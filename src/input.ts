@@ -151,34 +151,26 @@ function releaseFromBuilding(state: GameState, g: Goblin) {
 
 function assignToBuilding(state: GameState, goblins: Goblin[], b: Building) {
   const def = defOf(b);
-  if (b.state === 'constructing') {
-    const slots = def.buildersRequired - b.assignedGoblins.length;
-    let added = 0;
-    for (const g of goblins) {
-      if (added >= slots) break;
-      if (b.assignedGoblins.includes(g.id)) continue;
-      releaseFromBuilding(state, g);
-      b.assignedGoblins.push(g.id);
-      g.goal = null;
-      g.path = [];
-      g.state = { kind: 'going_to_build', buildingId: b.id };
-      added++;
-    }
-    if (added > 0) appendLog(state, `${added} goblin(s) assigned to construct ${def.name} #${b.id}.`);
-  } else {
-    const slots = def.maintainersRequired - b.assignedGoblins.length;
-    let added = 0;
-    for (const g of goblins) {
-      if (added >= slots) break;
-      if (b.assignedGoblins.includes(g.id)) continue;
-      releaseFromBuilding(state, g);
-      b.assignedGoblins.push(g.id);
-      g.goal = null;
-      g.path = [];
-      g.state = { kind: 'going_to_maintain', buildingId: b.id };
-      added++;
-    }
-    if (added > 0) appendLog(state, `${added} goblin(s) assigned to maintain ${def.name} #${b.id}.`);
+  const isBuilding = b.state === 'constructing';
+  const role = isBuilding ? 'construct' : 'maintain';
+
+  // Over-assignment is allowed: every selected goblin gets assigned. Extras
+  // beyond the required count just enter as additional workers (they'll fan out
+  // inside the footprint, or queue at the perimeter if it's full).
+  let added = 0;
+  for (const g of goblins) {
+    if (b.assignedGoblins.includes(g.id)) continue;
+    releaseFromBuilding(state, g);
+    b.assignedGoblins.push(g.id);
+    g.goal = null;
+    g.path = [];
+    g.state = isBuilding
+      ? { kind: 'going_to_build', buildingId: b.id }
+      : { kind: 'going_to_maintain', buildingId: b.id };
+    added++;
+  }
+  if (added > 0) {
+    appendLog(state, `${added} goblin(s) assigned to ${role} ${def.name} #${b.id}.`);
   }
 }
 

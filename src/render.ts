@@ -222,9 +222,14 @@ function drawBuildingBody(g: Graphics, b: Building) {
   g.clear();
   g.rect(-half, -half, def.size, def.size).fill(fill).stroke({ width: 2, color: border });
   // simple texture per kind
-  if (b.kind === 'datacentre') {
+  if (b.kind === 'phone_farm') {
     for (let i = -1; i <= 1; i++) {
       g.rect(-half + 14, -10 + i * 14, def.size - 28, 7).fill({ color: 0x000000, alpha: 0.25 });
+    }
+  } else if (b.kind === 'datacentre') {
+    // Big server-rack grid suggesting a real data hall.
+    for (let row = -2; row <= 2; row++) {
+      g.rect(-half + 16, row * 14 - 3, def.size - 32, 6).fill({ color: 0x000000, alpha: 0.28 });
     }
   } else if (b.kind === 'goblin_wheel') {
     g.circle(0, 0, def.size / 2 - 8).stroke({ width: 3, color: 0x000000, alpha: 0.35 });
@@ -235,7 +240,7 @@ function drawBuildingBody(g: Graphics, b: Building) {
         .lineTo(Math.cos(ang) * r, Math.sin(ang) * r)
         .stroke({ width: 1, color: 0x000000, alpha: 0.3 });
     }
-  } else if (b.kind === 'coal_plant') {
+  } else if (b.kind === 'power_plant') {
     // smokestacks: 3 narrow rectangles along the top
     const w = 10;
     for (let i = -1; i <= 1; i++) {

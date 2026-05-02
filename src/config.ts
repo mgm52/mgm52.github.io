@@ -46,16 +46,16 @@ function def(cellSize: number, rest: Omit<BuildingDef, 'cellSize' | 'size'>): Bu
 }
 
 export const BUILDING_DEFS = {
-  datacentre: def(3, {
-    name: 'Datacentre',
-    short: 'DC',
-    cost: 200,
+  phone_farm: def(3, {
+    name: 'Phone Farm',
+    short: 'PF',
+    cost: 250,
     buildersRequired: 3,
     buildTime: 8,
     maintainersRequired: 3,
-    income: 10,
-    powerOutput: -10_000_000, // 10 MW draw
-      wanderInterval: 1.4,
+    income: 12,
+    powerOutput: -200, // 200 W draw
+    wanderInterval: 1.4,
     wanderJitter: 0.8,
     colors: {
       active: 0x8a7a3a, activeBorder: 0xeada6a,
@@ -71,8 +71,8 @@ export const BUILDING_DEFS = {
     buildTime: 5,
     maintainersRequired: 1,
     income: 0,
-    powerOutput: 5_000_000, // 5 MW
-      wanderInterval: 0.45,    // runs the wheel quickly
+    powerOutput: 100, // 100 W
+    wanderInterval: 0.45,    // runs the wheel quickly
     wanderJitter: 0.15,
     colors: {
       active: 0x3a6a8a, activeBorder: 0x8acfff,
@@ -80,13 +80,13 @@ export const BUILDING_DEFS = {
       constructing: 0x3a3f47, constructingBorder: 0x808890,
     },
   }),
-  megacentre: def(5, {
-    name: 'Megacentre',
-    short: 'MC',
+  datacentre: def(5, {
+    name: 'Datacentre',
+    short: 'DC',
     cost: 10_000,
-    buildersRequired: 10,
+    buildersRequired: 15,
     buildTime: 30,
-    maintainersRequired: 10,
+    maintainersRequired: 15,
     income: 1000,
     powerOutput: -500_000_000, // 500 MW draw
     wanderInterval: 1.4,
@@ -97,16 +97,16 @@ export const BUILDING_DEFS = {
       constructing: 0x3a3f47, constructingBorder: 0x808890,
     },
   }),
-  coal_plant: def(4, {
-    name: 'Coal Power Plant',
-    short: 'CO',
+  power_plant: def(4, {
+    name: 'Power Plant',
+    short: 'PP',
     cost: 1200,
     buildersRequired: 3,
     buildTime: 15,
     maintainersRequired: 3,
     income: 0,
     powerOutput: 200_000_000, // 200 MW
-      wanderInterval: 0.9,
+    wanderInterval: 0.9,
     wanderJitter: 0.3,
     colors: {
       active: 0x3a6a3a, activeBorder: 0x8aef8a,
@@ -117,7 +117,7 @@ export const BUILDING_DEFS = {
 } as const;
 
 export type BuildingKind = keyof typeof BUILDING_DEFS;
-export const BUILDABLE_KINDS: BuildingKind[] = ['goblin_wheel', 'coal_plant', 'megacentre', 'datacentre'];
+export const BUILDABLE_KINDS: BuildingKind[] = ['goblin_wheel', 'power_plant', 'datacentre', 'phone_farm'];
 
 export const START_MONEY = 1000;
 export const START_GOBLINS = 0;

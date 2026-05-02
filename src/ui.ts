@@ -17,7 +17,7 @@ const TASKS: Task[] = [
   {
     id: 'wheel_turning',
     text: 'Get the Goblin Wheel turning',
-    unlocks: ['goblin_wheel', 'datacentre'],
+    unlocks: ['goblin_wheel', 'phone_farm'],
     isDone: (s) => {
       for (const b of s.buildings.values()) {
         if (b.kind === 'goblin_wheel' && b.state === 'active') return true;
@@ -26,12 +26,12 @@ const TASKS: Task[] = [
     },
   },
   {
-    id: 'build_dc',
-    text: 'Run a Datacentre',
-    unlocks: ['coal_plant', 'megacentre'],
+    id: 'run_phone_farm',
+    text: 'Run a Phone Farm',
+    unlocks: ['power_plant', 'datacentre'],
     isDone: (s) => {
       for (const b of s.buildings.values()) {
-        if (b.kind === 'datacentre' && b.state === 'active') return true;
+        if (b.kind === 'phone_farm' && b.state === 'active') return true;
       }
       return false;
     },

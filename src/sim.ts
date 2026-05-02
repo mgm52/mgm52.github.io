@@ -104,17 +104,40 @@ function updateGoblin(state: GameState, g: Goblin) {
     case 'going_to_build': {
       const b = state.buildings.get(s.buildingId);
       if (!b) { g.goal = null; g.path = []; g.state = { kind: 'idle' }; return; }
-      const middles = middleCells(b);
-      if (middles.some((m) => m.cx === g.cell.cx && m.cy === g.cell.cy)) {
+      const buildDef = defOf(b);
+
+      // At-commit capacity check: count other goblins already in 'building' state.
+      // First-to-arrive wins; the loser un-assigns and reverts to idle.
+      const tryBecomeBuilder = (): boolean => {
+        let workers = 0;
+        for (const aid of b.assignedGoblins) {
+          if (aid === g.id) continue;
+          const og = state.goblins.get(aid);
+          if (og && og.state.kind === 'building' && og.state.buildingId === b.id) workers++;
+        }
+        if (workers >= buildDef.buildersRequired) {
+          const i = b.assignedGoblins.indexOf(g.id);
+          if (i >= 0) b.assignedGoblins.splice(i, 1);
+          g.state = { kind: 'idle' };
+          g.goal = null;
+          g.path = [];
+          return false;
+        }
         g.goal = null;
         g.path = [];
         g.state = { kind: 'building', buildingId: b.id };
+        return true;
+      };
+
+      const middles = middleCells(b);
+      if (middles.some((m) => m.cx === g.cell.cx && m.cy === g.cell.cy)) {
+        tryBecomeBuilder();
         return;
       }
 
       if (isCellInBuilding(b, g.cell.cx, g.cell.cy)) {
         // Inside the building: direct step toward the closest middle cell.
-        // If blocked by another unit, stop here and start building.
+        // If blocked by another unit, try to commit as a builder here.
         let closestMid = middles[0];
         let bestD = Math.hypot(closestMid.cx - g.cell.cx, closestMid.cy - g.cell.cy);
         for (const m of middles) {
@@ -130,9 +153,7 @@ function updateGoblin(state: GameState, g: Goblin) {
           g.facing = Math.atan2(DY[stepDir], DX[stepDir]);
           g.path = [];
         } else {
-          g.goal = null;
-          g.path = [];
-          g.state = { kind: 'building', buildingId: b.id };
+          tryBecomeBuilder();
         }
         return;
       }
@@ -173,15 +194,30 @@ function updateGoblin(state: GameState, g: Goblin) {
     case 'going_to_maintain': {
       const b = state.buildings.get(s.buildingId);
       if (!b) { g.goal = null; g.path = []; g.state = { kind: 'idle' }; return; }
+      const def = defOf(b);
       const slot = maintainerSlot(state, b, g);
       if (!slot) return;
       if (g.cell.cx === slot.cx && g.cell.cy === slot.cy) {
+        // At-commit cap: count other maintainers; bail if full.
+        let m = 0;
+        for (const aid of b.assignedGoblins) {
+          if (aid === g.id) continue;
+          const og = state.goblins.get(aid);
+          if (og && og.state.kind === 'maintaining' && og.state.buildingId === b.id) m++;
+        }
+        if (m >= def.maintainersRequired) {
+          const i = b.assignedGoblins.indexOf(g.id);
+          if (i >= 0) b.assignedGoblins.splice(i, 1);
+          g.state = { kind: 'idle' };
+          g.goal = null;
+          g.path = [];
+          return;
+        }
         g.goal = null;
         g.path = [];
         g.state = { kind: 'maintaining', buildingId: b.id, nextWanderAt: state.now + jitterInterval(b) };
         return;
       }
-      // Invalidate path if goal changed
       if (!g.goal || g.goal.cx !== slot.cx || g.goal.cy !== slot.cy) {
         g.path = [];
         g.goal = slot;
