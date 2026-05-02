@@ -1,5 +1,6 @@
-import { Application, Assets, Container, Graphics, Rectangle, Sprite, Text, Texture } from 'pixi.js';
+import { Application, Assets, ColorMatrixFilter, Container, Graphics, Rectangle, Sprite, Text, Texture } from 'pixi.js';
 import { CELL, COLS, GOBLIN, RENDER_SCALE, ROWS, WORLD } from './config';
+import { ensureFontLoaded, fontFamilyById, getOptions, onOptionsChange, type FontConfig, type Options } from './options';
 import { Building, GameState, Goblin, buildingCenter, defOf, maintainerCount } from './state';
 
 export type Camera = { x: number; y: number };
@@ -12,7 +13,6 @@ export type Camera = { x: number; y: number };
 const GOBLIN_WALK_BASE = '/assets/rigged_goblin_dancing_aligol3dart_orc_walk';
 const GOBLIN_IDLE_BASE = '/assets/rigged_goblin_dancing_aligol3dart_orc_idle';
 const GOBLIN_BREAKDANCE_BASE = '/assets/rigged_goblin_dancing_aligol3dart_breakdance';
-const GOBLIN_DISPLAY_PX = 48;   // on-screen sprite size before world-layer scale
 
 type SheetHeading = { index: number; headingDeg: number };
 type SheetMeta = {
@@ -97,6 +97,7 @@ type BuildingView = {
   lastState: string;
   lastWarning: string;
   lastSize: number;
+  cellSize: number;
 };
 
 export type RenderContext = {
@@ -109,6 +110,13 @@ export type RenderContext = {
   buildingViews: Map<number, BuildingView>;
   camera: Camera;
   viewport: { width: number; height: number };
+  // Mutable references — used by applyOptions() to redraw on the fly.
+  walls: Set<string>;
+  playBg: Graphics;
+  wallGfx: Graphics;
+  grid: Graphics;
+  goblinFilter: ColorMatrixFilter;
+  buildingFilter: ColorMatrixFilter;
 };
 
 export async function createRender(parent: HTMLElement, walls: Set<string>): Promise<RenderContext> {
@@ -134,24 +142,10 @@ export async function createRender(parent: HTMLElement, walls: Set<string>): Pro
   const goblinLayer = new Container();
   const uiLayer = new Container();
 
-  // Playable-area background (sits behind the grid; OOB stays canvas-black).
+  // Playable-area background, walls, and grid — drawn lazily from current options.
   const playBg = new Graphics();
-  playBg.rect(0, 0, WORLD.width, WORLD.height).fill(0x0a0c0f);
-
-  // Wall border (drawn as a single Graphics instance — cheap & static)
   const wallGfx = new Graphics();
-  for (const key of walls) {
-    const [cxs, cys] = key.split(',');
-    const cx = +cxs;
-    const cy = +cys;
-    wallGfx.rect(cx * CELL, cy * CELL, CELL, CELL).fill(0x000000);
-  }
-
-  // Grid: only draw inside the play area (walls cover the rest)
   const grid = new Graphics();
-  for (let x = 0; x <= COLS; x++) grid.moveTo(x * CELL, 0).lineTo(x * CELL, WORLD.height);
-  for (let y = 0; y <= ROWS; y++) grid.moveTo(0, y * CELL).lineTo(WORLD.width, y * CELL);
-  grid.stroke({ width: 1, color: 0x363c44, alpha: 0.5 });
 
   worldLayer.addChild(playBg);
   worldLayer.addChild(wallGfx);
@@ -162,12 +156,23 @@ export async function createRender(parent: HTMLElement, walls: Set<string>): Pro
   worldLayer.scale.set(RENDER_SCALE);
   app.stage.addChild(worldLayer);
 
+  // Color filters let the user dial sprite/building saturation+brightness live.
+  // They're only attached when needed — applying a filter forces Pixi to
+  // render the layer to an offscreen texture each frame, which is wasteful
+  // when the matrix is the identity.
+  const goblinFilter = new ColorMatrixFilter();
+  const buildingFilter = new ColorMatrixFilter();
+
   const ctx: RenderContext = {
     app, worldLayer, buildingLayer, goblinLayer, uiLayer,
     goblinViews: new Map(), buildingViews: new Map(),
     camera: { x: 0, y: 0 },
     viewport: { width: initW, height: initH },
+    walls, playBg, wallGfx, grid, goblinFilter, buildingFilter,
   };
+
+  applyOptions(ctx, getOptions());
+  onOptionsChange((o) => applyOptions(ctx, o));
 
   const syncViewport = () => {
     const w = parent.clientWidth;
@@ -202,6 +207,121 @@ export function centerCameraOn(ctx: RenderContext, x: number, y: number) {
   clampCamera(ctx);
 }
 
+// ─── Live-applied options ───────────────────────────────────────────
+// Options are read each frame for things that change per-frame anyway (sprite
+// scale), and re-applied on change for static things (background, filters,
+// text styles, document fonts).
+function applyOptions(ctx: RenderContext, o: Options) {
+  redrawBackground(ctx, o);
+  redrawWalls(ctx, o);
+  redrawGrid(ctx, o);
+  ctx.app.renderer.background.color = o.oobColor;
+  applyFilter(ctx.goblinLayer, ctx.goblinFilter, o.goblinSaturation, o.goblinBrightness);
+  applyFilter(ctx.buildingLayer, ctx.buildingFilter, o.buildingSaturation, o.buildingBrightness);
+  applySidebarColors(o);
+  applyFonts(ctx, o);
+}
+
+function applySidebarColors(o: Options) {
+  const root = document.documentElement;
+  root.style.setProperty('--sidebar-bg', cssHex(o.sidebarBg));
+  root.style.setProperty('--sidebar-border', cssHex(o.sidebarBorder));
+  root.style.setProperty('--sidebar-button-bg', cssHex(o.sidebarButtonBg));
+  root.style.setProperty('--sidebar-button-border', cssHex(o.sidebarButtonBorder));
+  root.style.setProperty('--sidebar-accent', cssHex(o.sidebarAccent));
+  root.style.setProperty('--sidebar-title', cssHex(o.sidebarTitleColor));
+}
+
+function cssHex(n: number): string {
+  return '#' + n.toString(16).padStart(6, '0');
+}
+
+function redrawBackground(ctx: RenderContext, o: Options) {
+  const g = ctx.playBg;
+  g.clear();
+  if (o.bgPattern === 'checker') {
+    // Cell-sized checker over the playable area only (walls cover the rest).
+    for (let cy = 0; cy < ROWS; cy++) {
+      for (let cx = 0; cx < COLS; cx++) {
+        const fill = ((cx + cy) & 1) === 0 ? o.bgColor : o.bgColor2;
+        g.rect(cx * CELL, cy * CELL, CELL, CELL).fill(fill);
+      }
+    }
+  } else {
+    g.rect(0, 0, WORLD.width, WORLD.height).fill(o.bgColor);
+  }
+}
+
+function redrawWalls(ctx: RenderContext, o: Options) {
+  const g = ctx.wallGfx;
+  g.clear();
+  for (const key of ctx.walls) {
+    const [cxs, cys] = key.split(',');
+    const cx = +cxs;
+    const cy = +cys;
+    g.rect(cx * CELL, cy * CELL, CELL, CELL).fill(o.wallColor);
+  }
+}
+
+function redrawGrid(ctx: RenderContext, o: Options) {
+  const g = ctx.grid;
+  g.clear();
+  if (!o.gridVisible) return;
+  for (let x = 0; x <= COLS; x++) g.moveTo(x * CELL, 0).lineTo(x * CELL, WORLD.height);
+  for (let y = 0; y <= ROWS; y++) g.moveTo(0, y * CELL).lineTo(WORLD.width, y * CELL);
+  g.stroke({ width: 1, color: o.gridColor, alpha: o.gridAlpha });
+}
+
+function applyFilter(layer: Container, f: ColorMatrixFilter, saturation: number, brightness: number) {
+  const isIdentity = Math.abs(saturation - 1) < 0.005 && Math.abs(brightness - 1) < 0.005;
+  if (isIdentity) {
+    layer.filters = [];
+    return;
+  }
+  f.reset();
+  f.brightness(brightness, false);
+  f.saturate(saturation - 1, true); // saturate(0) is no-op; positive boosts, negative desats
+  layer.filters = [f];
+}
+
+function applyFonts(ctx: RenderContext, o: Options) {
+  const root = document.documentElement;
+  // Lazy-load any presets that haven't loaded yet.
+  for (const cfg of Object.values(o.fonts)) ensureFontLoaded(cfg.family);
+
+  const display = fontFamilyById(o.fonts.display.family).css;
+  const mono    = fontFamilyById(o.fonts.mono.family).css;
+  const body    = fontFamilyById(o.fonts.body.family).css;
+  root.style.setProperty('--font-display', display);
+  root.style.setProperty('--font-mono', mono);
+  root.style.setProperty('--font-body', body);
+  root.style.setProperty('--font-display-scale', String(o.fonts.display.scale));
+  root.style.setProperty('--font-mono-scale', String(o.fonts.mono.scale));
+  root.style.setProperty('--font-body-scale', String(o.fonts.body.scale));
+  root.style.setProperty('--font-building-label-scale', String(o.fonts.buildingLabel.scale));
+  root.style.setProperty('--font-building-warning-scale', String(o.fonts.buildingWarning.scale));
+
+  // In-canvas Text — update existing buildings live; new views read from
+  // options on creation.
+  const labelCss   = fontFamilyById(o.fonts.buildingLabel.family).css;
+  const warningCss = fontFamilyById(o.fonts.buildingWarning.family).css;
+  for (const v of ctx.buildingViews.values()) {
+    v.label.style.fontFamily = labelCss;
+    v.label.style.fontSize = buildingLabelSize(v.cellSize, o.fonts.buildingLabel.scale);
+    v.warning.style.fontFamily = warningCss;
+    v.warning.style.fontSize = buildingWarningSize(o.fonts.buildingWarning.scale);
+  }
+}
+
+function buildingLabelSize(cellSize: number, scale: number): number {
+  const base = cellSize >= 3 ? 32 : 24;
+  return Math.round(base * scale);
+}
+
+function buildingWarningSize(scale: number): number {
+  return Math.round(11 * scale);
+}
+
 function makeGoblinView(g: Goblin): GoblinView {
   const c = new Container();
   c.position.set(g.pos.x, g.pos.y);
@@ -214,7 +334,8 @@ function makeGoblinView(g: Goblin): GoblinView {
   const startTex = startSheet?.frames[0][0] ?? Texture.EMPTY;
   const sprite = new Sprite(startTex);
   sprite.anchor.set(0.5);
-  const s = GOBLIN_DISPLAY_PX / (startSheet?.meta.spriteSize ?? 64);
+  const px = getOptions().goblinDisplayPx;
+  const s = px / (startSheet?.meta.spriteSize ?? 64);
   sprite.scale.set(s);
 
   c.addChild(ring);
@@ -235,11 +356,14 @@ function makeBuildingView(b: Building): BuildingView {
   const body = new Graphics();
   drawBuildingBody(body, b);
 
+  const o = getOptions();
+  const labelCfg: FontConfig = o.fonts.buildingLabel;
+  const warningCfg: FontConfig = o.fonts.buildingWarning;
   const label = new Text({
     text: def.short,
     style: {
-      fontFamily: 'VT323, monospace',
-      fontSize: def.cellSize >= 3 ? 32 : 24,
+      fontFamily: fontFamilyById(labelCfg.family).css,
+      fontSize: buildingLabelSize(def.cellSize, labelCfg.scale),
       fill: 0xffffff,
       fontWeight: 'bold',
     },
@@ -251,8 +375,8 @@ function makeBuildingView(b: Building): BuildingView {
   const warning = new Text({
     text: '',
     style: {
-      fontFamily: 'system-ui, sans-serif',
-      fontSize: 11,
+      fontFamily: fontFamilyById(warningCfg.family).css,
+      fontSize: buildingWarningSize(warningCfg.scale),
       fill: 0xffb0b0,
       fontWeight: 'bold',
       stroke: { color: 0x000000, width: 3 },
@@ -270,7 +394,7 @@ function makeBuildingView(b: Building): BuildingView {
 
   return {
     container: c, body, selectionRing, label, progress, warning,
-    lastState: '', lastWarning: '', lastSize: def.size,
+    lastState: '', lastWarning: '', lastSize: def.size, cellSize: def.cellSize,
   };
 }
 
@@ -331,6 +455,8 @@ export function render(state: GameState, ctx: RenderContext) {
     Math.round(offsetY - ctx.camera.y * RENDER_SCALE),
   );
 
+  const displayPx = getOptions().goblinDisplayPx;
+
   // Goblins
   const seenG = new Set<number>();
   for (const g of state.goblins.values()) {
@@ -357,6 +483,7 @@ export function render(state: GameState, ctx: RenderContext) {
       const fpd = sheet.meta.framesPerDirection;
       const frame = Math.floor(state.now * sheet.fps) % fpd;
       v.sprite.texture = sheet.frames[dir][frame];
+      v.sprite.scale.set(displayPx / sheet.meta.spriteSize);
     }
     let tint = 0xffffff;
     if (g.state.kind === 'building' || g.state.kind === 'going_to_build') tint = 0xfff0a8;

@@ -1,0 +1,245 @@
+import {
+  DEFAULT_OPTIONS, FONT_FAMILIES, FONT_KEYS, ensureFontLoaded,
+  getOptions, resetOptions, setFontConfig, setOption,
+  type BgPattern, type FontKey, type Options,
+} from './options';
+
+export function setupOptionsUI(root: HTMLElement): void {
+  // Pre-load any persisted custom fonts so they're ready when the user opens
+  // the panel or the renderer applies them.
+  for (const cfg of Object.values(getOptions().fonts)) ensureFontLoaded(cfg.family);
+
+  const cog = document.createElement('button');
+  cog.id = 'options-cog';
+  cog.type = 'button';
+  cog.setAttribute('aria-label', 'Options');
+  cog.textContent = '⚙';
+
+  const panel = document.createElement('div');
+  panel.id = 'options-panel';
+  panel.hidden = true;
+
+  cog.addEventListener('click', (e) => {
+    e.stopPropagation();
+    panel.hidden = !panel.hidden;
+  });
+  document.addEventListener('click', (e) => {
+    if (panel.hidden) return;
+    if (e.target instanceof Node && (panel.contains(e.target) || cog.contains(e.target))) return;
+    panel.hidden = true;
+  });
+
+  rebuildPanel(panel);
+
+  root.appendChild(cog);
+  root.appendChild(panel);
+}
+
+// ─── Panel construction ─────────────────────────────────────────────
+function rebuildPanel(panel: HTMLElement): void {
+  panel.innerHTML = '';
+  const o = getOptions();
+
+  panel.appendChild(section('Background', [
+    select('Pattern', o.bgPattern, [
+      { value: 'solid', label: 'Solid' },
+      { value: 'checker', label: 'Checker' },
+    ], (v) => setOption('bgPattern', v as BgPattern)),
+    color('Primary', o.bgColor, (v) => setOption('bgColor', v)),
+    color('Checker alt', o.bgColor2, (v) => setOption('bgColor2', v)),
+    color('Out-of-bounds', o.oobColor, (v) => setOption('oobColor', v)),
+  ]));
+
+  panel.appendChild(section('Grid & walls', [
+    toggle('Grid visible', o.gridVisible, (v) => setOption('gridVisible', v)),
+    color('Grid color', o.gridColor, (v) => setOption('gridColor', v)),
+    slider('Grid alpha', o.gridAlpha, 0, 1, 0.05, (v) => setOption('gridAlpha', v)),
+    color('Wall color', o.wallColor, (v) => setOption('wallColor', v)),
+  ]));
+
+  panel.appendChild(section('Goblins', [
+    slider('Saturation', o.goblinSaturation, 0, 2, 0.05, (v) => setOption('goblinSaturation', v)),
+    slider('Brightness', o.goblinBrightness, 0.2, 2, 0.05, (v) => setOption('goblinBrightness', v)),
+    slider('Sprite size', o.goblinDisplayPx, 24, 96, 1, (v) => setOption('goblinDisplayPx', v)),
+  ]));
+
+  panel.appendChild(section('Buildings', [
+    slider('Saturation', o.buildingSaturation, 0, 2, 0.05, (v) => setOption('buildingSaturation', v)),
+    slider('Brightness', o.buildingBrightness, 0.2, 2, 0.05, (v) => setOption('buildingBrightness', v)),
+  ]));
+
+  panel.appendChild(section('Sidebar colors', [
+    color('Background',     o.sidebarBg,           (v) => setOption('sidebarBg', v)),
+    color('Border',         o.sidebarBorder,       (v) => setOption('sidebarBorder', v)),
+    color('Button bg',      o.sidebarButtonBg,     (v) => setOption('sidebarButtonBg', v)),
+    color('Button border',  o.sidebarButtonBorder, (v) => setOption('sidebarButtonBorder', v)),
+    color('Accent (Ƶ)',     o.sidebarAccent,       (v) => setOption('sidebarAccent', v)),
+    color('Title text',     o.sidebarTitleColor,   (v) => setOption('sidebarTitleColor', v)),
+  ]));
+
+  panel.appendChild(fontsSection(o));
+
+  const reset = document.createElement('button');
+  reset.type = 'button';
+  reset.className = 'options-reset';
+  reset.textContent = 'Reset to defaults';
+  reset.addEventListener('click', () => {
+    resetOptions();
+    rebuildPanel(panel);
+  });
+  panel.appendChild(reset);
+}
+
+function fontsSection(o: Options): HTMLElement {
+  const familyOpts = FONT_FAMILIES.map(f => ({ value: f.id, label: f.label }));
+  const rows: HTMLElement[] = [];
+  for (const { key, label } of FONT_KEYS) {
+    const cfg = o.fonts[key];
+    rows.push(fontRow(label, key, cfg.family, cfg.scale, familyOpts));
+  }
+  return section('Fonts', rows);
+}
+
+function fontRow(
+  label: string, key: FontKey, family: string, scale: number,
+  familyOpts: { value: string; label: string }[],
+): HTMLElement {
+  const row = document.createElement('div');
+  row.className = 'options-fontrow';
+
+  const head = document.createElement('div');
+  head.className = 'options-fontrow-label';
+  head.textContent = label;
+
+  const controls = document.createElement('div');
+  controls.className = 'options-fontrow-controls';
+
+  const sel = document.createElement('select');
+  for (const o of familyOpts) {
+    const opt = document.createElement('option');
+    opt.value = o.value; opt.textContent = o.label;
+    if (o.value === family) opt.selected = true;
+    sel.appendChild(opt);
+  }
+  sel.addEventListener('change', () => {
+    ensureFontLoaded(sel.value);
+    setFontConfig(key, { family: sel.value });
+  });
+
+  const scaleWrap = document.createElement('span');
+  scaleWrap.className = 'options-slider';
+  const scaleInput = document.createElement('input');
+  scaleInput.type = 'range';
+  scaleInput.min = '0.5'; scaleInput.max = '2'; scaleInput.step = '0.05';
+  scaleInput.value = String(scale);
+  const out = document.createElement('span');
+  out.className = 'options-slider-value';
+  out.textContent = scale.toFixed(2);
+  scaleInput.addEventListener('input', () => {
+    const v = Number(scaleInput.value);
+    out.textContent = v.toFixed(2);
+    setFontConfig(key, { scale: v });
+  });
+  scaleWrap.appendChild(scaleInput);
+  scaleWrap.appendChild(out);
+
+  controls.appendChild(sel);
+  controls.appendChild(scaleWrap);
+
+  row.appendChild(head);
+  row.appendChild(controls);
+  return row;
+}
+
+function section(title: string, rows: HTMLElement[]): HTMLElement {
+  const wrap = document.createElement('div');
+  wrap.className = 'options-section';
+  const h = document.createElement('div');
+  h.className = 'options-section-title';
+  h.textContent = title;
+  wrap.appendChild(h);
+  for (const r of rows) wrap.appendChild(r);
+  return wrap;
+}
+
+function row(label: string, control: HTMLElement): HTMLElement {
+  const r = document.createElement('label');
+  r.className = 'options-row';
+  const l = document.createElement('span');
+  l.className = 'options-label';
+  l.textContent = label;
+  r.appendChild(l);
+  r.appendChild(control);
+  return r;
+}
+
+function toggle(label: string, value: boolean, on: (v: boolean) => void): HTMLElement {
+  const input = document.createElement('input');
+  input.type = 'checkbox';
+  input.checked = value;
+  input.addEventListener('change', () => on(input.checked));
+  return row(label, input);
+}
+
+function slider(
+  label: string, value: number, min: number, max: number, step: number,
+  on: (v: number) => void,
+): HTMLElement {
+  const wrap = document.createElement('span');
+  wrap.className = 'options-slider';
+  const input = document.createElement('input');
+  input.type = 'range';
+  input.min = String(min); input.max = String(max); input.step = String(step);
+  input.value = String(value);
+  const out = document.createElement('span');
+  out.className = 'options-slider-value';
+  out.textContent = format(value);
+  input.addEventListener('input', () => {
+    const v = Number(input.value);
+    out.textContent = format(v);
+    on(v);
+  });
+  wrap.appendChild(input);
+  wrap.appendChild(out);
+  return row(label, wrap);
+}
+
+function color(label: string, value: number, on: (v: number) => void): HTMLElement {
+  const input = document.createElement('input');
+  input.type = 'color';
+  input.value = numToHex(value);
+  input.addEventListener('input', () => on(hexToNum(input.value)));
+  return row(label, input);
+}
+
+function select(
+  label: string, value: string,
+  opts: { value: string; label: string }[],
+  on: (v: string) => void,
+): HTMLElement {
+  const sel = document.createElement('select');
+  for (const o of opts) {
+    const opt = document.createElement('option');
+    opt.value = o.value; opt.textContent = o.label;
+    if (o.value === value) opt.selected = true;
+    sel.appendChild(opt);
+  }
+  sel.addEventListener('change', () => on(sel.value));
+  return row(label, sel);
+}
+
+function format(v: number): string {
+  if (Number.isInteger(v)) return String(v);
+  return v.toFixed(2);
+}
+
+function numToHex(n: number): string {
+  return '#' + n.toString(16).padStart(6, '0');
+}
+
+function hexToNum(h: string): number {
+  return parseInt(h.replace('#', ''), 16);
+}
+
+export type { Options };
+export { DEFAULT_OPTIONS };

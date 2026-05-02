@@ -1,5 +1,6 @@
 import { CAMERA_SPEED, GOBLIN, START_CELL, TICK_MS } from './config';
 import { setupInput } from './input';
+import { setupOptionsUI } from './options-ui';
 import { centerCameraOn, clampCamera, createRender, render } from './render';
 import { appendLog, cellCenter, createInitialState, destroyBuilding } from './state';
 import { tick } from './sim';
@@ -18,6 +19,7 @@ async function main() {
   const state = createInitialState();
   const ctx = await createRender(document.getElementById('game')!, state.walls);
   setupInput(state, ctx.app, ctx.uiLayer, ctx.worldLayer, ctx);
+  setupOptionsUI(document.getElementById('game')!);
   setupUI(state, {
     onSpawnGoblin: () => {
       if (state.money < GOBLIN.spawnCost) return;
