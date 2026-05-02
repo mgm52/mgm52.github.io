@@ -46,7 +46,12 @@
         background: linear-gradient(to right, rgba(106,142,176,0.55), rgba(138,207,255,0.45));
         transition: width 0.12s linear;
       }
-      .build-content { position: relative; z-index: 1; }
+      .build-content { position: relative; z-index: 1; display: flex; align-items: center; gap: 10px; }
+      .build-text { flex: 1; min-width: 0; }
+      .build-yields {
+        font-size: 12px; color: #6fbf73; font-weight: 600;
+        text-align: right; white-space: nowrap; line-height: 1.4;
+      }
       .task-text {
         font-size: 12px;
         color: #8a9099;
@@ -131,6 +136,7 @@
       .portrait-building.datacentre.active { background: #3a6a8a; border-color: #8acfff; }
       .portrait-building.goblin_wheel.active { background: #6a8a3a; border-color: #b8d96b; }
       .portrait-building.coal_plant.active { background: #6a4a2a; border-color: #c49a5a; }
+      .portrait-building.megacentre.active { background: #6a3a8a; border-color: #c88aff; }
       .portrait-building.constructing { background: #3a3f47; border-color: #808890; }
       .portrait-building.dormant { background: #5a4a3a; border-color: #d99a5a; }
       .info-details {
@@ -142,6 +148,21 @@
       .info-name { font-size: 14px; font-weight: 600; margin-bottom: 4px; color: #fff; }
       .info-state { color: #8a9099; line-height: 1.5; }
       .info-extra { color: #ccc; line-height: 1.5; margin-top: 2px; }
+      #info-panel button { pointer-events: auto; }
+      .info-destroy {
+        align-self: flex-start;
+        margin-top: 8px;
+        background: #5a2828;
+        border: 1px solid #8a3838;
+        color: #ffc8c8;
+        padding: 4px 10px;
+        font-size: 11px;
+        font-weight: 600;
+        border-radius: 3px;
+        cursor: pointer;
+        font-family: inherit;
+      }
+      .info-destroy:hover { background: #6a3838; border-color: #b04848; }
     </style>
   </head>
   <body>
@@ -154,6 +175,7 @@
             <div class="info-name" id="info-name"></div>
             <div class="info-state" id="info-state"></div>
             <div class="info-extra" id="info-extra"></div>
+            <button class="info-destroy" id="info-destroy" style="display:none">Destroy</button>
           </div>
         </div>
       </div>

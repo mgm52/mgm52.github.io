@@ -79,6 +79,23 @@ export const BUILDING_DEFS = {
       constructing: 0x3a3f47, constructingBorder: 0x808890,
     },
   }),
+  megacentre: def(5, {
+    name: 'Megacentre',
+    short: 'MC',
+    cost: 10_000,
+    buildersRequired: 10,
+    buildTime: 30,
+    maintainersRequired: 10,
+    income: 1000,
+    powerOutput: -500_000_000, // 500 MW draw
+    wanderInterval: 1.4,
+    wanderJitter: 0.8,
+    colors: {
+      active: 0x6a3a8a, activeBorder: 0xc88aff,
+      dormant: 0x4a3a5a, dormantBorder: 0x8a7aa0,
+      constructing: 0x3a3f47, constructingBorder: 0x808890,
+    },
+  }),
   coal_plant: def(4, {
     name: 'Coal Power Plant',
     short: 'CO',
@@ -99,7 +116,7 @@ export const BUILDING_DEFS = {
 } as const;
 
 export type BuildingKind = keyof typeof BUILDING_DEFS;
-export const BUILDABLE_KINDS: BuildingKind[] = ['goblin_wheel', 'coal_plant', 'datacentre'];
+export const BUILDABLE_KINDS: BuildingKind[] = ['goblin_wheel', 'coal_plant', 'megacentre', 'datacentre'];
 
 export const START_MONEY = 1000;
 export const START_GOBLINS = 0;

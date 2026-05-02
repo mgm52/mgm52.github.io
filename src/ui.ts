@@ -23,7 +23,7 @@ const TASKS: Task[] = [
   {
     id: 'build_dc',
     text: 'Construct a Datacentre',
-    unlocks: ['coal_plant'],
+    unlocks: ['coal_plant', 'megacentre'],
     isDone: (s) => {
       for (const b of s.buildings.values()) {
         if (b.kind === 'datacentre' && b.state !== 'constructing') return true;
@@ -36,6 +36,7 @@ const TASKS: Task[] = [
 export type UICallbacks = {
   onSpawnGoblin: () => void;
   onBuildBuilding: (kind: BuildingKind) => void;
+  onDestroyBuilding: (id: number) => void;
 };
 
 export function setupUI(state: GameState, callbacks: UICallbacks) {
@@ -66,17 +67,22 @@ export function setupUI(state: GameState, callbacks: UICallbacks) {
     const powerCostBit = def.powerOutput < 0
       ? ` · <span class="build-power-cost" id="power-cost-${kind}">${formatPower(-def.powerOutput)}</span>`
       : '';
-    const secondLineBits: string[] = [];
-    if (def.income) secondLineBits.push(`$${def.income}/s`);
-    if (def.powerOutput > 0) secondLineBits.push(`+${formatPower(def.powerOutput)}`);
-    const secondLine = secondLineBits.length > 0 ? `<br>${secondLineBits.join(' · ')}` : '';
+    const yieldBits: string[] = [];
+    if (def.income) yieldBits.push(`+$${def.income}/s`);
+    if (def.powerOutput > 0) yieldBits.push(`+${formatPower(def.powerOutput)}`);
+    const yieldHtml = yieldBits.length > 0
+      ? `<div class="build-yields">${yieldBits.join('<br>')}</div>`
+      : '';
     btn.innerHTML = `
       <div class="build-content">
-        <div class="build-name">${def.name}</div>
-        <div class="build-meta">
-          <span class="build-cost" id="cost-${kind}">$${def.cost}</span>${powerCostBit} ·
-          <span class="build-req" id="req-${kind}">${def.buildersRequired} goblin${def.buildersRequired === 1 ? '' : 's'}</span>${secondLine}
+        <div class="build-text">
+          <div class="build-name">${def.name}</div>
+          <div class="build-meta">
+            <span class="build-cost" id="cost-${kind}">$${def.cost}</span>${powerCostBit} ·
+            <span class="build-req" id="req-${kind}">${def.buildersRequired} goblin${def.buildersRequired === 1 ? '' : 's'}</span>
+          </div>
         </div>
+        ${yieldHtml}
       </div>
     `;
     btn.addEventListener('click', () => callbacks.onBuildBuilding(kind));
@@ -89,6 +95,13 @@ export function setupUI(state: GameState, callbacks: UICallbacks) {
   taskEl.className = 'task-text';
   taskEl.id = 'task-text';
   buildList.appendChild(taskEl);
+
+  // Destroy button on the info panel — uses currently-selected building from state.
+  document.getElementById('info-destroy')!.addEventListener('click', () => {
+    for (const b of state.buildings.values()) {
+      if (b.selected) { callbacks.onDestroyBuilding(b.id); break; }
+    }
+  });
 }
 
 function btnId(kind: BuildingKind): string { return `btn-build-${kind}`; }
@@ -200,8 +213,11 @@ function refreshInfoPanel(state: GameState) {
   const selectedGoblins = [...state.goblins.values()].filter((g) => g.selected);
   const selectedBuildings = [...state.buildings.values()].filter((b) => b.selected);
 
+  const destroyBtn = document.getElementById('info-destroy')!;
+  destroyBtn.style.display = 'none';
   if (selectedBuildings.length === 1 && selectedGoblins.length === 0) {
     showBuilding(state, selectedBuildings[0], panel, portrait, name, stateEl, extra);
+    destroyBtn.style.display = '';
   } else if (selectedGoblins.length === 1 && selectedBuildings.length === 0) {
     showGoblin(selectedGoblins[0], panel, portrait, name, stateEl, extra);
   } else if (selectedGoblins.length > 1) {

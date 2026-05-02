@@ -249,6 +249,21 @@ export function totalIncome(state: GameState): number {
   return inc;
 }
 
+export function destroyBuilding(state: GameState, buildingId: number) {
+  const b = state.buildings.get(buildingId);
+  if (!b) return;
+  // Release any assigned goblins; they'll auto-exit via the idle handler if they're
+  // still standing on what used to be the footprint.
+  for (const gid of b.assignedGoblins) {
+    const g = state.goblins.get(gid);
+    if (!g) continue;
+    g.state = { kind: 'idle' };
+    g.goal = null;
+    g.path = [];
+  }
+  state.buildings.delete(buildingId);
+}
+
 export function maintainerCount(state: GameState, b: Building): number {
   let n = 0;
   for (const id of b.assignedGoblins) {

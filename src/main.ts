@@ -1,7 +1,7 @@
 import { CAMERA_SPEED, GOBLIN, START_CELL, TICK_MS } from './config';
 import { setupInput } from './input';
 import { centerCameraOn, clampCamera, createRender, render } from './render';
-import { appendLog, cellCenter, createInitialState } from './state';
+import { appendLog, cellCenter, createInitialState, destroyBuilding } from './state';
 import { tick } from './sim';
 import { refreshUI, setupUI } from './ui';
 
@@ -25,6 +25,10 @@ async function main() {
     },
     onBuildBuilding: (kind) => {
       state.pendingBuild = state.pendingBuild?.kind === kind ? null : { kind };
+    },
+    onDestroyBuilding: (id) => {
+      destroyBuilding(state, id);
+      appendLog(state, `Building #${id} destroyed.`);
     },
   });
 
