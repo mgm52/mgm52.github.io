@@ -11,12 +11,16 @@ function showTitleScreen(): void {
   const screen = document.getElementById('title-screen');
   const playBtn = document.getElementById('title-play');
   if (!screen || !playBtn) return;
-  screen.classList.add('visible');
-  // Next frame so the opacity transition kicks in instead of jumping.
+  // Backdrop is already black (inline CSS). Fade the content in next frame.
   requestAnimationFrame(() => screen.classList.add('shown'));
   playBtn.addEventListener('click', () => {
+    // Stage 1: fade content (text + button) out, leaving full-black backdrop.
     screen.classList.remove('shown');
-    setTimeout(() => screen.classList.remove('visible'), 750);
+    setTimeout(() => {
+      // Stage 2: fade the black backdrop out, revealing the game beneath.
+      screen.classList.add('fading-out');
+      setTimeout(() => { screen.style.display = 'none'; }, 750);
+    }, 750);
   }, { once: true });
 }
 
