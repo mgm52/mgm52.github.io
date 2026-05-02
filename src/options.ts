@@ -100,7 +100,7 @@ export const DEFAULT_OPTIONS: Options = {
   goblinSaturation: 1.7,
   goblinBrightness: 1.8,
   goblinDisplayPx: 50,
-  buildingSaturation: 0.9,
+  buildingSaturation: 1.50,
   buildingBrightness: 1.05,
   sidebarBg: 0x000000,
   sidebarBorder: 0x2e3238,
@@ -109,7 +109,7 @@ export const DEFAULT_OPTIONS: Options = {
   sidebarAccent: 0xffd96b,
   sidebarTitleColor: 0x8a9099,
   fonts: {
-    display:         { family: 'majorMono', scale: 0.95 },
+    display:         { family: 'audiowide', scale: 0.95 },
     mono:            { family: 'majorMono', scale: 0.70 },
     body:            { family: 'majorMono', scale: 0.90 },
     buildingLabel:   { family: 'majorMono', scale: 0.50 },

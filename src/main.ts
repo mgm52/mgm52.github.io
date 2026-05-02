@@ -7,7 +7,24 @@ import { appendLog, cellCenter, createInitialState, destroyBuilding } from './st
 import { tick } from './sim';
 import { refreshUI, setupUI } from './ui';
 
+function showTitleScreen(): void {
+  const screen = document.getElementById('title-screen');
+  const playBtn = document.getElementById('title-play');
+  if (!screen || !playBtn) return;
+  screen.classList.add('visible');
+  // Next frame so the opacity transition kicks in instead of jumping.
+  requestAnimationFrame(() => screen.classList.add('shown'));
+  playBtn.addEventListener('click', () => {
+    screen.classList.remove('shown');
+    setTimeout(() => screen.classList.remove('visible'), 750);
+  }, { once: true });
+}
+
 async function main() {
+  // Production-only title gate. Click here also satisfies the browser's
+  // user-gesture requirement so audio can play immediately afterwards.
+  if (import.meta.env.PROD) showTitleScreen();
+
   // Wait for thematic fonts to be ready so Pixi caches the right glyphs.
   if ('fonts' in document) {
     try {

@@ -100,18 +100,18 @@ export const BUILDING_DEFS = {
   }),
   gas_engine: def(4, {
     name: 'Gas Engine',
-    short: 'GG',
+    short: 'GE',
     cost: 1200,
     buildersRequired: 3,
     buildTime: 15,
     maintainersRequired: 3,
     income: 0,
-    powerOutput: 2_000_000, // 2 MW
+    powerOutput: 2_100_000, // 2.1 MW
     wanderInterval: 0.9,
     wanderJitter: 0.3,
     colors: {
-      active: 0x3a6a3a, activeBorder: 0x8aef8a,
-      dormant: 0x3a4a3a, dormantBorder: 0x6a8a6a,
+      active: 0x3a6aaa, activeBorder: 0x9ac8ef,
+      dormant: 0x3a4a5a, dormantBorder: 0x6a7a90,
       constructing: 0x3a3f47, constructingBorder: 0x808890,
     },
   }),
@@ -126,5 +126,12 @@ export const START_GOBLINS = 0;
 export const START_CELL = { cx: WALL_BORDER + 4, cy: WALL_BORDER + 8 };
 
 export function formatPower(w: number): string {
-  return `${Math.round(w).toLocaleString('en-US')} W`;
+  const abs = Math.abs(w);
+  let val: number, unit: string;
+  if (abs >= 1e9)      { val = w / 1e9; unit = 'GW'; }
+  else if (abs >= 1e6) { val = w / 1e6; unit = 'MW'; }
+  else                 { val = w / 1e3; unit = 'kW'; }
+  // Round down to 2 decimal places (toward -∞).
+  const floored = Math.floor(val * 100) / 100;
+  return `${floored.toFixed(2)} ${unit}`;
 }

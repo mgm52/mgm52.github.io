@@ -139,34 +139,16 @@ function updateGoblin(state: GameState, g: Goblin) {
         return true;
       };
 
-      const middles = middleCells(b);
-      if (middles.some((m) => m.cx === g.cell.cx && m.cy === g.cell.cy)) {
+      // Once a goblin is anywhere in the footprint, commit immediately. Walking
+      // toward middle cells creates gridlock for big builds (e.g. DC needs 15)
+      // because earlier arrivals shuffle around and block later arrivals from
+      // entering the footprint at all.
+      if (isCellInBuilding(b, g.cell.cx, g.cell.cy)) {
         tryBecomeBuilder();
         return;
       }
 
-      if (isCellInBuilding(b, g.cell.cx, g.cell.cy)) {
-        // Inside the building: direct step toward the closest middle cell.
-        // If blocked by another unit, try to commit as a builder here.
-        let closestMid = middles[0];
-        let bestD = Math.hypot(closestMid.cx - g.cell.cx, closestMid.cy - g.cell.cy);
-        for (const m of middles) {
-          const d = Math.hypot(m.cx - g.cell.cx, m.cy - g.cell.cy);
-          if (d < bestD) { bestD = d; closestMid = m; }
-        }
-        const stepDir = preferredDir(g.cell, closestMid);
-        const nx = g.cell.cx + DX[stepDir];
-        const ny = g.cell.cy + DY[stepDir];
-        if (canStep(state, g.cell.cx, g.cell.cy, nx, ny, g.id, b.id)) {
-          occupyCell(state, nx, ny, g.id);
-          g.target = { cx: nx, cy: ny };
-          g.facing = Math.atan2(DY[stepDir], DX[stepDir]);
-          g.path = [];
-        } else {
-          tryBecomeBuilder();
-        }
-        return;
-      }
+      const middles = middleCells(b);
 
       // Outside the building: pick a reachable footprint cell as the BFS goal.
       // Prefer free middle cells; fall back to any free footprint cell. Sticky

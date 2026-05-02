@@ -344,9 +344,46 @@
         font-family: inherit; font-size: 11px;
       }
       .options-reset:hover { background: #353a42; color: #fff; }
+
+      /* ───────── Title screen (production only) ───────── */
+      #title-screen {
+        display: none;
+        position: fixed; inset: 0;
+        background: #000;
+        flex-direction: column;
+        align-items: center; justify-content: center;
+        gap: 32px;
+        z-index: 1500;
+        opacity: 0;
+        transition: opacity 700ms ease;
+      }
+      #title-screen.visible { display: flex; }
+      #title-screen.shown   { opacity: 1; }
+      #title-screen h1 {
+        font-family: 'Audiowide', system-ui, sans-serif;
+        font-size: clamp(32px, 7vw, 72px);
+        letter-spacing: 0.18em;
+        margin: 0; color: #ffd96b;
+        text-transform: lowercase;
+        text-shadow: 0 0 28px rgba(255, 217, 107, 0.25);
+      }
+      #title-play {
+        font-family: 'Audiowide', system-ui, sans-serif;
+        font-size: 18px; letter-spacing: 0.15em;
+        padding: 12px 36px;
+        background: transparent; color: #eee;
+        border: 1px solid #555; border-radius: 3px;
+        cursor: pointer;
+        transition: background 120ms, color 120ms, border-color 120ms;
+      }
+      #title-play:hover { background: #ffd96b; color: #000; border-color: #ffd96b; }
     </style>
   </head>
   <body>
+    <div id="title-screen">
+      <h1>goblin scaling</h1>
+      <button id="title-play">Play</button>
+    </div>
     <div id="portrait-warning">
       <div class="icon">⟳</div>
       <h1>Rotate your device</h1>
