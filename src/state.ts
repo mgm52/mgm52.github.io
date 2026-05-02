@@ -228,6 +228,19 @@ export function createInitialState(): GameState {
     }
     radius++;
   }
+  // Pre-built (but unstaffed) Goblin Wheel near the spawn area, used by the first tutorial task.
+  const wheelCell: Cell = { cx: START_CELL.cx + 4, cy: START_CELL.cy };
+  const wheel: Building = {
+    id: state.nextId++,
+    kind: 'goblin_wheel',
+    cell: wheelCell,
+    state: 'dormant',
+    buildProgress: 1,
+    assignedGoblins: [],
+    selected: false,
+  };
+  state.buildings.set(wheel.id, wheel);
+
   appendLog(state, 'Welcome, overseer.');
   return state;
 }

@@ -135,7 +135,7 @@ function makeGoblinView(g: Goblin): GoblinView {
 
   const label = new Text({
     text: 'G',
-    style: { fontFamily: 'monospace', fontSize: 12, fill: 0x102510, fontWeight: 'bold' },
+    style: { fontFamily: 'VT323, monospace', fontSize: 18, fill: 0x102510, fontWeight: 'bold' },
   });
   label.anchor.set(0.5);
 
@@ -161,8 +161,8 @@ function makeBuildingView(b: Building): BuildingView {
   const label = new Text({
     text: def.short,
     style: {
-      fontFamily: 'monospace',
-      fontSize: def.cellSize >= 3 ? 22 : 16,
+      fontFamily: 'VT323, monospace',
+      fontSize: def.cellSize >= 3 ? 32 : 24,
       fill: 0xffffff,
       fontWeight: 'bold',
     },

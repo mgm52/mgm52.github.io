@@ -6,6 +6,15 @@ import { tick } from './sim';
 import { refreshUI, setupUI } from './ui';
 
 async function main() {
+  // Wait for thematic fonts to be ready so Pixi caches the right glyphs.
+  if ('fonts' in document) {
+    try {
+      await Promise.all([
+        document.fonts.load('16px VT323'),
+        document.fonts.load('16px Audiowide'),
+      ]);
+    } catch { /* fall through to fallback fonts */ }
+  }
   const state = createInitialState();
   const ctx = await createRender(document.getElementById('game')!, state.walls);
   setupInput(state, ctx.app, ctx.uiLayer, ctx.worldLayer);

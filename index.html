@@ -4,7 +4,14 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Goblin Datacentres</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Audiowide&family=VT323&display=swap" rel="stylesheet">
     <style>
+      :root {
+        --font-display: 'Audiowide', system-ui, sans-serif;
+        --font-mono: 'VT323', 'Consolas', monospace;
+      }
       html, body { margin: 0; padding: 0; height: 100%; background: #1a1d21; color: #eee;
         font-family: system-ui, -apple-system, "Segoe UI", sans-serif; overflow: hidden; }
       #app { display: flex; height: 100vh; }
@@ -13,10 +20,10 @@
       #sidebar { width: 280px; background: #20242a; border-left: 1px solid #2d3138;
         padding: 14px; overflow-y: auto; box-sizing: border-box; }
       .panel { margin-bottom: 18px; }
-      .panel-title { font-size: 10px; text-transform: uppercase; letter-spacing: 1.5px;
-        color: #8a9099; margin-bottom: 6px; font-weight: 600; }
+      .panel-title { font-family: var(--font-display); font-size: 11px; text-transform: uppercase; letter-spacing: 2px;
+        color: #8a9099; margin-bottom: 6px; font-weight: 400; }
       .resource-row { display: flex; justify-content: space-between; padding: 3px 0; font-size: 13px; }
-      .resource-value { color: #ffd96b; font-weight: 600; font-variant-numeric: tabular-nums; }
+      .resource-value { font-family: var(--font-mono); font-size: 16px; color: #ffd96b; font-weight: 400; font-variant-numeric: tabular-nums; letter-spacing: 0.5px; }
       .resource-value .power-total { color: #6a7080; font-weight: 500; }
       .build-button {
         display: block; width: 100%;
@@ -62,7 +69,7 @@
       }
       .task-text strong { color: #b8bec6; font-weight: 600; }
       .build-button.locked { display: none; }
-      .build-name { font-size: 14px; font-weight: 600; margin-bottom: 3px; }
+      .build-name { font-family: var(--font-display); font-size: 14px; font-weight: 400; letter-spacing: 0.5px; margin-bottom: 3px; }
       .build-meta { font-size: 11px; color: #8a9099; line-height: 1.5; }
       .build-cost { color: #ffd96b; }
       .build-cost.met { color: #6fbf73; }
@@ -109,7 +116,7 @@
         background: #6fbf73;
         border: 2px solid #2d4a30;
         color: #102510;
-        font-family: monospace;
+        font-family: var(--font-mono);
         font-weight: bold;
         font-size: 22px;
         display: flex; align-items: center; justify-content: center;
@@ -126,7 +133,7 @@
       .portrait-building {
         width: 50px; height: 50px;
         color: #fff;
-        font-family: monospace;
+        font-family: var(--font-mono);
         font-weight: bold;
         font-size: 18px;
         display: flex; align-items: center; justify-content: center;
@@ -145,7 +152,7 @@
         justify-content: center;
         min-width: 160px;
       }
-      .info-name { font-size: 14px; font-weight: 600; margin-bottom: 4px; color: #fff; }
+      .info-name { font-family: var(--font-display); font-size: 15px; font-weight: 400; letter-spacing: 0.5px; margin-bottom: 4px; color: #fff; }
       .info-state { color: #8a9099; line-height: 1.5; }
       .info-extra { color: #ccc; line-height: 1.5; margin-top: 2px; }
       #info-panel button { pointer-events: auto; }

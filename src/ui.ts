@@ -15,18 +15,23 @@ type Task = {
 };
 const TASKS: Task[] = [
   {
-    id: 'spawn_2',
-    text: 'Spawn 2 Goblins',
+    id: 'wheel_turning',
+    text: 'Get the Goblin Wheel turning',
     unlocks: ['goblin_wheel', 'datacentre'],
-    isDone: (s) => s.spawnsCompleted >= 2,
+    isDone: (s) => {
+      for (const b of s.buildings.values()) {
+        if (b.kind === 'goblin_wheel' && b.state === 'active') return true;
+      }
+      return false;
+    },
   },
   {
     id: 'build_dc',
-    text: 'Construct a Datacentre',
+    text: 'Run a Datacentre',
     unlocks: ['coal_plant', 'megacentre'],
     isDone: (s) => {
       for (const b of s.buildings.values()) {
-        if (b.kind === 'datacentre' && b.state !== 'constructing') return true;
+        if (b.kind === 'datacentre' && b.state === 'active') return true;
       }
       return false;
     },
@@ -135,7 +140,7 @@ export function refreshUI(state: GameState) {
     if (def.powerOutput >= 0) continue;
     if (maintainerCount(state, b) >= def.maintainersRequired) { unpowered = true; break; }
   }
-  powerEl.style.color = unpowered ? '#d96b6b' : '#ffd96b';
+  powerEl.style.color = unpowered ? '#d96b6b' : '#8acfff';
 
   // Spawn Goblin
   const spawnInProgress = state.spawnQueue.length;
@@ -225,7 +230,7 @@ function refreshInfoPanel(state: GameState) {
     portrait.innerHTML = `<div class="portrait-goblin">G</div>`;
     name.textContent = `${selectedGoblins.length} goblins`;
     stateEl.textContent = '';
-    extra.textContent = '';
+    extra.innerHTML = `<span style="color:#6a7080">Right click to command</span>`;
   } else {
     panel.classList.remove('visible');
   }
@@ -237,7 +242,7 @@ function showGoblin(g: Goblin, panel: HTMLElement, portrait: HTMLElement,
   portrait.innerHTML = `<div class="portrait-goblin">G</div>`;
   name.textContent = `Goblin #${g.id}`;
   stateEl.textContent = describeGoblinState(g.state);
-  extra.textContent = '';
+  extra.innerHTML = `<span style="color:#6a7080">Right click to command</span>`;
 }
 
 function showBuilding(state: GameState, b: Building, panel: HTMLElement, portrait: HTMLElement,
