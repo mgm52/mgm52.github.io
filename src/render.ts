@@ -57,6 +57,10 @@ export async function createRender(parent: HTMLElement, walls: Set<string>): Pro
   const goblinLayer = new Container();
   const uiLayer = new Container();
 
+  // Playable-area background (sits behind the grid; OOB stays canvas-black).
+  const playBg = new Graphics();
+  playBg.rect(0, 0, WORLD.width, WORLD.height).fill(0x2b3036);
+
   // Wall border (drawn as a single Graphics instance — cheap & static)
   const wallGfx = new Graphics();
   for (const key of walls) {
@@ -72,6 +76,7 @@ export async function createRender(parent: HTMLElement, walls: Set<string>): Pro
   for (let y = 0; y <= ROWS; y++) grid.moveTo(0, y * CELL).lineTo(WORLD.width, y * CELL);
   grid.stroke({ width: 1, color: 0x363c44, alpha: 0.5 });
 
+  worldLayer.addChild(playBg);
   worldLayer.addChild(wallGfx);
   worldLayer.addChild(grid);
   worldLayer.addChild(buildingLayer);
