@@ -97,8 +97,8 @@ export const BUILDING_DEFS = {
       constructing: 0x3a3f47, constructingBorder: 0x808890,
     },
   }),
-  gas_genset: def(4, {
-    name: 'Gas Genset',
+  gas_engine: def(4, {
+    name: 'Gas Engine',
     short: 'GG',
     cost: 1200,
     buildersRequired: 3,
@@ -117,7 +117,7 @@ export const BUILDING_DEFS = {
 } as const;
 
 export type BuildingKind = keyof typeof BUILDING_DEFS;
-export const BUILDABLE_KINDS: BuildingKind[] = ['goblin_wheel', 'gas_genset', 'datacentre', 'phone_farm'];
+export const BUILDABLE_KINDS: BuildingKind[] = ['goblin_wheel', 'gas_engine', 'datacentre', 'phone_farm'];
 
 export const START_MONEY = 1000;
 export const START_GOBLINS = 0;

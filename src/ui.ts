@@ -28,7 +28,7 @@ const TASKS: Task[] = [
   {
     id: 'run_phone_farm',
     text: 'Run a Phone Farm',
-    unlocks: ['gas_genset', 'datacentre'],
+    unlocks: ['gas_engine', 'datacentre'],
     isDone: (s) => {
       for (const b of s.buildings.values()) {
         if (b.kind === 'phone_farm' && b.state === 'active') return true;
