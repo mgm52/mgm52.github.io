@@ -327,7 +327,7 @@ function placeBuilding(state: GameState, x: number, y: number) {
   if (!state.pendingBuild) return;
   const kind = state.pendingBuild.kind;
   const def = BUILDING_DEFS[kind];
-  if (state.money < def.cost) { appendLog(state, 'Not enough $.'); return; }
+  if (state.money < def.cost) { appendLog(state, 'Not enough Ƶ.'); return; }
   // Goblins are no longer required to place — any idle ones get auto-assigned;
   // shortfall is left for the player to staff up with right-clicks later.
   const idle = [...state.goblins.values()].filter((g) => g.state.kind === 'idle');

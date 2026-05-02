@@ -226,7 +226,7 @@ function drawBuildingBody(g: Graphics, b: Building) {
     for (let i = -1; i <= 1; i++) {
       g.rect(-half + 14, -10 + i * 14, def.size - 28, 7).fill({ color: 0x000000, alpha: 0.25 });
     }
-  } else if (b.kind === 'bitcoin_farm') {
+  } else if (b.kind === 'datacentre') {
     // Big server-rack grid suggesting a real mining hall.
     for (let row = -2; row <= 2; row++) {
       g.rect(-half + 16, row * 14 - 3, def.size - 32, 6).fill({ color: 0x000000, alpha: 0.28 });
@@ -240,7 +240,7 @@ function drawBuildingBody(g: Graphics, b: Building) {
         .lineTo(Math.cos(ang) * r, Math.sin(ang) * r)
         .stroke({ width: 1, color: 0x000000, alpha: 0.3 });
     }
-  } else if (b.kind === 'gasoline_generator') {
+  } else if (b.kind === 'gas_engine') {
     // smokestacks: 3 narrow rectangles along the top
     const w = 10;
     for (let i = -1; i <= 1; i++) {
