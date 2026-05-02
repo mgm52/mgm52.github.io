@@ -34,7 +34,7 @@ export type BuildingDef = {
   buildersRequired: number;
   buildTime: number;      // seconds
   maintainersRequired: number;
-  income: number;         // $/sec while active
+  income: number;         // Ƶ/sec while active
   powerOutput: number;    // watts: positive = produces, negative = consumes
   wanderInterval: number;
   wanderJitter: number;

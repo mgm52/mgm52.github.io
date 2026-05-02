@@ -57,7 +57,7 @@ export function setupUI(state: GameState, callbacks: UICallbacks) {
     <div class="build-content">
       <div class="build-name">Spawn Goblin</div>
       <div class="build-meta">
-        <span class="build-cost" id="cost-spawn-goblin">$${GOBLIN.spawnCost}</span>
+        <span class="build-cost" id="cost-spawn-goblin">Ƶ${GOBLIN.spawnCost}</span>
       </div>
     </div>
   `;
@@ -74,7 +74,7 @@ export function setupUI(state: GameState, callbacks: UICallbacks) {
       ? ` · <span class="build-power-cost" id="power-cost-${kind}">${formatPower(-def.powerOutput)}</span>`
       : '';
     const yieldBits: string[] = [];
-    if (def.income) yieldBits.push(`<span class="yield-money">+$${def.income}/s</span>`);
+    if (def.income) yieldBits.push(`<span class="yield-money">+Ƶ${def.income}/s</span>`);
     if (def.powerOutput > 0) yieldBits.push(`<span class="yield-power">+${formatPower(def.powerOutput)}</span>`);
     const yieldHtml = yieldBits.length > 0
       ? `<div class="build-yields">${yieldBits.join('<br>')}</div>`
@@ -84,7 +84,7 @@ export function setupUI(state: GameState, callbacks: UICallbacks) {
         <div class="build-text">
           <div class="build-name">${def.name}</div>
           <div class="build-meta">
-            <span class="build-cost" id="cost-${kind}">$${def.cost}</span>${powerCostBit}
+            <span class="build-cost" id="cost-${kind}">Ƶ${def.cost}</span>${powerCostBit}
           </div>
         </div>
         ${yieldHtml}
@@ -266,7 +266,7 @@ function showBuilding(state: GameState, b: Building, panel: HTMLElement, portrai
     const lines: string[] = [];
     if (b.state === 'active') {
       const bits: string[] = [];
-      if (def.income) bits.push(`earning $${def.income}/s`);
+      if (def.income) bits.push(`earning Ƶ${def.income}/s`);
       if (def.powerOutput > 0) bits.push(`producing ${formatPower(def.powerOutput)}`);
       else if (def.powerOutput < 0) bits.push(`drawing ${formatPower(-def.powerOutput)}`);
       stateEl.textContent = `Active — ${bits.join(', ')}`;
