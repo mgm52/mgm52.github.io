@@ -1,0 +1,72 @@
+{
+  "source": "rigged_goblin_dancing_aligol3dart",
+  "clip": "mixamo.com",
+  "clipDuration": 5.333333492279053,
+  "trimStartPct": 0,
+  "trimEndPct": 30,
+  "spriteSize": 64,
+  "directions": 8,
+  "framesPerDirection": 8,
+  "layout": "dir-rows",
+  "startAngleDeg": 0,
+  "clockwise": true,
+  "restForward": "-Z",
+  "headings": [
+    {
+      "index": 0,
+      "pivotRotationDeg": 0,
+      "headingDeg": 0,
+      "compass": "N"
+    },
+    {
+      "index": 1,
+      "pivotRotationDeg": 315,
+      "headingDeg": 45,
+      "compass": "NE"
+    },
+    {
+      "index": 2,
+      "pivotRotationDeg": 270,
+      "headingDeg": 90,
+      "compass": "E"
+    },
+    {
+      "index": 3,
+      "pivotRotationDeg": 225,
+      "headingDeg": 135,
+      "compass": "SE"
+    },
+    {
+      "index": 4,
+      "pivotRotationDeg": 180,
+      "headingDeg": 180,
+      "compass": "S"
+    },
+    {
+      "index": 5,
+      "pivotRotationDeg": 135,
+      "headingDeg": 225,
+      "compass": "SW"
+    },
+    {
+      "index": 6,
+      "pivotRotationDeg": 90,
+      "headingDeg": 270,
+      "compass": "W"
+    },
+    {
+      "index": 7,
+      "pivotRotationDeg": 45,
+      "headingDeg": 315,
+      "compass": "NW"
+    }
+  ],
+  "cameraPitchDeg": 30,
+  "projection": "ortho",
+  "cols": 8,
+  "rows": 8,
+  "sheetWidth": 512,
+  "sheetHeight": 512,
+  "autoCrop": true,
+  "cropPadding": 2
+}

@@ -5,10 +5,14 @@ import {
 
 export type Vec2 = { x: number; y: number };
 export type Cell = { cx: number; cy: number };
-export type Dir = 0 | 1 | 2 | 3; // 0=up, 1=right, 2=down, 3=left
+// 8-way direction, clockwise from north. Even indices are cardinals.
+export type Dir = 0 | 1 | 2 | 3 | 4 | 5 | 6 | 7;
 
-export const DX: Record<Dir, number> = { 0: 0, 1: 1, 2: 0, 3: -1 };
-export const DY: Record<Dir, number> = { 0: -1, 1: 0, 2: 1, 3: 0 };
+export const DX: Record<Dir, number> = { 0: 0, 1: 1, 2: 1, 3: 1, 4: 0, 5: -1, 6: -1, 7: -1 };
+export const DY: Record<Dir, number> = { 0: -1, 1: -1, 2: 0, 3: 1, 4: 1, 5: 1, 6: 0, 7: -1 };
+export const ALL_DIRS: Dir[] = [0, 1, 2, 3, 4, 5, 6, 7];
+export const CARDINAL_DIRS: Dir[] = [0, 2, 4, 6];
+export function isDiagonal(d: Dir): boolean { return (d & 1) === 1; }
 
 export type GoblinState =
   | { kind: 'idle' }
@@ -28,6 +32,7 @@ export type Goblin = {
   facing: number;
   state: GoblinState;
   selected: boolean;
+  idleSince: number | null; // game time when the current idle streak began
 };
 
 export type BuildingState = 'constructing' | 'active' | 'dormant';
@@ -168,7 +173,7 @@ export function findFreeCellNear(
     } else if (!isCellBlocked(state, c.cx, c.cy, exemptGoblinId)) {
       return c;
     }
-    for (const d of [0, 1, 2, 3] as Dir[]) {
+    for (const d of CARDINAL_DIRS) {
       queue.push({ cx: c.cx + DX[d], cy: c.cy + DY[d] });
     }
   }
@@ -219,7 +224,7 @@ export function createInitialState(): GameState {
         const g: Goblin = {
           id, pos: cellCenter(c), cell: c, target: null, goal: null,
           path: [], facing: Math.PI / 2,
-          state: { kind: 'idle' }, selected: false,
+          state: { kind: 'idle' }, selected: false, idleSince: null,
         };
         state.goblins.set(id, g);
         occupyCell(state, cx, cy, id);

@@ -17,6 +17,7 @@ export const GOBLIN = {
   spawnTime: 2,
   arriveDist: 2,
   concurrentBuildLimit: 5,
+  breakdanceAfter: 30, // seconds of continuous idle before goblins start breakdancing
 };
 
 export type BuildingColors = {
@@ -125,8 +126,5 @@ export const START_GOBLINS = 0;
 export const START_CELL = { cx: WALL_BORDER + 4, cy: WALL_BORDER + 8 };
 
 export function formatPower(w: number): string {
-  const abs = Math.abs(w);
-  if (abs >= 1e9) return `${(w / 1e9).toFixed(1)} GW`;
-  if (abs >= 1e6) return `${(w / 1e6).toFixed(1)} MW`;
-  return `${Math.round(w)} W`;
+  return `${Math.round(w).toLocaleString('en-US')} W`;
 }

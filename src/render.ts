@@ -1,14 +1,90 @@
-import { Application, Container, Graphics, Text } from 'pixi.js';
+import { Application, Assets, Container, Graphics, Rectangle, Sprite, Text, Texture } from 'pixi.js';
 import { CELL, COLS, GOBLIN, RENDER_SCALE, ROWS, WORLD } from './config';
 import { Building, GameState, Goblin, buildingCenter, defOf, maintainerCount } from './state';
 
 export type Camera = { x: number; y: number };
 
+// ─── Goblin sprite sheets ───────────────────────────────────────────
+// Two sheets: a moving/dancing loop and an idle loop. Each ships with a
+// sibling JSON describing sprite size, frame counts, and per-row world
+// heading (compass convention: 0=N, clockwise). Sheets are laid out as
+// dir-rows: each row is a viewing direction, columns are animation frames.
+const GOBLIN_WALK_BASE = '/assets/rigged_goblin_dancing_aligol3dart_orc_walk';
+const GOBLIN_IDLE_BASE = '/assets/rigged_goblin_dancing_aligol3dart_orc_idle';
+const GOBLIN_BREAKDANCE_BASE = '/assets/rigged_goblin_dancing_aligol3dart_breakdance';
+const GOBLIN_DISPLAY_PX = 48;   // on-screen sprite size before world-layer scale
+
+type SheetHeading = { index: number; headingDeg: number };
+type SheetMeta = {
+  spriteSize: number;
+  directions: number;
+  framesPerDirection: number;
+  clipDuration: number;
+  trimStartPct: number;
+  trimEndPct: number;
+  headings: SheetHeading[];
+};
+type Sheet = { meta: SheetMeta; frames: Texture[][]; fps: number };
+
+let goblinWalkSheet: Sheet | null = null;
+let goblinIdleSheet: Sheet | null = null;
+let goblinBreakdanceSheet: Sheet | null = null;
+
+async function loadSheet(base: string): Promise<Sheet> {
+  const meta = await fetch(`${base}.json`).then(r => r.json()) as SheetMeta;
+  const tex: Texture = await Assets.load(`${base}.png`);
+  const source = tex.source;
+  const frames: Texture[][] = [];
+  for (let d = 0; d < meta.directions; d++) {
+    const row: Texture[] = [];
+    for (let f = 0; f < meta.framesPerDirection; f++) {
+      row.push(new Texture({
+        source,
+        frame: new Rectangle(
+          f * meta.spriteSize,
+          d * meta.spriteSize,
+          meta.spriteSize,
+          meta.spriteSize,
+        ),
+      }));
+    }
+    frames.push(row);
+  }
+  // fps preserves the clip's natural tempo, given the trim window the sheet was sampled from.
+  const span = Math.max(0.001, (meta.trimEndPct - meta.trimStartPct) / 100);
+  const fps = meta.framesPerDirection / (meta.clipDuration * span);
+  return { meta, frames, fps };
+}
+
+async function loadGoblinSheets(): Promise<void> {
+  [goblinWalkSheet, goblinIdleSheet, goblinBreakdanceSheet] = await Promise.all([
+    loadSheet(GOBLIN_WALK_BASE),
+    loadSheet(GOBLIN_IDLE_BASE),
+    loadSheet(GOBLIN_BREAKDANCE_BASE),
+  ]);
+}
+
+// Map facing radians to a row index using the sheet's per-row heading table.
+// `facing` comes from atan2(dy,dx): 0 = east, +y = south. Compass headings
+// are 0=N, clockwise — convert with +90°, then pick the row whose heading is
+// closest (modulo 360).
+function dirIndex(meta: SheetMeta, facing: number): number {
+  const facingDeg = facing * (180 / Math.PI);
+  const compass = (((facingDeg + 90) % 360) + 360) % 360;
+  let best = 0;
+  let bestDist = Infinity;
+  for (const h of meta.headings) {
+    const raw = ((h.headingDeg - compass) % 360 + 540) % 360 - 180;
+    const dist = Math.abs(raw);
+    if (dist < bestDist) { bestDist = dist; best = h.index; }
+  }
+  return best;
+}
+
 type GoblinView = {
   container: Container;
-  body: Graphics;
+  sprite: Sprite;
   selectionRing: Graphics;
-  label: Text;
 };
 
 type BuildingView = {
@@ -36,6 +112,7 @@ export type RenderContext = {
 };
 
 export async function createRender(parent: HTMLElement, walls: Set<string>): Promise<RenderContext> {
+  await loadGoblinSheets();
   const initW = parent.clientWidth || window.innerWidth || WORLD.width;
   const initH = parent.clientHeight || window.innerHeight || WORLD.height;
   const app = new Application();
@@ -133,25 +210,16 @@ function makeGoblinView(g: Goblin): GoblinView {
   ring.circle(0, 0, GOBLIN.radius + 4).stroke({ width: 2, color: 0xffd96b });
   ring.visible = false;
 
-  const body = new Graphics();
-  body.circle(0, 0, GOBLIN.radius).fill(0x6fbf73).stroke({ width: 1, color: 0x2d4a30 });
-  body
-    .moveTo(GOBLIN.radius - 1, -5)
-    .lineTo(GOBLIN.radius + 7, 0)
-    .lineTo(GOBLIN.radius - 1, 5)
-    .closePath()
-    .fill(0x1f3522);
-
-  const label = new Text({
-    text: 'G',
-    style: { fontFamily: 'VT323, monospace', fontSize: 18, fill: 0x102510, fontWeight: 'bold' },
-  });
-  label.anchor.set(0.5);
+  const startSheet = goblinIdleSheet ?? goblinWalkSheet;
+  const startTex = startSheet?.frames[0][0] ?? Texture.EMPTY;
+  const sprite = new Sprite(startTex);
+  sprite.anchor.set(0.5);
+  const s = GOBLIN_DISPLAY_PX / (startSheet?.meta.spriteSize ?? 64);
+  sprite.scale.set(s);
 
   c.addChild(ring);
-  c.addChild(body);
-  c.addChild(label);
-  return { container: c, body, selectionRing: ring, label };
+  c.addChild(sprite);
+  return { container: c, sprite, selectionRing: ring };
 }
 
 function makeBuildingView(b: Building): BuildingView {
@@ -274,12 +342,26 @@ export function render(state: GameState, ctx: RenderContext) {
       ctx.goblinViews.set(g.id, v);
     }
     v.container.position.set(g.pos.x, g.pos.y);
-    v.body.rotation = g.facing;
     v.selectionRing.visible = g.selected;
+    // Walk while interpolating between cells; idle when stationary; break into
+    // breakdance once a goblin's been continuously idle for long enough.
+    const idleFor = (g.state.kind === 'idle' && g.idleSince !== null)
+      ? state.now - g.idleSince : 0;
+    const breakdancing = idleFor >= GOBLIN.breakdanceAfter;
+    const sheet =
+      (breakdancing ? goblinBreakdanceSheet : null) ??
+      (g.target !== null ? goblinWalkSheet : goblinIdleSheet) ??
+      goblinWalkSheet ?? goblinIdleSheet;
+    if (sheet) {
+      const dir = dirIndex(sheet.meta, g.facing);
+      const fpd = sheet.meta.framesPerDirection;
+      const frame = Math.floor(state.now * sheet.fps) % fpd;
+      v.sprite.texture = sheet.frames[dir][frame];
+    }
     let tint = 0xffffff;
     if (g.state.kind === 'building' || g.state.kind === 'going_to_build') tint = 0xfff0a8;
     else if (g.state.kind === 'maintaining' || g.state.kind === 'going_to_maintain') tint = 0xa8d8ff;
-    v.body.tint = tint;
+    v.sprite.tint = tint;
   }
   for (const [id, v] of ctx.goblinViews) {
     if (!seenG.has(id)) {

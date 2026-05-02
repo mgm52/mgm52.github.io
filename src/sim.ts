@@ -1,9 +1,9 @@
 import { BUILDING_DEFS, COLS, GOBLIN, START_CELL, TICK_S } from './config';
 import {
-  Building, Cell, DX, DY, Dir, GameState, Goblin,
+  ALL_DIRS, Building, Cell, DX, DY, Dir, GameState, Goblin,
   appendLog, buildingAtCell, buildingFootprint, buildingPerimeter, cellCenter,
-  defOf, findFreeCellNear, isCellBlocked, isCellInBuilding, maintainerCount,
-  occupyCell, releaseCell,
+  cellKey, defOf, findFreeCellNear, isCellBlocked, isCellInBuilding, isInBounds,
+  maintainerCount, occupyCell, releaseCell,
 } from './state';
 
 export function tick(state: GameState) {
@@ -45,7 +45,7 @@ function spawnGoblin(state: GameState) {
     target: null, goal: null,
     path: [],
     facing: Math.PI / 2,
-    state: { kind: 'idle' }, selected: false,
+    state: { kind: 'idle' }, selected: false, idleSince: null,
   };
   state.goblins.set(id, g);
   occupyCell(state, cell.cx, cell.cy, id);
@@ -55,6 +55,14 @@ function spawnGoblin(state: GameState) {
 
 // ─── Goblin update ──────────────────────────────────────────────────
 function updateGoblin(state: GameState, g: Goblin) {
+  // Track continuous idle time so the renderer can switch animations once a
+  // goblin's been standing around long enough.
+  if (g.state.kind === 'idle') {
+    if (g.idleSince === null) g.idleSince = state.now;
+  } else if (g.idleSince !== null) {
+    g.idleSince = null;
+  }
+
   // Continue interpolating toward target cell if mid-step
   if (g.target) {
     const tc = cellCenter(g.target);
@@ -147,7 +155,7 @@ function updateGoblin(state: GameState, g: Goblin) {
         const stepDir = preferredDir(g.cell, closestMid);
         const nx = g.cell.cx + DX[stepDir];
         const ny = g.cell.cy + DY[stepDir];
-        if (!isCellBlocked(state, nx, ny, g.id, b.id)) {
+        if (canStep(state, g.cell.cx, g.cell.cy, nx, ny, g.id, b.id)) {
           occupyCell(state, nx, ny, g.id);
           g.target = { cx: nx, cy: ny };
           g.facing = Math.atan2(DY[stepDir], DX[stepDir]);
@@ -252,11 +260,11 @@ function updateGoblin(state: GameState, g: Goblin) {
           }
         } else {
           const choices: Dir[] = [];
-          for (let d = 0 as Dir; d < 4; d++) {
+          for (const d of ALL_DIRS) {
             const nx = g.cell.cx + DX[d];
             const ny = g.cell.cy + DY[d];
             if (!isCellInBuilding(b, nx, ny)) continue;
-            if (isCellBlocked(state, nx, ny, g.id, b.id)) continue;
+            if (!canStep(state, g.cell.cx, g.cell.cy, nx, ny, g.id, b.id)) continue;
             choices.push(d);
           }
           if (choices.length > 0) chosen = choices[Math.floor(Math.random() * choices.length)];
@@ -280,10 +288,43 @@ function updateGoblin(state: GameState, g: Goblin) {
 function wheelNextDir(b: Building, cell: Cell): Dir {
   const lx = cell.cx - b.cell.cx;
   const ly = cell.cy - b.cell.cy;
-  if (lx === 0 && ly === 0) return 1; // east
-  if (lx === 1 && ly === 0) return 2; // south
-  if (lx === 1 && ly === 1) return 3; // west
+  if (lx === 0 && ly === 0) return 2; // east
+  if (lx === 1 && ly === 0) return 4; // south
+  if (lx === 1 && ly === 1) return 6; // west
   return 0;                            // (0,1) → north
+}
+
+// Can a goblin step from (fx,fy) to (tx,ty) in one move? Validates the
+// destination, and for diagonals also rejects corner-cutting through static
+// obstacles (walls, buildings). Other goblins are *not* corner blockers — that
+// would deadlock tight crowds (e.g. a goblin surrounded on all 4 cardinals).
+function canStep(
+  state: GameState,
+  fx: number, fy: number,
+  tx: number, ty: number,
+  gid: number,
+  exemptB: number | undefined,
+): boolean {
+  if (isCellBlocked(state, tx, ty, gid, exemptB)) return false;
+  const dx = tx - fx;
+  const dy = ty - fy;
+  if (dx !== 0 && dy !== 0) {
+    if (isCornerStaticBlocked(state, fx + dx, fy, exemptB)) return false;
+    if (isCornerStaticBlocked(state, fx, fy + dy, exemptB)) return false;
+  }
+  return true;
+}
+
+function isCornerStaticBlocked(
+  state: GameState,
+  cx: number, cy: number,
+  exemptB: number | undefined,
+): boolean {
+  if (!isInBounds(cx, cy)) return true;
+  if (state.walls.has(cellKey(cx, cy))) return true;
+  const b = buildingAtCell(state, cx, cy);
+  if (b && b.id !== exemptB) return true;
+  return false;
 }
 
 function jitterInterval(b: Building): number {
@@ -328,22 +369,12 @@ function maintainerSlot(state: GameState, b: Building, g: Goblin): Cell | null {
 
 // ─── Pathfinding (BFS over the cell grid) ───────────────────────────
 function preferredDir(from: Cell, to: Cell): Dir {
-  const dx = to.cx - from.cx;
-  const dy = to.cy - from.cy;
-  let best: Dir = 0;
-  let bestScore = -Infinity;
-  for (const d of [0, 1, 2, 3] as Dir[]) {
-    const score = dx * DX[d] + dy * DY[d];
-    let bonus = 0;
-    if (Math.abs(dx) >= Math.abs(dy)) {
-      if (DX[d] !== 0) bonus = 0.1;
-    } else {
-      if (DY[d] !== 0) bonus = 0.1;
-    }
-    const total = score + bonus;
-    if (total > bestScore) { bestScore = total; best = d; }
+  const sx = Math.sign(to.cx - from.cx);
+  const sy = Math.sign(to.cy - from.cy);
+  for (const d of ALL_DIRS) {
+    if (DX[d] === sx && DY[d] === sy) return d;
   }
-  return best;
+  return 0;
 }
 
 function exemptBuildingFor(state: GameState, g: Goblin): number | undefined {
@@ -394,13 +425,13 @@ function bfsPath(
     }
     const cx = curKey % COLS;
     const cy = (curKey - cx) / COLS;
-    for (let d = 0 as Dir; d < 4; d++) {
+    for (const d of ALL_DIRS) {
       const nx = cx + DX[d];
       const ny = cy + DY[d];
       const k = nkey(nx, ny);
       if (prev.has(k)) continue;
       if (confineBuilding && !isCellInBuilding(confineBuilding, nx, ny)) continue;
-      if (isCellBlocked(state, nx, ny, gid, exemptB)) continue;
+      if (!canStep(state, cx, cy, nx, ny, gid, exemptB)) continue;
       prev.set(k, curKey);
       queue.push(k);
     }
@@ -423,14 +454,16 @@ function planStep(state: GameState, g: Goblin) {
   let next: Cell | undefined = g.path[0];
   let needsReplan = false;
   if (!next) needsReplan = true;
-  else if (isCellBlocked(state, next.cx, next.cy, g.id, exemptB)) needsReplan = true;
+  else if (!canStep(state, g.cell.cx, g.cell.cy, next.cx, next.cy, g.id, exemptB)) needsReplan = true;
   else if (confineB !== undefined) {
     const b = state.buildings.get(confineB);
     if (b && !isCellInBuilding(b, next.cx, next.cy)) needsReplan = true;
   }
-  // Sanity: next must be adjacent to current cell
-  if (next && (Math.abs(next.cx - g.cell.cx) + Math.abs(next.cy - g.cell.cy)) !== 1) {
-    needsReplan = true;
+  // Sanity: next must be a single 8-way step from current cell.
+  if (next) {
+    const adx = Math.abs(next.cx - g.cell.cx);
+    const ady = Math.abs(next.cy - g.cell.cy);
+    if (Math.max(adx, ady) !== 1) needsReplan = true;
   }
 
   if (needsReplan) {
