@@ -38,15 +38,6 @@ export type RenderContext = {
 export async function createRender(parent: HTMLElement, walls: Set<string>): Promise<RenderContext> {
   const initW = parent.clientWidth || window.innerWidth || WORLD.width;
   const initH = parent.clientHeight || window.innerHeight || WORLD.height;
-  console.log('[render] init dims', {
-    parentClientW: parent.clientWidth,
-    parentClientH: parent.clientHeight,
-    windowInnerW: window.innerWidth,
-    windowInnerH: window.innerHeight,
-    initW,
-    initH,
-    dpr: window.devicePixelRatio,
-  });
   const app = new Application();
   await app.init({
     background: '#2b3036',
@@ -60,14 +51,6 @@ export async function createRender(parent: HTMLElement, walls: Set<string>): Pro
   app.canvas.style.width = '100%';
   app.canvas.style.height = '100%';
   app.canvas.style.display = 'block';
-  console.log('[render] post-append', {
-    canvasW: app.canvas.width,
-    canvasH: app.canvas.height,
-    canvasStyleW: app.canvas.style.width,
-    canvasStyleH: app.canvas.style.height,
-    parentClientW: parent.clientWidth,
-    parentClientH: parent.clientHeight,
-  });
 
   const worldLayer = new Container();
   const buildingLayer = new Container();
@@ -103,43 +86,22 @@ export async function createRender(parent: HTMLElement, walls: Set<string>): Pro
     viewport: { width: initW, height: initH },
   };
 
-  const syncViewport = (origin: string) => {
+  const syncViewport = () => {
     const w = parent.clientWidth;
     const h = parent.clientHeight;
-    if (w <= 0 || h <= 0) {
-      console.log('[render] syncViewport skipped (zero dims)', { origin, w, h });
-      return;
-    }
-    if (ctx.viewport.width === w && ctx.viewport.height === h) {
-      console.log('[render] syncViewport no-op', { origin, w, h });
-      return;
-    }
-    console.log('[render] syncViewport resize', {
-      origin,
-      from: { ...ctx.viewport },
-      to: { w, h },
-      canvasBeforeW: app.canvas.width,
-      canvasBeforeH: app.canvas.height,
-    });
+    if (w <= 0 || h <= 0) return;
+    if (ctx.viewport.width === w && ctx.viewport.height === h) return;
     app.renderer.resize(w, h);
     ctx.viewport.width = w;
     ctx.viewport.height = h;
     clampCamera(ctx);
-    console.log('[render] syncViewport done', {
-      canvasAfterW: app.canvas.width,
-      canvasAfterH: app.canvas.height,
-      canvasStyleW: app.canvas.style.width,
-      canvasStyleH: app.canvas.style.height,
-    });
   };
-  syncViewport('initial');
-  requestAnimationFrame(() => syncViewport('rAF'));
-  window.addEventListener('resize', () => syncViewport('window-resize'));
+  syncViewport();
+  requestAnimationFrame(syncViewport);
+  window.addEventListener('resize', syncViewport);
   if ('ResizeObserver' in window) {
-    new ResizeObserver(() => syncViewport('ResizeObserver')).observe(parent);
+    new ResizeObserver(syncViewport).observe(parent);
   }
-  // Re-check after layout / font load delays.
-  for (const t of [50, 200, 800]) setTimeout(() => syncViewport(`timeout-${t}`), t);
 
   return ctx;
 }
