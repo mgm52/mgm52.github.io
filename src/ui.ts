@@ -84,8 +84,7 @@ export function setupUI(state: GameState, callbacks: UICallbacks) {
         <div class="build-text">
           <div class="build-name">${def.name}</div>
           <div class="build-meta">
-            <span class="build-cost" id="cost-${kind}">$${def.cost}</span>${powerCostBit} ·
-            <span class="build-req" id="req-${kind}">${def.buildersRequired} goblin${def.buildersRequired === 1 ? '' : 's'}</span>
+            <span class="build-cost" id="cost-${kind}">$${def.cost}</span>${powerCostBit}
           </div>
         </div>
         ${yieldHtml}
@@ -184,14 +183,11 @@ export function refreshUI(state: GameState) {
     btn.classList.toggle('locked', !unlocked.has(kind));
     if (!unlocked.has(kind)) continue;
     const canAfford = state.money >= def.cost;
-    const enoughGoblins = idle >= def.buildersRequired;
     const draw = def.powerOutput < 0 ? -def.powerOutput : 0;
     const enoughPower = draw === 0 || draw <= availablePower;
-    btn.disabled = !canAfford || !enoughGoblins || !enoughPower;
+    btn.disabled = !canAfford || !enoughPower;
     btn.classList.toggle('active', state.pendingBuild?.kind === kind);
     document.getElementById(`cost-${kind}`)!.classList.toggle('met', canAfford);
-    const req = document.getElementById(`req-${kind}`)!;
-    req.classList.toggle('met', enoughGoblins);
     const powerCostEl = document.getElementById(`power-cost-${kind}`);
     if (powerCostEl) powerCostEl.classList.toggle('met', enoughPower);
   }

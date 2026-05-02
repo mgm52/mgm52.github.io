@@ -206,11 +206,9 @@ function placeBuilding(state: GameState, x: number, y: number) {
   const kind = state.pendingBuild.kind;
   const def = BUILDING_DEFS[kind];
   if (state.money < def.cost) { appendLog(state, 'Not enough $.'); return; }
+  // Goblins are no longer required to place — any idle ones get auto-assigned;
+  // shortfall is left for the player to staff up with right-clicks later.
   const idle = [...state.goblins.values()].filter((g) => g.state.kind === 'idle');
-  if (idle.length < def.buildersRequired) {
-    appendLog(state, `Need ${def.buildersRequired} idle goblin${def.buildersRequired === 1 ? '' : 's'} to construct.`);
-    return;
-  }
   if (def.powerOutput < 0) {
     const draw = -def.powerOutput;
     const available = state.lastPowerProduced - state.lastPowerConsumed;
@@ -245,7 +243,8 @@ function placeBuilding(state: GameState, x: number, y: number) {
     Math.hypot(a.pos.x - center.x, a.pos.y - center.y) -
     Math.hypot(c.pos.x - center.x, c.pos.y - center.y),
   );
-  for (let i = 0; i < def.buildersRequired; i++) {
+  const initialBuilders = Math.min(idle.length, def.buildersRequired);
+  for (let i = 0; i < initialBuilders; i++) {
     const g = idle[i];
     b.assignedGoblins.push(g.id);
     g.goal = null;
