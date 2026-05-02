@@ -35,6 +35,7 @@ async function main() {
       await Promise.all([
         document.fonts.load('16px VT323'),
         document.fonts.load('16px Audiowide'),
+        document.fonts.load('16px "Major Mono Display"'),
       ]);
     } catch { /* fall through to fallback fonts */ }
   }
