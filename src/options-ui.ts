@@ -61,6 +61,8 @@ function rebuildPanel(panel: HTMLElement): void {
     slider('Saturation', o.goblinSaturation, 0, 2, 0.05, (v) => setOption('goblinSaturation', v)),
     slider('Brightness', o.goblinBrightness, 0.2, 2, 0.05, (v) => setOption('goblinBrightness', v)),
     slider('Sprite size', o.goblinDisplayPx, 24, 96, 1, (v) => setOption('goblinDisplayPx', v)),
+    toggle('Foot shadow',   o.goblinShadow,  (v) => setOption('goblinShadow', v)),
+    toggle('Black outline', o.goblinOutline, (v) => setOption('goblinOutline', v)),
   ]));
 
   panel.appendChild(section('Buildings', [

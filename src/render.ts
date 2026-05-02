@@ -83,9 +83,39 @@ function dirIndex(meta: SheetMeta, facing: number): number {
 
 type GoblinView = {
   container: Container;
+  shadow: Sprite;
+  outline: Sprite[];   // 4 cardinal-offset copies, black-tinted
   sprite: Sprite;
   selectionRing: Graphics;
 };
+
+// Pure-Canvas radial-gradient texture for the foot shadow. Generated lazily so
+// we don't need a Pixi renderer at module-init time.
+let shadowTexture: Texture | null = null;
+function getShadowTexture(): Texture {
+  if (shadowTexture) return shadowTexture;
+  const w = 64, h = 24;
+  const canvas = document.createElement('canvas');
+  canvas.width = w; canvas.height = h;
+  const c = canvas.getContext('2d')!;
+  c.translate(w / 2, h / 2);
+  c.scale(1, h / w);          // squash to ellipse
+  const grad = c.createRadialGradient(0, 0, 0, 0, 0, w / 2);
+  grad.addColorStop(0, 'rgba(0,0,0,0.65)');
+  grad.addColorStop(0.5, 'rgba(0,0,0,0.32)');
+  grad.addColorStop(1, 'rgba(0,0,0,0)');
+  c.fillStyle = grad;
+  c.fillRect(-w / 2, -w / 2, w, w);
+  shadowTexture = Texture.from(canvas);
+  return shadowTexture;
+}
+
+// Cardinal pixel offsets for the cheap "outline" trick. Four offset copies
+// of the sprite, all tinted black, drawn behind the main sprite. The tinted
+// copies bleed past the anti-aliased sprite edges, producing a thin outline.
+const OUTLINE_OFFSETS: readonly [number, number][] = [
+  [-2, 0], [2, 0], [0, -2], [0, 2],
+];
 
 type BuildingView = {
   container: Container;
@@ -326,21 +356,36 @@ function makeGoblinView(g: Goblin): GoblinView {
   const c = new Container();
   c.position.set(g.pos.x, g.pos.y);
 
+  const shadow = new Sprite(getShadowTexture());
+  shadow.anchor.set(0.5);
+
   const ring = new Graphics();
   ring.circle(0, 0, GOBLIN.radius + 4).stroke({ width: 2, color: 0xffd96b });
   ring.visible = false;
 
   const startSheet = goblinIdleSheet ?? goblinWalkSheet;
   const startTex = startSheet?.frames[0][0] ?? Texture.EMPTY;
+  const px = getOptions().goblinDisplayPx;
+  const scale = px / (startSheet?.meta.spriteSize ?? 64);
+
+  const outline: Sprite[] = OUTLINE_OFFSETS.map(([dx, dy]) => {
+    const s = new Sprite(startTex);
+    s.anchor.set(0.5);
+    s.position.set(dx, dy);
+    s.tint = 0x000000;
+    s.scale.set(scale);
+    return s;
+  });
+
   const sprite = new Sprite(startTex);
   sprite.anchor.set(0.5);
-  const px = getOptions().goblinDisplayPx;
-  const s = px / (startSheet?.meta.spriteSize ?? 64);
-  sprite.scale.set(s);
+  sprite.scale.set(scale);
 
+  c.addChild(shadow);
   c.addChild(ring);
+  for (const s of outline) c.addChild(s);
   c.addChild(sprite);
-  return { container: c, sprite, selectionRing: ring };
+  return { container: c, shadow, outline, sprite, selectionRing: ring };
 }
 
 function makeBuildingView(b: Building): BuildingView {
@@ -455,7 +500,8 @@ export function render(state: GameState, ctx: RenderContext) {
     Math.round(offsetY - ctx.camera.y * RENDER_SCALE),
   );
 
-  const displayPx = getOptions().goblinDisplayPx;
+  const opts = getOptions();
+  const displayPx = opts.goblinDisplayPx;
 
   // Goblins
   const seenG = new Set<number>();
@@ -469,6 +515,12 @@ export function render(state: GameState, ctx: RenderContext) {
     }
     v.container.position.set(g.pos.x, g.pos.y);
     v.selectionRing.visible = g.selected;
+    // Shadow under the feet — anchored at sprite center, offset down to feet.
+    v.shadow.visible = opts.goblinShadow;
+    if (opts.goblinShadow) {
+      v.shadow.position.set(0, displayPx * 0.32);
+      v.shadow.scale.set(displayPx / 64);
+    }
     // Walk while interpolating between cells; idle when stationary; break into
     // breakdance once a goblin's been continuously idle for long enough.
     const idleFor = (g.state.kind === 'idle' && g.idleSince !== null)
@@ -482,9 +534,18 @@ export function render(state: GameState, ctx: RenderContext) {
       const dir = dirIndex(sheet.meta, g.facing);
       const fpd = sheet.meta.framesPerDirection;
       const frame = Math.floor(state.now * sheet.fps) % fpd;
-      v.sprite.texture = sheet.frames[dir][frame];
-      v.sprite.scale.set(displayPx / sheet.meta.spriteSize);
+      const tex = sheet.frames[dir][frame];
+      const sc = displayPx / sheet.meta.spriteSize;
+      v.sprite.texture = tex;
+      v.sprite.scale.set(sc);
+      if (opts.goblinOutline) {
+        for (const s of v.outline) {
+          s.texture = tex;
+          s.scale.set(sc);
+        }
+      }
     }
+    for (const s of v.outline) s.visible = opts.goblinOutline;
     let tint = 0xffffff;
     if (g.state.kind === 'building' || g.state.kind === 'going_to_build') tint = 0xfff0a8;
     else if (g.state.kind === 'maintaining' || g.state.kind === 'going_to_maintain') tint = 0xa8d8ff;

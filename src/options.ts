@@ -74,6 +74,8 @@ export type Options = {
   goblinSaturation: number;
   goblinBrightness: number;
   goblinDisplayPx: number;
+  goblinShadow: boolean;
+  goblinOutline: boolean;
   // Buildings
   buildingSaturation: number;
   buildingBrightness: number;
@@ -100,6 +102,8 @@ export const DEFAULT_OPTIONS: Options = {
   goblinSaturation: 1.7,
   goblinBrightness: 1.8,
   goblinDisplayPx: 50,
+  goblinShadow: true,
+  goblinOutline: false,
   buildingSaturation: 1.50,
   buildingBrightness: 1.05,
   sidebarBg: 0x000000,
