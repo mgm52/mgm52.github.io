@@ -103,7 +103,7 @@ export const DEFAULT_OPTIONS: Options = {
   goblinBrightness: 1.8,
   goblinDisplayPx: 50,
   goblinShadow: true,
-  goblinOutline: false,
+  goblinOutline: true,
   buildingSaturation: 1.50,
   buildingBrightness: 1.05,
   sidebarBg: 0x000000,

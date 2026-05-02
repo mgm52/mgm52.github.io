@@ -519,7 +519,8 @@ export function render(state: GameState, ctx: RenderContext) {
     v.shadow.visible = opts.goblinShadow;
     if (opts.goblinShadow) {
       v.shadow.position.set(0, displayPx * 0.32);
-      v.shadow.scale.set(displayPx / 64);
+      const sy = displayPx / 64;
+      v.shadow.scale.set(sy * 0.75, sy);
     }
     // Walk while interpolating between cells; idle when stationary; break into
     // breakdance once a goblin's been continuously idle for long enough.
