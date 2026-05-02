@@ -1,0 +1,290 @@
+import { BUILDABLE_KINDS, BUILDING_DEFS, BuildingKind, GOBLIN, formatPower } from './config';
+import { Building, GameState, Goblin, GoblinState, countIdle, defOf, maintainerCount } from './state';
+
+// Buttons render in cheapest-first order regardless of declaration order.
+const SORTED_KINDS: BuildingKind[] = [...BUILDABLE_KINDS].sort(
+  (a, b) => BUILDING_DEFS[a].cost - BUILDING_DEFS[b].cost,
+);
+
+// Tutorial gating: each task unlocks one or more building kinds when complete.
+type Task = {
+  id: string;
+  text: string;
+  unlocks: BuildingKind[];
+  isDone: (s: GameState) => boolean;
+};
+const TASKS: Task[] = [
+  {
+    id: 'spawn_2',
+    text: 'Spawn 2 Goblins',
+    unlocks: ['goblin_wheel', 'datacentre'],
+    isDone: (s) => s.spawnsCompleted >= 2,
+  },
+  {
+    id: 'build_dc',
+    text: 'Construct a Datacentre',
+    unlocks: ['coal_plant', 'nuclear_plant'],
+    isDone: (s) => {
+      for (const b of s.buildings.values()) {
+        if (b.kind === 'datacentre' && b.state !== 'constructing') return true;
+      }
+      return false;
+    },
+  },
+];
+
+export type UICallbacks = {
+  onSpawnGoblin: () => void;
+  onBuildBuilding: (kind: BuildingKind) => void;
+};
+
+export function setupUI(state: GameState, callbacks: UICallbacks) {
+  const buildList = document.getElementById('build-list')!;
+
+  // Spawn Goblin button
+  const spawnBtn = document.createElement('button');
+  spawnBtn.className = 'build-button';
+  spawnBtn.id = 'btn-spawn-goblin';
+  spawnBtn.innerHTML = `
+    ${progressTrack('spawn-goblin', GOBLIN.concurrentBuildLimit)}
+    <div class="build-content">
+      <div class="build-name">Spawn Goblin</div>
+      <div class="build-meta">
+        <span class="build-cost">$${GOBLIN.spawnCost}</span>
+      </div>
+    </div>
+  `;
+  spawnBtn.addEventListener('click', callbacks.onSpawnGoblin);
+  buildList.appendChild(spawnBtn);
+
+  // One button per building kind
+  for (const kind of SORTED_KINDS) {
+    const def = BUILDING_DEFS[kind];
+    const btn = document.createElement('button');
+    btn.className = 'build-button';
+    btn.id = btnId(kind);
+    const powerCostBit = def.powerOutput < 0
+      ? ` · <span class="build-power-cost" id="power-cost-${kind}">${formatPower(-def.powerOutput)}</span>`
+      : '';
+    const secondLineBits: string[] = [];
+    if (def.income) secondLineBits.push(`$${def.income}/s`);
+    if (def.powerOutput > 0) secondLineBits.push(`+${formatPower(def.powerOutput)}`);
+    const secondLine = secondLineBits.length > 0 ? `<br>${secondLineBits.join(' · ')}` : '';
+    btn.innerHTML = `
+      <div class="build-content">
+        <div class="build-name">${def.name}</div>
+        <div class="build-meta">
+          <span class="build-cost">$${def.cost}</span>${powerCostBit} ·
+          <span class="build-req" id="req-${kind}">${def.buildersRequired} goblin${def.buildersRequired === 1 ? '' : 's'}</span>${secondLine}
+        </div>
+      </div>
+    `;
+    btn.addEventListener('click', () => callbacks.onBuildBuilding(kind));
+    buildList.appendChild(btn);
+  }
+
+  // Tutorial task line lives at the bottom — locked buttons are display:none,
+  // so this naturally appears under the bottom-most visible button.
+  const taskEl = document.createElement('div');
+  taskEl.className = 'task-text';
+  taskEl.id = 'task-text';
+  buildList.appendChild(taskEl);
+}
+
+function btnId(kind: BuildingKind): string { return `btn-build-${kind}`; }
+
+function progressTrack(id: string, slots: number): string {
+  const segs = Array.from({ length: slots }, (_, i) =>
+    `<div class="seg"><div class="fill" id="fill-${id}-${i}"></div></div>`,
+  ).join('');
+  return `<div class="build-progress-track">${segs}</div>`;
+}
+
+export function refreshUI(state: GameState) {
+  const idle = countIdle(state);
+
+  setText('money', Math.floor(state.money).toString());
+
+  // Power: show consumed / produced. Tinted red on deficit.
+  const produced = state.lastPowerProduced;
+  const consumed = state.lastPowerConsumed;
+  const powerEl = document.getElementById('power')!;
+  if (consumed > 0) {
+    powerEl.innerHTML = `${formatPower(produced - consumed)}<span class="power-total"> / ${formatPower(produced)}</span>`;
+  } else {
+    powerEl.textContent = formatPower(produced);
+  }
+  // Determine if any consumer is unpowered (heuristic: dormant + staffed)
+  let unpowered = false;
+  for (const b of state.buildings.values()) {
+    if (b.state !== 'dormant') continue;
+    const def = defOf(b);
+    if (def.powerOutput >= 0) continue;
+    if (maintainerCount(state, b) >= def.maintainersRequired) { unpowered = true; break; }
+  }
+  powerEl.style.color = unpowered ? '#d96b6b' : '#ffd96b';
+
+  // Spawn Goblin
+  const spawnInProgress = state.spawnQueue.length;
+  const spawnBtn = document.getElementById('btn-spawn-goblin') as HTMLButtonElement;
+  spawnBtn.disabled =
+    state.money < GOBLIN.spawnCost || spawnInProgress >= GOBLIN.concurrentBuildLimit;
+  spawnBtn.classList.toggle('in-progress', spawnInProgress > 0);
+  const spawnBySlot: Record<number, number> = {};
+  for (const item of state.spawnQueue) {
+    spawnBySlot[item.slot] = 1 - item.remaining / GOBLIN.spawnTime;
+  }
+  for (let i = 0; i < GOBLIN.concurrentBuildLimit; i++) {
+    setFillWidth(`fill-spawn-goblin-${i}`, spawnBySlot[i] ?? 0);
+  }
+
+  // Tutorial: figure out which kinds are unlocked and what the current task is.
+  const unlocked = new Set<BuildingKind>();
+  let currentTask: Task | null = null;
+  for (const t of TASKS) {
+    if (t.isDone(state)) {
+      for (const k of t.unlocks) unlocked.add(k);
+    } else if (!currentTask) {
+      currentTask = t;
+    }
+  }
+  const taskEl = document.getElementById('task-text')!;
+  if (currentTask) {
+    taskEl.style.display = '';
+    taskEl.innerHTML = `<strong>Task:</strong> ${currentTask.text}`;
+  } else {
+    taskEl.style.display = 'none';
+  }
+
+  // Each building kind
+  const availablePower = state.lastPowerProduced - state.lastPowerConsumed;
+  for (const kind of SORTED_KINDS) {
+    const def = BUILDING_DEFS[kind];
+    const btn = document.getElementById(btnId(kind)) as HTMLButtonElement;
+    btn.classList.toggle('locked', !unlocked.has(kind));
+    if (!unlocked.has(kind)) continue;
+    const canAfford = state.money >= def.cost;
+    const enoughGoblins = idle >= def.buildersRequired;
+    const draw = def.powerOutput < 0 ? -def.powerOutput : 0;
+    const enoughPower = draw === 0 || draw <= availablePower;
+    btn.disabled = !canAfford || !enoughGoblins || !enoughPower;
+    btn.classList.toggle('active', state.pendingBuild?.kind === kind);
+    const req = document.getElementById(`req-${kind}`)!;
+    req.classList.toggle('unmet', !enoughGoblins);
+    const powerCostEl = document.getElementById(`power-cost-${kind}`);
+    if (powerCostEl) powerCostEl.classList.toggle('unmet', !enoughPower);
+  }
+
+  // Placement hint
+  const hint = document.getElementById('placement-hint')!;
+  if (state.pendingBuild) {
+    const name = BUILDING_DEFS[state.pendingBuild.kind].name;
+    hint.style.display = 'block';
+    hint.textContent = `Click on the map to place ${name} · ESC to cancel`;
+  } else {
+    hint.style.display = 'none';
+  }
+
+  refreshInfoPanel(state);
+}
+
+function refreshInfoPanel(state: GameState) {
+  const panel = document.getElementById('info-panel')!;
+  const portrait = document.getElementById('info-portrait')!;
+  const name = document.getElementById('info-name')!;
+  const stateEl = document.getElementById('info-state')!;
+  const extra = document.getElementById('info-extra')!;
+
+  const selectedGoblins = [...state.goblins.values()].filter((g) => g.selected);
+  const selectedBuildings = [...state.buildings.values()].filter((b) => b.selected);
+
+  if (selectedBuildings.length === 1 && selectedGoblins.length === 0) {
+    showBuilding(state, selectedBuildings[0], panel, portrait, name, stateEl, extra);
+  } else if (selectedGoblins.length === 1 && selectedBuildings.length === 0) {
+    showGoblin(selectedGoblins[0], panel, portrait, name, stateEl, extra);
+  } else if (selectedGoblins.length > 1) {
+    panel.classList.add('visible');
+    portrait.innerHTML = `<div class="portrait-goblin">G</div>`;
+    name.textContent = `${selectedGoblins.length} goblins`;
+    stateEl.textContent = '';
+    extra.textContent = '';
+  } else {
+    panel.classList.remove('visible');
+  }
+}
+
+function showGoblin(g: Goblin, panel: HTMLElement, portrait: HTMLElement,
+                    name: HTMLElement, stateEl: HTMLElement, extra: HTMLElement) {
+  panel.classList.add('visible');
+  portrait.innerHTML = `<div class="portrait-goblin">G</div>`;
+  name.textContent = `Goblin #${g.id}`;
+  stateEl.textContent = describeGoblinState(g.state);
+  extra.textContent = '';
+}
+
+function showBuilding(state: GameState, b: Building, panel: HTMLElement, portrait: HTMLElement,
+                      name: HTMLElement, stateEl: HTMLElement, extra: HTMLElement) {
+  panel.classList.add('visible');
+  const def = defOf(b);
+  const cls = b.state === 'constructing' ? 'constructing' :
+              b.state === 'dormant' ? 'dormant' : 'active';
+  portrait.innerHTML = `<div class="portrait-building ${b.kind} ${cls}">${def.short}</div>`;
+  name.textContent = `${def.name} #${b.id}`;
+
+  if (b.state === 'constructing') {
+    const pct = Math.round(b.buildProgress * 100);
+    stateEl.textContent = `Constructing — ${pct}%`;
+    let workers = 0;
+    for (const id of b.assignedGoblins) {
+      const g = state.goblins.get(id);
+      if (g && g.state.kind === 'building' && g.state.buildingId === b.id) workers++;
+    }
+    extra.textContent = `Builders on site: ${workers} / ${def.buildersRequired}`;
+  } else {
+    const have = maintainerCount(state, b);
+    const need = def.maintainersRequired;
+    const lines: string[] = [];
+    if (b.state === 'active') {
+      const bits: string[] = [];
+      if (def.income) bits.push(`earning $${def.income}/s`);
+      if (def.powerOutput > 0) bits.push(`producing ${formatPower(def.powerOutput)}`);
+      else if (def.powerOutput < 0) bits.push(`drawing ${formatPower(-def.powerOutput)}`);
+      stateEl.textContent = `Active — ${bits.join(', ')}`;
+    } else {
+      const why = have < need
+        ? `needs ${need - have} more goblin${need - have === 1 ? '' : 's'}`
+        : `underpowered`;
+      stateEl.textContent = `Dormant — ${why}`;
+    }
+    lines.push(`Maintained by ${have} / ${need} goblins`);
+    if (def.powerOutput !== 0) {
+      lines.push(def.powerOutput > 0
+        ? `Power output: ${formatPower(def.powerOutput)}`
+        : `Power draw: ${formatPower(-def.powerOutput)}`);
+    }
+    extra.innerHTML = lines.join('<br>');
+  }
+}
+
+function setText(id: string, t: string) {
+  const el = document.getElementById(id);
+  if (el && el.textContent !== t) el.textContent = t;
+}
+
+function setFillWidth(id: string, progress: number) {
+  const el = document.getElementById(id) as HTMLElement | null;
+  if (!el) return;
+  const pct = Math.max(0, Math.min(1, progress)) * 100;
+  el.style.width = `${pct}%`;
+}
+
+function describeGoblinState(s: GoblinState): string {
+  switch (s.kind) {
+    case 'idle': return 'Idle';
+    case 'moving': return 'Moving';
+    case 'going_to_build': return `Walking to build site #${s.buildingId}`;
+    case 'going_to_maintain': return `Walking to maintain #${s.buildingId}`;
+    case 'building': return `Constructing #${s.buildingId}`;
+    case 'maintaining': return `Maintaining #${s.buildingId}`;
+  }
+}

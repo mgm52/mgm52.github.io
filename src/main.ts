@@ -1,0 +1,85 @@
+import { CAMERA_SPEED, GOBLIN, START_CELL, TICK_MS } from './config';
+import { setupInput } from './input';
+import { centerCameraOn, clampCamera, createRender, render } from './render';
+import { appendLog, cellCenter, createInitialState } from './state';
+import { tick } from './sim';
+import { refreshUI, setupUI } from './ui';
+
+async function main() {
+  const state = createInitialState();
+  const ctx = await createRender(document.getElementById('game')!, state.walls);
+  setupInput(state, ctx.app, ctx.uiLayer, ctx.worldLayer);
+  setupUI(state, {
+    onSpawnGoblin: () => {
+      if (state.money < GOBLIN.spawnCost) return;
+      if (state.spawnQueue.length >= GOBLIN.concurrentBuildLimit) return;
+      const used = new Set(state.spawnQueue.map((s) => s.slot));
+      let slot = -1;
+      for (let i = 0; i < GOBLIN.concurrentBuildLimit; i++) {
+        if (!used.has(i)) { slot = i; break; }
+      }
+      if (slot < 0) return;
+      state.money -= GOBLIN.spawnCost;
+      state.spawnQueue.push({ remaining: GOBLIN.spawnTime, slot });
+      appendLog(state, 'Hatching a goblin...');
+    },
+    onBuildBuilding: (kind) => {
+      state.pendingBuild = state.pendingBuild?.kind === kind ? null : { kind };
+    },
+  });
+
+  // Center the camera on the starting area.
+  const startCenter = cellCenter(START_CELL);
+  centerCameraOn(ctx, startCenter.x, startCenter.y);
+
+  // ─── WASD camera panning ───────────────────────────────────────────
+  const held = new Set<string>();
+  const isPanKey = (k: string) =>
+    k === 'w' || k === 'a' || k === 's' || k === 'd' ||
+    k === 'arrowup' || k === 'arrowdown' || k === 'arrowleft' || k === 'arrowright';
+  window.addEventListener('keydown', (e) => {
+    const k = e.key.toLowerCase();
+    if (isPanKey(k)) { held.add(k); e.preventDefault(); }
+  });
+  window.addEventListener('keyup', (e) => {
+    const k = e.key.toLowerCase();
+    if (isPanKey(k)) held.delete(k);
+  });
+  // Drop held keys if the window loses focus (otherwise camera "drifts" forever).
+  window.addEventListener('blur', () => held.clear());
+
+  let acc = 0;
+  let last = performance.now();
+  function frame(now: number) {
+    const dt = now - last;
+    last = now;
+    acc += dt;
+    if (acc > TICK_MS * 10) acc = TICK_MS * 10;
+    while (acc >= TICK_MS) {
+      tick(state);
+      acc -= TICK_MS;
+    }
+    // Update camera based on held pan keys
+    let dx = 0, dy = 0;
+    if (held.has('a') || held.has('arrowleft')) dx -= 1;
+    if (held.has('d') || held.has('arrowright')) dx += 1;
+    if (held.has('w') || held.has('arrowup')) dy -= 1;
+    if (held.has('s') || held.has('arrowdown')) dy += 1;
+    if (dx !== 0 || dy !== 0) {
+      const len = Math.hypot(dx, dy);
+      const move = (CAMERA_SPEED * dt) / 1000;
+      ctx.camera.x += (dx / len) * move;
+      ctx.camera.y += (dy / len) * move;
+      clampCamera(ctx);
+    }
+    render(state, ctx);
+    refreshUI(state);
+    requestAnimationFrame(frame);
+  }
+  requestAnimationFrame(frame);
+}
+
+main().catch((e) => {
+  console.error(e);
+  document.body.innerHTML = `<pre style="color:#ff7777;padding:20px">${e}</pre>`;
+});
