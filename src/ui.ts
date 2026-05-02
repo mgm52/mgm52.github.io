@@ -14,6 +14,11 @@ type Task = {
   unlocks: BuildingKind[];
   isDone: (s: GameState) => boolean;
 };
+// Tasks are sticky: once a task's isDone has ever returned true in this session,
+// we treat it as permanently complete. Stops unlocks/build buttons from
+// regressing if e.g. the only Goblin Wheel gets destroyed.
+const completedTaskIds = new Set<string>();
+
 const TASKS: Task[] = [
   {
     id: 'wheel_turning',
@@ -157,7 +162,9 @@ export function refreshUI(state: GameState) {
   let firstTaskDone = false;
   for (let i = 0; i < TASKS.length; i++) {
     const t = TASKS[i];
-    if (t.isDone(state)) {
+    const done = completedTaskIds.has(t.id) || t.isDone(state);
+    if (done) {
+      completedTaskIds.add(t.id);
       for (const k of t.unlocks) unlocked.add(k);
       if (i === 0) firstTaskDone = true;
     } else if (!currentTask) {
