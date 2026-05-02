@@ -114,7 +114,7 @@ function getShadowTexture(): Texture {
 // of the sprite, all tinted black, drawn behind the main sprite. The tinted
 // copies bleed past the anti-aliased sprite edges, producing a thin outline.
 const OUTLINE_OFFSETS: readonly [number, number][] = [
-  [-2, 0], [2, 0], [0, -2], [0, 2],
+  [-1.5, 0], [1.5, 0], [0, -1.5], [0, 1.5],
 ];
 
 type BuildingView = {
