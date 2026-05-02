@@ -82,16 +82,19 @@ export async function createRender(parent: HTMLElement, walls: Set<string>): Pro
     viewport: { width: initW, height: initH },
   };
 
-  // Pixi's resizeTo handles canvas resize; we just keep our viewport in sync.
+  // Pixi's resizeTo only fires on window resize, so we also force-resize on
+  // parent layout changes (initial flexbox settle, sidebar toggles, etc.).
   const syncViewport = () => {
     const w = parent.clientWidth;
     const h = parent.clientHeight;
     if (w <= 0 || h <= 0) return;
+    app.resize();
     ctx.viewport.width = w;
     ctx.viewport.height = h;
     clampCamera(ctx);
   };
   syncViewport();
+  requestAnimationFrame(syncViewport);
   window.addEventListener('resize', syncViewport);
   if ('ResizeObserver' in window) {
     new ResizeObserver(syncViewport).observe(parent);
