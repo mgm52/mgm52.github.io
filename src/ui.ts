@@ -42,6 +42,17 @@ const TASKS: Task[] = [
       return false;
     },
   },
+  {
+    id: 'one_datacentre',
+    text: 'Build a Datacentre',
+    unlocks: ['nuclear_reactor'],
+    isDone: (s) => {
+      for (const b of s.buildings.values()) {
+        if (b.kind === 'datacentre' && b.state !== 'constructing') return true;
+      }
+      return false;
+    },
+  },
 ];
 
 export type UICallbacks = {

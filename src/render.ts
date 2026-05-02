@@ -484,6 +484,11 @@ function drawBuildingBody(g: Graphics, b: Building) {
       g.rect(i * 24 - w / 2, -half + 6, w, def.size - 18)
         .fill({ color: 0x000000, alpha: 0.32 });
     }
+  } else if (b.kind === 'nuclear_reactor') {
+    // Reactor core: concentric rings.
+    g.circle(0, 0, def.size / 2 - 6).stroke({ width: 2, color: 0x000000, alpha: 0.35 });
+    g.circle(0, 0, def.size / 2 - 14).stroke({ width: 2, color: 0x000000, alpha: 0.35 });
+    g.circle(0, 0, 4).fill({ color: 0x000000, alpha: 0.45 });
   }
 }
 

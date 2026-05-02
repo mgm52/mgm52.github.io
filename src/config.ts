@@ -106,7 +106,7 @@ export const BUILDING_DEFS = {
     buildTime: 15,
     maintainersRequired: 3,
     income: 0,
-    powerOutput: 2_100_000, // 2.1 MW
+    powerOutput: 2_500_000, // 2.5 MW
     wanderInterval: 0.9,
     wanderJitter: 0.3,
     colors: {
@@ -115,10 +115,27 @@ export const BUILDING_DEFS = {
       constructing: 0x3a3f47, constructingBorder: 0x808890,
     },
   }),
+  nuclear_reactor: def(2, {
+    name: 'Nuclear Reactor',
+    short: 'NR',
+    cost: 500_000,
+    buildersRequired: 4,
+    buildTime: 15,
+    maintainersRequired: 4,
+    income: 0,
+    powerOutput: 1_000_000_000, // 1 GW
+    wanderInterval: 1.1,
+    wanderJitter: 0.4,
+    colors: {
+      active: 0x3a8a5a, activeBorder: 0x9af0a0,
+      dormant: 0x3a5a4a, dormantBorder: 0x6a9a7a,
+      constructing: 0x3a3f47, constructingBorder: 0x808890,
+    },
+  }),
 } as const;
 
 export type BuildingKind = keyof typeof BUILDING_DEFS;
-export const BUILDABLE_KINDS: BuildingKind[] = ['goblin_wheel', 'gas_engine', 'datacentre', 'phone_farm'];
+export const BUILDABLE_KINDS: BuildingKind[] = ['goblin_wheel', 'gas_engine', 'datacentre', 'phone_farm', 'nuclear_reactor'];
 
 export const START_MONEY = 1000;
 export const START_GOBLINS = 0;

@@ -139,46 +139,39 @@ function updateGoblin(state: GameState, g: Goblin) {
         return true;
       };
 
-      // Once a goblin is anywhere in the footprint, commit immediately. Walking
-      // toward middle cells creates gridlock for big builds (e.g. DC needs 15)
-      // because earlier arrivals shuffle around and block later arrivals from
-      // entering the footprint at all.
-      if (isCellInBuilding(b, g.cell.cx, g.cell.cy)) {
-        tryBecomeBuilder();
-        return;
-      }
-
-      const middles = middleCells(b);
-
-      // Outside the building: pick a reachable footprint cell as the BFS goal.
-      // Prefer free middle cells; fall back to any free footprint cell. Sticky
-      // if the current goal is still valid.
+      // Pick the deepest free footprint cell as the goal, where depth = rings
+      // from the edge. A goblin only commits once it stands at max-depth among
+      // currently-free cells; otherwise it keeps walking inward. This stops
+      // first-arrivals from corking the doorway on big builds (e.g. DC needs 15).
       const footprint = buildingFootprint(b);
       const isFreeForMe = (c: Cell) =>
         (c.cx === g.cell.cx && c.cy === g.cell.cy) ||
         !isCellBlocked(state, c.cx, c.cy, g.id, b.id);
-      let slot: Cell | null = null;
-      if (g.goal && isCellInBuilding(b, g.goal.cx, g.goal.cy) && isFreeForMe(g.goal)) {
-        slot = g.goal;
-      } else {
-        const freeMids = middles
-          .filter(isFreeForMe)
-          .sort((a, c) =>
-            Math.hypot(a.cx - g.cell.cx, a.cy - g.cell.cy) -
-            Math.hypot(c.cx - g.cell.cx, c.cy - g.cell.cy));
-        if (freeMids.length > 0) {
-          slot = freeMids[0];
-        } else {
-          const center = middles[0];
-          const freeAll = footprint.filter(isFreeForMe).sort((a, c) =>
-            Math.hypot(a.cx - center.cx, a.cy - center.cy) -
-            Math.hypot(c.cx - center.cx, c.cy - center.cy));
-          slot = freeAll[0] ?? null;
-        }
+      const free = footprint.filter(isFreeForMe);
+      if (free.length === 0) return; // every cell blocked; wait a tick
+
+      let maxDepth = -1;
+      for (const c of free) {
+        const d = cellDepth(b, c.cx, c.cy);
+        if (d > maxDepth) maxDepth = d;
+      }
+
+      const insideFootprint = isCellInBuilding(b, g.cell.cx, g.cell.cy);
+      if (insideFootprint && cellDepth(b, g.cell.cx, g.cell.cy) >= maxDepth) {
+        tryBecomeBuilder();
+        return;
+      }
+
+      const candidates = free
+        .filter(c => cellDepth(b, c.cx, c.cy) === maxDepth)
+        .sort((a, c) =>
+          Math.hypot(a.cx - g.cell.cx, a.cy - g.cell.cy) -
+          Math.hypot(c.cx - g.cell.cx, c.cy - g.cell.cy));
+      const slot = candidates[0];
+      if (!g.goal || g.goal.cx !== slot.cx || g.goal.cy !== slot.cy) {
+        g.goal = slot;
         g.path = [];
       }
-      if (!slot) return; // every footprint cell is blocked; wait a tick
-      g.goal = slot;
       planStep(state, g);
       return;
     }
@@ -328,15 +321,13 @@ function nearestExitCell(state: GameState, g: Goblin, b: Building): Cell | null 
   return null;
 }
 
-function middleCells(b: Building): Cell[] {
+// Concentric-ring depth of a footprint cell: 0 on the outer ring, increasing
+// inward. Used by `going_to_build` to send arrivals to the deepest free spot.
+function cellDepth(b: Building, cx: number, cy: number): number {
   const n = defOf(b).cellSize;
-  const xs = n % 2 === 1 ? [Math.floor(n / 2)] : [n / 2 - 1, n / 2];
-  const ys = n % 2 === 1 ? [Math.floor(n / 2)] : [n / 2 - 1, n / 2];
-  const out: Cell[] = [];
-  for (const dx of xs) for (const dy of ys) {
-    out.push({ cx: b.cell.cx + dx, cy: b.cell.cy + dy });
-  }
-  return out;
+  const lx = cx - b.cell.cx;
+  const ly = cy - b.cell.cy;
+  return Math.min(lx, ly, n - 1 - lx, n - 1 - ly);
 }
 
 function maintainerSlot(state: GameState, b: Building, g: Goblin): Cell | null {

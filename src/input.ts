@@ -166,8 +166,8 @@ export function setupInput(
         b = buildingAtCell(state, c.cx, c.cy);
       }
       if (!additive) clearSelection(state);
-      if (g) { g.selected = true; playSound('select'); }
-      else if (b) { b.selected = true; playSound('select'); }
+      if (g) { g.selected = true; playSound('select', 0.33); }
+      else if (b) { b.selected = true; playSound('select', 0.33); }
     } else {
       const x1 = Math.min(input.dragStart.x, local.x);
       const y1 = Math.min(input.dragStart.y, local.y);
@@ -181,7 +181,7 @@ export function setupInput(
           any = true;
         }
       }
-      if (any) playSound('select');
+      if (any) playSound('select', 0.33);
     }
     input.selectionGfx.clear();
   };

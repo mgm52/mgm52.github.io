@@ -1,6 +1,7 @@
-import { preloadSounds, playSound } from './audio';
+import { preloadSounds, playSound, setMasterVolume } from './audio';
 import { CAMERA_SPEED, GOBLIN, START_CELL, TICK_MS } from './config';
 import { setupInput } from './input';
+import { getOptions, onOptionsChange } from './options';
 import { setupOptionsUI } from './options-ui';
 import { centerCameraOn, clampCamera, createRender, render } from './render';
 import { appendLog, cellCenter, createInitialState, destroyBuilding } from './state';
@@ -40,10 +41,17 @@ async function main() {
     } catch { /* fall through to fallback fonts */ }
   }
   preloadSounds();
+  setMasterVolume(getOptions().volume);
+  onOptionsChange((o) => setMasterVolume(o.volume));
   const state = createInitialState();
   const ctx = await createRender(document.getElementById('game')!, state.walls);
   setupInput(state, ctx.app, ctx.uiLayer, ctx.worldLayer, ctx);
-  setupOptionsUI(document.getElementById('game')!);
+  setupOptionsUI(document.getElementById('game')!, {
+    onCheatMoney: () => {
+      state.money += 100_000;
+      appendLog(state, 'Cheat: +Ƶ100,000.');
+    },
+  });
   setupUI(state, {
     onSpawnGoblin: () => {
       if (state.money < GOBLIN.spawnCost) { playSound('error'); return; }
@@ -63,7 +71,7 @@ async function main() {
     },
     onDestroyBuilding: (id) => {
       destroyBuilding(state, id);
-      playSound('destroy');
+      playSound('destroy', 0.5);
       appendLog(state, `Building #${id} destroyed.`);
     },
   });

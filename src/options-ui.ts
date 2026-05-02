@@ -4,7 +4,11 @@ import {
   type BgPattern, type FontKey, type Options,
 } from './options';
 
-export function setupOptionsUI(root: HTMLElement): void {
+export type OptionsUICallbacks = {
+  onCheatMoney: () => void;
+};
+
+export function setupOptionsUI(root: HTMLElement, callbacks: OptionsUICallbacks): void {
   // Pre-load any persisted custom fonts so they're ready when the user opens
   // the panel or the renderer applies them.
   for (const cfg of Object.values(getOptions().fonts)) ensureFontLoaded(cfg.family);
@@ -29,14 +33,14 @@ export function setupOptionsUI(root: HTMLElement): void {
     panel.hidden = true;
   });
 
-  rebuildPanel(panel);
+  rebuildPanel(panel, callbacks);
 
   root.appendChild(cog);
   root.appendChild(panel);
 }
 
 // ─── Panel construction ─────────────────────────────────────────────
-function rebuildPanel(panel: HTMLElement): void {
+function rebuildPanel(panel: HTMLElement, callbacks: OptionsUICallbacks): void {
   panel.innerHTML = '';
   const o = getOptions();
 
@@ -79,7 +83,18 @@ function rebuildPanel(panel: HTMLElement): void {
     color('Title text',     o.sidebarTitleColor,   (v) => setOption('sidebarTitleColor', v)),
   ]));
 
+  panel.appendChild(section('Audio', [
+    slider('Volume', o.volume, 0, 1, 0.05, (v) => setOption('volume', v)),
+  ]));
+
   panel.appendChild(fontsSection(o));
+
+  const cheat = document.createElement('button');
+  cheat.type = 'button';
+  cheat.className = 'options-reset';
+  cheat.textContent = 'Cheat +Ƶ100,000';
+  cheat.addEventListener('click', () => callbacks.onCheatMoney());
+  panel.appendChild(cheat);
 
   const reset = document.createElement('button');
   reset.type = 'button';
@@ -87,7 +102,7 @@ function rebuildPanel(panel: HTMLElement): void {
   reset.textContent = 'Reset to defaults';
   reset.addEventListener('click', () => {
     resetOptions();
-    rebuildPanel(panel);
+    rebuildPanel(panel, callbacks);
   });
   panel.appendChild(reset);
 }

@@ -88,6 +88,8 @@ export type Options = {
   sidebarTitleColor: number; // muted-gray panel titles
   // Fonts (per-category family + size scale)
   fonts: Record<FontKey, FontConfig>;
+  // Audio
+  volume: number;
 };
 
 export const DEFAULT_OPTIONS: Options = {
@@ -119,6 +121,7 @@ export const DEFAULT_OPTIONS: Options = {
     buildingLabel:   { family: 'majorMono', scale: 0.50 },
     buildingWarning: { family: 'majorMono', scale: 1.00 },
   },
+  volume: 0.7,
 };
 
 const STORAGE_KEY = 'rts.options.v2';
