@@ -128,7 +128,7 @@ function handleRightClick(state: GameState, x: number, y: number) {
       if (cell) {
         reserved.add(cellKey(cell.cx, cell.cy));
         g.goal = cell;
-        g.wallMode = false;
+        g.path = [];
         g.state = { kind: 'moving' };
       } else {
         appendLog(state, `Goblin #${g.id} can't find a path.`);
@@ -160,7 +160,7 @@ function assignToBuilding(state: GameState, goblins: Goblin[], b: Building) {
       releaseFromBuilding(state, g);
       b.assignedGoblins.push(g.id);
       g.goal = null;
-      g.wallMode = false;
+      g.path = [];
       g.state = { kind: 'going_to_build', buildingId: b.id };
       added++;
     }
@@ -174,7 +174,7 @@ function assignToBuilding(state: GameState, goblins: Goblin[], b: Building) {
       releaseFromBuilding(state, g);
       b.assignedGoblins.push(g.id);
       g.goal = null;
-      g.wallMode = false;
+      g.path = [];
       g.state = { kind: 'going_to_maintain', buildingId: b.id };
       added++;
     }
@@ -249,7 +249,7 @@ function placeBuilding(state: GameState, x: number, y: number) {
     const g = idle[i];
     b.assignedGoblins.push(g.id);
     g.goal = null;
-    g.wallMode = false;
+    g.path = [];
     g.state = { kind: 'going_to_build', buildingId: b.id };
   }
   state.pendingBuild = null;

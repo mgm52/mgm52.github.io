@@ -50,7 +50,7 @@ export function setupUI(state: GameState, callbacks: UICallbacks) {
     <div class="build-content">
       <div class="build-name">Spawn Goblin</div>
       <div class="build-meta">
-        <span class="build-cost">$${GOBLIN.spawnCost}</span>
+        <span class="build-cost" id="cost-spawn-goblin">$${GOBLIN.spawnCost}</span>
       </div>
     </div>
   `;
@@ -74,7 +74,7 @@ export function setupUI(state: GameState, callbacks: UICallbacks) {
       <div class="build-content">
         <div class="build-name">${def.name}</div>
         <div class="build-meta">
-          <span class="build-cost">$${def.cost}</span>${powerCostBit} ·
+          <span class="build-cost" id="cost-${kind}">$${def.cost}</span>${powerCostBit} ·
           <span class="build-req" id="req-${kind}">${def.buildersRequired} goblin${def.buildersRequired === 1 ? '' : 's'}</span>${secondLine}
         </div>
       </div>
@@ -127,9 +127,10 @@ export function refreshUI(state: GameState) {
   // Spawn Goblin
   const spawnInProgress = state.spawnQueue.length;
   const spawnBtn = document.getElementById('btn-spawn-goblin') as HTMLButtonElement;
-  spawnBtn.disabled =
-    state.money < GOBLIN.spawnCost || spawnInProgress >= GOBLIN.concurrentBuildLimit;
+  const canAffordGoblin = state.money >= GOBLIN.spawnCost;
+  spawnBtn.disabled = !canAffordGoblin || spawnInProgress >= GOBLIN.concurrentBuildLimit;
   spawnBtn.classList.toggle('in-progress', spawnInProgress > 0);
+  document.getElementById('cost-spawn-goblin')!.classList.toggle('met', canAffordGoblin);
   const spawnBySlot: Record<number, number> = {};
   for (const item of state.spawnQueue) {
     spawnBySlot[item.slot] = 1 - item.remaining / GOBLIN.spawnTime;
@@ -169,10 +170,11 @@ export function refreshUI(state: GameState) {
     const enoughPower = draw === 0 || draw <= availablePower;
     btn.disabled = !canAfford || !enoughGoblins || !enoughPower;
     btn.classList.toggle('active', state.pendingBuild?.kind === kind);
+    document.getElementById(`cost-${kind}`)!.classList.toggle('met', canAfford);
     const req = document.getElementById(`req-${kind}`)!;
-    req.classList.toggle('unmet', !enoughGoblins);
+    req.classList.toggle('met', enoughGoblins);
     const powerCostEl = document.getElementById(`power-cost-${kind}`);
-    if (powerCostEl) powerCostEl.classList.toggle('unmet', !enoughPower);
+    if (powerCostEl) powerCostEl.classList.toggle('met', enoughPower);
   }
 
   // Placement hint
