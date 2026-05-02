@@ -10,9 +10,9 @@ export type Camera = { x: number; y: number };
 // sibling JSON describing sprite size, frame counts, and per-row world
 // heading (compass convention: 0=N, clockwise). Sheets are laid out as
 // dir-rows: each row is a viewing direction, columns are animation frames.
-const GOBLIN_WALK_BASE = '/assets/rigged_goblin_dancing_aligol3dart_orc_walk';
-const GOBLIN_IDLE_BASE = '/assets/rigged_goblin_dancing_aligol3dart_orc_idle';
-const GOBLIN_BREAKDANCE_BASE = '/assets/rigged_goblin_dancing_aligol3dart_breakdance';
+const GOBLIN_WALK_BASE = 'assets/rigged_goblin_dancing_aligol3dart_orc_walk';
+const GOBLIN_IDLE_BASE = 'assets/rigged_goblin_dancing_aligol3dart_orc_idle';
+const GOBLIN_BREAKDANCE_BASE = 'assets/rigged_goblin_dancing_aligol3dart_breakdance';
 
 type SheetHeading = { index: number; headingDeg: number };
 type SheetMeta = {

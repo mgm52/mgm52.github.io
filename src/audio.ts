@@ -5,17 +5,18 @@
 const POOL_SIZE = 4;
 const pools = new Map<string, HTMLAudioElement[]>();
 
-// Sound name → file URL. Paths are relative to /public so Vite serves them as-is.
+// Sound name → file URL. Paths are relative (no leading slash) so they resolve
+// against the page URL — works for dev root and GH Pages subpath alike.
 const REGISTRY = {
-  click:        '/audio/click.mp3',
-  place:        '/audio/place.mp3',
-  build_done:   '/audio/build_done.mp3',
-  goblin_spawn: '/audio/goblin_spawn.mp3',
-  destroy:      '/audio/destroy.mp3',
-  select:       '/audio/select.mp3',
-  error:        '/audio/error.mp3',
-  online:       '/audio/online.mp3',
-  command_3:    '/audio/command_3.mp3',
+  click:        'audio/click.mp3',
+  place:        'audio/place.mp3',
+  build_done:   'audio/build_done.mp3',
+  goblin_spawn: 'audio/goblin_spawn.mp3',
+  destroy:      'audio/destroy.mp3',
+  select:       'audio/select.mp3',
+  error:        'audio/error.mp3',
+  online:       'audio/online.mp3',
+  command_3:    'audio/command_3.mp3',
 } as const;
 
 export type SoundName = keyof typeof REGISTRY;
