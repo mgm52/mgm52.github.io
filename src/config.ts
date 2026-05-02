@@ -80,15 +80,15 @@ export const BUILDING_DEFS = {
       constructing: 0x3a3f47, constructingBorder: 0x808890,
     },
   }),
-  bitcoin_farm: def(5, {
-    name: 'Bitcoin Farm',
-    short: 'BF',
+  datacentre: def(5, {
+    name: 'Datacentre',
+    short: 'DC',
     cost: 10_000,
     buildersRequired: 15,
     buildTime: 30,
     maintainersRequired: 15,
     income: 1000,
-    powerOutput: -20_000, // 20 kW draw
+    powerOutput: -6_000_000, // 6 MW draw
     wanderInterval: 1.4,
     wanderJitter: 0.8,
     colors: {
@@ -97,15 +97,15 @@ export const BUILDING_DEFS = {
       constructing: 0x3a3f47, constructingBorder: 0x808890,
     },
   }),
-  gasoline_generator: def(4, {
-    name: 'Gasoline Generator',
+  gas_genset: def(4, {
+    name: 'Gas Genset',
     short: 'GG',
     cost: 1200,
     buildersRequired: 3,
     buildTime: 15,
     maintainersRequired: 3,
     income: 0,
-    powerOutput: 8_000, // 8 kW
+    powerOutput: 2_000_000, // 2 MW
     wanderInterval: 0.9,
     wanderJitter: 0.3,
     colors: {
@@ -117,7 +117,7 @@ export const BUILDING_DEFS = {
 } as const;
 
 export type BuildingKind = keyof typeof BUILDING_DEFS;
-export const BUILDABLE_KINDS: BuildingKind[] = ['goblin_wheel', 'gasoline_generator', 'bitcoin_farm', 'phone_farm'];
+export const BUILDABLE_KINDS: BuildingKind[] = ['goblin_wheel', 'gas_genset', 'datacentre', 'phone_farm'];
 
 export const START_MONEY = 1000;
 export const START_GOBLINS = 0;
