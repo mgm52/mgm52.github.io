@@ -1,3 +1,4 @@
+import { playSound } from './audio';
 import { BUILDABLE_KINDS, BUILDING_DEFS, BuildingKind, GOBLIN, formatPower } from './config';
 import { Building, GameState, Goblin, GoblinState, countIdle, defOf, maintainerCount } from './state';
 
@@ -61,7 +62,7 @@ export function setupUI(state: GameState, callbacks: UICallbacks) {
       </div>
     </div>
   `;
-  spawnBtn.addEventListener('click', callbacks.onSpawnGoblin);
+  spawnBtn.addEventListener('click', () => { playSound('click'); callbacks.onSpawnGoblin(); });
   summonList.appendChild(spawnBtn);
 
   // One button per building kind
@@ -90,7 +91,7 @@ export function setupUI(state: GameState, callbacks: UICallbacks) {
         ${yieldHtml}
       </div>
     `;
-    btn.addEventListener('click', () => callbacks.onBuildBuilding(kind));
+    btn.addEventListener('click', () => { playSound('click'); callbacks.onBuildBuilding(kind); });
     buildList.appendChild(btn);
   }
 

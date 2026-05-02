@@ -1,3 +1,4 @@
+import { playSound } from './audio';
 import { BUILDING_DEFS, COLS, GOBLIN, START_CELL, TICK_S } from './config';
 import {
   ALL_DIRS, Building, Cell, DX, DY, Dir, GameState, Goblin,
@@ -50,6 +51,7 @@ function spawnGoblin(state: GameState) {
   state.goblins.set(id, g);
   occupyCell(state, cell.cx, cell.cy, id);
   state.spawnsCompleted++;
+  playSound('goblin_spawn');
   appendLog(state, `Goblin #${id} hatched.`);
 }
 
@@ -510,6 +512,7 @@ function updateConstruction(state: GameState, b: Building) {
     }
     b.assignedGoblins = newAssigned;
     b.state = 'dormant';
+    playSound('build_done');
     appendLog(state, `${def.name} #${b.id} construction complete.`);
   }
 }
@@ -556,6 +559,7 @@ function setActiveOrDormant(
   if (active) {
     if (b.state !== 'active') {
       b.state = 'active';
+      playSound('online');
       appendLog(state, `${def.name} #${b.id} online.`);
     }
   } else {

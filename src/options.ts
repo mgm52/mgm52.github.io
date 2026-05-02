@@ -113,7 +113,7 @@ export const DEFAULT_OPTIONS: Options = {
     mono:            { family: 'majorMono', scale: 0.70 },
     body:            { family: 'majorMono', scale: 0.90 },
     buildingLabel:   { family: 'majorMono', scale: 0.50 },
-    buildingWarning: { family: 'orbitron',  scale: 1.00 },
+    buildingWarning: { family: 'majorMono', scale: 1.00 },
   },
 };
 

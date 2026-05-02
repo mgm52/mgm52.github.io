@@ -1,3 +1,4 @@
+import { preloadSounds, playSound } from './audio';
 import { CAMERA_SPEED, GOBLIN, START_CELL, TICK_MS } from './config';
 import { setupInput } from './input';
 import { setupOptionsUI } from './options-ui';
@@ -16,14 +17,15 @@ async function main() {
       ]);
     } catch { /* fall through to fallback fonts */ }
   }
+  preloadSounds();
   const state = createInitialState();
   const ctx = await createRender(document.getElementById('game')!, state.walls);
   setupInput(state, ctx.app, ctx.uiLayer, ctx.worldLayer, ctx);
   setupOptionsUI(document.getElementById('game')!);
   setupUI(state, {
     onSpawnGoblin: () => {
-      if (state.money < GOBLIN.spawnCost) return;
-      if (state.spawnQueue.length >= GOBLIN.concurrentBuildLimit) return;
+      if (state.money < GOBLIN.spawnCost) { playSound('error'); return; }
+      if (state.spawnQueue.length >= GOBLIN.concurrentBuildLimit) { playSound('error'); return; }
       const used = new Set(state.spawnQueue.map((s) => s.slot));
       let slot = -1;
       for (let i = 0; i < GOBLIN.concurrentBuildLimit; i++) {
@@ -39,6 +41,7 @@ async function main() {
     },
     onDestroyBuilding: (id) => {
       destroyBuilding(state, id);
+      playSound('destroy');
       appendLog(state, `Building #${id} destroyed.`);
     },
   });

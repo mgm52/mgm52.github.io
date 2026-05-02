@@ -1,4 +1,5 @@
 import { Application, Container, FederatedPointerEvent, Graphics } from 'pixi.js';
+import { playSound } from './audio';
 import { BUILDING_DEFS, BuildingKind, CELL, GOBLIN, RENDER_SCALE, WORLD, formatPower } from './config';
 import { RenderContext, clampCamera } from './render';
 import {
@@ -165,17 +166,22 @@ export function setupInput(
         b = buildingAtCell(state, c.cx, c.cy);
       }
       if (!additive) clearSelection(state);
-      if (g) g.selected = true;
-      else if (b) b.selected = true;
+      if (g) { g.selected = true; playSound('select'); }
+      else if (b) { b.selected = true; playSound('select'); }
     } else {
       const x1 = Math.min(input.dragStart.x, local.x);
       const y1 = Math.min(input.dragStart.y, local.y);
       const x2 = Math.max(input.dragStart.x, local.x);
       const y2 = Math.max(input.dragStart.y, local.y);
       if (!additive) clearSelection(state);
+      let any = false;
       for (const g of state.goblins.values()) {
-        if (g.pos.x >= x1 && g.pos.x <= x2 && g.pos.y >= y1 && g.pos.y <= y2) g.selected = true;
+        if (g.pos.x >= x1 && g.pos.x <= x2 && g.pos.y >= y1 && g.pos.y <= y2) {
+          g.selected = true;
+          any = true;
+        }
       }
+      if (any) playSound('select');
     }
     input.selectionGfx.clear();
   };
@@ -231,6 +237,18 @@ function cancelLongPress(input: InputState) {
   input.longPressPointerId = null;
 }
 
+// One grunt per goblin, staggered ~90ms apart with a touch of jitter so a group
+// command sounds like a chorus instead of a single overlapped blob.
+function playGruntBurst(count: number) {
+  for (let i = 0; i < count; i++) {
+    const delay = i * 100;
+    setTimeout(() => {
+      const rate = 0.5 + Math.random();
+      playSound('command_3', 1, rate);
+    }, delay);
+  }
+}
+
 function clearSelection(state: GameState) {
   for (const g of state.goblins.values()) g.selected = false;
   for (const b of state.buildings.values()) b.selected = false;
@@ -246,6 +264,7 @@ function goblinAt(state: GameState, x: number, y: number): Goblin | null {
 function handleRightClick(state: GameState, x: number, y: number) {
   const selected = [...state.goblins.values()].filter((g) => g.selected);
   if (selected.length === 0) return;
+  playGruntBurst(selected.length);
   const target = pixelToCell(x, y);
   const b = buildingAtCell(state, target.cx, target.cy);
   if (b) {
@@ -327,7 +346,7 @@ function placeBuilding(state: GameState, x: number, y: number) {
   if (!state.pendingBuild) return;
   const kind = state.pendingBuild.kind;
   const def = BUILDING_DEFS[kind];
-  if (state.money < def.cost) { appendLog(state, 'Not enough Ƶ.'); return; }
+  if (state.money < def.cost) { playSound('error'); appendLog(state, 'Not enough Ƶ.'); return; }
   // Goblins are no longer required to place — any idle ones get auto-assigned;
   // shortfall is left for the player to staff up with right-clicks later.
   const idle = [...state.goblins.values()].filter((g) => g.state.kind === 'idle');
@@ -335,12 +354,14 @@ function placeBuilding(state: GameState, x: number, y: number) {
     const draw = -def.powerOutput;
     const available = state.lastPowerProduced - state.lastPowerConsumed;
     if (draw > available) {
+      playSound('error');
       appendLog(state, `Need ${formatPower(draw)} of free power to build ${def.name}.`);
       return;
     }
   }
   const tl = topLeftFromClick(x, y, kind);
   if (!canPlaceBuilding(state, tl, kind)) {
+    playSound('error');
     appendLog(state, 'Cannot place there — blocked.');
     return;
   }
@@ -374,6 +395,8 @@ function placeBuilding(state: GameState, x: number, y: number) {
     g.state = { kind: 'going_to_build', buildingId: b.id };
   }
   state.pendingBuild = null;
+  playSound('place', 1.6);
+  if (initialBuilders > 0) playGruntBurst(initialBuilders);
   appendLog(state, `${def.name} #${b.id} construction started.`);
 }
 
