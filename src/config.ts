@@ -8,6 +8,7 @@ export const ROWS = 20;
 export const WORLD = { width: COLS * CELL, height: ROWS * CELL };
 export const WALL_BORDER = 2; // impassable wall thickness in cells around play area
 export const CAMERA_SPEED = 700; // px/sec when panning with WASD
+export const RENDER_SCALE = 1.3; // visual zoom factor applied to the world layer
 
 export const GOBLIN = {
   speed: 110,

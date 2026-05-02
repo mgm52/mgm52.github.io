@@ -1,5 +1,5 @@
 import { Application, Container, Graphics, Text } from 'pixi.js';
-import { CELL, COLS, GOBLIN, ROWS, WORLD } from './config';
+import { CELL, COLS, GOBLIN, RENDER_SCALE, ROWS, WORLD } from './config';
 import { Building, GameState, Goblin, buildingCenter, defOf, maintainerCount } from './state';
 
 export type Camera = { x: number; y: number };
@@ -77,6 +77,7 @@ export async function createRender(parent: HTMLElement, walls: Set<string>): Pro
   worldLayer.addChild(buildingLayer);
   worldLayer.addChild(goblinLayer);
   worldLayer.addChild(uiLayer);
+  worldLayer.scale.set(RENDER_SCALE);
   app.stage.addChild(worldLayer);
 
   const ctx: RenderContext = {
@@ -107,15 +108,15 @@ export async function createRender(parent: HTMLElement, walls: Set<string>): Pro
 }
 
 export function clampCamera(ctx: RenderContext) {
-  const maxX = Math.max(0, WORLD.width - ctx.viewport.width);
-  const maxY = Math.max(0, WORLD.height - ctx.viewport.height);
+  const maxX = Math.max(0, WORLD.width - ctx.viewport.width / RENDER_SCALE);
+  const maxY = Math.max(0, WORLD.height - ctx.viewport.height / RENDER_SCALE);
   ctx.camera.x = Math.max(0, Math.min(maxX, ctx.camera.x));
   ctx.camera.y = Math.max(0, Math.min(maxY, ctx.camera.y));
 }
 
 export function centerCameraOn(ctx: RenderContext, x: number, y: number) {
-  ctx.camera.x = x - ctx.viewport.width / 2;
-  ctx.camera.y = y - ctx.viewport.height / 2;
+  ctx.camera.x = x - ctx.viewport.width / (2 * RENDER_SCALE);
+  ctx.camera.y = y - ctx.viewport.height / (2 * RENDER_SCALE);
   clampCamera(ctx);
 }
 
@@ -240,8 +241,12 @@ function drawBuildingBody(g: Graphics, b: Building) {
 }
 
 export function render(state: GameState, ctx: RenderContext) {
-  // Apply camera by translating the world layer (UI overlays in DOM stay fixed)
-  ctx.worldLayer.position.set(-Math.round(ctx.camera.x), -Math.round(ctx.camera.y));
+  // Apply camera by translating the world layer (UI overlays in DOM stay fixed).
+  // Camera is in world units; multiply by RENDER_SCALE to get screen pixels.
+  ctx.worldLayer.position.set(
+    -Math.round(ctx.camera.x * RENDER_SCALE),
+    -Math.round(ctx.camera.y * RENDER_SCALE),
+  );
 
   // Goblins
   const seenG = new Set<number>();
