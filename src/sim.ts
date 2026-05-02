@@ -205,27 +205,49 @@ function updateGoblin(state: GameState, g: Goblin) {
       g.goal = null;
       g.path = [];
       if (state.now >= s.nextWanderAt) {
-        const choices: Dir[] = [];
-        for (let d = 0 as Dir; d < 4; d++) {
+        let chosen: Dir | null = null;
+        if (b.kind === 'goblin_wheel') {
+          // Walk clockwise around the 2×2 footprint — looks like a turning wheel.
+          const d = wheelNextDir(b, g.cell);
           const nx = g.cell.cx + DX[d];
           const ny = g.cell.cy + DY[d];
-          if (!isCellInBuilding(b, nx, ny)) continue;
-          if (isCellBlocked(state, nx, ny, g.id, b.id)) continue;
-          choices.push(d);
+          if (isCellInBuilding(b, nx, ny) && !isCellBlocked(state, nx, ny, g.id, b.id)) {
+            chosen = d;
+          }
+        } else {
+          const choices: Dir[] = [];
+          for (let d = 0 as Dir; d < 4; d++) {
+            const nx = g.cell.cx + DX[d];
+            const ny = g.cell.cy + DY[d];
+            if (!isCellInBuilding(b, nx, ny)) continue;
+            if (isCellBlocked(state, nx, ny, g.id, b.id)) continue;
+            choices.push(d);
+          }
+          if (choices.length > 0) chosen = choices[Math.floor(Math.random() * choices.length)];
         }
-        if (choices.length > 0) {
-          const d = choices[Math.floor(Math.random() * choices.length)];
-          const nx = g.cell.cx + DX[d];
-          const ny = g.cell.cy + DY[d];
+        if (chosen !== null) {
+          const nx = g.cell.cx + DX[chosen];
+          const ny = g.cell.cy + DY[chosen];
           occupyCell(state, nx, ny, g.id);
           g.target = { cx: nx, cy: ny };
-          g.facing = Math.atan2(DY[d], DX[d]);
+          g.facing = Math.atan2(DY[chosen], DX[chosen]);
         }
         s.nextWanderAt = state.now + jitterInterval(b);
       }
       return;
     }
   }
+}
+
+// Direction to step from `cell` to the next cell on the clockwise loop
+// around a 2×2 building footprint (top-left → top-right → bottom-right → bottom-left → ...).
+function wheelNextDir(b: Building, cell: Cell): Dir {
+  const lx = cell.cx - b.cell.cx;
+  const ly = cell.cy - b.cell.cy;
+  if (lx === 0 && ly === 0) return 1; // east
+  if (lx === 1 && ly === 0) return 2; // south
+  if (lx === 1 && ly === 1) return 3; // west
+  return 0;                            // (0,1) → north
 }
 
 function jitterInterval(b: Building): number {
