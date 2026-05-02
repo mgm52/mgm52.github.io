@@ -243,9 +243,14 @@ function drawBuildingBody(g: Graphics, b: Building) {
 export function render(state: GameState, ctx: RenderContext) {
   // Apply camera by translating the world layer (UI overlays in DOM stay fixed).
   // Camera is in world units; multiply by RENDER_SCALE to get screen pixels.
+  // When the viewport is larger than the scaled world, center the world.
+  const scaledW = WORLD.width * RENDER_SCALE;
+  const scaledH = WORLD.height * RENDER_SCALE;
+  const offsetX = Math.max(0, (ctx.viewport.width - scaledW) / 2);
+  const offsetY = Math.max(0, (ctx.viewport.height - scaledH) / 2);
   ctx.worldLayer.position.set(
-    -Math.round(ctx.camera.x * RENDER_SCALE),
-    -Math.round(ctx.camera.y * RENDER_SCALE),
+    Math.round(offsetX - ctx.camera.x * RENDER_SCALE),
+    Math.round(offsetY - ctx.camera.y * RENDER_SCALE),
   );
 
   // Goblins
