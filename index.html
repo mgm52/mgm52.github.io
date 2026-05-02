@@ -2,7 +2,7 @@
 <html lang="en">
   <head>
     <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover" />
     <title>Goblin Datacentres</title>
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -13,12 +13,88 @@
         --font-mono: 'VT323', 'Consolas', monospace;
       }
       html, body { margin: 0; padding: 0; height: 100%; background: #1a1d21; color: #eee;
-        font-family: system-ui, -apple-system, "Segoe UI", sans-serif; overflow: hidden; }
-      #app { display: flex; height: 100vh; }
-      #game { flex: 1; position: relative; background: #000000; overflow: hidden; }
-      #game canvas { display: block; }
+        font-family: system-ui, -apple-system, "Segoe UI", sans-serif; overflow: hidden;
+        -webkit-text-size-adjust: 100%;
+        -webkit-tap-highlight-color: transparent;
+      }
+      #app { display: flex; height: 100vh; height: 100dvh; }
+      #game { flex: 1; position: relative; background: #000000; overflow: hidden;
+        touch-action: none; -webkit-user-select: none; user-select: none; -webkit-touch-callout: none;
+      }
+      #game canvas { display: block; touch-action: none; }
       #sidebar { width: 280px; background: #20242a; border-left: 1px solid #2d3138;
-        padding: 14px; overflow-y: auto; box-sizing: border-box; zoom: 1.5; }
+        padding: 14px; overflow-y: auto; box-sizing: border-box; zoom: 1.5;
+        -webkit-overflow-scrolling: touch;
+      }
+
+      /* ───────── Portrait warning (mobile only) ───────── */
+      #portrait-warning {
+        display: none;
+        position: fixed; inset: 0;
+        background: #1a1d21; color: #eee;
+        align-items: center; justify-content: center;
+        flex-direction: column;
+        text-align: center; padding: 24px;
+        z-index: 1000;
+      }
+      #portrait-warning .icon {
+        font-family: var(--font-display);
+        font-size: 56px; margin-bottom: 18px; color: #8acfff;
+        animation: rotate-hint 2.4s ease-in-out infinite;
+        transform-origin: center;
+      }
+      #portrait-warning h1 {
+        font-family: var(--font-display);
+        font-size: 22px; margin: 0 0 12px; letter-spacing: 1.5px;
+        color: #ffd96b;
+      }
+      #portrait-warning p {
+        font-family: system-ui, -apple-system, sans-serif;
+        font-size: 14px; color: #aab2bd; max-width: 320px; line-height: 1.5;
+        margin: 0;
+      }
+      @keyframes rotate-hint {
+        0%, 40% { transform: rotate(0deg); }
+        60%, 100% { transform: rotate(-90deg); }
+      }
+      @media (orientation: portrait) {
+        #app { display: none; }
+        #portrait-warning { display: flex; }
+      }
+
+      /* ───────── Compact landscape (mobile phones) ───────── */
+      @media (orientation: landscape) and (max-height: 500px) {
+        #sidebar {
+          width: 168px;
+          padding: 6px 8px;
+          zoom: 1;
+        }
+        .panel { margin-bottom: 10px; }
+        .panel-title { font-size: 9px; letter-spacing: 1px; margin-bottom: 4px; }
+        .resource-row { font-size: 11px; padding: 1px 0; }
+        .resource-value { font-size: 13px; }
+        .build-button { padding: 6px 8px; margin-bottom: 4px; }
+        .build-name { font-size: 12px; margin-bottom: 1px; }
+        .build-meta { font-size: 9px; }
+        .build-yields { font-size: 10px; line-height: 1.3; }
+        .task-text { font-size: 10px; padding: 4px 2px; line-height: 1.3; }
+        #info-panel {
+          zoom: 1;
+          padding: 6px;
+          gap: 8px;
+          max-width: 240px;
+          font-size: 10px;
+          left: 8px; bottom: 8px;
+        }
+        .info-portrait { width: 48px; height: 48px; }
+        .portrait-goblin { width: 30px; height: 30px; font-size: 15px; }
+        .portrait-goblin::after { right: -7px; border-left-width: 7px; border-top-width: 5px; border-bottom-width: 5px; }
+        .portrait-building { width: 36px; height: 36px; font-size: 13px; }
+        .info-name { font-size: 12px; margin-bottom: 2px; }
+        .info-state, .info-extra { font-size: 10px; line-height: 1.4; }
+        .info-destroy { font-size: 10px; padding: 3px 8px; margin-top: 4px; }
+        #placement-hint { font-size: 11px; padding: 4px 8px; }
+      }
       .panel { margin-bottom: 18px; }
       .panel-title { font-family: var(--font-display); font-size: 11px; text-transform: uppercase; letter-spacing: 2px;
         color: #8a9099; margin-bottom: 6px; font-weight: 400; }
@@ -176,6 +252,11 @@
     </style>
   </head>
   <body>
+    <div id="portrait-warning">
+      <div class="icon">⟳</div>
+      <h1>Rotate your device</h1>
+      <p>Goblin Datacentres plays best in landscape. Turn your phone sideways to start managing goblins.</p>
+    </div>
     <div id="app">
       <div id="game">
         <div id="placement-hint"></div>
