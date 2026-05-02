@@ -127,11 +127,7 @@ export const START_CELL = { cx: WALL_BORDER + 4, cy: WALL_BORDER + 8 };
 
 export function formatPower(w: number): string {
   const abs = Math.abs(w);
-  let val: number, unit: string;
-  if (abs >= 1e9)      { val = w / 1e9; unit = 'GW'; }
-  else if (abs >= 1e6) { val = w / 1e6; unit = 'MW'; }
-  else                 { val = w / 1e3; unit = 'kW'; }
-  // Round down to 2 decimal places (toward -∞).
-  const floored = Math.floor(val * 100) / 100;
-  return `${floored.toFixed(2)} ${unit}`;
+  if (abs >= 1e9) return `${(Math.floor(w / 1e9 * 100) / 100).toFixed(2)} GW`;
+  if (abs >= 1e6) return `${(Math.floor(w / 1e6 * 100) / 100).toFixed(2)} MW`;
+  return `${Math.floor(w)} W`;
 }
