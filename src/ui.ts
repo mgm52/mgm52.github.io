@@ -73,8 +73,8 @@ export function setupUI(state: GameState, callbacks: UICallbacks) {
       ? ` · <span class="build-power-cost" id="power-cost-${kind}">${formatPower(-def.powerOutput)}</span>`
       : '';
     const yieldBits: string[] = [];
-    if (def.income) yieldBits.push(`+$${def.income}/s`);
-    if (def.powerOutput > 0) yieldBits.push(`+${formatPower(def.powerOutput)}`);
+    if (def.income) yieldBits.push(`<span class="yield-money">+$${def.income}/s</span>`);
+    if (def.powerOutput > 0) yieldBits.push(`<span class="yield-power">+${formatPower(def.powerOutput)}</span>`);
     const yieldHtml = yieldBits.length > 0
       ? `<div class="build-yields">${yieldBits.join('<br>')}</div>`
       : '';
