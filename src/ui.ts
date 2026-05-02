@@ -45,9 +45,10 @@ export type UICallbacks = {
 };
 
 export function setupUI(state: GameState, callbacks: UICallbacks) {
+  const summonList = document.getElementById('summon-list')!;
   const buildList = document.getElementById('build-list')!;
 
-  // Spawn Goblin button
+  // Spawn Goblin button (Summon section)
   const spawnBtn = document.createElement('button');
   spawnBtn.className = 'build-button';
   spawnBtn.id = 'btn-spawn-goblin';
@@ -61,7 +62,7 @@ export function setupUI(state: GameState, callbacks: UICallbacks) {
     </div>
   `;
   spawnBtn.addEventListener('click', callbacks.onSpawnGoblin);
-  buildList.appendChild(spawnBtn);
+  summonList.appendChild(spawnBtn);
 
   // One button per building kind
   for (const kind of SORTED_KINDS) {
@@ -93,13 +94,6 @@ export function setupUI(state: GameState, callbacks: UICallbacks) {
     btn.addEventListener('click', () => callbacks.onBuildBuilding(kind));
     buildList.appendChild(btn);
   }
-
-  // Tutorial task line lives at the bottom — locked buttons are display:none,
-  // so this naturally appears under the bottom-most visible button.
-  const taskEl = document.createElement('div');
-  taskEl.className = 'task-text';
-  taskEl.id = 'task-text';
-  buildList.appendChild(taskEl);
 
   // Destroy button on the info panel — uses currently-selected building from state.
   document.getElementById('info-destroy')!.addEventListener('click', () => {
@@ -160,13 +154,20 @@ export function refreshUI(state: GameState) {
   // Tutorial: figure out which kinds are unlocked and what the current task is.
   const unlocked = new Set<BuildingKind>();
   let currentTask: Task | null = null;
-  for (const t of TASKS) {
+  let firstTaskDone = false;
+  for (let i = 0; i < TASKS.length; i++) {
+    const t = TASKS[i];
     if (t.isDone(state)) {
       for (const k of t.unlocks) unlocked.add(k);
+      if (i === 0) firstTaskDone = true;
     } else if (!currentTask) {
       currentTask = t;
     }
   }
+  // Build panel only appears once the first tutorial task is done.
+  const buildPanel = document.getElementById('panel-build')!;
+  buildPanel.style.display = firstTaskDone ? '' : 'none';
+
   const taskEl = document.getElementById('task-text')!;
   if (currentTask) {
     taskEl.style.display = '';
