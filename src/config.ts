@@ -6,7 +6,7 @@ export const CELL = 32;
 export const COLS = 24;
 export const ROWS = 20;
 export const WORLD = { width: COLS * CELL, height: ROWS * CELL };
-export const WALL_BORDER = 3; // impassable wall thickness in cells around play area
+export const WALL_BORDER = 2; // impassable wall thickness in cells around play area
 export const CAMERA_SPEED = 700; // px/sec when panning with WASD
 
 export const GOBLIN = {
@@ -53,7 +53,7 @@ export const BUILDING_DEFS = {
     buildTime: 8,
     maintainersRequired: 3,
     income: 10,
-    powerOutput: -5_000_000, // 5 MW draw
+    powerOutput: -10_000_000, // 10 MW draw
       wanderInterval: 1.4,
     wanderJitter: 0.8,
     colors: {
@@ -96,27 +96,10 @@ export const BUILDING_DEFS = {
       constructing: 0x3a3f47, constructingBorder: 0x808890,
     },
   }),
-  nuclear_plant: def(5, {
-    name: 'Nuclear Power Plant',
-    short: 'NU',
-    cost: 20000,
-    buildersRequired: 5,
-    buildTime: 40,
-    maintainersRequired: 5,
-    income: 0,
-    powerOutput: 5_000_000_000, // 5 GW
-      wanderInterval: 1.5,
-    wanderJitter: 0.6,
-    colors: {
-      active: 0x2a8a4a, activeBorder: 0x6af090,
-      dormant: 0x2a4a3a, dormantBorder: 0x6a8a7a,
-      constructing: 0x3a3f47, constructingBorder: 0x808890,
-    },
-  }),
 } as const;
 
 export type BuildingKind = keyof typeof BUILDING_DEFS;
-export const BUILDABLE_KINDS: BuildingKind[] = ['goblin_wheel', 'coal_plant', 'nuclear_plant', 'datacentre'];
+export const BUILDABLE_KINDS: BuildingKind[] = ['goblin_wheel', 'coal_plant', 'datacentre'];
 
 export const START_MONEY = 1000;
 export const START_GOBLINS = 0;

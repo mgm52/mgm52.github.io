@@ -36,18 +36,17 @@ export type RenderContext = {
 };
 
 export async function createRender(parent: HTMLElement, walls: Set<string>): Promise<RenderContext> {
-  const initW = parent.clientWidth || WORLD.width;
-  const initH = parent.clientHeight || WORLD.height;
   const app = new Application();
   await app.init({
     background: '#2b3036',
-    width: initW,
-    height: initH,
+    resizeTo: parent,
     antialias: true,
     resolution: window.devicePixelRatio || 1,
     autoDensity: true,
   });
   parent.appendChild(app.canvas);
+  const initW = app.renderer.width / (window.devicePixelRatio || 1);
+  const initH = app.renderer.height / (window.devicePixelRatio || 1);
 
   const worldLayer = new Container();
   const buildingLayer = new Container();
@@ -83,20 +82,19 @@ export async function createRender(parent: HTMLElement, walls: Set<string>): Pro
     viewport: { width: initW, height: initH },
   };
 
-  // Resize the canvas to fill its container.
-  const resize = () => {
+  // Pixi's resizeTo handles canvas resize; we just keep our viewport in sync.
+  const syncViewport = () => {
     const w = parent.clientWidth;
     const h = parent.clientHeight;
     if (w <= 0 || h <= 0) return;
-    app.renderer.resize(w, h);
     ctx.viewport.width = w;
     ctx.viewport.height = h;
     clampCamera(ctx);
   };
-  resize();
-  window.addEventListener('resize', resize);
+  syncViewport();
+  window.addEventListener('resize', syncViewport);
   if ('ResizeObserver' in window) {
-    new ResizeObserver(resize).observe(parent);
+    new ResizeObserver(syncViewport).observe(parent);
   }
 
   return ctx;
@@ -231,17 +229,6 @@ function drawBuildingBody(g: Graphics, b: Building) {
     for (let i = -1; i <= 1; i++) {
       g.rect(i * 24 - w / 2, -half + 6, w, def.size - 18)
         .fill({ color: 0x000000, alpha: 0.32 });
-    }
-  } else if (b.kind === 'nuclear_plant') {
-    // central reactor circle + cooling rings
-    g.circle(0, 0, def.size / 2 - 14).fill({ color: 0x000000, alpha: 0.18 });
-    g.circle(0, 0, def.size / 2 - 24).stroke({ width: 2, color: 0x000000, alpha: 0.4 });
-    // trefoil triangles (radioactive symbol stand-in)
-    for (let i = 0; i < 3; i++) {
-      const ang = (i / 3) * Math.PI * 2 - Math.PI / 2;
-      const r = def.size / 2 - 18;
-      g.circle(Math.cos(ang) * r * 0.55, Math.sin(ang) * r * 0.55, 7)
-        .fill({ color: 0x000000, alpha: 0.45 });
     }
   }
 }

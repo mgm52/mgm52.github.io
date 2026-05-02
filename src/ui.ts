@@ -23,7 +23,7 @@ const TASKS: Task[] = [
   {
     id: 'build_dc',
     text: 'Construct a Datacentre',
-    unlocks: ['coal_plant', 'nuclear_plant'],
+    unlocks: ['coal_plant'],
     isDone: (s) => {
       for (const b of s.buildings.values()) {
         if (b.kind === 'datacentre' && b.state !== 'constructing') return true;
