@@ -197,7 +197,7 @@ export function refreshUI(state: GameState) {
   if (state.pendingBuild) {
     const name = BUILDING_DEFS[state.pendingBuild.kind].name;
     hint.style.display = 'block';
-    hint.textContent = `Click on the map to place ${name} · ESC to cancel`;
+    hint.textContent = `Tap to place ${name} · tap the button again or press ESC to cancel`;
   } else {
     hint.style.display = 'none';
   }
@@ -227,7 +227,7 @@ function refreshInfoPanel(state: GameState) {
     portrait.innerHTML = `<div class="portrait-goblin">G</div>`;
     name.textContent = `${selectedGoblins.length} goblins`;
     stateEl.textContent = '';
-    extra.innerHTML = `<span style="color:#6a7080">Right click to command</span>`;
+    extra.innerHTML = `<span style="color:#6a7080">Right-click or long-press to command</span>`;
   } else {
     panel.classList.remove('visible');
   }
@@ -239,7 +239,7 @@ function showGoblin(g: Goblin, panel: HTMLElement, portrait: HTMLElement,
   portrait.innerHTML = `<div class="portrait-goblin">G</div>`;
   name.textContent = `Goblin #${g.id}`;
   stateEl.textContent = describeGoblinState(g.state);
-  extra.innerHTML = `<span style="color:#6a7080">Right click to command</span>`;
+  extra.innerHTML = `<span style="color:#6a7080">Right-click or long-press to command</span>`;
 }
 
 function showBuilding(state: GameState, b: Building, panel: HTMLElement, portrait: HTMLElement,

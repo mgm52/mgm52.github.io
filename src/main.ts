@@ -17,7 +17,7 @@ async function main() {
   }
   const state = createInitialState();
   const ctx = await createRender(document.getElementById('game')!, state.walls);
-  setupInput(state, ctx.app, ctx.uiLayer, ctx.worldLayer);
+  setupInput(state, ctx.app, ctx.uiLayer, ctx.worldLayer, ctx);
   setupUI(state, {
     onSpawnGoblin: () => {
       if (state.money < GOBLIN.spawnCost) return;

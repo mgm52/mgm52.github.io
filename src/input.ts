@@ -1,19 +1,41 @@
 import { Application, Container, FederatedPointerEvent, Graphics } from 'pixi.js';
-import { BUILDING_DEFS, BuildingKind, CELL, GOBLIN, WORLD, formatPower } from './config';
+import { BUILDING_DEFS, BuildingKind, CELL, GOBLIN, RENDER_SCALE, WORLD, formatPower } from './config';
+import { RenderContext, clampCamera } from './render';
 import {
   Building, Cell, GameState, Goblin,
   appendLog, buildingAtCell, cellCenter, cellKey, defOf, findFreeCellNear,
   isCellBlocked, isInBounds, pixelToCell,
 } from './state';
 
+type ActivePointer = {
+  startX: number; startY: number;
+  x: number; y: number;
+  worldStartX: number; worldStartY: number;
+};
+
 type InputState = {
   isDragging: boolean;
   dragStart: { x: number; y: number };
   selectionGfx: Graphics;
   placementGhost: Graphics;
+  // Multi-touch / long-press tracking
+  pointers: Map<number, ActivePointer>;
+  panLast: { x: number; y: number } | null;
+  longPressTimer: number | null;
+  longPressPointerId: number | null;
+  longPressFired: boolean;
 };
 
-export function setupInput(state: GameState, app: Application, uiLayer: Container, worldLayer: Container) {
+const LONG_PRESS_MS = 450;
+const LONG_PRESS_MOVE_TOL = 10; // screen-space px
+
+export function setupInput(
+  state: GameState,
+  app: Application,
+  uiLayer: Container,
+  worldLayer: Container,
+  ctx: RenderContext,
+) {
   const selectionGfx = new Graphics();
   const placementGhost = new Graphics();
   uiLayer.addChild(selectionGfx);
@@ -23,6 +45,11 @@ export function setupInput(state: GameState, app: Application, uiLayer: Containe
     isDragging: false,
     dragStart: { x: 0, y: 0 },
     selectionGfx, placementGhost,
+    pointers: new Map(),
+    panLast: null,
+    longPressTimer: null,
+    longPressPointerId: null,
+    longPressFired: false,
   };
 
   app.stage.eventMode = 'static';
@@ -32,6 +59,22 @@ export function setupInput(state: GameState, app: Application, uiLayer: Containe
 
   app.stage.on('pointerdown', (e: FederatedPointerEvent) => {
     const local = e.getLocalPosition(worldLayer);
+    input.pointers.set(e.pointerId, {
+      startX: e.global.x, startY: e.global.y,
+      x: e.global.x, y: e.global.y,
+      worldStartX: local.x, worldStartY: local.y,
+    });
+
+    // Two or more pointers → enter pan mode and abandon any single-pointer interaction.
+    if (input.pointers.size >= 2) {
+      cancelLongPress(input);
+      input.isDragging = false;
+      input.selectionGfx.clear();
+      const pts = [...input.pointers.values()];
+      input.panLast = { x: (pts[0].x + pts[1].x) / 2, y: (pts[0].y + pts[1].y) / 2 };
+      return;
+    }
+
     if (e.button === 2) {
       handleRightClick(state, local.x, local.y);
       return;
@@ -41,12 +84,42 @@ export function setupInput(state: GameState, app: Application, uiLayer: Containe
       drawGhost(input, local.x, local.y, state);
       return;
     }
+    // Schedule long-press → "right-click" on touch.
+    if (e.pointerType === 'touch') {
+      scheduleLongPress(input, e.pointerId, state, worldLayer);
+    }
     input.isDragging = true;
     input.dragStart = { x: local.x, y: local.y };
     input.selectionGfx.clear();
   });
 
   app.stage.on('pointermove', (e: FederatedPointerEvent) => {
+    const tracked = input.pointers.get(e.pointerId);
+    if (tracked) {
+      tracked.x = e.global.x;
+      tracked.y = e.global.y;
+    }
+
+    // Two-finger pan: compute midpoint delta in screen-space, apply to camera in world units.
+    if (input.pointers.size >= 2 && input.panLast) {
+      const pts = [...input.pointers.values()];
+      const midX = (pts[0].x + pts[1].x) / 2;
+      const midY = (pts[0].y + pts[1].y) / 2;
+      const dx = midX - input.panLast.x;
+      const dy = midY - input.panLast.y;
+      ctx.camera.x -= dx / RENDER_SCALE;
+      ctx.camera.y -= dy / RENDER_SCALE;
+      clampCamera(ctx);
+      input.panLast = { x: midX, y: midY };
+      return;
+    }
+
+    // Cancel long-press if the finger moved too far.
+    if (input.longPressPointerId === e.pointerId && tracked) {
+      const moved = Math.hypot(tracked.x - tracked.startX, tracked.y - tracked.startY);
+      if (moved > LONG_PRESS_MOVE_TOL) cancelLongPress(input);
+    }
+
     const local = e.getLocalPosition(worldLayer);
     if (state.pendingBuild) drawGhost(input, local.x, local.y, state);
     else input.placementGhost.clear();
@@ -62,7 +135,23 @@ export function setupInput(state: GameState, app: Application, uiLayer: Containe
       .stroke({ width: 1, color: 0xffd96b });
   });
 
-  app.stage.on('pointerup', (e: FederatedPointerEvent) => {
+  const onPointerUp = (e: FederatedPointerEvent) => {
+    const wasPanning = input.pointers.size >= 2;
+    input.pointers.delete(e.pointerId);
+    if (wasPanning) {
+      // Drop pan reference — don't resume a pending drag-select with the leftover finger.
+      input.panLast = null;
+      input.isDragging = false;
+      input.selectionGfx.clear();
+      return;
+    }
+    if (input.longPressPointerId === e.pointerId) cancelLongPress(input);
+    if (input.longPressFired) {
+      input.longPressFired = false;
+      input.isDragging = false;
+      input.selectionGfx.clear();
+      return;
+    }
     if (!input.isDragging) return;
     input.isDragging = false;
     const local = e.getLocalPosition(worldLayer);
@@ -89,7 +178,10 @@ export function setupInput(state: GameState, app: Application, uiLayer: Containe
       }
     }
     input.selectionGfx.clear();
-  });
+  };
+  app.stage.on('pointerup', onPointerUp);
+  app.stage.on('pointerupoutside', onPointerUp);
+  app.stage.on('pointercancel', onPointerUp);
 
   window.addEventListener('keydown', (e) => {
     if (e.key === 'Escape') {
@@ -99,6 +191,44 @@ export function setupInput(state: GameState, app: Application, uiLayer: Containe
   });
 
   return input;
+}
+
+function scheduleLongPress(
+  input: InputState,
+  pointerId: number,
+  state: GameState,
+  worldLayer: Container,
+) {
+  cancelLongPress(input);
+  input.longPressPointerId = pointerId;
+  input.longPressFired = false;
+  input.longPressTimer = window.setTimeout(() => {
+    const tracked = input.pointers.get(pointerId);
+    if (!tracked) return;
+    if (input.pointers.size !== 1) return;
+    const moved = Math.hypot(tracked.x - tracked.startX, tracked.y - tracked.startY);
+    if (moved > LONG_PRESS_MOVE_TOL) return;
+    input.longPressFired = true;
+    // Cancel any in-progress drag-select; long-press has taken over.
+    input.isDragging = false;
+    input.selectionGfx.clear();
+    if (state.pendingBuild) {
+      // No keyboard ESC on touch — long-press cancels pending placement.
+      state.pendingBuild = null;
+      input.placementGhost.clear();
+      return;
+    }
+    const world = worldLayer.toLocal({ x: tracked.x, y: tracked.y });
+    handleRightClick(state, world.x, world.y);
+  }, LONG_PRESS_MS);
+}
+
+function cancelLongPress(input: InputState) {
+  if (input.longPressTimer !== null) {
+    clearTimeout(input.longPressTimer);
+    input.longPressTimer = null;
+  }
+  input.longPressPointerId = null;
 }
 
 function clearSelection(state: GameState) {
