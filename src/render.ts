@@ -36,17 +36,21 @@ export type RenderContext = {
 };
 
 export async function createRender(parent: HTMLElement, walls: Set<string>): Promise<RenderContext> {
+  const initW = parent.clientWidth || window.innerWidth || WORLD.width;
+  const initH = parent.clientHeight || window.innerHeight || WORLD.height;
   const app = new Application();
   await app.init({
     background: '#2b3036',
-    resizeTo: parent,
+    width: initW,
+    height: initH,
     antialias: true,
     resolution: window.devicePixelRatio || 1,
     autoDensity: true,
   });
   parent.appendChild(app.canvas);
-  const initW = app.renderer.width / (window.devicePixelRatio || 1);
-  const initH = app.renderer.height / (window.devicePixelRatio || 1);
+  app.canvas.style.width = '100%';
+  app.canvas.style.height = '100%';
+  app.canvas.style.display = 'block';
 
   const worldLayer = new Container();
   const buildingLayer = new Container();
@@ -82,13 +86,12 @@ export async function createRender(parent: HTMLElement, walls: Set<string>): Pro
     viewport: { width: initW, height: initH },
   };
 
-  // Pixi's resizeTo only fires on window resize, so we also force-resize on
-  // parent layout changes (initial flexbox settle, sidebar toggles, etc.).
   const syncViewport = () => {
     const w = parent.clientWidth;
     const h = parent.clientHeight;
     if (w <= 0 || h <= 0) return;
-    app.resize();
+    if (ctx.viewport.width === w && ctx.viewport.height === h) return;
+    app.renderer.resize(w, h);
     ctx.viewport.width = w;
     ctx.viewport.height = h;
     clampCamera(ctx);
@@ -99,6 +102,9 @@ export async function createRender(parent: HTMLElement, walls: Set<string>): Pro
   if ('ResizeObserver' in window) {
     new ResizeObserver(syncViewport).observe(parent);
   }
+  // Belt-and-suspenders: also re-check on first few render frames in case
+  // layout settles late (web fonts, etc.).
+  for (const t of [50, 200, 800]) setTimeout(syncViewport, t);
 
   return ctx;
 }
