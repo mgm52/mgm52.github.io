@@ -58,8 +58,8 @@ export const BUILDING_DEFS = {
       wanderInterval: 1.4,
     wanderJitter: 0.8,
     colors: {
-      active: 0x3a6a8a, activeBorder: 0x8acfff,
-      dormant: 0x5a4a3a, dormantBorder: 0xd99a5a,
+      active: 0x8a7a3a, activeBorder: 0xeada6a,
+      dormant: 0x5a4a3a, dormantBorder: 0xa8985a,
       constructing: 0x3a3f47, constructingBorder: 0x808890,
     },
   }),
@@ -71,12 +71,12 @@ export const BUILDING_DEFS = {
     buildTime: 5,
     maintainersRequired: 1,
     income: 0,
-    powerOutput: 8_000_000, // 8 MW
+    powerOutput: 5_000_000, // 5 MW
       wanderInterval: 0.45,    // runs the wheel quickly
     wanderJitter: 0.15,
     colors: {
-      active: 0x6a8a3a, activeBorder: 0xb8d96b,
-      dormant: 0x5a4a3a, dormantBorder: 0xd99a5a,
+      active: 0x3a6a8a, activeBorder: 0x8acfff,
+      dormant: 0x3a4a5a, dormantBorder: 0x7a8aa0,
       constructing: 0x3a3f47, constructingBorder: 0x808890,
     },
   }),
@@ -92,8 +92,8 @@ export const BUILDING_DEFS = {
     wanderInterval: 1.4,
     wanderJitter: 0.8,
     colors: {
-      active: 0x6a3a8a, activeBorder: 0xc88aff,
-      dormant: 0x4a3a5a, dormantBorder: 0x8a7aa0,
+      active: 0x8a3a3a, activeBorder: 0xff8080,
+      dormant: 0x4a3a3a, dormantBorder: 0x8a6a6a,
       constructing: 0x3a3f47, constructingBorder: 0x808890,
     },
   }),
@@ -109,8 +109,8 @@ export const BUILDING_DEFS = {
       wanderInterval: 0.9,
     wanderJitter: 0.3,
     colors: {
-      active: 0x6a4a2a, activeBorder: 0xc49a5a,
-      dormant: 0x4a3a2a, dormantBorder: 0x8a6a4a,
+      active: 0x3a6a3a, activeBorder: 0x8aef8a,
+      dormant: 0x3a4a3a, dormantBorder: 0x6a8a6a,
       constructing: 0x3a3f47, constructingBorder: 0x808890,
     },
   }),
