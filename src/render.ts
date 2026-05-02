@@ -40,7 +40,7 @@ export async function createRender(parent: HTMLElement, walls: Set<string>): Pro
   const initH = parent.clientHeight || window.innerHeight || WORLD.height;
   const app = new Application();
   await app.init({
-    background: '#2b3036',
+    background: '#000000',
     width: initW,
     height: initH,
     antialias: true,
