@@ -59,7 +59,7 @@ export async function createRender(parent: HTMLElement, walls: Set<string>): Pro
 
   // Playable-area background (sits behind the grid; OOB stays canvas-black).
   const playBg = new Graphics();
-  playBg.rect(0, 0, WORLD.width, WORLD.height).fill(0x2b3036);
+  playBg.rect(0, 0, WORLD.width, WORLD.height).fill(0x0a0c0f);
 
   // Wall border (drawn as a single Graphics instance — cheap & static)
   const wallGfx = new Graphics();
