@@ -28,6 +28,11 @@ export const FONT_FAMILIES: FontFamily[] = [
     url: 'https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500&display=swap' },
   { id: 'inter',       label: 'Inter',           css: '"Inter", system-ui, sans-serif',
     url: 'https://fonts.googleapis.com/css2?family=Inter:wght@400;600&display=swap' },
+  // Local-only fallbacks: rely on the OS having these installed (no Google
+  // Fonts URL). If the user's system lacks them they fall back to the listed
+  // generics, which is fine.
+  { id: 'comicSans',   label: 'Comic Sans',      css: '"Comic Sans MS", "Comic Sans", cursive, sans-serif' },
+  { id: 'timesNewRoman', label: 'Times New Roman', css: '"Times New Roman", Times, serif' },
 ];
 
 export function fontFamilyById(id: string): FontFamily {

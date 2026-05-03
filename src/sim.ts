@@ -1,16 +1,33 @@
 import { playSound } from './audio';
-import { BUILDING_DEFS, COLS, GOBLIN, START_CELL, TICK_S } from './config';
+import { BUILDING_DEFS, COLS, GOBLIN, GOBLIN_HOLE_SPAWN_INTERVAL, KILL_REWARD, SUMMON_UPGRADES, TICK_S, MINOTAUR, formatPower } from './config';
 import {
-  ALL_DIRS, Building, Cell, DX, DY, Dir, GameState, Goblin,
-  appendLog, buildingAtCell, buildingFootprint, buildingPerimeter, cellCenter,
-  cellKey, defOf, findFreeCellNear, isCellBlocked, isCellInBuilding, isInBounds,
-  maintainerCount, occupyCell, releaseCell,
+  ALL_DIRS, Building, Cell, DX, DY, Dir, GameState, Goblin, HOLE_SIZE, Minotaur,
+  appendLog, buildingAtCell, buildingCenter, buildingFootprint, buildingPerimeter,
+  cellCenter, cellKey, defOf, destroyBuilding, findFreeCellNear, holeBlockedByBuilding,
+  isCellBlocked, isCellInBuilding, isInBounds, maintainerCount, occupyCell,
+  pushDeathEffect, pushFloater, releaseCell, removeGoblin,
 } from './state';
 
 export function tick(state: GameState) {
   state.now += TICK_S;
 
   // ── 1. Spawn queue ────────────────────────────────────────────────
+  if (state.autoSpawnEnabled) {
+    state.autoSpawnTimer -= TICK_S;
+    if (state.autoSpawnTimer <= 0) {
+      state.autoSpawnTimer += SUMMON_UPGRADES.autoSpawn.intervalSeconds;
+      const cap = state.hole.spawnCapacity;
+      if (state.spawnQueue.length < cap) {
+        const used = new Set(state.spawnQueue.map((s) => s.slot));
+        for (let i = 0; i < cap; i++) {
+          if (!used.has(i)) {
+            state.spawnQueue.push({ remaining: GOBLIN.spawnTime, slot: i });
+            break;
+          }
+        }
+      }
+    }
+  }
   for (let i = state.spawnQueue.length - 1; i >= 0; i--) {
     state.spawnQueue[i].remaining -= TICK_S;
     if (state.spawnQueue[i].remaining <= 0) {
@@ -19,8 +36,24 @@ export function tick(state: GameState) {
     }
   }
 
+  // ── 1b. Minotaur spawn queue ─────────────────────────────────────
+  for (let i = state.minotaurSpawnQueue.length - 1; i >= 0; i--) {
+    state.minotaurSpawnQueue[i].remaining -= TICK_S;
+    if (state.minotaurSpawnQueue[i].remaining <= 0) {
+      if (spawnMinotaur(state)) {
+        state.minotaurSpawnQueue.splice(i, 1);
+      } else {
+        // Hole perimeter blocked — retry shortly so we don't burn the slot.
+        state.minotaurSpawnQueue[i].remaining = 0.5;
+      }
+    }
+  }
+
   // ── 2. Goblin updates ─────────────────────────────────────────────
   for (const g of state.goblins.values()) updateGoblin(state, g);
+
+  // ── 2b. Minotaur updates ─────────────────────────────────────────────
+  for (const t of state.minotaurs.values()) updateMinotaur(state, t);
 
   // ── 3. Construction progress ──────────────────────────────────────
   for (const b of state.buildings.values()) updateConstruction(state, b);
@@ -28,14 +61,95 @@ export function tick(state: GameState) {
   // ── 4. Power balance + active/dormant resolution ──────────────────
   resolvePowerAndState(state);
 
+  // ── 4b. Goblin Hole auto-spawns ───────────────────────────────────
+  for (const b of state.buildings.values()) {
+    if (b.kind !== 'goblin_hole') continue;
+    if (b.state !== 'active') { b.nextSpawnAt = undefined; continue; }
+    if (b.nextSpawnAt === undefined) {
+      b.nextSpawnAt = state.now + GOBLIN_HOLE_SPAWN_INTERVAL;
+      continue;
+    }
+    if (state.now >= b.nextSpawnAt) {
+      if (spawnGoblinAtBuilding(state, b)) {
+        b.nextSpawnAt = state.now + GOBLIN_HOLE_SPAWN_INTERVAL;
+      } else {
+        // No room on the perimeter — retry shortly so we don't burn the slot.
+        b.nextSpawnAt = state.now + 0.5;
+      }
+    }
+  }
+
   // ── 5. Income ─────────────────────────────────────────────────────
   for (const b of state.buildings.values()) {
     if (b.state === 'active') state.money += defOf(b).income * TICK_S;
   }
+
+  // 1Hz floater pulse: surface per-second income for each active income
+  // building so the player can see their gains accumulate.
+  if (state.now >= state.nextIncomeFloatAt) {
+    for (const b of state.buildings.values()) {
+      if (b.state !== 'active') continue;
+      const def = defOf(b);
+      if (def.income <= 0) continue;
+      const c = buildingCenter(b);
+      pushFloater(state, c.x, c.y, `+Ƶ${def.income}`, 0xffd96b);
+    }
+    state.nextIncomeFloatAt = state.now + 1;
+  }
+
+  // Expire aged-out floaters and death-effect markers.
+  for (let i = state.floaters.length - 1; i >= 0; i--) {
+    const f = state.floaters[i];
+    if (state.now - f.spawnAt >= f.lifetime) state.floaters.splice(i, 1);
+  }
+  for (let i = state.deathEffects.length - 1; i >= 0; i--) {
+    if (state.now - state.deathEffects[i].spawnAt >= 2) state.deathEffects.splice(i, 1);
+  }
+}
+
+// Spawn a goblin at a free cell on the perimeter of `b`. Used by the
+// Goblin Hole building's auto-spawn timer. Returns false if every perimeter
+// cell is blocked, so the caller can retry next tick.
+function spawnGoblinAtBuilding(state: GameState, b: Building): boolean {
+  let cell: Cell | null = null;
+  for (const c of buildingPerimeter(b)) {
+    if (!isCellBlocked(state, c.cx, c.cy)) { cell = c; break; }
+  }
+  if (!cell) return false;
+  const id = state.nextId++;
+  const g: Goblin = {
+    id, pos: cellCenter(cell), cell,
+    target: null, goal: null,
+    path: [],
+    facing: Math.PI / 2,
+    state: { kind: 'idle' }, selected: false, idleSince: null,
+  };
+  state.goblins.set(id, g);
+  occupyCell(state, cell.cx, cell.cy, id);
+  state.spawnsCompleted++;
+  playSound('goblin_spawn', 0.5);
+  appendLog(state, `Goblin #${id} hatched from Goblin Hole #${b.id}.`);
+  if (state.autoAssignEnabled) autoAssignAllIdle(state);
+  return true;
 }
 
 function spawnGoblin(state: GameState) {
-  const cell = findFreeCellNear(state, START_CELL.cx, START_CELL.cy);
+  // If a building is sitting on the Goblin Hole when the timer expires, the
+  // spawn aborts and the player gets their Ƶ back. The button-disable check
+  // in the UI normally prevents queueing in this state, but a building can
+  // be placed on top after queueing, so the runtime check is still needed.
+  if (holeBlockedByBuilding(state)) {
+    state.money += GOBLIN.spawnCost;
+    appendLog(state, 'Goblin Hole is blocked; spawn refunded.');
+    playSound('error');
+    return;
+  }
+  // Goblins emerge on the perimeter of the hole — never on top of it. Right-
+  // hand cells are tried first so the spawn flow visually pours rightward
+  // toward the rest of the build area; if the whole perimeter is blocked we
+  // fall back to BFS (which will skip the hole's interior because the spawned
+  // occupants block it, but that's fine — extras just queue up further out).
+  const cell = pickHolePerimeterCell(state) ?? findFreeCellNear(state, state.hole.cell.cx, state.hole.cell.cy);
   if (!cell) {
     appendLog(state, 'No room to spawn goblin.');
     return;
@@ -51,8 +165,344 @@ function spawnGoblin(state: GameState) {
   state.goblins.set(id, g);
   occupyCell(state, cell.cx, cell.cy, id);
   state.spawnsCompleted++;
-  playSound('goblin_spawn');
+  playSound('goblin_spawn', 0.5);
   appendLog(state, `Goblin #${id} hatched.`);
+  if (state.autoAssignEnabled) autoAssignAllIdle(state);
+}
+
+// Fill every understaffed building from the pool of idle goblins, picking the
+// closest idle goblin for each open slot. Tier order is constructing > dormant
+// > active-short-on-maintainers; within a tier, fewer-currently-assigned wins
+// the next pick (so two equally-needy buildings get filled evenly).
+export function autoAssignAllIdle(state: GameState) {
+  if (!state.autoAssignEnabled) return;
+
+  type Need = { b: Building; tier: number; slots: number; center: { x: number; y: number } };
+  const needs: Need[] = [];
+  for (const b of state.buildings.values()) {
+    const def = defOf(b);
+    const required = b.state === 'constructing' ? def.buildersRequired : def.maintainersRequired;
+    const slots = required - b.assignedGoblins.length;
+    if (slots <= 0) continue;
+    const tier =
+      b.state === 'constructing' ? 3 :
+      b.state === 'dormant' ? 2 : 1;
+    needs.push({ b, tier, slots, center: buildingCenter(b) });
+  }
+  if (needs.length === 0) return;
+
+  const idle: Goblin[] = [];
+  for (const g of state.goblins.values()) {
+    if (g.state.kind === 'idle') idle.push(g);
+  }
+
+  while (idle.length > 0) {
+    let best: Need | null = null;
+    for (const n of needs) {
+      if (n.slots <= 0) continue;
+      if (!best
+          || n.tier > best.tier
+          || (n.tier === best.tier && n.b.assignedGoblins.length < best.b.assignedGoblins.length)) {
+        best = n;
+      }
+    }
+    if (!best) return;
+
+    let pickI = 0;
+    let pickD = Infinity;
+    for (let i = 0; i < idle.length; i++) {
+      const g = idle[i];
+      const dx = g.pos.x - best.center.x;
+      const dy = g.pos.y - best.center.y;
+      const d = dx * dx + dy * dy;
+      if (d < pickD) { pickD = d; pickI = i; }
+    }
+    const g = idle.splice(pickI, 1)[0];
+    best.b.assignedGoblins.push(g.id);
+    g.goal = null;
+    g.path = [];
+    g.state = best.b.state === 'constructing'
+      ? { kind: 'going_to_build', buildingId: best.b.id }
+      : { kind: 'going_to_maintain', buildingId: best.b.id };
+    best.slots--;
+  }
+}
+
+// Pop a minotaur out of the goblin hole. Minotaurs don't queue/take spawn time —
+// summoning is instant; if the hole and its perimeter are fully blocked, the
+// summon refunds.
+export function spawnMinotaur(state: GameState): boolean {
+  const cell = pickHolePerimeterCell(state) ?? findFreeCellNear(state, state.hole.cell.cx, state.hole.cell.cy);
+  if (!cell) return false;
+  const id = state.nextId++;
+  const t: Minotaur = {
+    id,
+    pos: cellCenter(cell),
+    cell,
+    target: null,
+    facing: 0,
+    state: { kind: 'wander' },
+    nextWanderAt: state.now + MINOTAUR.wanderInterval,
+    selected: false,
+  };
+  state.minotaurs.set(id, t);
+  appendLog(state, `Minotaur #${id} crawls out of the hole.`);
+  playSound('goblin_spawn', 1.4);
+  return true;
+}
+
+function minotaurWalkable(state: GameState, cx: number, cy: number): boolean {
+  if (!isInBounds(cx, cy)) return false;
+  if (state.walls.has(cellKey(cx, cy))) return false;
+  if (buildingAtCell(state, cx, cy)) return false;
+  return true;
+}
+
+function minotaurStepToward(state: GameState, t: Minotaur, target: Cell): Cell | null {
+  // Pick the 8-neighbor with smallest Chebyshev distance to the target cell.
+  let best: Cell | null = null;
+  let bestDist = Infinity;
+  for (const d of ALL_DIRS) {
+    const nx = t.cell.cx + DX[d];
+    const ny = t.cell.cy + DY[d];
+    if (!minotaurWalkable(state, nx, ny)) continue;
+    const dist = Math.max(Math.abs(nx - target.cx), Math.abs(ny - target.cy));
+    if (dist < bestDist) { bestDist = dist; best = { cx: nx, cy: ny }; }
+  }
+  return best;
+}
+
+function minotaurWanderStep(state: GameState, t: Minotaur): Cell | null {
+  const choices: Cell[] = [];
+  for (const d of ALL_DIRS) {
+    const nx = t.cell.cx + DX[d];
+    const ny = t.cell.cy + DY[d];
+    if (minotaurWalkable(state, nx, ny)) choices.push({ cx: nx, cy: ny });
+  }
+  if (choices.length === 0) return null;
+  return choices[Math.floor(Math.random() * choices.length)];
+}
+
+function nearestGoblin(state: GameState, t: Minotaur): Goblin | null {
+  let best: Goblin | null = null;
+  let bestD = Infinity;
+  for (const g of state.goblins.values()) {
+    // Goblins inside building footprints (workers/maintainers, plus any idle
+    // straggler on a footprint cell) are sheltered from minotaurs.
+    if (buildingAtCell(state, g.cell.cx, g.cell.cy)) continue;
+    const dx = g.pos.x - t.pos.x;
+    const dy = g.pos.y - t.pos.y;
+    const d = dx * dx + dy * dy;
+    if (d < bestD) { bestD = d; best = g; }
+  }
+  return best;
+}
+
+function chebyshevToBuilding(cell: Cell, b: Building): number {
+  const n = defOf(b).cellSize;
+  const right = b.cell.cx + n - 1;
+  const bottom = b.cell.cy + n - 1;
+  const dx = Math.max(0, b.cell.cx - cell.cx, cell.cx - right);
+  const dy = Math.max(0, b.cell.cy - cell.cy, cell.cy - bottom);
+  return Math.max(dx, dy);
+}
+
+function minotaurStepTowardBuilding(state: GameState, t: Minotaur, b: Building): Cell | null {
+  let best: Cell | null = null;
+  let bestDist = Infinity;
+  for (const d of ALL_DIRS) {
+    const nx = t.cell.cx + DX[d];
+    const ny = t.cell.cy + DY[d];
+    if (!minotaurWalkable(state, nx, ny)) continue;
+    const dist = chebyshevToBuilding({ cx: nx, cy: ny }, b);
+    if (dist < bestDist) { bestDist = dist; best = { cx: nx, cy: ny }; }
+  }
+  return best;
+}
+
+function updateMinotaur(state: GameState, t: Minotaur) {
+  // Mid-step pixel lerp (shared with goblin movement model).
+  if (t.target) {
+    const tc = cellCenter(t.target);
+    const dx = tc.x - t.pos.x;
+    const dy = tc.y - t.pos.y;
+    const d = Math.hypot(dx, dy);
+    const step = MINOTAUR.speed * TICK_S;
+    if (d <= step + MINOTAUR.arriveDist) {
+      t.cell = t.target;
+      t.pos = tc;
+      t.target = null;
+    } else {
+      t.pos.x += (dx / d) * step;
+      t.pos.y += (dy / d) * step;
+      t.facing = Math.atan2(dy, dx);
+      return;
+    }
+  }
+
+  // Player-issued commands take priority over auto-targeting.
+  if (t.state.kind === 'going_to_destroy') {
+    const b = state.buildings.get(t.state.buildingId);
+    if (!b) {
+      t.state = { kind: 'wander' };
+      t.nextWanderAt = state.now + MINOTAUR.wanderInterval;
+      return;
+    }
+    const s = t.state;
+    if (chebyshevToBuilding(t.cell, b) <= 1) {
+      if (s.attackAt === undefined) {
+        const c = buildingCenter(b);
+        s.attackAt = state.now + MINOTAUR.attackWindup;
+        t.facing = Math.atan2(c.y - t.pos.y, c.x - t.pos.x);
+        return;
+      }
+      if (state.now < s.attackAt) return;
+      const c = buildingCenter(b);
+      const def = defOf(b);
+      appendLog(state, `Minotaur #${t.id} smashes ${def.name} #${b.id}.`);
+      pushDeathEffect(state, c.x, c.y);
+      destroyBuilding(state, b.id);
+      playSound('goblin_death', 0.5);
+      t.state = { kind: 'wander' };
+      t.nextWanderAt = state.now + MINOTAUR.wanderInterval;
+      return;
+    }
+    const next = minotaurStepTowardBuilding(state, t, b);
+    if (next) {
+      t.target = next;
+      t.facing = Math.atan2(next.cy - t.cell.cy, next.cx - t.cell.cx);
+    }
+    return;
+  }
+
+  if (t.state.kind === 'going_to_kill_minotaur') {
+    const target = state.minotaurs.get(t.state.targetId);
+    if (!target || target.id === t.id) {
+      t.state = { kind: 'wander' };
+      t.nextWanderAt = state.now + MINOTAUR.wanderInterval;
+      return;
+    }
+    const s = t.state;
+    const cdx = Math.abs(target.cell.cx - t.cell.cx);
+    const cdy = Math.abs(target.cell.cy - t.cell.cy);
+    if (Math.max(cdx, cdy) <= 1) {
+      if (s.attackAt === undefined) {
+        s.attackAt = state.now + MINOTAUR.attackWindup;
+        t.facing = Math.atan2(target.pos.y - t.pos.y, target.pos.x - t.pos.x);
+        return;
+      }
+      if (state.now < s.attackAt) return;
+      const tx = target.pos.x, ty = target.pos.y;
+      state.minotaurs.delete(target.id);
+      state.money += KILL_REWARD.money;
+      state.blood += KILL_REWARD.blood;
+      state.bloodUnlocked = true;
+      pushFloater(state, tx, ty, `+Ƶ${KILL_REWARD.money}`, 0xffd96b, 1.6);
+      pushFloater(state, tx, ty - 14, `+${KILL_REWARD.blood} blood`, 0xff8a8a, 1.6);
+      pushDeathEffect(state, tx, ty);
+      playSound('goblin_death', 0.7);
+      appendLog(state, `Minotaur #${target.id} gored by Minotaur #${t.id}.`);
+      t.state = { kind: 'wander' };
+      t.nextWanderAt = state.now + MINOTAUR.wanderInterval;
+      return;
+    }
+    const next = minotaurStepToward(state, t, target.cell);
+    if (next) {
+      t.target = next;
+      t.facing = Math.atan2(next.cy - t.cell.cy, next.cx - t.cell.cx);
+    }
+    return;
+  }
+
+  const target = nearestGoblin(state, t);
+  if (target) {
+    if (t.state.kind !== 'going_to_kill' || t.state.targetId !== target.id) {
+      t.state = { kind: 'going_to_kill', targetId: target.id };
+    }
+    const s = t.state;
+    const cdx = Math.abs(target.cell.cx - t.cell.cx);
+    const cdy = Math.abs(target.cell.cy - t.cell.cy);
+    if (Math.max(cdx, cdy) <= 1) {
+      // Windup → kill.
+      if (s.attackAt === undefined) {
+        s.attackAt = state.now + MINOTAUR.attackWindup;
+        t.facing = Math.atan2(target.pos.y - t.pos.y, target.pos.x - t.pos.x);
+        return;
+      }
+      if (state.now < s.attackAt) return;
+      const tx = target.pos.x, ty = target.pos.y;
+      removeGoblin(state, target.id);
+      state.money += KILL_REWARD.money;
+      state.blood += KILL_REWARD.blood;
+      state.bloodUnlocked = true;
+      pushFloater(state, tx, ty, `+Ƶ${KILL_REWARD.money}`, 0xffd96b, 1.6);
+      pushFloater(state, tx, ty - 14, `+${KILL_REWARD.blood} blood`, 0xff8a8a, 1.6);
+      pushDeathEffect(state, tx, ty);
+      playSound('goblin_death', 0.7);
+      appendLog(state, `Goblin #${target.id} killed by Minotaur #${t.id}.`);
+      t.state = { kind: 'wander' };
+      t.nextWanderAt = state.now + MINOTAUR.wanderInterval;
+      return;
+    }
+    // Step one cell toward the target.
+    const next = minotaurStepToward(state, t, target.cell);
+    if (next) {
+      t.target = next;
+      t.facing = Math.atan2(next.cy - t.cell.cy, next.cx - t.cell.cx);
+    }
+    return;
+  }
+
+  // No goblins — wander.
+  if (t.state.kind !== 'wander') t.state = { kind: 'wander' };
+  if (state.now >= t.nextWanderAt) {
+    const next = minotaurWanderStep(state, t);
+    if (next) {
+      t.target = next;
+      t.facing = Math.atan2(next.cy - t.cell.cy, next.cx - t.cell.cx);
+    }
+    t.nextWanderAt = state.now + MINOTAUR.wanderInterval;
+  }
+}
+
+function nearestFreeNeighbor(state: GameState, cell: Cell, hunter: Goblin): Cell | null {
+  let best: Cell | null = null;
+  let bestDist = Infinity;
+  for (const d of ALL_DIRS) {
+    const cx = cell.cx + DX[d];
+    const cy = cell.cy + DY[d];
+    if (!isInBounds(cx, cy)) continue;
+    if (cx === hunter.cell.cx && cy === hunter.cell.cy) return { cx, cy };
+    if (isCellBlocked(state, cx, cy, hunter.id)) continue;
+    const dist = Math.hypot(cx - hunter.cell.cx, cy - hunter.cell.cy);
+    if (dist < bestDist) { best = { cx, cy }; bestDist = dist; }
+  }
+  return best;
+}
+
+// Cells on the ring just outside the 2×2 hole footprint, sorted with a
+// strong rightward bias and a mild "stay near the centerline" tiebreak.
+function pickHolePerimeterCell(state: GameState): Cell | null {
+  const h = state.hole.cell;
+  const cx0 = h.cx + (HOLE_SIZE - 1) / 2;
+  const cy0 = h.cy + (HOLE_SIZE - 1) / 2;
+  const ring: Cell[] = [];
+  for (let dx = -1; dx <= HOLE_SIZE; dx++) {
+    for (let dy = -1; dy <= HOLE_SIZE; dy++) {
+      const inHole = dx >= 0 && dx < HOLE_SIZE && dy >= 0 && dy < HOLE_SIZE;
+      if (inHole) continue;
+      ring.push({ cx: h.cx + dx, cy: h.cy + dy });
+    }
+  }
+  ring.sort((a, b) => {
+    const sa = (a.cx - cx0) - 0.25 * Math.abs(a.cy - cy0);
+    const sb = (b.cx - cx0) - 0.25 * Math.abs(b.cy - cy0);
+    return sb - sa;
+  });
+  for (const c of ring) {
+    if (!isCellBlocked(state, c.cx, c.cy)) return c;
+  }
+  return null;
 }
 
 // ─── Goblin update ──────────────────────────────────────────────────
@@ -215,6 +665,59 @@ function updateGoblin(state: GameState, g: Goblin) {
       if (!state.buildings.has(s.buildingId)) g.state = { kind: 'idle' };
       g.goal = null;
       g.path = [];
+      return;
+    }
+
+    case 'going_to_kill': {
+      const target = state.goblins.get(s.targetId);
+      if (!target || target.id === g.id) {
+        g.state = { kind: 'idle' };
+        g.goal = null;
+        g.path = [];
+        return;
+      }
+      const dx = Math.abs(target.cell.cx - g.cell.cx);
+      const dy = Math.abs(target.cell.cy - g.cell.cy);
+      if (Math.max(dx, dy) <= 1) {
+        // Windup → swing → kill. Holding for a beat lets the swipe animation
+        // visibly play before the target vanishes.
+        if (s.attackAt === undefined) {
+          s.attackAt = state.now + 0.4;
+          g.facing = Math.atan2(target.pos.y - g.pos.y, target.pos.x - g.pos.x);
+          g.goal = null;
+          g.path = [];
+          return;
+        }
+        if (state.now < s.attackAt) {
+          g.goal = null;
+          g.path = [];
+          return;
+        }
+        const tx = target.pos.x, ty = target.pos.y;
+        removeGoblin(state, target.id);
+        state.money += KILL_REWARD.money;
+        state.blood += KILL_REWARD.blood;
+        state.bloodUnlocked = true;
+        pushFloater(state, tx, ty, `+Ƶ${KILL_REWARD.money}`, 0xffd96b, 1.6);
+        pushFloater(state, tx, ty - 14, `+${KILL_REWARD.blood} blood`, 0xff8a8a, 1.6);
+        pushDeathEffect(state, tx, ty);
+        playSound('goblin_death', 0.7);
+        appendLog(state, `Goblin #${target.id} killed by #${g.id}.`);
+        g.state = { kind: 'idle' };
+        g.goal = null;
+        g.path = [];
+        return;
+      }
+      // Target's own cell is blocked by the target itself, so we'd never
+      // path there — head to the closest free 8-neighbor instead.
+      s.attackAt = undefined;
+      const adj = nearestFreeNeighbor(state, target.cell, g);
+      if (!adj) { g.path = []; return; }
+      if (!g.goal || g.goal.cx !== adj.cx || g.goal.cy !== adj.cy) {
+        g.goal = adj;
+        g.path = [];
+      }
+      planStep(state, g);
       return;
     }
 
@@ -534,6 +1037,12 @@ function setActiveOrDormant(
       b.state = 'active';
       playSound('online');
       appendLog(state, `${def.name} #${b.id} online.`);
+      const c = buildingCenter(b);
+      if (def.powerOutput > 0) {
+        pushFloater(state, c.x, c.y, `+${formatPower(def.powerOutput)}`, 0x8acfff, 1.6);
+      } else if (def.powerOutput < 0) {
+        pushFloater(state, c.x, c.y, `-${formatPower(-def.powerOutput)}`, 0xd96b6b, 1.6);
+      }
     }
   } else {
     if (b.state !== 'dormant') {

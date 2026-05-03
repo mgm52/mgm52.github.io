@@ -1,12 +1,14 @@
 import { preloadSounds, playSound, setMasterVolume } from './audio';
-import { CAMERA_SPEED, GOBLIN, START_CELL, TICK_MS } from './config';
+import {
+  CAMERA_SPEED, GOBLIN, KILL_REWARD, START_CELL, SUMMON_UPGRADES, TICK_MS, MINOTAUR,
+} from './config';
 import { setupInput } from './input';
 import { getOptions, onOptionsChange } from './options';
 import { setupOptionsUI } from './options-ui';
 import { centerCameraOn, clampCamera, createRender, render } from './render';
-import { appendLog, cellCenter, createInitialState, destroyBuilding } from './state';
-import { tick } from './sim';
-import { refreshUI, setupUI } from './ui';
+import { appendLog, cellCenter, createInitialState, destroyBuilding, pushDeathEffect, pushFloater, removeGoblin } from './state';
+import { autoAssignAllIdle, spawnMinotaur, tick } from './sim';
+import { executeTaskSkip, refreshUI, setupUI } from './ui';
 
 function showTitleScreen(): void {
   const screen = document.getElementById('title-screen');
@@ -51,20 +53,75 @@ async function main() {
       state.money += 100_000;
       appendLog(state, 'Cheat: +Ƶ100,000.');
     },
+    onTaskSkip: () => executeTaskSkip(state),
   });
   setupUI(state, {
     onSpawnGoblin: () => {
       if (state.money < GOBLIN.spawnCost) { playSound('error'); return; }
-      if (state.spawnQueue.length >= GOBLIN.concurrentBuildLimit) { playSound('error'); return; }
+      const cap = state.hole.spawnCapacity;
+      if (state.spawnQueue.length >= cap) { playSound('error'); return; }
       const used = new Set(state.spawnQueue.map((s) => s.slot));
       let slot = -1;
-      for (let i = 0; i < GOBLIN.concurrentBuildLimit; i++) {
+      for (let i = 0; i < cap; i++) {
         if (!used.has(i)) { slot = i; break; }
       }
       if (slot < 0) return;
       state.money -= GOBLIN.spawnCost;
       state.spawnQueue.push({ remaining: GOBLIN.spawnTime, slot });
       appendLog(state, 'Hatching a goblin...');
+    },
+    onSummonMinotaur: () => {
+      if (state.blood < MINOTAUR.bloodCost) { playSound('error'); return; }
+      if (state.minotaurSpawnQueue.length >= MINOTAUR.spawnCapacity) { playSound('error'); return; }
+      state.blood -= MINOTAUR.bloodCost;
+      state.minotaurSpawnQueue.push({ remaining: MINOTAUR.spawnTime });
+      playSound('ritual');
+      appendLog(state, 'Minotaur summon ritual begins...');
+    },
+    onBuyAutoAssign: () => {
+      if (state.autoAssignEnabled) return;
+      const cost = SUMMON_UPGRADES.autoAssign.bloodCost;
+      if (state.blood < cost) { playSound('error'); return; }
+      state.blood -= cost;
+      state.autoAssignEnabled = true;
+      playSound('ritual');
+      appendLog(state, 'Autotask unlocked — new goblins route themselves to needy buildings.');
+      autoAssignAllIdle(state);
+    },
+    onBuyAutoSpawn: () => {
+      if (state.autoSpawnEnabled) return;
+      const cost = SUMMON_UPGRADES.autoSpawn.bloodCost;
+      if (state.blood < cost) { playSound('error'); return; }
+      state.blood -= cost;
+      state.autoSpawnEnabled = true;
+      state.autoSpawnTimer = SUMMON_UPGRADES.autoSpawn.intervalSeconds;
+      playSound('ritual');
+      appendLog(state, `Autospawn — a goblin hatches every ${SUMMON_UPGRADES.autoSpawn.intervalSeconds}s.`);
+    },
+    onBuyWiderHole: () => {
+      if (state.widerHoleEnabled) return;
+      const cost = SUMMON_UPGRADES.widerHole.bloodCost;
+      if (state.blood < cost) { playSound('error'); return; }
+      state.blood -= cost;
+      state.widerHoleEnabled = true;
+      state.hole.spawnCapacity = SUMMON_UPGRADES.widerHole.capacity;
+      playSound('ritual');
+      appendLog(state, `Goblinsixstack — up to ${SUMMON_UPGRADES.widerHole.capacity} concurrent spawns.`);
+    },
+    onKillGoblin: (id: number) => {
+      const g = state.goblins.get(id);
+      if (!g) return;
+      const x = g.pos.x, y = g.pos.y;
+      removeGoblin(state, id);
+      state.money += KILL_REWARD.money;
+      state.blood += KILL_REWARD.blood;
+      state.bloodUnlocked = true;
+      // Two stacked floaters so each value gets its own color.
+      pushFloater(state, x, y, `+Ƶ${KILL_REWARD.money}`, 0xffd96b, 1.6);
+      pushFloater(state, x, y - 14, `+${KILL_REWARD.blood} blood`, 0xff8a8a, 1.6);
+      pushDeathEffect(state, x, y);
+      playSound('goblin_death', 0.7);
+      appendLog(state, `Goblin #${id} killed — +Ƶ${KILL_REWARD.money}, +${KILL_REWARD.blood} blood.`);
     },
     onBuildBuilding: (kind) => {
       state.pendingBuild = state.pendingBuild?.kind === kind ? null : { kind };

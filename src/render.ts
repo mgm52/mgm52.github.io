@@ -1,7 +1,17 @@
-import { Application, Assets, ColorMatrixFilter, Container, Graphics, Rectangle, Sprite, Text, Texture } from 'pixi.js';
-import { CELL, COLS, GOBLIN, RENDER_SCALE, ROWS, WORLD } from './config';
+import { Application, Assets, ColorMatrixFilter, Container, extensions, Graphics, Rectangle, Sprite, Text, Texture } from 'pixi.js';
+import { GifAsset, GifSource } from 'pixi.js/gif';
+
+// Side-effect registration: `pixi.js/gif` does NOT auto-register the .gif
+// asset loader on import. Without this, `Assets.load(*.gif)` rejects.
+extensions.add(GifAsset);
+
+// Decoded GIF: frame textures + the cumulative time-of-end of each frame, in
+// game seconds. Used as a manual sprite-sheet — we pick the frame ourselves
+// each tick based on (state.now - spawnAt) so playback always starts at frame 0.
+type DeathFrames = { textures: Texture[]; ends: number[]; duration: number };
+import { CELL, COLS, GOBLIN, RENDER_SCALE, ROWS, MINOTAUR, WORLD } from './config';
 import { ensureFontLoaded, fontFamilyById, getOptions, onOptionsChange, type FontConfig, type Options } from './options';
-import { Building, GameState, Goblin, buildingCenter, defOf, maintainerCount } from './state';
+import { Building, GameState, Goblin, HOLE_SIZE, Minotaur, buildingCenter, defOf, holeCenter, maintainerCount } from './state';
 
 export type Camera = { x: number; y: number };
 
@@ -13,6 +23,9 @@ export type Camera = { x: number; y: number };
 const GOBLIN_WALK_BASE = 'assets/rigged_goblin_dancing_aligol3dart_orc_walk';
 const GOBLIN_IDLE_BASE = 'assets/rigged_goblin_dancing_aligol3dart_orc_idle';
 const GOBLIN_BREAKDANCE_BASE = 'assets/rigged_goblin_dancing_aligol3dart_breakdance';
+const GOBLIN_SWIPE_BASE = 'assets/rigged_goblin_dancing_aligol3dart_mutant_swiping';
+const MINOTAUR_WALK_BASE = 'assets/rigged_minotaur_sasswalk_aligol3dart_rigged_minotaur_sasswalk_aligol3dart';
+const MINOTAUR_SWIPE_BASE = 'assets/rigged_minotaur_sasswalk_aligol3dart_mutant_swiping';
 
 type SheetHeading = { index: number; headingDeg: number };
 type SheetMeta = {
@@ -29,6 +42,9 @@ type Sheet = { meta: SheetMeta; frames: Texture[][]; fps: number };
 let goblinWalkSheet: Sheet | null = null;
 let goblinIdleSheet: Sheet | null = null;
 let goblinBreakdanceSheet: Sheet | null = null;
+let goblinSwipeSheet: Sheet | null = null;
+let minotaurWalkSheet: Sheet | null = null;
+let minotaurSwipeSheet: Sheet | null = null;
 
 async function loadSheet(base: string): Promise<Sheet> {
   const meta = await fetch(`${base}.json`).then(r => r.json()) as SheetMeta;
@@ -57,10 +73,16 @@ async function loadSheet(base: string): Promise<Sheet> {
 }
 
 async function loadGoblinSheets(): Promise<void> {
-  [goblinWalkSheet, goblinIdleSheet, goblinBreakdanceSheet] = await Promise.all([
+  [
+    goblinWalkSheet, goblinIdleSheet, goblinBreakdanceSheet, goblinSwipeSheet,
+    minotaurWalkSheet, minotaurSwipeSheet,
+  ] = await Promise.all([
     loadSheet(GOBLIN_WALK_BASE),
     loadSheet(GOBLIN_IDLE_BASE),
     loadSheet(GOBLIN_BREAKDANCE_BASE),
+    loadSheet(GOBLIN_SWIPE_BASE),
+    loadSheet(MINOTAUR_WALK_BASE),
+    loadSheet(MINOTAUR_SWIPE_BASE),
   ]);
 }
 
@@ -117,6 +139,13 @@ const OUTLINE_OFFSETS: readonly [number, number][] = [
   [-1.5, 0], [1.5, 0], [0, -1.5], [0, 1.5],
 ];
 
+type MinotaurView = {
+  container: Container;
+  shadow: Sprite;
+  sprite: Sprite;
+  selectionRing: Graphics;
+};
+
 type BuildingView = {
   container: Container;
   body: Graphics;
@@ -137,9 +166,23 @@ export type RenderContext = {
   goblinLayer: Container;
   uiLayer: Container;
   goblinViews: Map<number, GoblinView>;
+  minotaurLayer: Container;
+  minotaurViews: Map<number, MinotaurView>;
   buildingViews: Map<number, BuildingView>;
   camera: Camera;
   viewport: { width: number; height: number };
+  // Goblin Hole: a fixed pit-graphic plus its selection ring. Drawn between
+  // the grid and buildings so a building placed on top covers it.
+  holeGfx: Graphics;
+  holeRing: Graphics;
+  // Floating-text overlay (kill rewards, income ticks, power online).
+  floatersLayer: Container;
+  floaterViews: Map<number, Text>;
+  // One-shot blood-explosion GIFs played at goblin death positions. Plain
+  // Sprites whose textures we swap per-frame from the decoded `deathFrames`.
+  effectsLayer: Container;
+  deathViews: Map<number, Sprite>;
+  deathFrames: DeathFrames | null;
   // Mutable references — used by applyOptions() to redraw on the fly.
   walls: Set<string>;
   playBg: Graphics;
@@ -170,18 +213,29 @@ export async function createRender(parent: HTMLElement, walls: Set<string>): Pro
   const worldLayer = new Container();
   const buildingLayer = new Container();
   const goblinLayer = new Container();
+  const minotaurLayer = new Container();
   const uiLayer = new Container();
 
   // Playable-area background, walls, and grid — drawn lazily from current options.
   const playBg = new Graphics();
   const wallGfx = new Graphics();
   const grid = new Graphics();
+  const holeGfx = new Graphics();
+  const holeRing = new Graphics();
+
+  const floatersLayer = new Container();
+  const effectsLayer = new Container();
 
   worldLayer.addChild(playBg);
   worldLayer.addChild(wallGfx);
   worldLayer.addChild(grid);
+  worldLayer.addChild(holeGfx);
   worldLayer.addChild(buildingLayer);
   worldLayer.addChild(goblinLayer);
+  worldLayer.addChild(minotaurLayer);
+  worldLayer.addChild(holeRing);
+  worldLayer.addChild(effectsLayer);
+  worldLayer.addChild(floatersLayer);
   worldLayer.addChild(uiLayer);
   worldLayer.scale.set(RENDER_SCALE);
   app.stage.addChild(worldLayer);
@@ -195,11 +249,36 @@ export async function createRender(parent: HTMLElement, walls: Set<string>): Pro
 
   const ctx: RenderContext = {
     app, worldLayer, buildingLayer, goblinLayer, uiLayer,
-    goblinViews: new Map(), buildingViews: new Map(),
+    goblinViews: new Map(),
+    minotaurLayer, minotaurViews: new Map(),
+    buildingViews: new Map(),
     camera: { x: 0, y: 0 },
     viewport: { width: initW, height: initH },
+    holeGfx, holeRing,
+    floatersLayer, floaterViews: new Map(),
+    effectsLayer, deathViews: new Map(),
+    deathFrames: null,
     walls, playBg, wallGfx, grid, goblinFilter, buildingFilter,
   };
+
+  // Decode the GIF once into AnimatedSprite frames. Sharing GifSprite across
+  // many short-lived sprites had race-condition issues (sprites starting
+  // mid-animation); AnimatedSprite indexes by frame and behaves predictably.
+  Assets.load<GifSource>('assets/blood-explosion.gif')
+    .then((src) => {
+      const textures: Texture[] = [];
+      const ends: number[] = [];
+      let cum = 0;
+      for (const f of src.frames) {
+        // GIF delays come in ms; convert to game seconds. Floor at 30 ms so
+        // an over-eager encoder can't hide a frame for one tick.
+        cum += Math.max(30, f.end - f.start) / 1000;
+        textures.push(f.texture);
+        ends.push(cum);
+      }
+      ctx.deathFrames = { textures, ends, duration: cum };
+    })
+    .catch((err) => { console.warn('blood-explosion gif failed to load', err); });
 
   applyOptions(ctx, getOptions());
   onOptionsChange((o) => applyOptions(ctx, o));
@@ -388,6 +467,23 @@ function makeGoblinView(g: Goblin): GoblinView {
   return { container: c, shadow, outline, sprite, selectionRing: ring };
 }
 
+function makeMinotaurView(): MinotaurView {
+  const c = new Container();
+  const shadow = new Sprite(getShadowTexture());
+  shadow.anchor.set(0.5);
+  const ring = new Graphics();
+  ring.circle(0, 0, MINOTAUR.radius + 6).stroke({ width: 2, color: 0xffd96b });
+  ring.visible = false;
+  const startSheet = minotaurWalkSheet;
+  const startTex = startSheet?.frames[0][0] ?? Texture.EMPTY;
+  const sprite = new Sprite(startTex);
+  sprite.anchor.set(0.5);
+  c.addChild(shadow);
+  c.addChild(ring);
+  c.addChild(sprite);
+  return { container: c, shadow, sprite, selectionRing: ring };
+}
+
 function makeBuildingView(b: Building): BuildingView {
   const def = defOf(b);
   const c = new Container();
@@ -443,6 +539,95 @@ function makeBuildingView(b: Building): BuildingView {
   };
 }
 
+function drawHole(ctx: RenderContext, state: GameState) {
+  const c = holeCenter(state);
+  const r = CELL * HOLE_SIZE * 0.42;
+  ctx.holeGfx.clear();
+  ctx.holeGfx
+    .ellipse(c.x, c.y + 1, r, r * 0.6).fill({ color: 0x000000, alpha: 0.55 })
+    .ellipse(c.x, c.y, r, r * 0.55).fill({ color: 0x050505 })
+    .ellipse(c.x, c.y - 1, r * 0.85, r * 0.45).fill({ color: 0x101010 });
+  ctx.holeRing.clear();
+  if (state.hole.selected) {
+    const half = (CELL * HOLE_SIZE) / 2 + 2;
+    ctx.holeRing
+      .rect(c.x - half, c.y - half, half * 2, half * 2)
+      .stroke({ width: 2, color: 0xffd96b });
+  }
+}
+
+function drawDeathEffects(ctx: RenderContext, state: GameState) {
+  const seen = new Set<number>();
+  const frames = ctx.deathFrames;
+  for (const e of state.deathEffects) {
+    seen.add(e.id);
+    if (!frames) continue;
+    let sprite = ctx.deathViews.get(e.id);
+    if (!sprite) {
+      sprite = new Sprite(frames.textures[0]);
+      sprite.anchor.set(0.5);
+      sprite.position.set(e.x, e.y);
+      // Scale once on creation to ~one cell wide.
+      const target = 40;
+      const sc = target / Math.max(frames.textures[0].width || target, 1);
+      sprite.scale.set(sc);
+      ctx.effectsLayer.addChild(sprite);
+      ctx.deathViews.set(e.id, sprite);
+    }
+    const elapsed = state.now - e.spawnAt;
+    if (elapsed >= frames.duration) {
+      sprite.visible = false;
+    } else {
+      // Linear scan — there are typically <20 frames, faster than a binary
+      // search at this size and avoids stale-frame edge cases.
+      let idx = frames.ends.length - 1;
+      for (let i = 0; i < frames.ends.length; i++) {
+        if (elapsed < frames.ends[i]) { idx = i; break; }
+      }
+      sprite.texture = frames.textures[idx];
+    }
+  }
+  for (const [id, sprite] of ctx.deathViews) {
+    if (!seen.has(id)) {
+      sprite.destroy();
+      ctx.deathViews.delete(id);
+    }
+  }
+}
+
+function drawFloaters(ctx: RenderContext, state: GameState) {
+  const seen = new Set<number>();
+  for (const f of state.floaters) {
+    seen.add(f.id);
+    let t = ctx.floaterViews.get(f.id);
+    if (!t) {
+      t = new Text({
+        text: f.text,
+        style: {
+          fontFamily: fontFamilyById(getOptions().fonts.mono.family).css,
+          fontSize: 14,
+          fill: f.color,
+          fontWeight: 'bold',
+          stroke: { color: 0x000000, width: 3 },
+        },
+      });
+      t.anchor.set(0.5, 1);
+      ctx.floatersLayer.addChild(t);
+      ctx.floaterViews.set(f.id, t);
+    }
+    const age = state.now - f.spawnAt;
+    const k = Math.max(0, Math.min(1, age / f.lifetime));
+    t.position.set(f.x, f.y - 18 - k * 28);
+    t.alpha = 1 - k;
+  }
+  for (const [id, t] of ctx.floaterViews) {
+    if (!seen.has(id)) {
+      t.destroy();
+      ctx.floaterViews.delete(id);
+    }
+  }
+}
+
 function drawSelectionRing(g: Graphics, size: number) {
   const half = size / 2 + 4;
   g.clear();
@@ -484,11 +669,10 @@ function drawBuildingBody(g: Graphics, b: Building) {
       g.rect(i * 24 - w / 2, -half + 6, w, def.size - 18)
         .fill({ color: 0x000000, alpha: 0.32 });
     }
-  } else if (b.kind === 'nuclear_reactor') {
-    // Reactor core: concentric rings.
-    g.circle(0, 0, def.size / 2 - 6).stroke({ width: 2, color: 0x000000, alpha: 0.35 });
-    g.circle(0, 0, def.size / 2 - 14).stroke({ width: 2, color: 0x000000, alpha: 0.35 });
-    g.circle(0, 0, 4).fill({ color: 0x000000, alpha: 0.45 });
+  } else if (b.kind === 'goblin_hole') {
+    // A dark pit at the center plus a smaller inner ring for depth.
+    g.circle(0, 0, def.size * 0.35).fill({ color: 0x000000, alpha: 0.55 });
+    g.circle(0, 0, def.size * 0.22).fill({ color: 0x000000, alpha: 0.7 });
   }
 }
 
@@ -507,6 +691,17 @@ export function render(state: GameState, ctx: RenderContext) {
 
   const opts = getOptions();
   const displayPx = opts.goblinDisplayPx;
+
+  // Goblin Hole — re-drawn each frame (cheap and keeps the position cell-exact
+  // even if anything moves it later).
+  drawHole(ctx, state);
+
+  // Floaters: rising fading text. Sim adds & expires; renderer just animates.
+  drawFloaters(ctx, state);
+
+  // Death effects: spawn a one-shot GifSprite per new entry; the sim expires
+  // entries after a couple seconds and we tear the sprite down with them.
+  drawDeathEffects(ctx, state);
 
   // Goblins
   const seenG = new Set<number>();
@@ -532,7 +727,9 @@ export function render(state: GameState, ctx: RenderContext) {
     const idleFor = (g.state.kind === 'idle' && g.idleSince !== null)
       ? state.now - g.idleSince : 0;
     const breakdancing = idleFor >= GOBLIN.breakdanceAfter;
+    const swinging = g.state.kind === 'going_to_kill' && g.state.attackAt !== undefined;
     const sheet =
+      (swinging ? goblinSwipeSheet : null) ??
       (breakdancing ? goblinBreakdanceSheet : null) ??
       (g.target !== null ? goblinWalkSheet : goblinIdleSheet) ??
       goblinWalkSheet ?? goblinIdleSheet;
@@ -561,6 +758,45 @@ export function render(state: GameState, ctx: RenderContext) {
     if (!seenG.has(id)) {
       v.container.destroy({ children: true });
       ctx.goblinViews.delete(id);
+    }
+  }
+
+  // Minotaurs — sass-walk loop while moving / hunting, mutant swipe while
+  // winding up an attack (vs. goblin, vs. minotaur, or vs. building).
+  const minotaurDisplayPx = displayPx * (MINOTAUR.radius / GOBLIN.radius);
+  const seenT = new Set<number>();
+  for (const t of state.minotaurs.values()) {
+    seenT.add(t.id);
+    let v = ctx.minotaurViews.get(t.id);
+    if (!v) {
+      v = makeMinotaurView();
+      ctx.minotaurLayer.addChild(v.container);
+      ctx.minotaurViews.set(t.id, v);
+    }
+    v.container.position.set(t.pos.x, t.pos.y);
+    v.selectionRing.visible = t.selected;
+    v.shadow.visible = opts.goblinShadow;
+    if (opts.goblinShadow) {
+      v.shadow.position.set(0, minotaurDisplayPx * 0.32);
+      const sy = minotaurDisplayPx / 64;
+      v.shadow.scale.set(sy * 0.75, sy);
+    }
+    const winding =
+      (t.state.kind === 'going_to_kill' || t.state.kind === 'going_to_kill_minotaur' || t.state.kind === 'going_to_destroy')
+      && t.state.attackAt !== undefined;
+    const sheet = (winding ? minotaurSwipeSheet : null) ?? minotaurWalkSheet;
+    if (sheet) {
+      const dir = dirIndex(sheet.meta, t.facing);
+      const fpd = sheet.meta.framesPerDirection;
+      const frame = Math.floor(state.now * sheet.fps) % fpd;
+      v.sprite.texture = sheet.frames[dir][frame];
+      v.sprite.scale.set(minotaurDisplayPx / sheet.meta.spriteSize);
+    }
+  }
+  for (const [id, v] of ctx.minotaurViews) {
+    if (!seenT.has(id)) {
+      v.container.destroy({ children: true });
+      ctx.minotaurViews.delete(id);
     }
   }
 

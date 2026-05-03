@@ -161,10 +161,25 @@
       }
       .task-text strong { color: #b8bec6; font-weight: 600; }
       .build-button.locked { display: none; }
+      .build-warning {
+        position: absolute; left: 0; right: 0; bottom: 0;
+        font-family: var(--font-body);
+        font-size: calc(10px * var(--font-body-scale));
+        color: #ffb0b0;
+        background: rgba(120, 30, 30, 0.55);
+        text-align: center; padding: 2px 4px;
+        z-index: 2;
+        pointer-events: none;
+      }
       .build-name { font-family: var(--font-display); font-size: calc(14px * var(--font-display-scale)); font-weight: 400; letter-spacing: 0.5px; margin-bottom: 3px; }
       .build-meta { font-family: var(--font-body); font-size: calc(11px * var(--font-body-scale)); color: var(--sidebar-title); line-height: 1.5; }
       .build-cost { color: #d96b6b; }
       .build-cost.met { color: #6fbf73; }
+      .build-cost.owned { color: #6a7080; }
+      .build-button-compact { padding: 5px 10px; }
+      .build-button-compact .build-name { margin-bottom: 0; }
+      .build-cost-side { font-family: var(--font-body); font-size: calc(11px * var(--font-body-scale)); white-space: nowrap; }
+      .build-separator { height: 1px; background: rgba(255,255,255,0.08); margin: 8px 4px; }
       .build-power-cost { color: #d96b6b; }
       .build-power-cost.met { color: #6fbf73; }
       .build-req { color: #d96b6b; }
@@ -238,7 +253,14 @@
       .portrait-building.goblin_wheel.active { background: #3a6a8a; border-color: #8acfff; }
       .portrait-building.gas_engine.active { background: #3a6a3a; border-color: #8aef8a; }
       .portrait-building.datacentre.active { background: #8a3a3a; border-color: #ff8080; }
-      .portrait-building.nuclear_reactor.active { background: #3a8a5a; border-color: #9af0a0; }
+      .portrait-building.goblin_hole.active { background: #4a2a4a; border-color: #a06aff; }
+      .portrait-hole {
+        width: 44px; height: 44px;
+        border-radius: 50%;
+        background: radial-gradient(circle at 50% 40%, #1a1a1a 0%, #050505 70%);
+        border: 2px solid #2a2a2a;
+        box-shadow: inset 0 4px 8px rgba(0,0,0,0.85);
+      }
       .portrait-building.constructing { background: #3a3f47; border-color: #808890; }
       .portrait-building.dormant { background: #5a4a3a; border-color: #d99a5a; }
       .info-details {
@@ -265,6 +287,17 @@
         cursor: pointer;
       }
       .info-destroy:hover { background: #6a3838; border-color: #b04848; }
+      .hole-toggle {
+        display: flex; align-items: center; gap: 6px;
+        font-family: var(--font-body);
+        font-size: calc(11px * var(--font-body-scale));
+        color: #ccc;
+        margin-top: 6px;
+        cursor: pointer;
+        user-select: none;
+        pointer-events: auto;
+      }
+      .hole-toggle input { cursor: pointer; pointer-events: auto; }
 
       /* ───────── Options cog + panel ───────── */
       #options-cog {
@@ -420,6 +453,7 @@
             <div class="info-state" id="info-state"></div>
             <div class="info-extra" id="info-extra"></div>
             <button class="info-destroy" id="info-destroy" style="display:none">Destroy</button>
+            <button class="info-destroy" id="info-kill" style="display:none">Kill</button>
           </div>
         </div>
       </div>
@@ -427,11 +461,16 @@
         <div class="panel">
           <div class="panel-title">Resources</div>
           <div class="resource-row"><span>Ƶ Money</span><span class="resource-value" id="money">0</span></div>
-          <div class="resource-row"><span>Power</span><span class="resource-value" id="power">0 / 0 W</span></div>
+          <div class="resource-row" id="row-blood" style="display:none"><span style="color:#d96b6b">Blood</span><span class="resource-value" id="blood" style="color:#ff8a8a">0</span></div>
+          <div class="resource-row" id="row-power" style="display:none"><span>Power</span><span class="resource-value" id="power">0 / 0 W</span></div>
         </div>
         <div class="panel" id="panel-summon">
           <div class="panel-title">Summon</div>
           <div id="summon-list"></div>
+        </div>
+        <div class="panel" id="panel-ritual" style="display:none">
+          <div class="panel-title">Ritual</div>
+          <div id="ritual-list"></div>
         </div>
         <div class="panel" id="panel-build">
           <div class="panel-title">Build</div>

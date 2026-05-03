@@ -6,6 +6,7 @@ import {
 
 export type OptionsUICallbacks = {
   onCheatMoney: () => void;
+  onTaskSkip: () => void;
 };
 
 export function setupOptionsUI(root: HTMLElement, callbacks: OptionsUICallbacks): void {
@@ -95,6 +96,13 @@ function rebuildPanel(panel: HTMLElement, callbacks: OptionsUICallbacks): void {
   cheat.textContent = 'Cheat +Ƶ100,000';
   cheat.addEventListener('click', () => callbacks.onCheatMoney());
   panel.appendChild(cheat);
+
+  const taskSkip = document.createElement('button');
+  taskSkip.type = 'button';
+  taskSkip.className = 'options-reset';
+  taskSkip.textContent = 'Task skip';
+  taskSkip.addEventListener('click', () => callbacks.onTaskSkip());
+  panel.appendChild(taskSkip);
 
   const reset = document.createElement('button');
   reset.type = 'button';

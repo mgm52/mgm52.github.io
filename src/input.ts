@@ -1,11 +1,12 @@
 import { Application, Container, FederatedPointerEvent, Graphics } from 'pixi.js';
 import { playSound } from './audio';
-import { BUILDING_DEFS, BuildingKind, CELL, GOBLIN, RENDER_SCALE, WORLD, formatPower } from './config';
+import { BUILDING_DEFS, BuildingKind, CELL, GOBLIN, MINOTAUR, RENDER_SCALE, WORLD, formatPower } from './config';
 import { RenderContext, clampCamera } from './render';
+import { autoAssignAllIdle } from './sim';
 import {
-  Building, Cell, GameState, Goblin,
-  appendLog, buildingAtCell, cellCenter, cellKey, defOf, findFreeCellNear,
-  isCellBlocked, isInBounds, pixelToCell,
+  Building, Cell, GameState, Goblin, Minotaur,
+  appendLog, buildingAtCell, cellKey, defOf, findFreeCellNear,
+  holeAtCell, isCellBlocked, isInBounds, pixelToCell,
 } from './state';
 
 type ActivePointer = {
@@ -160,14 +161,19 @@ export function setupInput(
     const additive = e.shiftKey;
     if (dist < 4) {
       const g = goblinAt(state, local.x, local.y);
+      const m = g ? null : minotaurAt(state, local.x, local.y);
       let b: Building | null = null;
-      if (!g) {
+      let onHole = false;
+      if (!g && !m) {
         const c = pixelToCell(local.x, local.y);
         b = buildingAtCell(state, c.cx, c.cy);
+        if (!b) onHole = holeAtCell(state, c.cx, c.cy);
       }
       if (!additive) clearSelection(state);
       if (g) { g.selected = true; playSound('select', 0.33); }
+      else if (m) { m.selected = true; playSound('select', 0.33); }
       else if (b) { b.selected = true; playSound('select', 0.33); }
+      else if (onHole) { state.hole.selected = true; playSound('select', 0.33); }
     } else {
       const x1 = Math.min(input.dragStart.x, local.x);
       const y1 = Math.min(input.dragStart.y, local.y);
@@ -178,6 +184,12 @@ export function setupInput(
       for (const g of state.goblins.values()) {
         if (g.pos.x >= x1 && g.pos.x <= x2 && g.pos.y >= y1 && g.pos.y <= y2) {
           g.selected = true;
+          any = true;
+        }
+      }
+      for (const m of state.minotaurs.values()) {
+        if (m.pos.x >= x1 && m.pos.x <= x2 && m.pos.y >= y1 && m.pos.y <= y2) {
+          m.selected = true;
           any = true;
         }
       }
@@ -251,7 +263,9 @@ function playGruntBurst(count: number) {
 
 function clearSelection(state: GameState) {
   for (const g of state.goblins.values()) g.selected = false;
+  for (const m of state.minotaurs.values()) m.selected = false;
   for (const b of state.buildings.values()) b.selected = false;
+  state.hole.selected = false;
 }
 
 function goblinAt(state: GameState, x: number, y: number): Goblin | null {
@@ -261,19 +275,75 @@ function goblinAt(state: GameState, x: number, y: number): Goblin | null {
   return null;
 }
 
+function minotaurAt(state: GameState, x: number, y: number): Minotaur | null {
+  // Larger hit-radius than the body collider since the minotaur's sprite is
+  // significantly bigger than the goblin's.
+  for (const m of state.minotaurs.values()) {
+    if (Math.hypot(m.pos.x - x, m.pos.y - y) <= MINOTAUR.radius * 1.4) return m;
+  }
+  return null;
+}
+
 function handleRightClick(state: GameState, x: number, y: number) {
-  const selected = [...state.goblins.values()].filter((g) => g.selected);
-  if (selected.length === 0) return;
-  playGruntBurst(selected.length);
-  const target = pixelToCell(x, y);
-  const b = buildingAtCell(state, target.cx, target.cy);
-  if (b) {
-    assignToBuilding(state, selected, b);
+  const selectedGoblins = [...state.goblins.values()].filter((g) => g.selected);
+  const selectedMinotaurs = [...state.minotaurs.values()].filter((m) => m.selected);
+  if (selectedGoblins.length === 0 && selectedMinotaurs.length === 0) return;
+  if (selectedGoblins.length > 0) playGruntBurst(selectedGoblins.length);
+
+  const targetGoblin = goblinAt(state, x, y);
+  const targetMinotaur = targetGoblin ? null : minotaurAt(state, x, y);
+  const targetCell = pixelToCell(x, y);
+  const targetBuilding = (targetGoblin || targetMinotaur)
+    ? null
+    : buildingAtCell(state, targetCell.cx, targetCell.cy);
+
+  // Minotaur commands.
+  if (selectedMinotaurs.length > 0) {
+    if (targetMinotaur) {
+      // Minotaur-on-minotaur — the target itself is excluded.
+      const attackers = selectedMinotaurs.filter(m => m.id !== targetMinotaur.id);
+      for (const m of attackers) {
+        m.target = null;
+        m.state = { kind: 'going_to_kill_minotaur', targetId: targetMinotaur.id };
+      }
+      if (attackers.length > 0) {
+        appendLog(state, `${attackers.length} minotaur(s) ordered to gore Minotaur #${targetMinotaur.id}.`);
+      }
+    } else if (targetBuilding) {
+      for (const m of selectedMinotaurs) {
+        m.target = null;
+        m.state = { kind: 'going_to_destroy', buildingId: targetBuilding.id };
+      }
+      appendLog(state, `${selectedMinotaurs.length} minotaur(s) ordered to smash ${defOf(targetBuilding).name} #${targetBuilding.id}.`);
+    }
+  }
+
+  if (selectedGoblins.length === 0) return;
+
+  // Kill order: right-click on another goblin sends every selected attacker
+  // toward it. The target itself, even if selected, is excluded so the order
+  // never resolves to "kill yourself".
+  if (targetGoblin) {
+    const attackers = selectedGoblins.filter(g => g.id !== targetGoblin.id);
+    if (attackers.length > 0) {
+      for (const g of attackers) {
+        releaseFromBuilding(state, g);
+        g.goal = null;
+        g.path = [];
+        g.state = { kind: 'going_to_kill', targetId: targetGoblin.id };
+      }
+      appendLog(state, `${attackers.length} goblin(s) ordered to kill #${targetGoblin.id}.`);
+      return;
+    }
+  }
+
+  if (targetBuilding) {
+    assignToBuilding(state, selectedGoblins, targetBuilding);
   } else {
     const reserved = new Set<string>();
-    for (const g of selected) {
+    for (const g of selectedGoblins) {
       releaseFromBuilding(state, g);
-      const cell = findFreeCellNear(state, target.cx, target.cy, g.id, reserved, 600);
+      const cell = findFreeCellNear(state, targetCell.cx, targetCell.cy, g.id, reserved, 600);
       if (cell) {
         reserved.add(cellKey(cell.cx, cell.cy));
         g.goal = cell;
@@ -347,9 +417,7 @@ function placeBuilding(state: GameState, x: number, y: number) {
   const kind = state.pendingBuild.kind;
   const def = BUILDING_DEFS[kind];
   if (state.money < def.cost) { playSound('error'); appendLog(state, 'Not enough Ƶ.'); return; }
-  // Goblins are no longer required to place — any idle ones get auto-assigned;
-  // shortfall is left for the player to staff up with right-clicks later.
-  const idle = [...state.goblins.values()].filter((g) => g.state.kind === 'idle');
+  if (def.bloodCost && state.blood < def.bloodCost) { playSound('error'); appendLog(state, `Need ${def.bloodCost} blood to build ${def.name}.`); return; }
   if (def.powerOutput < 0) {
     const draw = -def.powerOutput;
     const available = state.lastPowerProduced - state.lastPowerConsumed;
@@ -367,6 +435,7 @@ function placeBuilding(state: GameState, x: number, y: number) {
   }
 
   state.money -= def.cost;
+  if (def.bloodCost) state.blood -= def.bloodCost;
   const b: Building = {
     id: state.nextId++,
     kind,
@@ -377,27 +446,10 @@ function placeBuilding(state: GameState, x: number, y: number) {
     selected: false,
   };
   state.buildings.set(b.id, b);
-
-  const center = cellCenter({
-    cx: tl.cx + (def.cellSize - 1) / 2,
-    cy: tl.cy + (def.cellSize - 1) / 2,
-  });
-  idle.sort((a, c) =>
-    Math.hypot(a.pos.x - center.x, a.pos.y - center.y) -
-    Math.hypot(c.pos.x - center.x, c.pos.y - center.y),
-  );
-  const initialBuilders = Math.min(idle.length, def.buildersRequired);
-  for (let i = 0; i < initialBuilders; i++) {
-    const g = idle[i];
-    b.assignedGoblins.push(g.id);
-    g.goal = null;
-    g.path = [];
-    g.state = { kind: 'going_to_build', buildingId: b.id };
-  }
   state.pendingBuild = null;
   playSound('place', 1.6);
-  if (initialBuilders > 0) playGruntBurst(initialBuilders);
-  appendLog(state, `${def.name} #${b.id} construction started.`);
+  appendLog(state, `${def.name} #${b.id} construction started — right-click goblins onto it to staff the build.`);
+  autoAssignAllIdle(state);
 }
 
 function drawGhost(input: InputState, x: number, y: number, state: GameState) {

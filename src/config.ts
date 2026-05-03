@@ -13,12 +13,44 @@ export const RENDER_SCALE = 1.3; // visual zoom factor applied to the world laye
 export const GOBLIN = {
   speed: 110,
   radius: 12,
-  spawnCost: 50,
+  spawnCost: 0,
   spawnTime: 2,
   arriveDist: 2,
-  concurrentBuildLimit: 5,
+  // Hard ceiling for the spawn-progress track. Per-hole capacity lives on
+  // `state.hole.spawnCapacity` and currently doesn't ramp; the headroom is
+  // here in case future upgrades raise it.
+  concurrentBuildLimit: 12,
   breakdanceAfter: 30, // seconds of continuous idle before goblins start breakdancing
 };
+
+// Minotaur — a player-summoned predator. Walks the map, hunts the nearest
+// goblin, and gives the same KILL_REWARD per kill as a goblin-on-goblin kill.
+// Minotaurs respect building footprints, walls, and the world border when
+// stepping; goblin occupancy doesn't block them (they hunt straight through).
+export const MINOTAUR = {
+  speed: 70,
+  radius: 22,
+  bloodCost: 8,
+  spawnTime: 5,
+  spawnCapacity: 1,
+  arriveDist: 2,
+  attackWindup: 0.5,
+  wanderInterval: 1.2,
+};
+
+// One-shot Ritual upgrades. Autotask + Goblinsixstack unlock once a Phone
+// Farm has been built; Autospawn unlocks once a Gas Engine has been built.
+// "Autotask": newly-hatched goblins route themselves to understaffed
+// buildings. "Goblinsixstack": permanent capacity bump (3 → 6).
+// "Autospawn": queues a free spawn every 3 seconds.
+export const SUMMON_UPGRADES = {
+  autoAssign: { bloodCost: 13 },
+  widerHole: { bloodCost: 6, capacity: 6 },
+  autoSpawn: { bloodCost: 13, intervalSeconds: 3 },
+};
+
+// Killing a goblin yields this much money + this much blood.
+export const KILL_REWARD = { money: 25, blood: 1 };
 
 export type BuildingColors = {
   active: number; activeBorder: number;
@@ -32,6 +64,7 @@ export type BuildingDef = {
   cellSize: number;
   size: number;           // pixel size = cellSize * CELL
   cost: number;
+  bloodCost?: number;     // optional secondary cost in blood
   buildersRequired: number;
   buildTime: number;      // seconds
   maintainersRequired: number;
@@ -50,9 +83,9 @@ export const BUILDING_DEFS = {
   phone_farm: def(3, {
     name: 'Phone Farm',
     short: 'PF',
-    cost: 250,
+    cost: 150,
     buildersRequired: 3,
-    buildTime: 8,
+    buildTime: 4,
     maintainersRequired: 3,
     income: 12,
     powerOutput: -200, // 200 W draw
@@ -67,7 +100,7 @@ export const BUILDING_DEFS = {
   goblin_wheel: def(2, {
     name: 'Goblin Wheel',
     short: 'GW',
-    cost: 100,
+    cost: 75,
     buildersRequired: 1,
     buildTime: 5,
     maintainersRequired: 1,
@@ -101,7 +134,7 @@ export const BUILDING_DEFS = {
   gas_engine: def(4, {
     name: 'Gas Engine',
     short: 'GE',
-    cost: 1200,
+    cost: 1500,
     buildersRequired: 3,
     buildTime: 15,
     maintainersRequired: 3,
@@ -115,29 +148,34 @@ export const BUILDING_DEFS = {
       constructing: 0x3a3f47, constructingBorder: 0x808890,
     },
   }),
-  nuclear_reactor: def(2, {
-    name: 'Nuclear Reactor',
-    short: 'NR',
-    cost: 500_000,
-    buildersRequired: 4,
-    buildTime: 15,
-    maintainersRequired: 4,
+  goblin_hole: def(2, {
+    name: 'Goblin Hole',
+    short: 'GH',
+    cost: 1500,
+    bloodCost: 150,
+    buildersRequired: 1,
+    buildTime: 8,
+    maintainersRequired: 1,
     income: 0,
-    powerOutput: 1_000_000_000, // 1 GW
-    wanderInterval: 1.1,
+    powerOutput: -50, // 50 W
+    wanderInterval: 1.0,
     wanderJitter: 0.4,
     colors: {
-      active: 0x3a8a5a, activeBorder: 0x9af0a0,
-      dormant: 0x3a5a4a, dormantBorder: 0x6a9a7a,
+      active: 0x4a2a4a, activeBorder: 0xa06aff,
+      dormant: 0x3a2a3a, dormantBorder: 0x705580,
       constructing: 0x3a3f47, constructingBorder: 0x808890,
     },
   }),
 } as const;
 
-export type BuildingKind = keyof typeof BUILDING_DEFS;
-export const BUILDABLE_KINDS: BuildingKind[] = ['goblin_wheel', 'gas_engine', 'datacentre', 'phone_farm', 'nuclear_reactor'];
+// Spawn cadence for the Goblin Hole building (one free goblin per interval
+// while active). Independent of the main hole's autospawn ritual.
+export const GOBLIN_HOLE_SPAWN_INTERVAL = 5;
 
-export const START_MONEY = 1000;
+export type BuildingKind = keyof typeof BUILDING_DEFS;
+export const BUILDABLE_KINDS: BuildingKind[] = ['goblin_wheel', 'gas_engine', 'datacentre', 'phone_farm', 'goblin_hole'];
+
+export const START_MONEY = 0;
 export const START_GOBLINS = 0;
 // Place start near the top-left of the playable area, just inside the wall border.
 export const START_CELL = { cx: WALL_BORDER + 4, cy: WALL_BORDER + 8 };

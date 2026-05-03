@@ -1,6 +1,6 @@
 import {
   BUILDING_DEFS, BuildingDef, BuildingKind, CELL, COLS, ROWS,
-  START_CELL, START_GOBLINS, START_MONEY, WALL_BORDER,
+  START_CELL, START_GOBLINS, START_MONEY, WALL_BORDER, formatPower,
 } from './config';
 
 export type Vec2 = { x: number; y: number };
@@ -20,7 +20,8 @@ export type GoblinState =
   | { kind: 'going_to_build'; buildingId: number }
   | { kind: 'going_to_maintain'; buildingId: number }
   | { kind: 'building'; buildingId: number }
-  | { kind: 'maintaining'; buildingId: number; nextWanderAt: number };
+  | { kind: 'maintaining'; buildingId: number; nextWanderAt: number }
+  | { kind: 'going_to_kill'; targetId: number; attackAt?: number };
 
 export type Goblin = {
   id: number;
@@ -35,6 +36,23 @@ export type Goblin = {
   idleSince: number | null; // game time when the current idle streak began
 };
 
+export type MinotaurState =
+  | { kind: 'wander' }
+  | { kind: 'going_to_kill'; targetId: number; attackAt?: number }
+  | { kind: 'going_to_kill_minotaur'; targetId: number; attackAt?: number }
+  | { kind: 'going_to_destroy'; buildingId: number; attackAt?: number };
+
+export type Minotaur = {
+  id: number;
+  pos: Vec2;
+  cell: Cell;
+  target: Cell | null;    // pixel-lerp target cell (mid-step)
+  facing: number;
+  state: MinotaurState;
+  nextWanderAt: number;
+  selected: boolean;
+};
+
 export type BuildingState = 'constructing' | 'active' | 'dormant';
 
 export type Building = {
@@ -45,15 +63,62 @@ export type Building = {
   buildProgress: number;
   assignedGoblins: number[];
   selected: boolean;
+  // goblin_hole: countdown to next free spawn. Set when the building first
+  // goes active; ignored on every other kind.
+  nextSpawnAt?: number;
 };
 
 export type PendingBuild = { kind: BuildingKind } | null;
 
+// Short-lived floating text drawn at a world position — used for kill rewards,
+// income ticks, power going online, etc. Removed by the renderer once aged out.
+export type Floater = {
+  id: number;
+  x: number; y: number;
+  text: string;
+  color: number;
+  spawnAt: number;
+  lifetime: number;
+};
+
+// One-shot blood-explosion GIF effect played at a world position.
+export type DeathEffect = {
+  id: number;
+  x: number; y: number;
+  spawnAt: number;
+};
+
+// The Goblin Hole — a 1×1 spawn point. Goblins emerge from cells around it.
+// Buildings CAN be placed on top of the hole's cell; while one is, new spawns
+// are blocked until the building is destroyed.
+export const HOLE_SIZE = 1;
+export type Hole = {
+  cell: Cell;
+  selected: boolean;
+  spawnCapacity: number;
+};
+
 export type GameState = {
   money: number;
+  // Blood is earned by killing goblins. Once any blood is earned in this run
+  // `bloodUnlocked` flips true and the resource row stays visible (sticky).
+  blood: number;
+  bloodUnlocked: boolean;
   goblins: Map<number, Goblin>;
+  minotaurs: Map<number, Minotaur>;
   buildings: Map<number, Building>;
+  hole: Hole;
+  // Ritual upgrades — sticky once bought, apply game-wide.
+  autoAssignEnabled: boolean;
+  widerHoleEnabled: boolean;
+  autoSpawnEnabled: boolean;
+  autoSpawnTimer: number;
+  floaters: Floater[];
+  deathEffects: DeathEffect[];
+  // Tick state for the 1Hz income-floater cadence.
+  nextIncomeFloatAt: number;
   spawnQueue: { remaining: number; slot: number }[];
+  minotaurSpawnQueue: { remaining: number }[];
   pendingBuild: PendingBuild;
   log: { time: number; msg: string }[];
   occupancy: Map<string, number>;
@@ -196,9 +261,25 @@ function buildBorderWalls(): Set<string> {
 export function createInitialState(): GameState {
   const state: GameState = {
     money: START_MONEY,
+    blood: 0,
+    bloodUnlocked: false,
     goblins: new Map(),
+    minotaurs: new Map(),
     buildings: new Map(),
+    hole: {
+      cell: { cx: START_CELL.cx, cy: START_CELL.cy },
+      selected: false,
+      spawnCapacity: 3,
+    },
+    autoAssignEnabled: false,
+    widerHoleEnabled: false,
+    autoSpawnEnabled: false,
+    autoSpawnTimer: 0,
+    floaters: [],
+    deathEffects: [],
+    nextIncomeFloatAt: 1,
     spawnQueue: [],
+    minotaurSpawnQueue: [],
     pendingBuild: null,
     log: [],
     occupancy: new Map(),
@@ -233,19 +314,6 @@ export function createInitialState(): GameState {
     }
     radius++;
   }
-  // Pre-built (but unstaffed) Goblin Wheel near the spawn area, used by the first tutorial task.
-  const wheelCell: Cell = { cx: START_CELL.cx + 4, cy: START_CELL.cy };
-  const wheel: Building = {
-    id: state.nextId++,
-    kind: 'goblin_wheel',
-    cell: wheelCell,
-    state: 'dormant',
-    buildProgress: 1,
-    assignedGoblins: [],
-    selected: false,
-  };
-  state.buildings.set(wheel.id, wheel);
-
   appendLog(state, 'Welcome, overseer.');
   return state;
 }
@@ -267,9 +335,61 @@ export function totalIncome(state: GameState): number {
   return inc;
 }
 
+export function pushDeathEffect(state: GameState, x: number, y: number) {
+  state.deathEffects.push({
+    id: state.nextId++,
+    x, y,
+    spawnAt: state.now,
+  });
+}
+
+export function pushFloater(
+  state: GameState,
+  x: number, y: number,
+  text: string,
+  color: number,
+  lifetime = 1.4,
+) {
+  state.floaters.push({
+    id: state.nextId++,
+    x, y, text, color,
+    spawnAt: state.now,
+    lifetime,
+  });
+}
+
+export function removeGoblin(state: GameState, goblinId: number) {
+  const g = state.goblins.get(goblinId);
+  if (!g) return;
+  // Detach from any building it was assigned to.
+  const s = g.state;
+  if (s.kind === 'going_to_build' || s.kind === 'going_to_maintain' ||
+      s.kind === 'building' || s.kind === 'maintaining') {
+    const b = state.buildings.get(s.buildingId);
+    if (b) {
+      const i = b.assignedGoblins.indexOf(goblinId);
+      if (i >= 0) b.assignedGoblins.splice(i, 1);
+    }
+  }
+  releaseCell(state, g.cell.cx, g.cell.cy, goblinId);
+  if (g.target) releaseCell(state, g.target.cx, g.target.cy, goblinId);
+  state.goblins.delete(goblinId);
+}
+
 export function destroyBuilding(state: GameState, buildingId: number) {
   const b = state.buildings.get(buildingId);
   if (!b) return;
+  // If the building was online, its power contribution is going away — show
+  // the inverse of the floater that appeared when it came online.
+  const def = defOf(b);
+  if (b.state === 'active' && def.powerOutput !== 0) {
+    const c = buildingCenter(b);
+    if (def.powerOutput > 0) {
+      pushFloater(state, c.x, c.y, `-${formatPower(def.powerOutput)}`, 0xd96b6b, 1.6);
+    } else {
+      pushFloater(state, c.x, c.y, `+${formatPower(-def.powerOutput)}`, 0x8acfff, 1.6);
+    }
+  }
   // Release any assigned goblins; they'll auto-exit via the idle handler if they're
   // still standing on what used to be the footprint.
   for (const gid of b.assignedGoblins) {
@@ -280,6 +400,37 @@ export function destroyBuilding(state: GameState, buildingId: number) {
     g.path = [];
   }
   state.buildings.delete(buildingId);
+}
+
+export function holeAtCell(state: GameState, cx: number, cy: number): boolean {
+  const h = state.hole.cell;
+  return cx >= h.cx && cx < h.cx + HOLE_SIZE && cy >= h.cy && cy < h.cy + HOLE_SIZE;
+}
+
+export function holeCells(state: GameState): Cell[] {
+  const h = state.hole.cell;
+  const out: Cell[] = [];
+  for (let dx = 0; dx < HOLE_SIZE; dx++) {
+    for (let dy = 0; dy < HOLE_SIZE; dy++) {
+      out.push({ cx: h.cx + dx, cy: h.cy + dy });
+    }
+  }
+  return out;
+}
+
+export function holeCenter(state: GameState): Vec2 {
+  return cellCenter({
+    cx: state.hole.cell.cx + (HOLE_SIZE - 1) / 2,
+    cy: state.hole.cell.cy + (HOLE_SIZE - 1) / 2,
+  });
+}
+
+// True iff a building's footprint covers any of the Goblin Hole's 2×2 cells.
+export function holeBlockedByBuilding(state: GameState): boolean {
+  for (const c of holeCells(state)) {
+    if (buildingAtCell(state, c.cx, c.cy)) return true;
+  }
+  return false;
 }
 
 export function maintainerCount(state: GameState, b: Building): number {

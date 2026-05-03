@@ -17,6 +17,8 @@ const REGISTRY = {
   error:        'audio/error.mp3',
   online:       'audio/online.mp3',
   command_3:    'audio/command_3.mp3',
+  ritual:       'audio/ritual.mp3',
+  goblin_death: 'audio/goblin_death.mp3',
 } as const;
 
 export type SoundName = keyof typeof REGISTRY;
