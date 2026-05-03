@@ -114,7 +114,17 @@ async function main() {
       state.blood -= cost;
       state.goldgoblinsEnabled = true;
       playSound('ritual');
-      appendLog(state, 'Goldgoblins — 10% chance of gold-tinted spawns dropping Ƶ150.');
+      appendLog(state, 'Goldgoblins — gold-tinted spawns drop Ƶ250.');
+    },
+    onBuyGoldgoblinsX10: () => {
+      if (!state.goldgoblinsEnabled) return;
+      if (state.goldgoblinMultiplier >= SUMMON_UPGRADES.goldgoblinsX10.multiplier) return;
+      const cost = SUMMON_UPGRADES.goldgoblinsX10.bloodCost;
+      if (state.blood < cost) { playSound('error'); return; }
+      state.blood -= cost;
+      state.goldgoblinMultiplier = SUMMON_UPGRADES.goldgoblinsX10.multiplier;
+      playSound('ritual');
+      appendLog(state, 'Goldgoblins x10 — gold drops jump to Ƶ2500.');
     },
     onDig: (dir) => {
       if (state.dugDirections.has(dir)) return;
@@ -133,7 +143,9 @@ async function main() {
       const g = state.goblins.get(id);
       if (!g) return;
       const x = g.pos.x, y = g.pos.y;
-      const reward = g.gold ? GOLD_KILL_REWARD : KILL_REWARD;
+      const reward = g.gold
+        ? { money: GOLD_KILL_REWARD.money * state.goldgoblinMultiplier, blood: GOLD_KILL_REWARD.blood }
+        : KILL_REWARD;
       removeGoblin(state, id);
       state.money += reward.money;
       state.blood += reward.blood;

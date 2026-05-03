@@ -10,10 +10,11 @@ import {
 } from './state';
 
 // Build buttons appear in this fixed order. Mostly cheapest-first, with
-// goblin_hole pushed to the bottom (it's a late-game capacity expander).
+// goblin_hole slotted right below datacentre (it's an auxiliary capacity
+// expander introduced alongside Datacentres, not a late-game item).
 const SORTED_KINDS: BuildingKind[] = [
   'goblin_wheel', 'phone_farm', 'gas_engine', 'datacentre',
-  'nuclear_reactor', 'hypercentre', 'goblin_hole',
+  'goblin_hole', 'nuclear_reactor', 'hypercentre', 'wall',
 ];
 
 // Inserted between adjacent build buttons that belong to different tutorial
@@ -72,7 +73,7 @@ const TASKS: Task[] = [
   },
   {
     id: 'reach_6mw',
-    text: 'Reach 6 MW of power',
+    text: 'Generate 6 MW of power',
     unlocks: [],
     isDone: (s) => s.lastPowerProduced >= 6_000_000,
     prereq: ['build_gas_engine'],
@@ -80,7 +81,7 @@ const TASKS: Task[] = [
   {
     id: 'run_datacentre',
     text: 'Get a datacentre running',
-    unlocks: ['nuclear_reactor', 'hypercentre'],
+    unlocks: ['nuclear_reactor', 'hypercentre', 'wall'],
     isDone: (s) => {
       for (const b of s.buildings.values()) {
         if (b.kind === 'datacentre' && b.state === 'active') return true;
@@ -97,6 +98,7 @@ export type UICallbacks = {
   onBuyAutoAssign: () => void;
   onBuyAutoSpawn: () => void;
   onBuyGoldgoblins: () => void;
+  onBuyGoldgoblinsX10: () => void;
   onDig: (dir: 'n' | 'e' | 's' | 'w') => void;
   onBuildBuilding: (kind: BuildingKind) => void;
   onDestroyBuilding: (id: number) => void;
@@ -186,6 +188,23 @@ export function setupUI(state: GameState, callbacks: UICallbacks) {
   `;
   goldGoblinsBtn.addEventListener('click', () => { playSound('click'); callbacks.onBuyGoldgoblins(); });
   ritualList.appendChild(goldGoblinsBtn);
+
+  // Goldgoblins x10 — appears once base Goldgoblins is owned. Multiplies the
+  // gold-goblin money drop 10× (Ƶ250 → Ƶ2500).
+  const goldX10Btn = document.createElement('button');
+  goldX10Btn.className = 'build-button build-button-compact';
+  goldX10Btn.id = 'btn-buy-goldgoblins-x10';
+  goldX10Btn.style.display = 'none';
+  goldX10Btn.innerHTML = `
+    <div class="build-content">
+      <div class="build-text">
+        <div class="build-name">Goldgoblins x10</div>
+      </div>
+      <div class="build-cost-side"><span class="build-cost" id="cost-buy-goldgoblins-x10">${SUMMON_UPGRADES.goldgoblinsX10.bloodCost} blood</span></div>
+    </div>
+  `;
+  goldX10Btn.addEventListener('click', () => { playSound('click'); callbacks.onBuyGoldgoblinsX10(); });
+  ritualList.appendChild(goldX10Btn);
 
   // Dig row — four compact buttons (NESW) on a single line, gated on a
   // Datacentre being built. Each is one-shot and costs DIG.bloodCost blood.
@@ -497,6 +516,12 @@ export function refreshUI(state: GameState) {
     gasEngineBuilt, state.goldgoblinsEnabled,
     state.blood >= SUMMON_UPGRADES.goldgoblins.bloodCost,
     `${SUMMON_UPGRADES.goldgoblins.bloodCost} blood`,
+  );
+  refreshRitualButton(
+    'btn-buy-goldgoblins-x10', 'cost-buy-goldgoblins-x10',
+    state.goldgoblinsEnabled, state.goldgoblinMultiplier >= SUMMON_UPGRADES.goldgoblinsX10.multiplier,
+    state.blood >= SUMMON_UPGRADES.goldgoblinsX10.bloodCost,
+    `${SUMMON_UPGRADES.goldgoblinsX10.bloodCost} blood`,
   );
 
   // Dig row: visible once a Datacentre is built. Each direction is one-shot.

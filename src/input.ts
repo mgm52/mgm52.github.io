@@ -125,6 +125,12 @@ export function setupInput(
     const local = e.getLocalPosition(worldLayer);
     if (state.pendingBuild) drawGhost(input, local.x, local.y, state);
     else input.placementGhost.clear();
+    // Drag-paint walls — pointer is held (still in input.pointers) and the
+    // current pending kind is wall. Silently skips duplicate cells.
+    if (state.pendingBuild?.kind === 'wall' && input.pointers.has(e.pointerId)) {
+      const c = pixelToCell(local.x, local.y);
+      tryPlaceWallAt(state, c.cx, c.cy, true);
+    }
     if (!input.isDragging) return;
     input.selectionGfx.clear();
     const x = Math.min(input.dragStart.x, local.x);
@@ -477,6 +483,13 @@ function canPlaceBuilding(state: GameState, topLeft: Cell, kind: BuildingKind): 
 function placeBuilding(state: GameState, x: number, y: number) {
   if (!state.pendingBuild) return;
   const kind = state.pendingBuild.kind;
+  // Wall is a special case: no Building entity, just a wall cell. Stays in
+  // pending mode after placement so the player can drag-paint more.
+  if (kind === 'wall') {
+    const c = pixelToCell(x, y);
+    tryPlaceWallAt(state, c.cx, c.cy, false);
+    return;
+  }
   const def = BUILDING_DEFS[kind];
   if (state.money < def.cost) { playSound('error'); appendLog(state, 'Not enough Ƶ.'); return; }
   if (def.bloodCost && state.blood < def.bloodCost) { playSound('error'); appendLog(state, `Need ${def.bloodCost} blood to build ${def.name}.`); return; }
@@ -512,6 +525,26 @@ function placeBuilding(state: GameState, x: number, y: number) {
   playSound('place', 1.6);
   appendLog(state, `${def.name} #${b.id} construction started — right-click goblins onto it to staff the build.`);
   autoAssignAllIdle(state);
+}
+
+// Wall placement — Ƶ1 per cell, instant, no Building entity. Just adds the
+// cell to state.walls and bumps the version so render redraws. Drag-paint
+// calls this with silent=true so duplicate-cell attempts don't beep.
+function tryPlaceWallAt(state: GameState, cx: number, cy: number, silent: boolean): boolean {
+  if (!isInBounds(cx, cy)) return false;
+  if (state.money < 1) {
+    if (!silent) { playSound('error'); appendLog(state, 'Not enough Ƶ.'); }
+    return false;
+  }
+  const k = cellKey(cx, cy);
+  if (state.walls.has(k)) return false;
+  if (buildingAtCell(state, cx, cy)) return false;
+  if (state.occupancy.has(k)) return false;       // a goblin's standing here
+  if (holeAtCell(state, cx, cy)) return false;
+  state.money -= 1;
+  state.walls.add(k);
+  state.wallsVersion++;
+  return true;
 }
 
 function drawGhost(input: InputState, x: number, y: number, state: GameState) {

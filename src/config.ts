@@ -57,7 +57,8 @@ export const MINOTAUR = {
 export const SUMMON_UPGRADES = {
   autoAssign: { bloodCost: 13 },
   autoSpawn: { bloodCost: 13, intervalSeconds: 3 },
-  goldgoblins: { bloodCost: 50 },
+  goldgoblins: { bloodCost: 26 },
+  goldgoblinsX10: { bloodCost: 128, multiplier: 10 },
 };
 
 // Tier ladder for the Autospawn ritual. Each subsequent purchase replaces the
@@ -189,11 +190,11 @@ export const BUILDING_DEFS = {
       constructing: 0x3a3f47, constructingBorder: 0x808890,
     },
   }),
-  nuclear_reactor: def(5, {
+  nuclear_reactor: def(2, {
     name: 'Nuclear Reactor',
     short: 'NR',
     cost: 500_000,
-    buildersRequired: 5,
+    buildersRequired: 4,
     buildTime: 60,
     maintainersRequired: 5,
     income: 0,
@@ -204,6 +205,23 @@ export const BUILDING_DEFS = {
       active: 0x2a6a4a, activeBorder: 0x6affb0,
       dormant: 0x2a4a3a, dormantBorder: 0x5a8a70,
       constructing: 0x3a3f47, constructingBorder: 0x808890,
+    },
+  }),
+  wall: def(1, {
+    name: 'Wall',
+    short: 'W',
+    cost: 1,
+    buildersRequired: 0,
+    buildTime: 0,
+    maintainersRequired: 0,
+    income: 0,
+    powerOutput: 0,
+    wanderInterval: 0,
+    wanderJitter: 0,
+    colors: {
+      active: 0x191919, activeBorder: 0x191919,
+      dormant: 0x191919, dormantBorder: 0x191919,
+      constructing: 0x191919, constructingBorder: 0x191919,
     },
   }),
   hypercentre: def(6, {
@@ -230,7 +248,7 @@ export const BUILDING_DEFS = {
     short: 'GE',
     cost: 1500,
     buildersRequired: 3,
-    buildTime: 15,
+    buildTime: 7.5,
     maintainersRequired: 3,
     income: 0,
     powerOutput: 2_500_000, // 2.5 MW
@@ -262,7 +280,7 @@ export const BUILDING_DEFS = {
 } as const;
 
 export type BuildingKind = keyof typeof BUILDING_DEFS;
-export const BUILDABLE_KINDS: BuildingKind[] = ['goblin_wheel', 'gas_engine', 'datacentre', 'phone_farm', 'goblin_hole', 'nuclear_reactor', 'hypercentre'];
+export const BUILDABLE_KINDS: BuildingKind[] = ['goblin_wheel', 'gas_engine', 'datacentre', 'phone_farm', 'goblin_hole', 'nuclear_reactor', 'hypercentre', 'wall'];
 
 export const START_MONEY = 0;
 export const START_GOBLINS = 0;

@@ -70,6 +70,12 @@ function rebuildPanel(panel: HTMLElement, callbacks: OptionsUICallbacks): void {
     toggle('Black outline', o.goblinOutline, (v) => setOption('goblinOutline', v)),
   ]));
 
+  panel.appendChild(section('Minotaurs', [
+    slider('Saturation', o.minotaurSaturation, 0, 2, 0.05, (v) => setOption('minotaurSaturation', v)),
+    slider('Brightness', o.minotaurBrightness, 0.2, 2, 0.05, (v) => setOption('minotaurBrightness', v)),
+    slider('Sprite size', o.minotaurDisplayPx, 40, 200, 1, (v) => setOption('minotaurDisplayPx', v)),
+  ]));
+
   panel.appendChild(section('Buildings', [
     slider('Saturation', o.buildingSaturation, 0, 2, 0.05, (v) => setOption('buildingSaturation', v)),
     slider('Brightness', o.buildingBrightness, 0.2, 2, 0.05, (v) => setOption('buildingBrightness', v)),

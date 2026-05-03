@@ -197,6 +197,7 @@ export type RenderContext = {
   wallGfx: Graphics;
   grid: Graphics;
   goblinFilter: ColorMatrixFilter;
+  minotaurFilter: ColorMatrixFilter;
   buildingFilter: ColorMatrixFilter;
 };
 
@@ -255,6 +256,7 @@ export async function createRender(parent: HTMLElement, walls: Set<string>): Pro
   // render the layer to an offscreen texture each frame, which is wasteful
   // when the matrix is the identity.
   const goblinFilter = new ColorMatrixFilter();
+  const minotaurFilter = new ColorMatrixFilter();
   const buildingFilter = new ColorMatrixFilter();
 
   const ctx: RenderContext = {
@@ -269,7 +271,7 @@ export async function createRender(parent: HTMLElement, walls: Set<string>): Pro
     floatersLayer, floaterViews: new Map(),
     effectsLayer, deathViews: new Map(),
     deathFrames: null,
-    walls, wallsVersion: -1, playBg, wallGfx, grid, goblinFilter, buildingFilter,
+    walls, wallsVersion: -1, playBg, wallGfx, grid, goblinFilter, minotaurFilter, buildingFilter,
   };
 
   // Decode the GIF once into AnimatedSprite frames. Sharing GifSprite across
@@ -337,6 +339,7 @@ function applyOptions(ctx: RenderContext, o: Options) {
   redrawGrid(ctx, o);
   ctx.app.renderer.background.color = o.oobColor;
   applyFilter(ctx.goblinLayer, ctx.goblinFilter, o.goblinSaturation, o.goblinBrightness);
+  applyFilter(ctx.minotaurLayer, ctx.minotaurFilter, o.minotaurSaturation, o.minotaurBrightness);
   applyFilter(ctx.buildingLayer, ctx.buildingFilter, o.buildingSaturation, o.buildingBrightness);
   applySidebarColors(o);
   applyFonts(ctx, o);
@@ -799,7 +802,7 @@ export function render(state: GameState, ctx: RenderContext) {
     // Gold goblins keep their gold tint regardless of role; if they're on
     // water duty the blue still wins so the player can find their carriers.
     if (g.state.kind === 'fetching_water') tint = 0x2060ff;
-    else if (g.gold) tint = 0xffd700;
+    else if (g.gold) tint = 0xffa800;
     else if (g.state.kind === 'building' || g.state.kind === 'going_to_build') tint = 0xfff0a8;
     else if (g.state.kind === 'maintaining' || g.state.kind === 'going_to_maintain') tint = 0xa8d8ff;
     v.sprite.tint = tint;
@@ -813,7 +816,7 @@ export function render(state: GameState, ctx: RenderContext) {
 
   // Minotaurs — sass-walk loop while moving / hunting, mutant swipe while
   // winding up an attack (vs. goblin, vs. minotaur, or vs. building).
-  const minotaurDisplayPx = displayPx * (MINOTAUR.radius / GOBLIN.radius);
+  const minotaurDisplayPx = opts.minotaurDisplayPx;
   const seenT = new Set<number>();
   for (const t of state.minotaurs.values()) {
     seenT.add(t.id);
@@ -913,19 +916,23 @@ export function render(state: GameState, ctx: RenderContext) {
       v.progress.rect(-w / 2, y, w * meter, h).fill(0x4a8acf);
     }
 
-    // floating warning — show ALL unmet needs at once, one per line.
+    // floating warning — show unmet needs in priority order.
+    // Priority: maintainers → power → water. Maintainers and power can
+    // both show at once; water is only listed when staffing + power are
+    // already good (otherwise watering wouldn't help).
     let warningText = '';
     if (b.state === 'dormant') {
       const reasons: string[] = [];
       const have = maintainerCount(state, b);
       const need = def.maintainersRequired - have;
-      if (need > 0) reasons.push(`needs ${need} goblin${need === 1 ? '' : 's'}`);
-      if (drinks && (b.waterMeter ?? 0) <= 0) reasons.push('needs water');
-      // "Underpowered" only manifests when staffing + water are sufficient
-      // and the building still can't activate; in that case those other
-      // reasons are empty and the only remaining cause is power.
       const draw = def.powerOutput < 0 ? -def.powerOutput : 0;
-      if (reasons.length === 0 && draw > 0) reasons.push('underpowered');
+      const free = state.lastPowerProduced - state.lastPowerConsumed;
+      const underpowered = draw > 0 && free < draw;
+      if (need > 0) reasons.push(`needs ${need} goblin${need === 1 ? '' : 's'}`);
+      if (underpowered) reasons.push('underpowered');
+      if (need <= 0 && !underpowered && drinks && (b.waterMeter ?? 0) <= 0) {
+        reasons.push('needs water');
+      }
       warningText = reasons.join('\n');
     } else if (b.state === 'constructing') {
       let workers = 0;

@@ -29,7 +29,9 @@ export type GoblinState =
   // The optional initialTarget is the exact cell the player right-clicked,
   // used only for the first walk to the source; subsequent trips fall back
   // to the closest cell within the source region.
-  | { kind: 'fetching_water'; buildingId: number; sourceId: number; phase: 'to_source' | 'to_dc'; firstLoopDone?: boolean; initialTarget?: Cell }
+  // collectingSince records when the goblin first stepped into the water on
+  // the current trip; they have to dwell for 1s before phase flips to to_dc.
+  | { kind: 'fetching_water'; buildingId: number; sourceId: number; phase: 'to_source' | 'to_dc'; firstLoopDone?: boolean; initialTarget?: Cell; collectingSince?: number }
   | { kind: 'going_to_kill'; targetId: number; attackAt?: number };
 
 export type Goblin = {
@@ -168,6 +170,9 @@ export type GameState = {
   autoAssignEnabled: boolean;
   autoSpawnEnabled: boolean;
   goldgoblinsEnabled: boolean;
+  // Multiplier applied to a gold goblin's GOLD_KILL_REWARD.money on death.
+  // 1 by default; 10 once Goldgoblins x10 is purchased.
+  goldgoblinMultiplier: number;
   autoSpawnTimer: number;
   // Increments per goblin spawn so successive goblins emerge from a different
   // hole (main + each completed Goblin Hole building, round-robin).
@@ -420,6 +425,7 @@ export function createInitialState(): GameState {
     autoAssignEnabled: false,
     autoSpawnEnabled: false,
     goldgoblinsEnabled: false,
+    goldgoblinMultiplier: 1,
     autoSpawnTimer: 0,
     autoSpawnMultiplier: 0,
     spawnHoleRotation: 0,

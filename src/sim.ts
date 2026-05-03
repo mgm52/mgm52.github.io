@@ -185,9 +185,14 @@ export function autoAssignAllIdle(state: GameState) {
   // (Manual right-click ignores this cap.)
   if (state.waterSources.size > 0) {
     for (const b of state.buildings.values()) {
-      const target = defOf(b).waterAutoAssignTarget ?? 0;
+      const def = defOf(b);
+      const target = def.waterAutoAssignTarget ?? 0;
       if (target === 0) continue;
       if (b.state === 'constructing') continue;
+      // Don't pull goblins onto water duty until the building is fully
+      // staffed — maintainers are the more pressing need, and water
+      // delivery doesn't even land while understaffed.
+      if (maintainerCount(state, b) < def.maintainersRequired) continue;
       const source = nearestWaterSourceTo(state, b);
       if (!source) break;
       while (waterCarrierCount(state, b) < target && idle.length > 0) {
@@ -473,7 +478,7 @@ function updateMinotaur(state: GameState, t: Minotaur) {
       }
       if (state.now < s.attackAt) return;
       const tx = target.pos.x, ty = target.pos.y;
-      const reward = goblinKillReward(target);
+      const reward = goblinKillReward(state, target);
       removeGoblin(state, target.id);
       state.money += reward.money;
       state.blood += reward.blood;
@@ -524,9 +529,15 @@ export function nearestWaterSourceTo(state: GameState, b: Building) {
   return best;
 }
 
-// Standard kill payout, with a fatter pile for gold-tinted goblins.
-function goblinKillReward(g: Goblin) {
-  return g.gold ? GOLD_KILL_REWARD : KILL_REWARD;
+// Standard kill payout, with a fatter pile for gold-tinted goblins. The
+// gold multiplier (1 by default, 10 with Goldgoblins x10) scales the money
+// drop without touching the blood reward.
+function goblinKillReward(state: GameState, g: Goblin) {
+  if (!g.gold) return KILL_REWARD;
+  return {
+    money: GOLD_KILL_REWARD.money * state.goldgoblinMultiplier,
+    blood: GOLD_KILL_REWARD.blood,
+  };
 }
 
 // Closest unblocked perimeter cell of `b` to the goblin — used by water
@@ -802,15 +813,24 @@ function updateGoblin(state: GameState, g: Goblin) {
         return;
       }
       // 'to_source' counts as arrived once we step into ANY cell of the water
-      // region; 'to_dc' as soon as we're on the building's perimeter.
+      // region AND have stood there for at least 1s (the goblin has to dip
+      // their bucket — instant jumping to to_dc looked silly).
       if (s.phase === 'to_source') {
         if (isCellInWaterSource(src, g.cell)) {
-          s.phase = 'to_dc';
-          s.initialTarget = undefined;  // first trip done; closest point thereafter
+          if (s.collectingSince === undefined) s.collectingSince = state.now;
+          // While dwelling, hold position — clear any goal so planStep
+          // doesn't keep nudging us forward.
           g.goal = null;
           g.path = [];
+          if (state.now - s.collectingSince >= 1) {
+            s.phase = 'to_dc';
+            s.initialTarget = undefined;  // first trip done; closest point thereafter
+            s.collectingSince = undefined;
+          }
           return;
         }
+        // Stepped back out (or never arrived) — reset the dwell timer.
+        s.collectingSince = undefined;
         // First trip aims at the click cell; later trips pick the closest
         // reachable cell in the source region. If the click cell turns out to
         // be unreachable, fall back to the closest in the same tick.
@@ -834,11 +854,14 @@ function updateGoblin(state: GameState, g: Goblin) {
       const dcTarget = pickDcDeliveryCell(state, b, g) ?? buildingPerimeter(b)[0];
       if (!dcTarget) return;
       if (g.cell.cx === dcTarget.cx && g.cell.cy === dcTarget.cy) {
-        // Delivery: bump the building's water meter by its per-delivery
-        // amount, capped at WATER_METER_MAX. The first such delivery flips
-        // firstLoopDone (kept around for any legacy paths that still read it).
+        // Delivery: bump the building's water meter — but only if the
+        // building is fully staffed. A half-built crew can't keep the
+        // tanks online, so the carrier's water "spills" until maintainers
+        // are in place.
         const delivery = defOf(b).waterDeliveryAmount ?? 0;
-        if (delivery > 0) {
+        const def2 = defOf(b);
+        const fullyStaffed = maintainerCount(state, b) >= def2.maintainersRequired;
+        if (delivery > 0 && fullyStaffed) {
           b.waterMeter = Math.min(WATER_METER_MAX, (b.waterMeter ?? 0) + delivery);
         }
         s.firstLoopDone = true;
@@ -881,7 +904,7 @@ function updateGoblin(state: GameState, g: Goblin) {
           return;
         }
         const tx = target.pos.x, ty = target.pos.y;
-        const reward = goblinKillReward(target);
+        const reward = goblinKillReward(state, target);
         removeGoblin(state, target.id);
         state.money += reward.money;
         state.blood += reward.blood;

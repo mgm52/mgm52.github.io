@@ -81,6 +81,10 @@ export type Options = {
   goblinDisplayPx: number;
   goblinShadow: boolean;
   goblinOutline: boolean;
+  // Minotaur sprites
+  minotaurSaturation: number;
+  minotaurBrightness: number;
+  minotaurDisplayPx: number;
   // Buildings
   buildingSaturation: number;
   buildingBrightness: number;
@@ -111,6 +115,12 @@ export const DEFAULT_OPTIONS: Options = {
   goblinDisplayPx: 50,
   goblinShadow: true,
   goblinOutline: false,
+  // Default minotaur is roughly the goblin's render-relative size — same
+  // formula as before (radius ratio) baked into the default value, but now
+  // independently tunable.
+  minotaurSaturation: 1.4,
+  minotaurBrightness: 1.4,
+  minotaurDisplayPx: 90,
   buildingSaturation: 1.50,
   buildingBrightness: 1.05,
   sidebarBg: 0x000000,
