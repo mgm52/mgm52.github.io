@@ -13,14 +13,56 @@ import {
 // goblin_hole slotted right below datacentre (it's an auxiliary capacity
 // expander introduced alongside Datacentres, not a late-game item).
 const SORTED_KINDS: BuildingKind[] = [
+  // Wall sits at the top of the build list once unlocked — it's a quick
+  // utility the player drops constantly, so keeping it within reach helps.
+  'wall',
   'goblin_wheel', 'phone_farm', 'gas_engine', 'datacentre',
-  'goblin_hole', 'nuclear_reactor', 'hypercentre', 'dragon_beacon', 'wall',
+  'goblin_hole', 'nuclear_reactor', 'hypercentre', 'dragon_beacon',
 ];
 
 // Inserted between adjacent build buttons that belong to different tutorial
 // task groups; refreshUI hides separators for not-yet-completed tasks.
 type BuildSeparator = { el: HTMLElement; afterTaskId: string };
 const buildSeparators: BuildSeparator[] = [];
+
+// Snapshot of completedTaskIds from the previous refreshUI tick — used to
+// detect newly-completed tasks and trigger the celebration animation.
+const previouslyCompletedTaskIds = new Set<string>();
+
+// Tasks whose celebration overlay has finished — only then do their unlocks
+// take effect, so newly-revealed buttons stay hidden behind the overlay
+// instead of flashing through it.
+const revealedTaskIds = new Set<string>();
+
+// Build/ritual buttons that have already been visible at least once. First
+// appearance gets a soft fade-in via the .fade-in CSS animation.
+const everVisibleButtonIds = new Set<string>();
+function applyFadeInOnFirstShow(btnId: string): void {
+  if (everVisibleButtonIds.has(btnId)) return;
+  everVisibleButtonIds.add(btnId);
+  const btn = document.getElementById(btnId);
+  if (!btn) return;
+  btn.classList.add('fade-in');
+  window.setTimeout(() => btn.classList.remove('fade-in'), 700);
+}
+
+// Plays the "TASK COMPLETE" overlay + a short Skyrim-ish drum-then-fanfare
+// tap. Idempotent in the sense that re-triggers stack the timer; the overlay
+// just stays "shown" longer if multiple tasks complete in quick succession.
+function playTaskCompleteAnimation(taskId: string): void {
+  const overlay = document.getElementById('task-complete-overlay');
+  if (!overlay) return;
+  overlay.classList.add('shown');
+  // "Level Up/Mission Complete (Resistance)" by Dylan Kelk (freesound 672801).
+  playSound('task_complete', 1);
+  // Hold the overlay for ~2s, then fade out (CSS handles the 600ms fade).
+  window.setTimeout(() => overlay.classList.remove('shown'), 2200);
+  // Only after the overlay clears do the task's unlocks take effect — that
+  // gives newly-revealed buttons a moment to be hidden and then fade in
+  // properly via the .fade-in animation, rather than flashing on screen
+  // behind a transparent overlay.
+  window.setTimeout(() => { revealedTaskIds.add(taskId); }, 2800);
+}
 
 // Tutorial gating: each task unlocks one or more building kinds when complete.
 // Tasks form a DAG via `prereq` — multiple tasks with the same prereqs become
@@ -43,7 +85,7 @@ let currentTaskCached: Task | null = null;
 const TASKS: Task[] = [
   {
     id: 'earn_100',
-    text: 'Make Ƶ100',
+    text: 'Make Ƶ100 (somehow...)',
     unlocks: ['goblin_wheel', 'phone_farm'],
     isDone: (s) => s.money >= 100,
   },
@@ -133,7 +175,7 @@ export function setupUI(state: GameState, callbacks: UICallbacks) {
     </div>
     <div class="build-warning" id="warn-spawn-goblin" style="display:none">Hole blocked</div>
   `;
-  spawnBtn.addEventListener('click', () => { playSound('click'); callbacks.onSpawnGoblin(); });
+  spawnBtn.addEventListener('click', () => { playSound('click', 1, 0.75); callbacks.onSpawnGoblin(); });
   summonList.appendChild(spawnBtn);
 
   // Minotaur — unlocks alongside the Datacentre (once a Gas Engine is built).
@@ -150,7 +192,7 @@ export function setupUI(state: GameState, callbacks: UICallbacks) {
       <div class="build-cost-side"><span class="build-cost" id="cost-summon-minotaur">${MINOTAUR.bloodCost} blood</span></div>
     </div>
   `;
-  minotaurBtn.addEventListener('click', () => { playSound('click'); callbacks.onSummonMinotaur(); });
+  minotaurBtn.addEventListener('click', () => { playSound('click', 1, 0.75); callbacks.onSummonMinotaur(); });
   summonList.appendChild(minotaurBtn);
 
   // Ritual upgrades — surfaced once a Phone Farm has finished building.
@@ -166,7 +208,7 @@ export function setupUI(state: GameState, callbacks: UICallbacks) {
       <div class="build-cost-side"><span class="build-cost" id="cost-buy-autoassign">${SUMMON_UPGRADES.autoAssign.bloodCost} blood</span></div>
     </div>
   `;
-  autoAssignBtn.addEventListener('click', () => { playSound('click'); callbacks.onBuyAutoAssign(); });
+  autoAssignBtn.addEventListener('click', () => { playSound('click', 1, 0.75); callbacks.onBuyAutoAssign(); });
   ritualList.appendChild(autoAssignBtn);
 
   const autoSpawnBtn = document.createElement('button');
@@ -181,7 +223,7 @@ export function setupUI(state: GameState, callbacks: UICallbacks) {
     </div>
     <div class="build-warning" id="warn-buy-autospawn" style="display:none">not enough holes</div>
   `;
-  autoSpawnBtn.addEventListener('click', () => { playSound('click'); callbacks.onBuyAutoSpawn(); });
+  autoSpawnBtn.addEventListener('click', () => { playSound('click', 1, 0.75); callbacks.onBuyAutoSpawn(); });
   ritualList.appendChild(autoSpawnBtn);
 
   // Goldgoblins — appears alongside Goblin Hole (post-Gas Engine). Once
@@ -198,7 +240,7 @@ export function setupUI(state: GameState, callbacks: UICallbacks) {
       <div class="build-cost-side"><span class="build-cost" id="cost-buy-goldgoblins">${SUMMON_UPGRADES.goldgoblins.bloodCost} blood</span></div>
     </div>
   `;
-  goldGoblinsBtn.addEventListener('click', () => { playSound('click'); callbacks.onBuyGoldgoblins(); });
+  goldGoblinsBtn.addEventListener('click', () => { playSound('click', 1, 0.75); callbacks.onBuyGoldgoblins(); });
   ritualList.appendChild(goldGoblinsBtn);
 
   // Goldgoblins x10 — appears once base Goldgoblins is owned. Multiplies the
@@ -215,7 +257,7 @@ export function setupUI(state: GameState, callbacks: UICallbacks) {
       <div class="build-cost-side"><span class="build-cost" id="cost-buy-goldgoblins-x10">${SUMMON_UPGRADES.goldgoblinsX10.bloodCost} blood</span></div>
     </div>
   `;
-  goldX10Btn.addEventListener('click', () => { playSound('click'); callbacks.onBuyGoldgoblinsX10(); });
+  goldX10Btn.addEventListener('click', () => { playSound('click', 1, 0.75); callbacks.onBuyGoldgoblinsX10(); });
   ritualList.appendChild(goldX10Btn);
 
   // Dig row — four compact buttons (NESW) on a single line, gated on a
@@ -237,7 +279,7 @@ export function setupUI(state: GameState, callbacks: UICallbacks) {
         <span class="build-cost" id="cost-dig-${dir}" style="font-size: calc(10px * var(--font-body-scale))">${DIG.bloodCost}</span>
       </div>
     `;
-    b.addEventListener('click', () => { playSound('click'); callbacks.onDig(dir); });
+    b.addEventListener('click', () => { playSound('click', 1, 0.75); callbacks.onDig(dir); });
     digRow.appendChild(b);
   }
   ritualList.appendChild(digRow);
@@ -269,7 +311,7 @@ export function setupUI(state: GameState, callbacks: UICallbacks) {
       ? ` · <span class="build-cost build-blood-cost" id="blood-cost-${kind}">${def.bloodCost} blood</span>`
       : '';
     const yieldBits: string[] = [];
-    if (def.income) yieldBits.push(`<span class="yield-money">+Ƶ${def.income}/s</span>`);
+    if (def.income) yieldBits.push(`<span class="yield-money">+Ƶ${def.income.toLocaleString('en-US')}/s</span>`);
     if (def.powerOutput > 0) yieldBits.push(`<span class="yield-power">+${formatPower(def.powerOutput)}</span>`);
     const yieldHtml = yieldBits.length > 0
       ? `<div class="build-yields">${yieldBits.join('<br>')}</div>`
@@ -279,13 +321,13 @@ export function setupUI(state: GameState, callbacks: UICallbacks) {
         <div class="build-text">
           <div class="build-name">${def.name}</div>
           <div class="build-meta">
-            <span class="build-cost" id="cost-${kind}">Ƶ${def.cost}</span>${powerCostBit}${bloodCostBit}
+            <span class="build-cost" id="cost-${kind}">Ƶ${def.cost.toLocaleString('en-US')}</span>${powerCostBit}${bloodCostBit}
           </div>
         </div>
         ${yieldHtml}
       </div>
     `;
-    btn.addEventListener('click', () => { playSound('click'); callbacks.onBuildBuilding(kind); });
+    btn.addEventListener('click', () => { playSound('click', 1, 0.75); callbacks.onBuildBuilding(kind); });
     buildList.appendChild(btn);
   }
 
@@ -368,6 +410,8 @@ function refreshRitualButton(
     cost.classList.toggle('met', canAfford);
     cost.classList.remove('owned');
   }
+  // Set disabled BEFORE applying the fade-in so the right keyframes pick.
+  applyFadeInOnFirstShow(btnId);
 }
 
 // Single Autospawn button that levels up through AUTOSPAWN_TIERS. The same
@@ -415,7 +459,7 @@ function progressTrack(id: string, slots: number): string {
 export function refreshUI(state: GameState) {
   const idle = countIdle(state);
 
-  setText('money', Math.floor(state.money).toString());
+  setText('money', Math.floor(state.money).toLocaleString('en-US'));
 
   // Blood resource — hidden until the player kills their first goblin.
   setText('blood', state.blood.toString());
@@ -485,12 +529,25 @@ export function refreshUI(state: GameState) {
 
   // Tutorial: build the completed set first, then collect any tasks whose
   // prereqs are all done but which are themselves not done yet — those are
-  // the *active* tasks (multiple can be active at once).
+  // the *active* tasks (multiple can be active at once). A completed task's
+  // unlocks only kick in once its celebration overlay has finished
+  // (revealedTaskIds), so newly-revealed buttons stay hidden during the
+  // black-out and then fade in.
   const unlocked = new Set<BuildingKind>();
   for (const t of TASKS) {
     if (completedTaskIds.has(t.id) || t.isDone(state)) {
       completedTaskIds.add(t.id);
-      for (const k of t.unlocks) unlocked.add(k);
+      if (revealedTaskIds.has(t.id)) {
+        for (const k of t.unlocks) unlocked.add(k);
+      }
+    }
+  }
+  // Fire the celebration animation for any task that crossed the threshold
+  // since the last frame.
+  for (const id of completedTaskIds) {
+    if (!previouslyCompletedTaskIds.has(id)) {
+      previouslyCompletedTaskIds.add(id);
+      playTaskCompleteAnimation(id);
     }
   }
   const activeTasks: Task[] = [];
@@ -501,9 +558,11 @@ export function refreshUI(state: GameState) {
   }
   const firstTaskDone = completedTaskIds.has('earn_100');
   currentTaskCached = activeTasks[0] ?? null;
-  // Build panel only appears once the first tutorial task is done.
-  const buildPanel = document.getElementById('panel-build')!;
-  buildPanel.style.display = firstTaskDone ? '' : 'none';
+  // Build subsection only appears once the first tutorial task is done.
+  // We hide the inner #build-section, NOT the outer #panel-build, so the
+  // task-text stays visible (it lives inside the same scroll container).
+  const buildSection = document.getElementById('build-section')!;
+  buildSection.style.display = firstTaskDone ? '' : 'none';
 
   // Ritual upgrades — Autotask and Goblinsixstack appear once a Phone Farm is
   // built; Autospawn appears once a Gas Engine is built. Bought ones stay
@@ -523,15 +582,18 @@ export function refreshUI(state: GameState) {
     `${SUMMON_UPGRADES.autoAssign.bloodCost} blood`,
   );
   refreshAutospawnButton(state, gasEngineBuilt);
+  // Goldgoblins → Goldgoblins x10 form a replace chain (like Autospawn):
+  // base button hides once owned, x10 takes its place; x10 hides once owned.
   refreshRitualButton(
     'btn-buy-goldgoblins', 'cost-buy-goldgoblins',
-    gasEngineBuilt, state.goldgoblinsEnabled,
+    gasEngineBuilt && !state.goldgoblinsEnabled, false,
     state.blood >= SUMMON_UPGRADES.goldgoblins.bloodCost,
     `${SUMMON_UPGRADES.goldgoblins.bloodCost} blood`,
   );
   refreshRitualButton(
     'btn-buy-goldgoblins-x10', 'cost-buy-goldgoblins-x10',
-    state.goldgoblinsEnabled, state.goldgoblinMultiplier >= SUMMON_UPGRADES.goldgoblinsX10.multiplier,
+    state.goldgoblinsEnabled && state.goldgoblinMultiplier < SUMMON_UPGRADES.goldgoblinsX10.multiplier,
+    false,
     state.blood >= SUMMON_UPGRADES.goldgoblinsX10.bloodCost,
     `${SUMMON_UPGRADES.goldgoblinsX10.bloodCost} blood`,
   );
@@ -575,6 +637,8 @@ export function refreshUI(state: GameState) {
     if (b.state !== 'active') continue;
     if (b.kind === 'gas_engine') obsoletedKinds.add('goblin_wheel');
     if (b.kind === 'datacentre') obsoletedKinds.add('phone_farm');
+    if (b.kind === 'nuclear_reactor') obsoletedKinds.add('gas_engine');
+    if (b.kind === 'hypercentre') obsoletedKinds.add('datacentre');
   }
 
   // Each building kind
@@ -589,7 +653,10 @@ export function refreshUI(state: GameState) {
     const canAffordBlood = !def.bloodCost || state.blood >= def.bloodCost;
     const draw = def.powerOutput < 0 ? -def.powerOutput : 0;
     const enoughPower = draw === 0 || draw <= availablePower;
+    // Set the disabled state BEFORE kicking off the fade-in so the right
+    // keyframes (full vs disabled-target opacity) get picked.
     btn.disabled = !canAffordMoney || !canAffordBlood || !enoughPower;
+    applyFadeInOnFirstShow(btnId(kind));
     btn.classList.toggle('active', state.pendingBuild?.kind === kind);
     document.getElementById(`cost-${kind}`)!.classList.toggle('met', canAffordMoney);
     const powerCostEl = document.getElementById(`power-cost-${kind}`);
@@ -599,8 +666,26 @@ export function refreshUI(state: GameState) {
   }
 
   // Hide separators that mark a task boundary the player hasn't crossed yet.
-  for (const sep of buildSeparators) {
-    sep.el.style.display = completedTaskIds.has(sep.afterTaskId) ? '' : 'none';
+  // Hide separators that don't actually sit between two visible buttons.
+  // Walks the live DOM so this stays correct regardless of how visibility
+  // is computed (locked, obsoleted, etc.) — a separator only shows when
+  // there's at least one non-locked .build-button on each side of it.
+  const buildListEl = document.getElementById('build-list')!;
+  const children = Array.from(buildListEl.children) as HTMLElement[];
+  const isVisibleButton = (el: HTMLElement) =>
+    el.classList.contains('build-button') && !el.classList.contains('locked');
+  for (let i = 0; i < children.length; i++) {
+    const c = children[i];
+    if (!c.classList.contains('build-separator')) continue;
+    let hasBefore = false;
+    for (let j = i - 1; j >= 0; j--) {
+      if (isVisibleButton(children[j])) { hasBefore = true; break; }
+    }
+    let hasAfter = false;
+    for (let j = i + 1; j < children.length; j++) {
+      if (isVisibleButton(children[j])) { hasAfter = true; break; }
+    }
+    c.style.display = (hasBefore && hasAfter) ? '' : 'none';
   }
 
   // Placement hint
@@ -725,7 +810,7 @@ function showBuilding(state: GameState, b: Building, panel: HTMLElement, portrai
     const lines: string[] = [];
     if (b.state === 'active') {
       const bits: string[] = [];
-      if (def.income) bits.push(`earning Ƶ${def.income}/s`);
+      if (def.income) bits.push(`earning Ƶ${def.income.toLocaleString('en-US')}/s`);
       if (def.powerOutput > 0) bits.push(`producing ${formatPower(def.powerOutput)}`);
       else if (def.powerOutput < 0) bits.push(`drawing ${formatPower(-def.powerOutput)}`);
       stateEl.textContent = `Active — ${bits.join(', ')}`;
@@ -759,7 +844,7 @@ function setFillWidth(id: string, progress: number) {
 
 function describeGoblinState(s: GoblinState): string {
   switch (s.kind) {
-    case 'idle': return 'Idle';
+    case 'idle': return '';
     case 'moving': return 'Moving';
     case 'going_to_build': return `Walking to build site #${s.buildingId}`;
     case 'going_to_maintain': return `Walking to maintain #${s.buildingId}`;
@@ -874,6 +959,10 @@ export function executeTaskSkip(state: GameState): void {
   }
 
   completedTaskIds.add(next.id);
+  // Task-skip is a debug shortcut — don't fire the celebration animation
+  // and reveal the unlocks immediately rather than waiting on the overlay.
+  previouslyCompletedTaskIds.add(next.id);
+  revealedTaskIds.add(next.id);
   appendLog(state, `Task skip: "${next.text}" marked complete.`);
 }
 
