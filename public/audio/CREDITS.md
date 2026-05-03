@@ -11,3 +11,13 @@
 | error.mp3 | [Freesound #419023](https://freesound.org/s/419023/) | CC0 1.0 | n/a |
 | online.mp3 | [Freesound #220173](https://freesound.org/s/220173/) | CC0 1.0 | n/a |
 | command_3.mp3 | [Freesound #233158](https://freesound.org/s/233158/) | CC0 1.0 | n/a |
+| goblin_death.mp3 | _TODO: source unknown_ | _TODO_ | _TODO_ |
+| ritual.mp3 | _TODO: source unknown_ | _TODO_ | _TODO_ |
+| task_complete.mp3 | [Freesound #672801](https://freesound.org/s/672801/) — "Level Up/Mission Complete (Resistance)" | per author requirement | Dylan Kelk |
+| water_splash.mp3 | [Freesound #829676](https://freesound.org/s/829676/) | CC0 1.0 | n/a |
+
+## Music
+
+| File | Source | License | Author |
+|---|---|---|---|
+| `assets/01.03. String Quartet No.4_ Allegretto; Allegretto.mp3` | _TODO: source unknown_ | _TODO_ | _TODO_ |

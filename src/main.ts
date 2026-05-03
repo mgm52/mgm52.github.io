@@ -1,4 +1,4 @@
-import { preloadSounds, playSound, setMasterVolume } from './audio';
+import { playSound, preloadSounds, setMasterVolume, startBackgroundMusic } from './audio';
 import {
   AUTOSPAWN_TIERS, CAMERA_SPEED, CELL, DIG, GOBLIN, GOLD_KILL_REWARD, KILL_REWARD, START_CELL,
   SUMMON_UPGRADES, TICK_MS, MINOTAUR,
@@ -13,20 +13,41 @@ import { executeTaskSkip, refreshUI, setupUI } from './ui';
 
 function showTitleScreen(): void {
   const screen = document.getElementById('title-screen');
-  const playBtn = document.getElementById('title-play');
-  if (!screen || !playBtn) return;
+  const playBtn = document.getElementById('title-play') as HTMLButtonElement | null;
+  const fill = document.getElementById('title-play-fill');
+  if (!screen || !playBtn || !fill) return;
+  // Reset state so this can be called repeatedly (debug "Show title screen"
+  // button in dev mode reuses the same DOM).
+  screen.style.display = 'flex';
+  screen.classList.remove('fading-out', 'shown');
+  fill.style.transition = 'none';
+  fill.style.width = '0%';
+  // Force a layout flush so the next transition: width starts from 0%.
+  void fill.offsetWidth;
+  playBtn.disabled = false;
+  document.documentElement.classList.remove('dev');
   // Backdrop is already black (inline CSS). Fade the content in next frame.
   requestAnimationFrame(() => screen.classList.add('shown'));
   playBtn.addEventListener('click', () => {
-    // Stage 1: fade content (text + button) out, leaving full-black backdrop.
-    screen.classList.remove('shown');
+    playBtn.disabled = true;
+    // Kick the looping background music off the same gesture so the
+    // browser's autoplay policy lets it through.
+    startBackgroundMusic(BACKGROUND_MUSIC_URL);
+    // 2-second fill, then the existing two-stage fade.
+    const fillDuration = 2000;
+    fill.style.transition = `width ${fillDuration}ms linear`;
+    requestAnimationFrame(() => { fill.style.width = '100%'; });
     setTimeout(() => {
-      // Stage 2: fade the black backdrop out, revealing the game beneath.
-      screen.classList.add('fading-out');
-      setTimeout(() => { screen.style.display = 'none'; }, 750);
-    }, 750);
+      screen.classList.remove('shown');
+      setTimeout(() => {
+        screen.classList.add('fading-out');
+        setTimeout(() => { screen.style.display = 'none'; }, 1500);
+      }, 1500);
+    }, fillDuration);
   }, { once: true });
 }
+
+const BACKGROUND_MUSIC_URL = encodeURI('assets/01.03. String Quartet No.4_ Allegretto; Allegretto.mp3');
 
 async function main() {
   // Production-only title gate. Click here also satisfies the browser's
@@ -55,6 +76,7 @@ async function main() {
       appendLog(state, 'Cheat: +Ƶ100,000.');
     },
     onTaskSkip: () => executeTaskSkip(state),
+    onShowTitleScreen: () => showTitleScreen(),
   });
   setupUI(state, {
     onSpawnGoblin: () => {
@@ -151,11 +173,11 @@ async function main() {
       state.blood += reward.blood;
       state.bloodUnlocked = true;
       // Two stacked floaters so each value gets its own color.
-      pushFloater(state, x, y, `+Ƶ${reward.money}`, 0xffd96b, 1.6);
+      pushFloater(state, x, y, `+Ƶ${reward.money.toLocaleString('en-US')}`, 0xffd96b, 1.6);
       pushFloater(state, x, y - 14, `+${reward.blood} blood`, 0xff8a8a, 1.6);
       pushDeathEffect(state, x, y);
-      playSound('goblin_death', 0.7);
-      appendLog(state, `Goblin #${id} killed — +Ƶ${reward.money}, +${reward.blood} blood.`);
+      playSound('goblin_death', 0.56);
+      appendLog(state, `Goblin #${id} killed — +Ƶ${reward.money.toLocaleString('en-US')}, +${reward.blood} blood.`);
     },
     onBuildBuilding: (kind) => {
       state.pendingBuild = state.pendingBuild?.kind === kind ? null : { kind };

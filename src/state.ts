@@ -203,6 +203,10 @@ export type GameState = {
   spawnsCompleted: number;
   // Hint UI: dismissed once the player presses any pan key (WASD/arrows).
   panHintDismissed: boolean;
+  // In production builds the options cog is hidden until the player places a
+  // Dragon Beacon — that's the demo-end gag, so the secret-settings reveal
+  // gates on getting that far. Sticky once flipped.
+  optionsUnlocked: boolean;
 };
 
 export function defOf(b: Building): BuildingDef { return BUILDING_DEFS[b.kind]; }
@@ -447,6 +451,7 @@ export function createInitialState(): GameState {
     lastPowerConsumed: 0,
     spawnsCompleted: 0,
     panHintDismissed: false,
+    optionsUnlocked: false,
   };
   state.walls = rebuildWalls(state);
   let placed = 0;

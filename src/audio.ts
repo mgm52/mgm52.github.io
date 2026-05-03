@@ -19,6 +19,8 @@ const REGISTRY = {
   command_3:    'audio/command_3.mp3',
   ritual:       'audio/ritual.mp3',
   goblin_death: 'audio/goblin_death.mp3',
+  task_complete: 'audio/task_complete.mp3',
+  water_splash: 'audio/water_splash.mp3',
 } as const;
 
 export type SoundName = keyof typeof REGISTRY;
@@ -53,6 +55,54 @@ export function playSound(name: SoundName, volume = 1, playbackRate?: number) {
   free.play().catch(() => { /* autoplay may be blocked until first interaction */ });
 }
 
-export function setMasterVolume(v: number) { masterVolume = Math.max(0, Math.min(1, v)); }
+// ─── Decaying spawn / death volumes ─────────────────────────────────
+// Late-game spam can spawn dozens of goblins per second. Each successive
+// goblin_spawn / goblin_death plays a hair quieter than the last so the
+// audio doesn't pile up into a roar; clamps at GOBLIN_*_FLOOR.
+let goblinSpawnVolume = 0.325;
+const GOBLIN_SPAWN_VOLUME_FLOOR = 0.008;
+const GOBLIN_SPAWN_VOLUME_DECAY = 0.001;
+export function playDecayingGoblinSpawn(rate?: number): void {
+  playSound('goblin_spawn', goblinSpawnVolume, rate);
+  goblinSpawnVolume = Math.max(
+    GOBLIN_SPAWN_VOLUME_FLOOR,
+    goblinSpawnVolume - GOBLIN_SPAWN_VOLUME_DECAY,
+  );
+}
+
+let goblinDeathVolume = 0.56;
+const GOBLIN_DEATH_VOLUME_FLOOR = 0.02;
+const GOBLIN_DEATH_VOLUME_DECAY = 0.001;
+export function playDecayingGoblinDeath(rate?: number): void {
+  playSound('goblin_death', goblinDeathVolume, rate);
+  goblinDeathVolume = Math.max(
+    GOBLIN_DEATH_VOLUME_FLOOR,
+    goblinDeathVolume - GOBLIN_DEATH_VOLUME_DECAY,
+  );
+}
+
+export function setMasterVolume(v: number) {
+  masterVolume = Math.max(0, Math.min(1, v));
+  if (musicEl) musicEl.volume = effectiveMusicVolume();
+}
 export function setMuted(m: boolean) { muted = m; }
 export function isMuted() { return muted; }
+
+// ─── Looping background music ───────────────────────────────────────
+// One persistent <audio> element, lazy-started after first user gesture so
+// the browser's autoplay policy lets it through. Volume rides on top of
+// masterVolume scaled by MUSIC_GAIN.
+const MUSIC_GAIN = 1.0;
+let musicEl: HTMLAudioElement | null = null;
+function effectiveMusicVolume(): number {
+  return Math.max(0, Math.min(1, masterVolume * MUSIC_GAIN));
+}
+export function startBackgroundMusic(url: string): void {
+  if (musicEl) return;
+  const a = new Audio(url);
+  a.loop = true;
+  a.preload = 'auto';
+  a.volume = effectiveMusicVolume();
+  a.play().catch(() => {/* gated until next gesture; caller should retry */});
+  musicEl = a;
+}

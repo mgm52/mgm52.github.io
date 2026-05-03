@@ -7,6 +7,7 @@ import {
 export type OptionsUICallbacks = {
   onCheatMoney: () => void;
   onTaskSkip: () => void;
+  onShowTitleScreen: () => void;
 };
 
 export function setupOptionsUI(root: HTMLElement, callbacks: OptionsUICallbacks): void {
@@ -19,6 +20,12 @@ export function setupOptionsUI(root: HTMLElement, callbacks: OptionsUICallbacks)
   cog.type = 'button';
   cog.setAttribute('aria-label', 'Options');
   cog.textContent = '⚙';
+  // In prod the cog is hidden until the player places a Dragon Beacon —
+  // unlockOptionsCog() flips it visible (and persists the flag in
+  // localStorage so the unlock survives reloads). Dev keeps it always-on.
+  if (!import.meta.env.DEV && localStorage.getItem(SECRET_UNLOCK_KEY) !== '1') {
+    cog.style.display = 'none';
+  }
 
   const panel = document.createElement('div');
   panel.id = 'options-panel';
@@ -38,6 +45,17 @@ export function setupOptionsUI(root: HTMLElement, callbacks: OptionsUICallbacks)
 
   root.appendChild(cog);
   root.appendChild(panel);
+}
+
+const SECRET_UNLOCK_KEY = 'gs.optionsCog.secretUnlocked';
+
+// Reveals the options cog. Used in prod once the player places a Dragon
+// Beacon — see the second alert in input.ts placeBuilding. Persists in
+// localStorage so the unlock survives reloads.
+export function unlockOptionsCog(): void {
+  try { localStorage.setItem(SECRET_UNLOCK_KEY, '1'); } catch { /* no-op */ }
+  const cog = document.getElementById('options-cog');
+  if (cog) cog.style.display = '';
 }
 
 // ─── Panel construction ─────────────────────────────────────────────
@@ -112,6 +130,13 @@ function rebuildPanel(panel: HTMLElement, callbacks: OptionsUICallbacks): void {
   taskSkip.textContent = 'Task skip';
   taskSkip.addEventListener('click', () => callbacks.onTaskSkip());
   panel.appendChild(taskSkip);
+
+  const showTitle = document.createElement('button');
+  showTitle.type = 'button';
+  showTitle.className = 'options-reset';
+  showTitle.textContent = 'Show title screen';
+  showTitle.addEventListener('click', () => callbacks.onShowTitleScreen());
+  panel.appendChild(showTitle);
 
   const reset = document.createElement('button');
   reset.type = 'button';
