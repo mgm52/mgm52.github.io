@@ -1,17 +1,20 @@
 import { playSound } from './audio';
 import {
-  BUILDABLE_KINDS, BUILDING_DEFS, BuildingKind, GOBLIN, SUMMON_UPGRADES, MINOTAUR, formatPower,
+  AUTOSPAWN_TIERS, BUILDABLE_KINDS, BUILDING_DEFS, BuildingKind, DIG, GOBLIN, SUMMON_UPGRADES,
+  MINOTAUR, formatPower,
 } from './config';
 import {
   Building, Cell, GameState, Goblin, GoblinState,
-  appendLog, cellCenter, cellKey, countIdle, defOf, holeBlockedByBuilding,
-  isCellBlocked, isInBounds, maintainerCount, occupyCell,
+  appendLog, buildingCenter, cellCenter, cellKey, countIdle, defOf, digDirection, getSpawnCapacity,
+  holeBlockedByBuilding, isCellBlocked, isInBounds, maintainerCount, occupyCell,
 } from './state';
 
-// Buttons render in cheapest-first order regardless of declaration order.
-const SORTED_KINDS: BuildingKind[] = [...BUILDABLE_KINDS].sort(
-  (a, b) => BUILDING_DEFS[a].cost - BUILDING_DEFS[b].cost,
-);
+// Build buttons appear in this fixed order. Mostly cheapest-first, with
+// goblin_hole pushed to the bottom (it's a late-game capacity expander).
+const SORTED_KINDS: BuildingKind[] = [
+  'goblin_wheel', 'phone_farm', 'gas_engine', 'datacentre',
+  'nuclear_reactor', 'hypercentre', 'goblin_hole',
+];
 
 // Inserted between adjacent build buttons that belong to different tutorial
 // task groups; refreshUI hides separators for not-yet-completed tasks.
@@ -58,7 +61,7 @@ const TASKS: Task[] = [
   {
     id: 'build_gas_engine',
     text: 'Build a Gas Engine',
-    unlocks: ['datacentre'],
+    unlocks: ['datacentre', 'goblin_hole'],
     isDone: (s) => {
       for (const b of s.buildings.values()) {
         if (b.kind === 'gas_engine' && b.state !== 'constructing') return true;
@@ -68,16 +71,23 @@ const TASKS: Task[] = [
     prereq: ['run_phone_farm'],
   },
   {
-    id: 'build_datacentre',
-    text: 'Build a Datacentre',
-    unlocks: ['goblin_hole'],
+    id: 'reach_6mw',
+    text: 'Reach 6 MW of power',
+    unlocks: [],
+    isDone: (s) => s.lastPowerProduced >= 6_000_000,
+    prereq: ['build_gas_engine'],
+  },
+  {
+    id: 'run_datacentre',
+    text: 'Get a datacentre running',
+    unlocks: ['nuclear_reactor', 'hypercentre'],
     isDone: (s) => {
       for (const b of s.buildings.values()) {
-        if (b.kind === 'datacentre' && b.state !== 'constructing') return true;
+        if (b.kind === 'datacentre' && b.state === 'active') return true;
       }
       return false;
     },
-    prereq: ['build_gas_engine'],
+    prereq: ['reach_6mw'],
   },
 ];
 
@@ -86,7 +96,8 @@ export type UICallbacks = {
   onSummonMinotaur: () => void;
   onBuyAutoAssign: () => void;
   onBuyAutoSpawn: () => void;
-  onBuyWiderHole: () => void;
+  onBuyGoldgoblins: () => void;
+  onDig: (dir: 'n' | 'e' | 's' | 'w') => void;
   onBuildBuilding: (kind: BuildingKind) => void;
   onDestroyBuilding: (id: number) => void;
   onKillGoblin: (id: number) => void;
@@ -144,33 +155,61 @@ export function setupUI(state: GameState, callbacks: UICallbacks) {
   autoAssignBtn.addEventListener('click', () => { playSound('click'); callbacks.onBuyAutoAssign(); });
   ritualList.appendChild(autoAssignBtn);
 
-  const widerHoleBtn = document.createElement('button');
-  widerHoleBtn.className = 'build-button build-button-compact';
-  widerHoleBtn.id = 'btn-buy-widerhole';
-  widerHoleBtn.innerHTML = `
-    <div class="build-content">
-      <div class="build-text">
-        <div class="build-name">Goblinsixstack</div>
-      </div>
-      <div class="build-cost-side"><span class="build-cost" id="cost-buy-widerhole">${SUMMON_UPGRADES.widerHole.bloodCost} blood</span></div>
-    </div>
-  `;
-  widerHoleBtn.addEventListener('click', () => { playSound('click'); callbacks.onBuyWiderHole(); });
-  ritualList.appendChild(widerHoleBtn);
-
   const autoSpawnBtn = document.createElement('button');
   autoSpawnBtn.className = 'build-button build-button-compact';
   autoSpawnBtn.id = 'btn-buy-autospawn';
   autoSpawnBtn.innerHTML = `
     <div class="build-content">
       <div class="build-text">
-        <div class="build-name">Autospawn</div>
+        <div class="build-name" id="label-buy-autospawn">Autospawn</div>
       </div>
-      <div class="build-cost-side"><span class="build-cost" id="cost-buy-autospawn">${SUMMON_UPGRADES.autoSpawn.bloodCost} blood</span></div>
+      <div class="build-cost-side"><span class="build-cost" id="cost-summon-autospawn-cost">${AUTOSPAWN_TIERS[0].bloodCost} blood</span></div>
     </div>
+    <div class="build-warning" id="warn-buy-autospawn" style="display:none">not enough holes</div>
   `;
   autoSpawnBtn.addEventListener('click', () => { playSound('click'); callbacks.onBuyAutoSpawn(); });
   ritualList.appendChild(autoSpawnBtn);
+
+  // Goldgoblins — appears alongside Goblin Hole (post-Gas Engine). Once
+  // bought, ~10% of new goblins spawn gold-tinted and drop Ƶ150 each.
+  const goldGoblinsBtn = document.createElement('button');
+  goldGoblinsBtn.className = 'build-button build-button-compact';
+  goldGoblinsBtn.id = 'btn-buy-goldgoblins';
+  goldGoblinsBtn.style.display = 'none';
+  goldGoblinsBtn.innerHTML = `
+    <div class="build-content">
+      <div class="build-text">
+        <div class="build-name">Goldgoblins</div>
+      </div>
+      <div class="build-cost-side"><span class="build-cost" id="cost-buy-goldgoblins">${SUMMON_UPGRADES.goldgoblins.bloodCost} blood</span></div>
+    </div>
+  `;
+  goldGoblinsBtn.addEventListener('click', () => { playSound('click'); callbacks.onBuyGoldgoblins(); });
+  ritualList.appendChild(goldGoblinsBtn);
+
+  // Dig row — four compact buttons (NESW) on a single line, gated on a
+  // Datacentre being built. Each is one-shot and costs DIG.bloodCost blood.
+  const digRow = document.createElement('div');
+  digRow.id = 'dig-row';
+  digRow.style.display = 'none';
+  digRow.style.gap = '4px';
+  digRow.style.marginBottom = '6px';
+  for (const dir of ['n', 'e', 's', 'w'] as const) {
+    const b = document.createElement('button');
+    b.className = 'build-button build-button-compact dig-btn';
+    b.id = `btn-dig-${dir}`;
+    b.style.flex = '1';
+    b.style.padding = '4px 2px';
+    b.innerHTML = `
+      <div class="build-content" style="flex-direction:column; align-items:center; gap:1px">
+        <div class="build-name" style="font-size: calc(13px * var(--font-display-scale))">Dig ${dir.toUpperCase()}</div>
+        <span class="build-cost" id="cost-dig-${dir}" style="font-size: calc(10px * var(--font-body-scale))">${DIG.bloodCost}</span>
+      </div>
+    `;
+    b.addEventListener('click', () => { playSound('click'); callbacks.onDig(dir); });
+    digRow.appendChild(b);
+  }
+  ritualList.appendChild(digRow);
 
   // Map each buildable kind back to the task that unlocks it. Used both for
   // gating and for placing visual separators between task-unlock groups.
@@ -219,11 +258,33 @@ export function setupUI(state: GameState, callbacks: UICallbacks) {
     buildList.appendChild(btn);
   }
 
-  // Destroy button on the info panel — uses currently-selected building from state.
+  // Destroy button on the info panel — instead of instantly tearing down the
+  // building, allocate the nearest minotaur to smash it. Without one, flash
+  // a "needs minotaur" warning under the button.
   document.getElementById('info-destroy')!.addEventListener('click', () => {
-    for (const b of state.buildings.values()) {
-      if (b.selected) { callbacks.onDestroyBuilding(b.id); break; }
+    const target = [...state.buildings.values()].find(b => b.selected);
+    if (!target) return;
+    const minotaurs = [...state.minotaurs.values()];
+    const warn = document.getElementById('info-destroy-warning')!;
+    if (minotaurs.length === 0) {
+      warn.style.display = '';
+      window.setTimeout(() => { warn.style.display = 'none'; }, 2000);
+      playSound('error');
+      return;
     }
+    warn.style.display = 'none';
+    const c = buildingCenter(target);
+    let best = minotaurs[0];
+    let bestD = Infinity;
+    for (const m of minotaurs) {
+      const dx = m.pos.x - c.x;
+      const dy = m.pos.y - c.y;
+      const d = dx * dx + dy * dy;
+      if (d < bestD) { bestD = d; best = m; }
+    }
+    best.target = null;
+    best.state = { kind: 'going_to_destroy', buildingId: target.id };
+    appendLog(state, `Minotaur #${best.id} ordered to smash ${defOf(target).name} #${target.id}.`);
   });
 
   // Kill button — kills every currently-selected goblin.
@@ -245,6 +306,13 @@ function anyPhoneFarmBuilt(state: GameState): boolean {
 function anyGasEngineBuilt(state: GameState): boolean {
   for (const b of state.buildings.values()) {
     if (b.kind === 'gas_engine' && b.state !== 'constructing') return true;
+  }
+  return false;
+}
+
+function anyDatacentreBuilt(state: GameState): boolean {
+  for (const b of state.buildings.values()) {
+    if (b.kind === 'datacentre' && b.state !== 'constructing') return true;
   }
   return false;
 }
@@ -271,6 +339,41 @@ function refreshRitualButton(
   }
 }
 
+// Single Autospawn button that levels up through AUTOSPAWN_TIERS. The same
+// button morphs from "Autospawn" → "Autospawn x2" → "Autospawn x4" → … → x32,
+// each purchase replacing the prior in the menu. Once the player owns x32,
+// the button is hidden. Shows "needs more holes" when the next-tier multiplier
+// would exceed total spawn capacity.
+function refreshAutospawnButton(state: GameState, gasEngineBuilt: boolean): void {
+  const btn = document.getElementById('btn-buy-autospawn') as HTMLButtonElement;
+  const cost = document.getElementById('cost-summon-autospawn-cost')!;
+  const label = document.getElementById('label-buy-autospawn')!;
+  const warn = document.getElementById('warn-buy-autospawn')!;
+  if (!gasEngineBuilt) {
+    btn.style.display = 'none';
+    return;
+  }
+  const current = state.autoSpawnMultiplier;
+  // Find the next tier the player can buy.
+  const next = AUTOSPAWN_TIERS.find(t => t.multiplier > current);
+  if (!next) {
+    // Already at max — hide the button.
+    btn.style.display = 'none';
+    return;
+  }
+  btn.style.display = '';
+  label.textContent = next.multiplier === 1 ? 'Autospawn' : `Autospawn x${next.multiplier}`;
+  cost.textContent = `${next.bloodCost} blood`;
+  const canAfford = state.blood >= next.bloodCost;
+  cost.classList.toggle('met', canAfford);
+  cost.classList.remove('owned');
+  btn.disabled = !canAfford;
+
+  const cap = getSpawnCapacity(state);
+  const willOverflow = next.multiplier > cap;
+  warn.style.display = willOverflow ? '' : 'none';
+}
+
 function progressTrack(id: string, slots: number): string {
   const segs = Array.from({ length: slots }, (_, i) =>
     `<div class="seg" id="seg-${id}-${i}"><div class="fill" id="fill-${id}-${i}"></div></div>`,
@@ -284,9 +387,7 @@ export function refreshUI(state: GameState) {
   setText('money', Math.floor(state.money).toString());
 
   // Blood resource — hidden until the player kills their first goblin.
-  const bloodRow = document.getElementById('row-blood')!;
-  bloodRow.style.display = state.bloodUnlocked ? '' : 'none';
-  if (state.bloodUnlocked) setText('blood', state.blood.toString());
+  setText('blood', state.blood.toString());
 
   // Power: hide entirely until any production exists, then show consumed /
   // produced. Tinted red on deficit.
@@ -316,7 +417,7 @@ export function refreshUI(state: GameState) {
   const spawnBtn = document.getElementById('btn-spawn-goblin') as HTMLButtonElement;
   const canAffordGoblin = state.money >= GOBLIN.spawnCost;
   const holeBlocked = holeBlockedByBuilding(state);
-  const cap = state.hole.spawnCapacity;
+  const cap = getSpawnCapacity(state);
   spawnBtn.disabled = !canAffordGoblin || holeBlocked || spawnInProgress >= cap;
   spawnBtn.classList.toggle('in-progress', spawnInProgress > 0);
   const warnEl = document.getElementById('warn-spawn-goblin')!;
@@ -378,24 +479,43 @@ export function refreshUI(state: GameState) {
   // visible but go disabled.
   const phoneFarmBuilt = anyPhoneFarmBuilt(state);
   const gasEngineBuilt = anyGasEngineBuilt(state);
-  const ritualPanel = document.getElementById('panel-ritual')!;
-  ritualPanel.style.display = (phoneFarmBuilt || gasEngineBuilt) ? '' : 'none';
+  // Dig becomes available once the player reaches 6 MW — that way they can
+  // dig + find water before placing a Datacentre, instead of being blocked by
+  // a thirsty DC.
+  const digUnlocked = completedTaskIds.has('reach_6mw');
+  const ritualSection = document.getElementById('ritual-section')!;
+  ritualSection.style.display = (phoneFarmBuilt || gasEngineBuilt || digUnlocked) ? '' : 'none';
 
   refreshRitualButton(
     'btn-buy-autoassign', 'cost-buy-autoassign',
     phoneFarmBuilt, state.autoAssignEnabled, state.blood >= SUMMON_UPGRADES.autoAssign.bloodCost,
     `${SUMMON_UPGRADES.autoAssign.bloodCost} blood`,
   );
+  refreshAutospawnButton(state, gasEngineBuilt);
   refreshRitualButton(
-    'btn-buy-widerhole', 'cost-buy-widerhole',
-    phoneFarmBuilt, state.widerHoleEnabled, state.blood >= SUMMON_UPGRADES.widerHole.bloodCost,
-    `${SUMMON_UPGRADES.widerHole.bloodCost} blood`,
+    'btn-buy-goldgoblins', 'cost-buy-goldgoblins',
+    gasEngineBuilt, state.goldgoblinsEnabled,
+    state.blood >= SUMMON_UPGRADES.goldgoblins.bloodCost,
+    `${SUMMON_UPGRADES.goldgoblins.bloodCost} blood`,
   );
-  refreshRitualButton(
-    'btn-buy-autospawn', 'cost-buy-autospawn',
-    gasEngineBuilt, state.autoSpawnEnabled, state.blood >= SUMMON_UPGRADES.autoSpawn.bloodCost,
-    `${SUMMON_UPGRADES.autoSpawn.bloodCost} blood`,
-  );
+
+  // Dig row: visible once a Datacentre is built. Each direction is one-shot.
+  const digRow = document.getElementById('dig-row')!;
+  digRow.style.display = digUnlocked ? 'flex' : 'none';
+  for (const dir of ['n', 'e', 's', 'w'] as const) {
+    const btn = document.getElementById(`btn-dig-${dir}`) as HTMLButtonElement;
+    if (!btn) continue;
+    const dug = state.dugDirections.has(dir);
+    const canAfford = state.blood >= DIG.bloodCost;
+    btn.disabled = dug || !canAfford;
+    const label = btn.querySelector('.build-name') as HTMLElement | null;
+    if (label) label.textContent = dug ? `${dir.toUpperCase()} ✓` : `Dig ${dir.toUpperCase()}`;
+    const cost = document.getElementById(`cost-dig-${dir}`);
+    if (cost) {
+      cost.textContent = dug ? '' : `${DIG.bloodCost} blood`;
+      cost.classList.toggle('met', !dug && canAfford);
+    }
+  }
 
   const taskEl = document.getElementById('task-text')!;
   if (activeTasks.length > 0) {
@@ -410,13 +530,24 @@ export function refreshUI(state: GameState) {
     taskEl.style.display = 'none';
   }
 
+  // Buildings the player has outgrown — once a Gas Engine is running, the
+  // Goblin Wheel disappears; once a Datacentre is running, the Phone Farm
+  // disappears. The replacement just produces / earns more for the same role.
+  const obsoletedKinds = new Set<BuildingKind>();
+  for (const b of state.buildings.values()) {
+    if (b.state !== 'active') continue;
+    if (b.kind === 'gas_engine') obsoletedKinds.add('goblin_wheel');
+    if (b.kind === 'datacentre') obsoletedKinds.add('phone_farm');
+  }
+
   // Each building kind
   const availablePower = state.lastPowerProduced - state.lastPowerConsumed;
   for (const kind of SORTED_KINDS) {
     const def = BUILDING_DEFS[kind];
     const btn = document.getElementById(btnId(kind)) as HTMLButtonElement;
-    btn.classList.toggle('locked', !unlocked.has(kind));
-    if (!unlocked.has(kind)) continue;
+    const visible = unlocked.has(kind) && !obsoletedKinds.has(kind);
+    btn.classList.toggle('locked', !visible);
+    if (!visible) continue;
     const canAffordMoney = state.money >= def.cost;
     const canAffordBlood = !def.bloodCost || state.blood >= def.bloodCost;
     const draw = def.powerOutput < 0 ? -def.powerOutput : 0;
@@ -444,6 +575,11 @@ export function refreshUI(state: GameState) {
   } else {
     hint.style.display = 'none';
   }
+
+  // Pan-key hint — surfaces once the player has dug at least once, hides
+  // on first WASD/arrow press (panHintDismissed).
+  const panHint = document.getElementById('pan-hint')!;
+  panHint.style.display = (state.dugDirections.size > 0 && !state.panHintDismissed) ? 'block' : 'none';
 
   refreshInfoPanel(state);
 }
@@ -483,7 +619,7 @@ function refreshInfoPanel(state: GameState) {
       portrait.innerHTML = `<div class="portrait-goblin" style="background:#6a1a1a;border-color:#a06aff;color:#ffe0a0">M</div>`;
       name.textContent = `Minotaur #${m.id}`;
       stateEl.textContent = describeMinotaurState(m.state);
-      extra.innerHTML = `<span style="color:#6a7080">Right-click a building to smash it, or another minotaur to gore it</span>`;
+      extra.innerHTML = `<span style="color:#6a7080">Right-click to command</span>`;
     } else if (selectedMinotaurs.length > 1) {
       panel.classList.add('visible');
       portrait.innerHTML = `<div class="portrait-goblin" style="background:#6a1a1a;border-color:#a06aff;color:#ffe0a0">M</div>`;
@@ -499,6 +635,7 @@ function refreshInfoPanel(state: GameState) {
 function describeMinotaurState(s: import('./state').MinotaurState): string {
   switch (s.kind) {
     case 'wander': return 'Wandering';
+    case 'moving_to': return 'Moving';
     case 'going_to_kill': return `Hunting goblin #${s.targetId}`;
     case 'going_to_kill_minotaur': return `Charging Minotaur #${s.targetId}`;
     case 'going_to_destroy': return `Smashing building #${s.buildingId}`;
@@ -591,6 +728,10 @@ function describeGoblinState(s: GoblinState): string {
     case 'going_to_maintain': return `Walking to maintain #${s.buildingId}`;
     case 'building': return `Constructing #${s.buildingId}`;
     case 'maintaining': return `Maintaining #${s.buildingId}`;
+    case 'fetching_water':
+      return s.phase === 'to_source'
+        ? `Fetching water for #${s.buildingId}`
+        : `Delivering water to #${s.buildingId}`;
     case 'going_to_kill': return `Hunting goblin #${s.targetId}`;
   }
 }
@@ -621,36 +762,56 @@ export function executeTaskSkip(state: GameState): void {
       break;
     }
     case 'run_phone_farm': {
-      ensureGoblins(state, 7);
-      ensureBuilding(state, 'goblin_wheel');
-      ensureBuilding(state, 'goblin_wheel');
-      ensureBuilding(state, 'phone_farm');
+      // 1 PF (3 maintainers, 200W) needs at least 2 wheels (each 100W,
+      // 1 maintainer). Three wheels gives a little headroom; total 6
+      // maintainers + a couple idle.
+      ensureGoblins(state, 9);
+      ensureBuildingCount(state, 'goblin_wheel', 3);
+      ensureBuildingCount(state, 'phone_farm', 1);
       state.money = Math.max(state.money, 250);
-      break;
-    }
-    case 'build_gas_engine': {
-      ensureGoblins(state, 12);
-      ensureBuilding(state, 'goblin_wheel');
-      ensureBuilding(state, 'goblin_wheel');
-      ensureBuilding(state, 'phone_farm');
-      ensureBuilding(state, 'gas_engine');
-      state.money = Math.max(state.money, 1200);
-      // A few kills' worth of blood — enough to summon a Minotaur once.
-      state.blood = Math.max(state.blood, 8);
+      // The player has been killing the odd goblin to test the mechanic, so
+      // they likely have enough blood for one ritual purchase by now.
+      state.blood = Math.max(state.blood, 15);
       state.bloodUnlocked = true;
       break;
     }
-    case 'build_datacentre': {
-      ensureGoblins(state, 30);
-      ensureBuilding(state, 'goblin_wheel');
-      ensureBuilding(state, 'goblin_wheel');
-      ensureBuilding(state, 'phone_farm');
-      ensureBuilding(state, 'gas_engine');
-      ensureBuilding(state, 'gas_engine');
-      ensureBuilding(state, 'gas_engine');
-      ensureBuilding(state, 'datacentre');
-      state.money = Math.max(state.money, 5000);
-      state.blood = Math.max(state.blood, 25);
+    case 'build_gas_engine': {
+      // GE produces 2.5 MW (covers PF). Keep the 2 wheels from before so the
+      // map looks "lived in" but they're optional for power.
+      ensureGoblins(state, 14);
+      ensureBuildingCount(state, 'goblin_wheel', 2);
+      ensureBuildingCount(state, 'phone_farm', 1);
+      ensureBuildingCount(state, 'gas_engine', 1);
+      state.money = Math.max(state.money, 1200);
+      // Enough for a couple ritual upgrades by this point.
+      state.blood = Math.max(state.blood, 75);
+      state.bloodUnlocked = true;
+      break;
+    }
+    case 'reach_6mw': {
+      // Reach 6 MW production. Three Gas Engines (2.5 MW each) cover it
+      // with headroom. No Datacentre placed yet — the next task is to run
+      // one, which involves digging, placing the DC, and watering it.
+      ensureGoblins(state, 24);
+      ensureBuildingCount(state, 'goblin_wheel', 2);
+      ensureBuildingCount(state, 'phone_farm', 1);
+      ensureBuildingCount(state, 'gas_engine', 3);
+      state.money = Math.max(state.money, 3000);
+      state.blood = Math.max(state.blood, 150);
+      state.bloodUnlocked = true;
+      break;
+    }
+    case 'run_datacentre': {
+      // Full DC setup: dig water + maintainers + carriers so the DC powers
+      // up. The previous tier's reach_6mw skip already provided gas engines.
+      ensureGoblins(state, 40);
+      if (!state.dugDirections.has('n')) digDirection(state, 'n');
+      ensureBuildingCount(state, 'goblin_wheel', 2);
+      ensureBuildingCount(state, 'phone_farm', 1);
+      ensureBuildingCount(state, 'gas_engine', 3);
+      ensureBuildingCount(state, 'datacentre', 1);
+      state.money = Math.max(state.money, 8000);
+      state.blood = Math.max(state.blood, 500);
       state.bloodUnlocked = true;
       break;
     }
@@ -683,7 +844,7 @@ function spawnIdleGoblinNearHole(state: GameState): boolean {
           cell: { cx, cy },
           target: null, goal: null, path: [],
           facing: Math.PI / 2,
-          state: { kind: 'idle' }, selected: false, idleSince: null,
+          state: { kind: 'idle' }, selected: false, idleSince: null, lastCellChangedAt: state.now,
         };
         state.goblins.set(id, g);
         occupyCell(state, cx, cy, id);
@@ -695,14 +856,16 @@ function spawnIdleGoblinNearHole(state: GameState): boolean {
   return false;
 }
 
-function ensureBuilding(state: GameState, kind: BuildingKind): boolean {
-  // If one already exists past construction, leave it alone.
-  for (const b of state.buildings.values()) {
-    if (b.kind === kind && b.state !== 'constructing') return true;
-  }
+// Place a single building of `kind` and snap maintainers + water carrier
+// (for DCs) directly inside the footprint so the post-skip state powers up
+// instantly instead of waiting for goblins to walk over. Pass
+// `waterCarriers: false` to leave the building thirsty (used by the
+// build_datacentre task-skip so the player still has to dig + assign water).
+type PlaceOpts = { waterCarriers?: boolean };
+function placeOneBuilding(state: GameState, kind: BuildingKind, opts: PlaceOpts = {}): Building | null {
   const def = BUILDING_DEFS[kind];
   const tl = findFreeFootprint(state, def.cellSize);
-  if (!tl) return false;
+  if (!tl) return null;
   const b: Building = {
     id: state.nextId++,
     kind,
@@ -713,18 +876,86 @@ function ensureBuilding(state: GameState, kind: BuildingKind): boolean {
     selected: false,
   };
   state.buildings.set(b.id, b);
-  // Pull idle goblins as maintainers so the building can power up.
-  let need = def.maintainersRequired;
+
+  // Snap idle goblins straight into 'maintaining' inside the footprint so
+  // resolvePowerAndState marks the building active on the very next tick.
+  const footprintCells = buildingFootprintCells(b, def.cellSize);
+  let placed = 0;
   for (const g of state.goblins.values()) {
-    if (need <= 0) break;
+    if (placed >= def.maintainersRequired) break;
     if (g.state.kind !== 'idle') continue;
+    const slot = footprintCells.find(c => !state.occupancy.has(cellKey(c.cx, c.cy)));
+    if (!slot) break;
+    teleportGoblinTo(state, g, slot);
     b.assignedGoblins.push(g.id);
-    g.state = { kind: 'going_to_maintain', buildingId: b.id };
-    g.goal = null;
-    g.path = [];
-    need--;
+    g.state = { kind: 'maintaining', buildingId: b.id, nextWanderAt: state.now + 1 };
+    placed++;
   }
-  return true;
+  // Buildings that drink (Datacentre, Hypercentre) get their auto-assign
+  // target of carriers snapped on, plus a full water meter so the post-skip
+  // state is operational. Caller can opt out (run_datacentre skip stops
+  // here for the build_foundations phase, leaving the DC thirsty).
+  const drinks = (def.waterDeliveryAmount ?? 0) > 0;
+  const target = def.waterAutoAssignTarget ?? 0;
+  if (opts.waterCarriers !== false && drinks && state.waterSources.size > 0) {
+    b.waterMeter = 100;
+    const sourceId = [...state.waterSources.values()][0].id;
+    let assigned = 0;
+    for (const g of state.goblins.values()) {
+      if (assigned >= target) break;
+      if (g.state.kind !== 'idle') continue;
+      b.assignedGoblins.push(g.id);
+      g.state = { kind: 'fetching_water', buildingId: b.id, sourceId, phase: 'to_source', firstLoopDone: true };
+      g.goal = null;
+      g.path = [];
+      assigned++;
+    }
+  }
+  // Goblin Hole is its own thing — finished construction goes straight to
+  // active in the regular path; mirror that here.
+  if (kind === 'goblin_hole') b.state = 'active';
+  return b;
+}
+
+function buildingFootprintCells(b: Building, n: number): Cell[] {
+  const out: Cell[] = [];
+  for (let dx = 0; dx < n; dx++) {
+    for (let dy = 0; dy < n; dy++) {
+      out.push({ cx: b.cell.cx + dx, cy: b.cell.cy + dy });
+    }
+  }
+  return out;
+}
+
+function teleportGoblinTo(state: GameState, g: Goblin, c: Cell): void {
+  if (state.occupancy.get(cellKey(g.cell.cx, g.cell.cy)) === g.id) {
+    state.occupancy.delete(cellKey(g.cell.cx, g.cell.cy));
+  }
+  if (g.target) {
+    state.occupancy.delete(cellKey(g.target.cx, g.target.cy));
+    g.target = null;
+  }
+  g.cell = c;
+  g.pos = cellCenter(c);
+  g.lastCellChangedAt = state.now;
+  g.goal = null;
+  g.path = [];
+  occupyCell(state, c.cx, c.cy, g.id);
+}
+
+// Place enough buildings of `kind` so the world has at least `count` of them
+// past construction. Returns the actual count after placement.
+function ensureBuildingCount(state: GameState, kind: BuildingKind, count: number, opts: PlaceOpts = {}): number {
+  let have = 0;
+  for (const b of state.buildings.values()) {
+    if (b.kind === kind && b.state !== 'constructing') have++;
+  }
+  while (have < count) {
+    const placed = placeOneBuilding(state, kind, opts);
+    if (!placed) break;
+    have++;
+  }
+  return have;
 }
 
 function findFreeFootprint(state: GameState, cellSize: number): Cell | null {

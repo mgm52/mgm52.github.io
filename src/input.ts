@@ -4,9 +4,9 @@ import { BUILDING_DEFS, BuildingKind, CELL, GOBLIN, MINOTAUR, RENDER_SCALE, WORL
 import { RenderContext, clampCamera } from './render';
 import { autoAssignAllIdle } from './sim';
 import {
-  Building, Cell, GameState, Goblin, Minotaur,
+  Building, Cell, GameState, Goblin, Minotaur, WaterSource,
   appendLog, buildingAtCell, cellKey, defOf, findFreeCellNear,
-  holeAtCell, isCellBlocked, isInBounds, pixelToCell,
+  holeAtCell, isCellBlocked, isInBounds, pixelToCell, waterCarrierCount, waterSourceAtCell,
 } from './state';
 
 type ActivePointer = {
@@ -275,6 +275,27 @@ function goblinAt(state: GameState, x: number, y: number): Goblin | null {
   return null;
 }
 
+function waterSourceAt(state: GameState, cell: Cell): WaterSource | null {
+  return waterSourceAtCell(state, cell);
+}
+
+// Pick a building that drinks water (DC, HC). No carrier cap applies — the
+// player can pile as many goblins onto a single building as they want. We
+// favour the lowest-meter building so manual right-clicks always go to the
+// thirstiest target first.
+function nearestThirstyDatacentre(state: GameState): Building | null {
+  let best: Building | null = null;
+  let bestMeter = Infinity;
+  for (const b of state.buildings.values()) {
+    const drinks = (defOf(b).waterDeliveryAmount ?? 0) > 0;
+    if (!drinks) continue;
+    if (b.state === 'constructing') continue;
+    const m = b.waterMeter ?? 0;
+    if (m < bestMeter) { bestMeter = m; best = b; }
+  }
+  return best;
+}
+
 function minotaurAt(state: GameState, x: number, y: number): Minotaur | null {
   // Larger hit-radius than the body collider since the minotaur's sprite is
   // significantly bigger than the goblin's.
@@ -296,6 +317,40 @@ function handleRightClick(state: GameState, x: number, y: number) {
   const targetBuilding = (targetGoblin || targetMinotaur)
     ? null
     : buildingAtCell(state, targetCell.cx, targetCell.cy);
+  const targetWater = (!targetGoblin && !targetMinotaur && !targetBuilding)
+    ? waterSourceAt(state, targetCell)
+    : null;
+
+  // Water duty: right-click a water source with goblins selected to put them
+  // on the loop for the closest under-watered Datacentre.
+  if (targetWater && selectedGoblins.length > 0) {
+    let assigned = 0;
+    for (const g of selectedGoblins) {
+      const dc = nearestThirstyDatacentre(state);
+      if (!dc) break;
+      releaseFromBuilding(state, g);
+      dc.assignedGoblins.push(g.id);
+      g.goal = null;
+      g.path = [];
+      g.state = {
+        kind: 'fetching_water',
+        buildingId: dc.id,
+        sourceId: targetWater.id,
+        phase: 'to_source',
+        initialTarget: { cx: targetCell.cx, cy: targetCell.cy },
+      };
+      // Reset stuck timer so the new role gets a clean 3s grace window.
+      g.lastCellChangedAt = state.now;
+      assigned++;
+    }
+    if (assigned > 0) {
+      appendLog(state, `${assigned} goblin(s) on water duty.`);
+      return;
+    }
+    playSound('error');
+    appendLog(state, 'Nothing to water.');
+    return;
+  }
 
   // Minotaur commands.
   if (selectedMinotaurs.length > 0) {
@@ -315,6 +370,13 @@ function handleRightClick(state: GameState, x: number, y: number) {
         m.state = { kind: 'going_to_destroy', buildingId: targetBuilding.id };
       }
       appendLog(state, `${selectedMinotaurs.length} minotaur(s) ordered to smash ${defOf(targetBuilding).name} #${targetBuilding.id}.`);
+    } else {
+      // Empty cell — walk there, then resume the usual hunt/wander.
+      for (const m of selectedMinotaurs) {
+        m.target = null;
+        m.state = { kind: 'moving_to', goal: { cx: targetCell.cx, cy: targetCell.cy } };
+      }
+      appendLog(state, `${selectedMinotaurs.length} minotaur(s) on the move.`);
     }
   }
 

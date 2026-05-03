@@ -3,10 +3,21 @@ export const TICK_MS = 1000 / TICK_HZ;
 export const TICK_S = 1 / TICK_HZ;
 
 export const CELL = 32;
-export const COLS = 24;
-export const ROWS = 20;
+// World grid is sized to fit the maximum possible play area: the initial
+// 24x20 region plus DIG.cells (20) of growth in every direction. Walls fill
+// everything outside the current play area, so the visible map starts small.
+export const INITIAL_PLAY_COLS = 24;
+export const INITIAL_PLAY_ROWS = 20;
+export const DIG_GROWTH_CELLS = 12;
+export const COLS = INITIAL_PLAY_COLS + DIG_GROWTH_CELLS * 2;
+export const ROWS = INITIAL_PLAY_ROWS + DIG_GROWTH_CELLS * 2;
 export const WORLD = { width: COLS * CELL, height: ROWS * CELL };
-export const WALL_BORDER = 2; // impassable wall thickness in cells around play area
+export const WALL_BORDER = 2; // impassable wall thickness at the world's outer edge
+
+// Where the initial play area sits within the larger world (top-left, in cells).
+// Centered so dig in any direction has 20 cells of headroom.
+export const INITIAL_PLAY_X0 = DIG_GROWTH_CELLS;
+export const INITIAL_PLAY_Y0 = DIG_GROWTH_CELLS;
 export const CAMERA_SPEED = 700; // px/sec when panning with WASD
 export const RENDER_SCALE = 1.3; // visual zoom factor applied to the world layer
 
@@ -19,7 +30,7 @@ export const GOBLIN = {
   // Hard ceiling for the spawn-progress track. Per-hole capacity lives on
   // `state.hole.spawnCapacity` and currently doesn't ramp; the headroom is
   // here in case future upgrades raise it.
-  concurrentBuildLimit: 12,
+  concurrentBuildLimit: 40,
   breakdanceAfter: 30, // seconds of continuous idle before goblins start breakdancing
 };
 
@@ -31,7 +42,7 @@ export const MINOTAUR = {
   speed: 70,
   radius: 22,
   bloodCost: 8,
-  spawnTime: 5,
+  spawnTime: 2,
   spawnCapacity: 1,
   arriveDist: 2,
   attackWindup: 0.5,
@@ -45,12 +56,48 @@ export const MINOTAUR = {
 // "Autospawn": queues a free spawn every 3 seconds.
 export const SUMMON_UPGRADES = {
   autoAssign: { bloodCost: 13 },
-  widerHole: { bloodCost: 6, capacity: 6 },
   autoSpawn: { bloodCost: 13, intervalSeconds: 3 },
+  goldgoblins: { bloodCost: 50 },
 };
+
+// Tier ladder for the Autospawn ritual. Each subsequent purchase replaces the
+// previous in the menu (level → next entry). Doubling cost per tier.
+export const AUTOSPAWN_TIERS: { multiplier: number; bloodCost: number }[] = [
+  { multiplier: 1,  bloodCost: 13 },
+  { multiplier: 2,  bloodCost: 26 },
+  { multiplier: 4,  bloodCost: 52 },
+  { multiplier: 8,  bloodCost: 104 },
+  { multiplier: 16, bloodCost: 208 },
+  { multiplier: 32, bloodCost: 416 },
+];
+
+// Cost per dig direction (NESW). The growth distance lives in
+// DIG_GROWTH_CELLS so it can also size the world grid.
+export const DIG = { bloodCost: 100, cells: DIG_GROWTH_CELLS };
+
+// Water meter — every building with `waterDeliveryAmount` keeps a 0..100
+// score that depletes at this rate and is bumped per delivery.
+export const WATER_METER_MAX = 100;
+export const WATER_DEPLETION_PP_PER_SEC = 10;
+
+// Default per-hole capacity. Each completed Goblin Hole building stacks
+// another GOBLIN_HOLE_CAPACITY_PER_BUILDING on top of the base.
+export const BASE_SPAWN_CAPACITY = 5;
+export const GOBLIN_HOLE_CAPACITY_PER_BUILDING = 5;
 
 // Killing a goblin yields this much money + this much blood.
 export const KILL_REWARD = { money: 25, blood: 1 };
+// A gold-tinted goblin (rolled at spawn time when Goldgoblins is owned)
+// drops a much fatter pile of money on death.
+export const GOLD_KILL_REWARD = { money: 250, blood: 1 };
+// Probability a fresh goblin is gold-tinted, applied when Goldgoblins is
+// owned. Independent per spawn.
+export const GOLD_GOBLIN_CHANCE = 0.20;
+
+// Killing a Minotaur (only possible by goring it with another Minotaur)
+// drops blood but no money — the player paid summoning blood, this returns
+// most of it via the kill but doesn't generate Ƶ.
+export const MINOTAUR_KILL_REWARD = { money: 0, blood: 10 };
 
 export type BuildingColors = {
   active: number; activeBorder: number;
@@ -68,6 +115,15 @@ export type BuildingDef = {
   buildersRequired: number;
   buildTime: number;      // seconds
   maintainersRequired: number;
+  // Per-delivery water bump (0..100). Set on buildings that drink (DC, HC).
+  // The building maintains a 0..100 waterMeter that depletes at
+  // WATER_DEPLETION_PP_PER_SEC and is bumped by this amount each time a
+  // carrier completes a source → building round trip. The building counts
+  // as watered while the meter is > 0.
+  waterDeliveryAmount?: number;
+  // Auto-assign target — Autotask will keep this many carriers on the
+  // building. Manual right-click ignores the cap (no per-building limit).
+  waterAutoAssignTarget?: number;
   income: number;         // Ƶ/sec while active
   powerOutput: number;    // watts: positive = produces, negative = consumes
   wanderInterval: number;
@@ -121,6 +177,8 @@ export const BUILDING_DEFS = {
     buildersRequired: 15,
     buildTime: 30,
     maintainersRequired: 15,
+    waterDeliveryAmount: 50,
+    waterAutoAssignTarget: 2,
     income: 1000,
     powerOutput: -6_000_000, // 6 MW draw
     wanderInterval: 1.4,
@@ -128,6 +186,42 @@ export const BUILDING_DEFS = {
     colors: {
       active: 0x8a3a3a, activeBorder: 0xff8080,
       dormant: 0x4a3a3a, dormantBorder: 0x8a6a6a,
+      constructing: 0x3a3f47, constructingBorder: 0x808890,
+    },
+  }),
+  nuclear_reactor: def(5, {
+    name: 'Nuclear Reactor',
+    short: 'NR',
+    cost: 500_000,
+    buildersRequired: 5,
+    buildTime: 60,
+    maintainersRequired: 5,
+    income: 0,
+    powerOutput: 1_000_000_000, // 1 GW
+    wanderInterval: 1.2,
+    wanderJitter: 0.4,
+    colors: {
+      active: 0x2a6a4a, activeBorder: 0x6affb0,
+      dormant: 0x2a4a3a, dormantBorder: 0x5a8a70,
+      constructing: 0x3a3f47, constructingBorder: 0x808890,
+    },
+  }),
+  hypercentre: def(6, {
+    name: 'Hypercentre',
+    short: 'HC',
+    cost: 500_000,
+    buildersRequired: 20,
+    buildTime: 90,
+    maintainersRequired: 30,
+    waterDeliveryAmount: 20,
+    waterAutoAssignTarget: 5,
+    income: 50_000,
+    powerOutput: -1_000_000_000, // 1 GW draw
+    wanderInterval: 1.6,
+    wanderJitter: 0.9,
+    colors: {
+      active: 0x6a2a8a, activeBorder: 0xc080ff,
+      dormant: 0x4a2a5a, dormantBorder: 0x80608a,
       constructing: 0x3a3f47, constructingBorder: 0x808890,
     },
   }),
@@ -148,37 +242,32 @@ export const BUILDING_DEFS = {
       constructing: 0x3a3f47, constructingBorder: 0x808890,
     },
   }),
-  goblin_hole: def(2, {
+  goblin_hole: def(1, {
     name: 'Goblin Hole',
     short: 'GH',
-    cost: 1500,
-    bloodCost: 150,
-    buildersRequired: 1,
-    buildTime: 8,
-    maintainersRequired: 1,
+    cost: 666,
+    buildersRequired: 0,
+    buildTime: 4,
+    maintainersRequired: 0,
     income: 0,
-    powerOutput: -50, // 50 W
+    powerOutput: 0,
     wanderInterval: 1.0,
     wanderJitter: 0.4,
     colors: {
-      active: 0x4a2a4a, activeBorder: 0xa06aff,
-      dormant: 0x3a2a3a, dormantBorder: 0x705580,
+      active: 0x2a1a2a, activeBorder: 0xa06aff,
+      dormant: 0x2a1a2a, dormantBorder: 0x705580,
       constructing: 0x3a3f47, constructingBorder: 0x808890,
     },
   }),
 } as const;
 
-// Spawn cadence for the Goblin Hole building (one free goblin per interval
-// while active). Independent of the main hole's autospawn ritual.
-export const GOBLIN_HOLE_SPAWN_INTERVAL = 5;
-
 export type BuildingKind = keyof typeof BUILDING_DEFS;
-export const BUILDABLE_KINDS: BuildingKind[] = ['goblin_wheel', 'gas_engine', 'datacentre', 'phone_farm', 'goblin_hole'];
+export const BUILDABLE_KINDS: BuildingKind[] = ['goblin_wheel', 'gas_engine', 'datacentre', 'phone_farm', 'goblin_hole', 'nuclear_reactor', 'hypercentre'];
 
 export const START_MONEY = 0;
 export const START_GOBLINS = 0;
 // Place start near the top-left of the playable area, just inside the wall border.
-export const START_CELL = { cx: WALL_BORDER + 4, cy: WALL_BORDER + 8 };
+export const START_CELL = { cx: INITIAL_PLAY_X0 + 4, cy: INITIAL_PLAY_Y0 + 8 };
 
 export function formatPower(w: number): string {
   const abs = Math.abs(w);

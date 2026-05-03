@@ -11,7 +11,7 @@ extensions.add(GifAsset);
 type DeathFrames = { textures: Texture[]; ends: number[]; duration: number };
 import { CELL, COLS, GOBLIN, RENDER_SCALE, ROWS, MINOTAUR, WORLD } from './config';
 import { ensureFontLoaded, fontFamilyById, getOptions, onOptionsChange, type FontConfig, type Options } from './options';
-import { Building, GameState, Goblin, HOLE_SIZE, Minotaur, buildingCenter, defOf, holeCenter, maintainerCount } from './state';
+import { Building, GameState, Goblin, HOLE_SIZE, Minotaur, WaterSource, buildingCenter, cellCenter, defOf, holeCenter, maintainerCount } from './state';
 
 export type Camera = { x: number; y: number };
 
@@ -146,6 +146,11 @@ type MinotaurView = {
   selectionRing: Graphics;
 };
 
+type WaterView = {
+  container: Container;
+  body: Graphics;
+};
+
 type BuildingView = {
   container: Container;
   body: Graphics;
@@ -168,6 +173,8 @@ export type RenderContext = {
   goblinViews: Map<number, GoblinView>;
   minotaurLayer: Container;
   minotaurViews: Map<number, MinotaurView>;
+  waterLayer: Container;
+  waterViews: Map<number, WaterView>;
   buildingViews: Map<number, BuildingView>;
   camera: Camera;
   viewport: { width: number; height: number };
@@ -185,6 +192,7 @@ export type RenderContext = {
   deathFrames: DeathFrames | null;
   // Mutable references — used by applyOptions() to redraw on the fly.
   walls: Set<string>;
+  wallsVersion: number;     // last drawn version; render compares vs state.wallsVersion
   playBg: Graphics;
   wallGfx: Graphics;
   grid: Graphics;
@@ -214,6 +222,7 @@ export async function createRender(parent: HTMLElement, walls: Set<string>): Pro
   const buildingLayer = new Container();
   const goblinLayer = new Container();
   const minotaurLayer = new Container();
+  const waterLayer = new Container();
   const uiLayer = new Container();
 
   // Playable-area background, walls, and grid — drawn lazily from current options.
@@ -229,6 +238,7 @@ export async function createRender(parent: HTMLElement, walls: Set<string>): Pro
   worldLayer.addChild(playBg);
   worldLayer.addChild(wallGfx);
   worldLayer.addChild(grid);
+  worldLayer.addChild(waterLayer);
   worldLayer.addChild(holeGfx);
   worldLayer.addChild(buildingLayer);
   worldLayer.addChild(goblinLayer);
@@ -251,6 +261,7 @@ export async function createRender(parent: HTMLElement, walls: Set<string>): Pro
     app, worldLayer, buildingLayer, goblinLayer, uiLayer,
     goblinViews: new Map(),
     minotaurLayer, minotaurViews: new Map(),
+    waterLayer, waterViews: new Map(),
     buildingViews: new Map(),
     camera: { x: 0, y: 0 },
     viewport: { width: initW, height: initH },
@@ -258,7 +269,7 @@ export async function createRender(parent: HTMLElement, walls: Set<string>): Pro
     floatersLayer, floaterViews: new Map(),
     effectsLayer, deathViews: new Map(),
     deathFrames: null,
-    walls, playBg, wallGfx, grid, goblinFilter, buildingFilter,
+    walls, wallsVersion: -1, playBg, wallGfx, grid, goblinFilter, buildingFilter,
   };
 
   // Decode the GIF once into AnimatedSprite frames. Sharing GifSprite across
@@ -484,6 +495,28 @@ function makeMinotaurView(): MinotaurView {
   return { container: c, shadow, sprite, selectionRing: ring };
 }
 
+function makeWaterView(w: WaterSource): WaterView {
+  const c = new Container();
+  const body = new Graphics();
+  const x = w.x0 * CELL;
+  const y = w.y0 * CELL;
+  const wpx = (w.x1 - w.x0) * CELL;
+  const hpx = (w.y1 - w.y0) * CELL;
+  body.rect(x, y, wpx, hpx).fill(0x2a5aa8);
+  // Sparse ripple highlights so the surface reads as water rather than a
+  // flat blue rectangle. Random per build but stable thereafter.
+  const rippleCount = Math.max(4, Math.floor((wpx * hpx) / (CELL * CELL * 4)));
+  for (let i = 0; i < rippleCount; i++) {
+    const rx = x + Math.random() * wpx;
+    const ry = y + Math.random() * hpx;
+    const rr = CELL * (0.16 + Math.random() * 0.16);
+    body.circle(rx, ry, rr).fill({ color: 0x4a8acf, alpha: 0.7 });
+    body.circle(rx + rr * 0.4, ry - rr * 0.4, rr * 0.3).fill({ color: 0xffffff, alpha: 0.35 });
+  }
+  c.addChild(body);
+  return { container: c, body };
+}
+
 function makeBuildingView(b: Building): BuildingView {
   const def = defOf(b);
   const c = new Container();
@@ -539,14 +572,18 @@ function makeBuildingView(b: Building): BuildingView {
   };
 }
 
+// Both the starting Goblin Hole (state.hole) and Goblin Hole buildings render
+// the same way: a black-filled circle with a thin white outline. Shared here
+// so the two never visually drift.
+const HOLE_RADIUS = CELL * 0.42;
+function drawHoleAt(g: Graphics, x: number, y: number) {
+  g.circle(x, y, HOLE_RADIUS).fill(0x000000).stroke({ width: 1.5, color: 0xffffff });
+}
+
 function drawHole(ctx: RenderContext, state: GameState) {
   const c = holeCenter(state);
-  const r = CELL * HOLE_SIZE * 0.42;
   ctx.holeGfx.clear();
-  ctx.holeGfx
-    .ellipse(c.x, c.y + 1, r, r * 0.6).fill({ color: 0x000000, alpha: 0.55 })
-    .ellipse(c.x, c.y, r, r * 0.55).fill({ color: 0x050505 })
-    .ellipse(c.x, c.y - 1, r * 0.85, r * 0.45).fill({ color: 0x101010 });
+  drawHoleAt(ctx.holeGfx, c.x, c.y);
   ctx.holeRing.clear();
   if (state.hole.selected) {
     const half = (CELL * HOLE_SIZE) / 2 + 2;
@@ -637,11 +674,17 @@ function drawSelectionRing(g: Graphics, size: number) {
 function drawBuildingBody(g: Graphics, b: Building) {
   const def = defOf(b);
   const half = def.size / 2;
+  g.clear();
+  // Goblin Hole buildings render identically to the starting hole — black
+  // circle, white outline — no purple-pad rectangle.
+  if (b.kind === 'goblin_hole') {
+    drawHoleAt(g, 0, 0);
+    return;
+  }
   const c = def.colors;
   let fill = c.constructing, border = c.constructingBorder;
   if (b.state === 'active') { fill = c.active; border = c.activeBorder; }
   else if (b.state === 'dormant') { fill = c.dormant; border = c.dormantBorder; }
-  g.clear();
   g.rect(-half, -half, def.size, def.size).fill(fill).stroke({ width: 2, color: border });
   // simple texture per kind
   if (b.kind === 'phone_farm') {
@@ -669,10 +712,6 @@ function drawBuildingBody(g: Graphics, b: Building) {
       g.rect(i * 24 - w / 2, -half + 6, w, def.size - 18)
         .fill({ color: 0x000000, alpha: 0.32 });
     }
-  } else if (b.kind === 'goblin_hole') {
-    // A dark pit at the center plus a smaller inner ring for depth.
-    g.circle(0, 0, def.size * 0.35).fill({ color: 0x000000, alpha: 0.55 });
-    g.circle(0, 0, def.size * 0.22).fill({ color: 0x000000, alpha: 0.7 });
   }
 }
 
@@ -691,6 +730,13 @@ export function render(state: GameState, ctx: RenderContext) {
 
   const opts = getOptions();
   const displayPx = opts.goblinDisplayPx;
+
+  // Walls expand when a Dig is purchased; redraw lazily on version drift.
+  if (state.wallsVersion !== ctx.wallsVersion) {
+    ctx.walls = state.walls;
+    redrawWalls(ctx, opts);
+    ctx.wallsVersion = state.wallsVersion;
+  }
 
   // Goblin Hole — re-drawn each frame (cheap and keeps the position cell-exact
   // even if anything moves it later).
@@ -750,7 +796,11 @@ export function render(state: GameState, ctx: RenderContext) {
     }
     for (const s of v.outline) s.visible = opts.goblinOutline;
     let tint = 0xffffff;
-    if (g.state.kind === 'building' || g.state.kind === 'going_to_build') tint = 0xfff0a8;
+    // Gold goblins keep their gold tint regardless of role; if they're on
+    // water duty the blue still wins so the player can find their carriers.
+    if (g.state.kind === 'fetching_water') tint = 0x2060ff;
+    else if (g.gold) tint = 0xffd700;
+    else if (g.state.kind === 'building' || g.state.kind === 'going_to_build') tint = 0xfff0a8;
     else if (g.state.kind === 'maintaining' || g.state.kind === 'going_to_maintain') tint = 0xa8d8ff;
     v.sprite.tint = tint;
   }
@@ -800,6 +850,26 @@ export function render(state: GameState, ctx: RenderContext) {
     }
   }
 
+  // Water sources — region rectangles with a few ripple highlights for life.
+  const seenW = new Set<number>();
+  for (const w of state.waterSources.values()) {
+    seenW.add(w.id);
+    let v = ctx.waterViews.get(w.id);
+    if (!v) {
+      v = makeWaterView(w);
+      ctx.waterLayer.addChild(v.container);
+      ctx.waterViews.set(w.id, v);
+    }
+    // Region is fixed once spawned, so the view only needs to be positioned
+    // once at create time.
+  }
+  for (const [id, v] of ctx.waterViews) {
+    if (!seenW.has(id)) {
+      v.container.destroy({ children: true });
+      ctx.waterViews.delete(id);
+    }
+  }
+
   // Buildings
   const seenB = new Set<number>();
   for (const b of state.buildings.values()) {
@@ -824,27 +894,39 @@ export function render(state: GameState, ctx: RenderContext) {
       v.lastSize = def.size;
     }
 
-    // progress bar — sits inside the top edge, below the warning text if any
+    // progress bar — yellow construction fill while building, blue water
+    // meter once finished (only on buildings that drink).
     v.progress.clear();
+    const drinks = (def.waterDeliveryAmount ?? 0) > 0;
     if (b.state === 'constructing') {
       const w = def.size - 10;
       const h = 5;
-      // If the warning is showing, drop the bar below the warning row.
       const y = (v.warning.visible ? -def.size / 2 + 18 : -def.size / 2 + 5);
       v.progress.rect(-w / 2, y, w, h).fill({ color: 0x000000, alpha: 0.6 }).stroke({ width: 1, color: 0x000000 });
       v.progress.rect(-w / 2, y, w * b.buildProgress, h).fill(0xffd96b);
+    } else if (drinks) {
+      const w = def.size - 10;
+      const h = 5;
+      const y = (v.warning.visible ? -def.size / 2 + 18 : -def.size / 2 + 5);
+      const meter = (b.waterMeter ?? 0) / 100;
+      v.progress.rect(-w / 2, y, w, h).fill({ color: 0x000000, alpha: 0.6 }).stroke({ width: 1, color: 0x000000 });
+      v.progress.rect(-w / 2, y, w * meter, h).fill(0x4a8acf);
     }
 
-    // floating warning
+    // floating warning — show ALL unmet needs at once, one per line.
     let warningText = '';
     if (b.state === 'dormant') {
+      const reasons: string[] = [];
       const have = maintainerCount(state, b);
       const need = def.maintainersRequired - have;
-      if (need > 0) {
-        warningText = `needs ${need} goblin${need === 1 ? '' : 's'}`;
-      } else {
-        warningText = 'underpowered';
-      }
+      if (need > 0) reasons.push(`needs ${need} goblin${need === 1 ? '' : 's'}`);
+      if (drinks && (b.waterMeter ?? 0) <= 0) reasons.push('needs water');
+      // "Underpowered" only manifests when staffing + water are sufficient
+      // and the building still can't activate; in that case those other
+      // reasons are empty and the only remaining cause is power.
+      const draw = def.powerOutput < 0 ? -def.powerOutput : 0;
+      if (reasons.length === 0 && draw > 0) reasons.push('underpowered');
+      warningText = reasons.join('\n');
     } else if (b.state === 'constructing') {
       let workers = 0;
       for (const id of b.assignedGoblins) {

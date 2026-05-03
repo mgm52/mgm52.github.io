@@ -1,5 +1,7 @@
 import {
-  BUILDING_DEFS, BuildingDef, BuildingKind, CELL, COLS, ROWS,
+  BASE_SPAWN_CAPACITY, BUILDING_DEFS, BuildingDef, BuildingKind, CELL, COLS,
+  DIG_GROWTH_CELLS, GOBLIN_HOLE_CAPACITY_PER_BUILDING, ROWS,
+  INITIAL_PLAY_COLS, INITIAL_PLAY_ROWS, INITIAL_PLAY_X0, INITIAL_PLAY_Y0,
   START_CELL, START_GOBLINS, START_MONEY, WALL_BORDER, formatPower,
 } from './config';
 
@@ -21,6 +23,13 @@ export type GoblinState =
   | { kind: 'going_to_maintain'; buildingId: number }
   | { kind: 'building'; buildingId: number }
   | { kind: 'maintaining'; buildingId: number; nextWanderAt: number }
+  // Water carrier — cycles between a Datacentre and a water source. A
+  // carrier only "waters" the DC after completing their first round trip
+  // (source → DC); waterCarrierCount ignores carriers with firstLoopDone=false.
+  // The optional initialTarget is the exact cell the player right-clicked,
+  // used only for the first walk to the source; subsequent trips fall back
+  // to the closest cell within the source region.
+  | { kind: 'fetching_water'; buildingId: number; sourceId: number; phase: 'to_source' | 'to_dc'; firstLoopDone?: boolean; initialTarget?: Cell }
   | { kind: 'going_to_kill'; targetId: number; attackAt?: number };
 
 export type Goblin = {
@@ -34,13 +43,48 @@ export type Goblin = {
   state: GoblinState;
   selected: boolean;
   idleSince: number | null; // game time when the current idle streak began
+  // game time when this goblin's `cell` last changed (not pos — pos updates
+  // every tick mid-step). Used by water-duty stuck detection: if a carrier
+  // hasn't progressed a full cell in 3s, drop the role.
+  lastCellChangedAt: number;
+  // Rolled at spawn time when Goldgoblins is owned. Gold goblins render with
+  // a yellow tint and drop GOLD_KILL_REWARD instead of the usual KILL_REWARD.
+  gold?: boolean;
 };
 
 export type MinotaurState =
   | { kind: 'wander' }
+  | { kind: 'moving_to'; goal: Cell }
   | { kind: 'going_to_kill'; targetId: number; attackAt?: number }
   | { kind: 'going_to_kill_minotaur'; targetId: number; attackAt?: number }
   | { kind: 'going_to_destroy'; buildingId: number; attackAt?: number };
+
+// A discovered water source — fills a rectangular region (the far third of
+// the dug arm). Goblins on water duty cycle between any cell inside the
+// region and the Datacentre.
+export type WaterSource = {
+  id: number;
+  x0: number; y0: number;
+  x1: number; y1: number;   // exclusive upper bounds
+};
+
+export function isCellInWaterSource(w: WaterSource, c: Cell): boolean {
+  return c.cx >= w.x0 && c.cx < w.x1 && c.cy >= w.y0 && c.cy < w.y1;
+}
+
+export function waterSourceAtCell(state: GameState, c: Cell): WaterSource | null {
+  for (const w of state.waterSources.values()) {
+    if (isCellInWaterSource(w, c)) return w;
+  }
+  return null;
+}
+
+// Closest cell inside `w` (clamped to its bounds) to `from`.
+export function nearestCellInWaterSource(w: WaterSource, from: Cell): Cell {
+  const cx = Math.min(w.x1 - 1, Math.max(w.x0, from.cx));
+  const cy = Math.min(w.y1 - 1, Math.max(w.y0, from.cy));
+  return { cx, cy };
+}
 
 export type Minotaur = {
   id: number;
@@ -63,9 +107,10 @@ export type Building = {
   buildProgress: number;
   assignedGoblins: number[];
   selected: boolean;
-  // goblin_hole: countdown to next free spawn. Set when the building first
-  // goes active; ignored on every other kind.
-  nextSpawnAt?: number;
+  // 0..100 percent. For buildings with `waterDeliveryAmount`, depletes at
+  // WATER_DEPLETION_PP_PER_SEC; each carrier delivery bumps it by the def's
+  // delivery amount. The building counts as "watered" while > 0.
+  waterMeter?: number;
 };
 
 export type PendingBuild = { kind: BuildingKind } | null;
@@ -95,8 +140,18 @@ export const HOLE_SIZE = 1;
 export type Hole = {
   cell: Cell;
   selected: boolean;
-  spawnCapacity: number;
 };
+
+// Total in-flight spawn slots: base + GOBLIN_HOLE_CAPACITY_PER_BUILDING per
+// completed Goblin Hole building. Computed fresh each tick so the spawn queue
+// always reflects the latest infrastructure.
+export function getSpawnCapacity(state: GameState): number {
+  let cap = BASE_SPAWN_CAPACITY;
+  for (const b of state.buildings.values()) {
+    if (b.kind === 'goblin_hole' && b.state !== 'constructing') cap += GOBLIN_HOLE_CAPACITY_PER_BUILDING;
+  }
+  return cap;
+}
 
 export type GameState = {
   money: number;
@@ -106,13 +161,23 @@ export type GameState = {
   bloodUnlocked: boolean;
   goblins: Map<number, Goblin>;
   minotaurs: Map<number, Minotaur>;
+  waterSources: Map<number, WaterSource>;
   buildings: Map<number, Building>;
   hole: Hole;
   // Ritual upgrades — sticky once bought, apply game-wide.
   autoAssignEnabled: boolean;
-  widerHoleEnabled: boolean;
   autoSpawnEnabled: boolean;
+  goldgoblinsEnabled: boolean;
   autoSpawnTimer: number;
+  // Increments per goblin spawn so successive goblins emerge from a different
+  // hole (main + each completed Goblin Hole building, round-robin).
+  spawnHoleRotation: number;
+  autoSpawnMultiplier: number; // 1 baseline; 2 with x2; 4 with x4
+  // Set of dig directions already purchased ('n'|'e'|'s'|'w'); each expands
+  // the play area by DIG.cells in that direction and reveals a water source.
+  dugDirections: Set<'n' | 'e' | 's' | 'w'>;
+  // Bounds of the currently-walkable rectangle. Walls fill everything else.
+  playArea: { x0: number; y0: number; x1: number; y1: number };
   floaters: Floater[];
   deathEffects: DeathEffect[];
   // Tick state for the 1Hz income-floater cadence.
@@ -122,7 +187,8 @@ export type GameState = {
   pendingBuild: PendingBuild;
   log: { time: number; msg: string }[];
   occupancy: Map<string, number>;
-  walls: Set<string>;     // permanently impassable cells
+  walls: Set<string>;     // permanently impassable cells (mutated by Dig)
+  wallsVersion: number;   // bumped whenever `walls` changes — render redraws
   nextId: number;
   now: number;
   // Snapshot of last tick's power balance for display.
@@ -130,6 +196,8 @@ export type GameState = {
   lastPowerConsumed: number;
   // Tutorial counters (cumulative — only ever increase).
   spawnsCompleted: number;
+  // Hint UI: dismissed once the player presses any pan key (WASD/arrows).
+  panHintDismissed: boolean;
 };
 
 export function defOf(b: Building): BuildingDef { return BUILDING_DEFS[b.kind]; }
@@ -192,6 +260,13 @@ export function isCellBlocked(
   if (b && b.id !== exemptBuildingId) return true;
   const occ = state.occupancy.get(cellKey(cx, cy));
   if (occ !== undefined && occ !== exemptGoblinId) return true;
+  // Water cells are walkable only for goblins currently on water-duty —
+  // everyone else has to path around the source.
+  if (waterSourceAtCell(state, { cx, cy })) {
+    if (exemptGoblinId === undefined) return true;
+    const eg = state.goblins.get(exemptGoblinId);
+    if (!eg || eg.state.kind !== 'fetching_water') return true;
+  }
   return false;
 }
 
@@ -245,17 +320,88 @@ export function findFreeCellNear(
   return null;
 }
 
-function buildBorderWalls(): Set<string> {
+// Initial center play area, before any digs.
+export function initialPlayArea(): { x0: number; y0: number; x1: number; y1: number } {
+  return {
+    x0: INITIAL_PLAY_X0,
+    y0: INITIAL_PLAY_Y0,
+    x1: INITIAL_PLAY_X0 + INITIAL_PLAY_COLS,
+    y1: INITIAL_PLAY_Y0 + INITIAL_PLAY_ROWS,
+  };
+}
+
+// Predicate over the plus-shaped play area: a cell is in play if it's in the
+// initial center rectangle, OR in an axis-aligned extension off one of its
+// sides for a dug direction. Diagonal corners are never in play (the final
+// shape is a +).
+export function isInPlayCell(state: GameState, cx: number, cy: number): boolean {
+  const c = initialPlayArea();
+  if (cx >= c.x0 && cx < c.x1 && cy >= c.y0 && cy < c.y1) return true;
+  if (state.dugDirections.has('n')
+      && cx >= c.x0 && cx < c.x1
+      && cy >= c.y0 - DIG_GROWTH_CELLS && cy < c.y0) return true;
+  if (state.dugDirections.has('s')
+      && cx >= c.x0 && cx < c.x1
+      && cy >= c.y1 && cy < c.y1 + DIG_GROWTH_CELLS) return true;
+  if (state.dugDirections.has('w')
+      && cy >= c.y0 && cy < c.y1
+      && cx >= c.x0 - DIG_GROWTH_CELLS && cx < c.x0) return true;
+  if (state.dugDirections.has('e')
+      && cy >= c.y0 && cy < c.y1
+      && cx >= c.x1 && cx < c.x1 + DIG_GROWTH_CELLS) return true;
+  return false;
+}
+
+// Rebuilds the wall set: every cell that's NOT in play, plus a thin border
+// around the entire world (catches anything against the outer edge).
+export function rebuildWalls(state: GameState): Set<string> {
   const walls = new Set<string>();
   for (let cy = 0; cy < ROWS; cy++) {
     for (let cx = 0; cx < COLS; cx++) {
       const inBorder =
         cx < WALL_BORDER || cx >= COLS - WALL_BORDER ||
         cy < WALL_BORDER || cy >= ROWS - WALL_BORDER;
-      if (inBorder) walls.add(cellKey(cx, cy));
+      if (inBorder || !isInPlayCell(state, cx, cy)) walls.add(cellKey(cx, cy));
     }
   }
   return walls;
+}
+
+// Bounding box of the union of plus arms — used by the camera to know how
+// far it can pan. Always covers the initial center; expands per dug direction.
+export function computePlayBounds(state: GameState): { x0: number; y0: number; x1: number; y1: number } {
+  const c = initialPlayArea();
+  const b = { ...c };
+  if (state.dugDirections.has('n')) b.y0 = c.y0 - DIG_GROWTH_CELLS;
+  if (state.dugDirections.has('s')) b.y1 = c.y1 + DIG_GROWTH_CELLS;
+  if (state.dugDirections.has('w')) b.x0 = c.x0 - DIG_GROWTH_CELLS;
+  if (state.dugDirections.has('e')) b.x1 = c.x1 + DIG_GROWTH_CELLS;
+  return b;
+}
+
+// Expand the plus-shape by adding an arm in the given direction, refresh walls
+// + camera bounds, and lay down a water region covering the far third of the
+// new arm (full cross-section).
+export function digDirection(state: GameState, dir: 'n' | 'e' | 's' | 'w'): { ok: boolean; reason?: string } {
+  if (state.dugDirections.has(dir)) return { ok: false, reason: 'already-dug' };
+  state.dugDirections.add(dir);
+  state.walls = rebuildWalls(state);
+  state.wallsVersion++;
+  state.playArea = computePlayBounds(state);
+
+  // Water occupies the FAR third of the dug arm (away from the center).
+  const c = initialPlayArea();
+  const grow = DIG_GROWTH_CELLS;
+  const third = Math.ceil(grow / 3);
+  let region: { x0: number; y0: number; x1: number; y1: number };
+  if (dir === 'n') region = { x0: c.x0, x1: c.x1, y0: c.y0 - grow,    y1: c.y0 - grow + third };
+  else if (dir === 's') region = { x0: c.x0, x1: c.x1, y0: c.y1 + grow - third, y1: c.y1 + grow };
+  else if (dir === 'w') region = { x0: c.x0 - grow,    x1: c.x0 - grow + third, y0: c.y0, y1: c.y1 };
+  else region = { x0: c.x1 + grow - third, x1: c.x1 + grow, y0: c.y0, y1: c.y1 };
+
+  const id = state.nextId++;
+  state.waterSources.set(id, { id, ...region });
+  return { ok: true };
 }
 
 export function createInitialState(): GameState {
@@ -265,16 +411,20 @@ export function createInitialState(): GameState {
     bloodUnlocked: false,
     goblins: new Map(),
     minotaurs: new Map(),
+    waterSources: new Map(),
     buildings: new Map(),
     hole: {
       cell: { cx: START_CELL.cx, cy: START_CELL.cy },
       selected: false,
-      spawnCapacity: 3,
     },
     autoAssignEnabled: false,
-    widerHoleEnabled: false,
     autoSpawnEnabled: false,
+    goldgoblinsEnabled: false,
     autoSpawnTimer: 0,
+    autoSpawnMultiplier: 0,
+    spawnHoleRotation: 0,
+    dugDirections: new Set(),
+    playArea: initialPlayArea(),
     floaters: [],
     deathEffects: [],
     nextIncomeFloatAt: 1,
@@ -283,13 +433,16 @@ export function createInitialState(): GameState {
     pendingBuild: null,
     log: [],
     occupancy: new Map(),
-    walls: buildBorderWalls(),
+    walls: new Set<string>(),  // populated after construction
+    wallsVersion: 0,
     nextId: 1,
     now: 0,
     lastPowerProduced: 0,
     lastPowerConsumed: 0,
     spawnsCompleted: 0,
+    panHintDismissed: false,
   };
+  state.walls = rebuildWalls(state);
   let placed = 0;
   let radius = 0;
   while (placed < START_GOBLINS && radius < 12) {
@@ -305,7 +458,7 @@ export function createInitialState(): GameState {
         const g: Goblin = {
           id, pos: cellCenter(c), cell: c, target: null, goal: null,
           path: [], facing: Math.PI / 2,
-          state: { kind: 'idle' }, selected: false, idleSince: null,
+          state: { kind: 'idle' }, selected: false, idleSince: null, lastCellChangedAt: 0,
         };
         state.goblins.set(id, g);
         occupyCell(state, cx, cy, id);
@@ -438,6 +591,31 @@ export function maintainerCount(state: GameState, b: Building): number {
   for (const id of b.assignedGoblins) {
     const g = state.goblins.get(id);
     if (g && g.state.kind === 'maintaining' && g.state.buildingId === b.id) n++;
+  }
+  return n;
+}
+
+// All goblins ASSIGNED as water carriers for `b`, including ones who haven't
+// completed their first loop. Used to decide whether to assign more (so we
+// don't pile up duplicate carriers while one is still doing the first run).
+export function waterCarrierCount(state: GameState, b: Building): number {
+  let n = 0;
+  for (const id of b.assignedGoblins) {
+    const g = state.goblins.get(id);
+    if (g && g.state.kind === 'fetching_water' && g.state.buildingId === b.id) n++;
+  }
+  return n;
+}
+
+// Only carriers who have actually delivered water (completed at least one
+// source → DC round trip). Used to decide whether the DC counts as watered.
+export function effectiveWaterCarrierCount(state: GameState, b: Building): number {
+  let n = 0;
+  for (const id of b.assignedGoblins) {
+    const g = state.goblins.get(id);
+    if (g && g.state.kind === 'fetching_water'
+        && g.state.buildingId === b.id
+        && g.state.firstLoopDone) n++;
   }
   return n;
 }

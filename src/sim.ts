@@ -1,11 +1,12 @@
 import { playSound } from './audio';
-import { BUILDING_DEFS, COLS, GOBLIN, GOBLIN_HOLE_SPAWN_INTERVAL, KILL_REWARD, SUMMON_UPGRADES, TICK_S, MINOTAUR, formatPower } from './config';
+import { BUILDING_DEFS, CELL, COLS, GOBLIN, GOLD_GOBLIN_CHANCE, GOLD_KILL_REWARD, KILL_REWARD, MINOTAUR_KILL_REWARD, SUMMON_UPGRADES, TICK_S, MINOTAUR, WATER_DEPLETION_PP_PER_SEC, WATER_METER_MAX, formatPower } from './config';
 import {
   ALL_DIRS, Building, Cell, DX, DY, Dir, GameState, Goblin, HOLE_SIZE, Minotaur,
   appendLog, buildingAtCell, buildingCenter, buildingFootprint, buildingPerimeter,
-  cellCenter, cellKey, defOf, destroyBuilding, findFreeCellNear, holeBlockedByBuilding,
-  isCellBlocked, isCellInBuilding, isInBounds, maintainerCount, occupyCell,
-  pushDeathEffect, pushFloater, releaseCell, removeGoblin,
+  cellCenter, cellKey, defOf, destroyBuilding, findFreeCellNear,
+  getSpawnCapacity, holeBlockedByBuilding, isCellBlocked, isCellInBuilding, isCellInWaterSource,
+  isInBounds, maintainerCount, nearestCellInWaterSource, occupyCell, pushDeathEffect, pushFloater,
+  releaseCell, removeGoblin, waterCarrierCount,
 } from './state';
 
 export function tick(state: GameState) {
@@ -14,14 +15,18 @@ export function tick(state: GameState) {
   // ── 1. Spawn queue ────────────────────────────────────────────────
   if (state.autoSpawnEnabled) {
     state.autoSpawnTimer -= TICK_S;
+    // Higher multipliers fire more often (interval / multiplier) instead of
+    // queuing N goblins simultaneously — staggered cadence keeps the holes
+    // pulsing evenly. One spawn per fire.
     if (state.autoSpawnTimer <= 0) {
-      state.autoSpawnTimer += SUMMON_UPGRADES.autoSpawn.intervalSeconds;
-      const cap = state.hole.spawnCapacity;
+      const cadence = SUMMON_UPGRADES.autoSpawn.intervalSeconds / Math.max(1, state.autoSpawnMultiplier);
+      state.autoSpawnTimer += cadence;
+      const cap = getSpawnCapacity(state);
       if (state.spawnQueue.length < cap) {
         const used = new Set(state.spawnQueue.map((s) => s.slot));
-        for (let i = 0; i < cap; i++) {
-          if (!used.has(i)) {
-            state.spawnQueue.push({ remaining: GOBLIN.spawnTime, slot: i });
+        for (let slot = 0; slot < cap; slot++) {
+          if (!used.has(slot)) {
+            state.spawnQueue.push({ remaining: GOBLIN.spawnTime, slot });
             break;
           }
         }
@@ -58,26 +63,18 @@ export function tick(state: GameState) {
   // ── 3. Construction progress ──────────────────────────────────────
   for (const b of state.buildings.values()) updateConstruction(state, b);
 
+  // ── 4. Water meter depletion (before power resolution so dormancy
+  //       reflects the latest meter values). Buildings with a
+  //       waterDeliveryAmount lose WATER_DEPLETION_PP_PER_SEC each second.
+  for (const b of state.buildings.values()) {
+    const def = defOf(b);
+    if (!def.waterDeliveryAmount || b.state === 'constructing') continue;
+    if (b.waterMeter === undefined) b.waterMeter = 0;
+    b.waterMeter = Math.max(0, b.waterMeter - WATER_DEPLETION_PP_PER_SEC * TICK_S);
+  }
+
   // ── 4. Power balance + active/dormant resolution ──────────────────
   resolvePowerAndState(state);
-
-  // ── 4b. Goblin Hole auto-spawns ───────────────────────────────────
-  for (const b of state.buildings.values()) {
-    if (b.kind !== 'goblin_hole') continue;
-    if (b.state !== 'active') { b.nextSpawnAt = undefined; continue; }
-    if (b.nextSpawnAt === undefined) {
-      b.nextSpawnAt = state.now + GOBLIN_HOLE_SPAWN_INTERVAL;
-      continue;
-    }
-    if (state.now >= b.nextSpawnAt) {
-      if (spawnGoblinAtBuilding(state, b)) {
-        b.nextSpawnAt = state.now + GOBLIN_HOLE_SPAWN_INTERVAL;
-      } else {
-        // No room on the perimeter — retry shortly so we don't burn the slot.
-        b.nextSpawnAt = state.now + 0.5;
-      }
-    }
-  }
 
   // ── 5. Income ─────────────────────────────────────────────────────
   for (const b of state.buildings.values()) {
@@ -107,66 +104,53 @@ export function tick(state: GameState) {
   }
 }
 
-// Spawn a goblin at a free cell on the perimeter of `b`. Used by the
-// Goblin Hole building's auto-spawn timer. Returns false if every perimeter
-// cell is blocked, so the caller can retry next tick.
-function spawnGoblinAtBuilding(state: GameState, b: Building): boolean {
-  let cell: Cell | null = null;
-  for (const c of buildingPerimeter(b)) {
-    if (!isCellBlocked(state, c.cx, c.cy)) { cell = c; break; }
-  }
-  if (!cell) return false;
-  const id = state.nextId++;
-  const g: Goblin = {
-    id, pos: cellCenter(cell), cell,
-    target: null, goal: null,
-    path: [],
-    facing: Math.PI / 2,
-    state: { kind: 'idle' }, selected: false, idleSince: null,
-  };
-  state.goblins.set(id, g);
-  occupyCell(state, cell.cx, cell.cy, id);
-  state.spawnsCompleted++;
-  playSound('goblin_spawn', 0.5);
-  appendLog(state, `Goblin #${id} hatched from Goblin Hole #${b.id}.`);
-  if (state.autoAssignEnabled) autoAssignAllIdle(state);
-  return true;
-}
 
 function spawnGoblin(state: GameState) {
-  // If a building is sitting on the Goblin Hole when the timer expires, the
-  // spawn aborts and the player gets their Ƶ back. The button-disable check
-  // in the UI normally prevents queueing in this state, but a building can
-  // be placed on top after queueing, so the runtime check is still needed.
-  if (holeBlockedByBuilding(state)) {
+  // Round-robin between the main hole and every completed Goblin Hole. A
+  // freshly-built hole is added to the rotation automatically.
+  const holeCells: Cell[] = [{ cx: state.hole.cell.cx, cy: state.hole.cell.cy }];
+  const isMain: boolean[] = [true];
+  for (const b of state.buildings.values()) {
+    if (b.kind !== 'goblin_hole') continue;
+    if (b.state === 'constructing') continue;
+    holeCells.push({ cx: b.cell.cx, cy: b.cell.cy });
+    isMain.push(false);
+  }
+  // Try each hole starting at the rotation index; pick the first that yields
+  // a free perimeter cell. Bump rotation regardless so spawns spread out.
+  const start = state.spawnHoleRotation % holeCells.length;
+  let cell: Cell | null = null;
+  for (let i = 0; i < holeCells.length; i++) {
+    const idx = (start + i) % holeCells.length;
+    if (isMain[idx] && holeBlockedByBuilding(state)) continue;
+    cell = pickHolePerimeterCellAt(state, holeCells[idx])
+        ?? findFreeCellNear(state, holeCells[idx].cx, holeCells[idx].cy);
+    if (cell) {
+      state.spawnHoleRotation = idx + 1;
+      break;
+    }
+  }
+  if (!cell) {
     state.money += GOBLIN.spawnCost;
-    appendLog(state, 'Goblin Hole is blocked; spawn refunded.');
+    appendLog(state, 'All Goblin Holes blocked; spawn refunded.');
     playSound('error');
     return;
   }
-  // Goblins emerge on the perimeter of the hole — never on top of it. Right-
-  // hand cells are tried first so the spawn flow visually pours rightward
-  // toward the rest of the build area; if the whole perimeter is blocked we
-  // fall back to BFS (which will skip the hole's interior because the spawned
-  // occupants block it, but that's fine — extras just queue up further out).
-  const cell = pickHolePerimeterCell(state) ?? findFreeCellNear(state, state.hole.cell.cx, state.hole.cell.cy);
-  if (!cell) {
-    appendLog(state, 'No room to spawn goblin.');
-    return;
-  }
   const id = state.nextId++;
+  const isGold = state.goldgoblinsEnabled && Math.random() < GOLD_GOBLIN_CHANCE;
   const g: Goblin = {
     id, pos: cellCenter(cell), cell,
     target: null, goal: null,
     path: [],
     facing: Math.PI / 2,
-    state: { kind: 'idle' }, selected: false, idleSince: null,
+    state: { kind: 'idle' }, selected: false, idleSince: null, lastCellChangedAt: state.now,
+    gold: isGold || undefined,
   };
   state.goblins.set(id, g);
   occupyCell(state, cell.cx, cell.cy, id);
   state.spawnsCompleted++;
   playSound('goblin_spawn', 0.5);
-  appendLog(state, `Goblin #${id} hatched.`);
+  appendLog(state, isGold ? `Gold Goblin #${id} hatched!` : `Goblin #${id} hatched.`);
   if (state.autoAssignEnabled) autoAssignAllIdle(state);
 }
 
@@ -194,6 +178,38 @@ export function autoAssignAllIdle(state: GameState) {
   const idle: Goblin[] = [];
   for (const g of state.goblins.values()) {
     if (g.state.kind === 'idle') idle.push(g);
+  }
+
+  // First: keep every thirsty building staffed with its auto-assign target
+  // of carriers as long as a water source exists and idle goblins remain.
+  // (Manual right-click ignores this cap.)
+  if (state.waterSources.size > 0) {
+    for (const b of state.buildings.values()) {
+      const target = defOf(b).waterAutoAssignTarget ?? 0;
+      if (target === 0) continue;
+      if (b.state === 'constructing') continue;
+      const source = nearestWaterSourceTo(state, b);
+      if (!source) break;
+      while (waterCarrierCount(state, b) < target && idle.length > 0) {
+        const c = buildingCenter(b);
+        let pickI = 0;
+        let pickD = Infinity;
+        for (let i = 0; i < idle.length; i++) {
+          const g = idle[i];
+          const dx = g.pos.x - c.x;
+          const dy = g.pos.y - c.y;
+          const d = dx * dx + dy * dy;
+          if (d < pickD) { pickD = d; pickI = i; }
+        }
+        const g = idle.splice(pickI, 1)[0];
+        b.assignedGoblins.push(g.id);
+        g.goal = null;
+        g.path = [];
+        g.state = { kind: 'fetching_water', buildingId: b.id, sourceId: source.id, phase: 'to_source' };
+        g.lastCellChangedAt = state.now;
+      }
+      if (idle.length === 0) break;
+    }
   }
 
   while (idle.length > 0) {
@@ -232,7 +248,7 @@ export function autoAssignAllIdle(state: GameState) {
 // summoning is instant; if the hole and its perimeter are fully blocked, the
 // summon refunds.
 export function spawnMinotaur(state: GameState): boolean {
-  const cell = pickHolePerimeterCell(state) ?? findFreeCellNear(state, state.hole.cell.cx, state.hole.cell.cy);
+  const cell = pickMinotaurSpawnCell(state);
   if (!cell) return false;
   const id = state.nextId++;
   const t: Minotaur = {
@@ -251,10 +267,17 @@ export function spawnMinotaur(state: GameState): boolean {
   return true;
 }
 
-function minotaurWalkable(state: GameState, cx: number, cy: number): boolean {
+function minotaurWalkable(state: GameState, cx: number, cy: number, selfId?: number): boolean {
   if (!isInBounds(cx, cy)) return false;
   if (state.walls.has(cellKey(cx, cy))) return false;
   if (buildingAtCell(state, cx, cy)) return false;
+  // Reserve cells already held — current cell or in-flight step target — by
+  // any other minotaur. Two of them must never share a square.
+  for (const m of state.minotaurs.values()) {
+    if (m.id === selfId) continue;
+    if (m.cell.cx === cx && m.cell.cy === cy) return false;
+    if (m.target && m.target.cx === cx && m.target.cy === cy) return false;
+  }
   return true;
 }
 
@@ -265,7 +288,7 @@ function minotaurStepToward(state: GameState, t: Minotaur, target: Cell): Cell |
   for (const d of ALL_DIRS) {
     const nx = t.cell.cx + DX[d];
     const ny = t.cell.cy + DY[d];
-    if (!minotaurWalkable(state, nx, ny)) continue;
+    if (!minotaurWalkable(state, nx, ny, t.id)) continue;
     const dist = Math.max(Math.abs(nx - target.cx), Math.abs(ny - target.cy));
     if (dist < bestDist) { bestDist = dist; best = { cx: nx, cy: ny }; }
   }
@@ -277,7 +300,7 @@ function minotaurWanderStep(state: GameState, t: Minotaur): Cell | null {
   for (const d of ALL_DIRS) {
     const nx = t.cell.cx + DX[d];
     const ny = t.cell.cy + DY[d];
-    if (minotaurWalkable(state, nx, ny)) choices.push({ cx: nx, cy: ny });
+    if (minotaurWalkable(state, nx, ny, t.id)) choices.push({ cx: nx, cy: ny });
   }
   if (choices.length === 0) return null;
   return choices[Math.floor(Math.random() * choices.length)];
@@ -313,7 +336,7 @@ function minotaurStepTowardBuilding(state: GameState, t: Minotaur, b: Building):
   for (const d of ALL_DIRS) {
     const nx = t.cell.cx + DX[d];
     const ny = t.cell.cy + DY[d];
-    if (!minotaurWalkable(state, nx, ny)) continue;
+    if (!minotaurWalkable(state, nx, ny, t.id)) continue;
     const dist = chebyshevToBuilding({ cx: nx, cy: ny }, b);
     if (dist < bestDist) { bestDist = dist; best = { cx: nx, cy: ny }; }
   }
@@ -341,6 +364,25 @@ function updateMinotaur(state: GameState, t: Minotaur) {
   }
 
   // Player-issued commands take priority over auto-targeting.
+  if (t.state.kind === 'moving_to') {
+    const goal = t.state.goal;
+    if (t.cell.cx === goal.cx && t.cell.cy === goal.cy) {
+      t.state = { kind: 'wander' };
+      t.nextWanderAt = state.now + MINOTAUR.wanderInterval;
+      return;
+    }
+    const next = minotaurStepToward(state, t, goal);
+    if (next) {
+      t.target = next;
+      t.facing = Math.atan2(next.cy - t.cell.cy, next.cx - t.cell.cx);
+    } else {
+      // Boxed in — give up the order and resume normal behavior next tick.
+      t.state = { kind: 'wander' };
+      t.nextWanderAt = state.now + MINOTAUR.wanderInterval;
+    }
+    return;
+  }
+
   if (t.state.kind === 'going_to_destroy') {
     const b = state.buildings.get(t.state.buildingId);
     if (!b) {
@@ -394,11 +436,11 @@ function updateMinotaur(state: GameState, t: Minotaur) {
       if (state.now < s.attackAt) return;
       const tx = target.pos.x, ty = target.pos.y;
       state.minotaurs.delete(target.id);
-      state.money += KILL_REWARD.money;
-      state.blood += KILL_REWARD.blood;
+      state.money += MINOTAUR_KILL_REWARD.money;
+      state.blood += MINOTAUR_KILL_REWARD.blood;
       state.bloodUnlocked = true;
-      pushFloater(state, tx, ty, `+Ƶ${KILL_REWARD.money}`, 0xffd96b, 1.6);
-      pushFloater(state, tx, ty - 14, `+${KILL_REWARD.blood} blood`, 0xff8a8a, 1.6);
+      pushFloater(state, tx, ty, `+Ƶ${MINOTAUR_KILL_REWARD.money}`, 0xffd96b, 1.6);
+      pushFloater(state, tx, ty - 14, `+${MINOTAUR_KILL_REWARD.blood} blood`, 0xff8a8a, 1.6);
       pushDeathEffect(state, tx, ty);
       playSound('goblin_death', 0.7);
       appendLog(state, `Minotaur #${target.id} gored by Minotaur #${t.id}.`);
@@ -431,12 +473,13 @@ function updateMinotaur(state: GameState, t: Minotaur) {
       }
       if (state.now < s.attackAt) return;
       const tx = target.pos.x, ty = target.pos.y;
+      const reward = goblinKillReward(target);
       removeGoblin(state, target.id);
-      state.money += KILL_REWARD.money;
-      state.blood += KILL_REWARD.blood;
+      state.money += reward.money;
+      state.blood += reward.blood;
       state.bloodUnlocked = true;
-      pushFloater(state, tx, ty, `+Ƶ${KILL_REWARD.money}`, 0xffd96b, 1.6);
-      pushFloater(state, tx, ty - 14, `+${KILL_REWARD.blood} blood`, 0xff8a8a, 1.6);
+      pushFloater(state, tx, ty, `+Ƶ${reward.money}`, 0xffd96b, 1.6);
+      pushFloater(state, tx, ty - 14, `+${reward.blood} blood`, 0xff8a8a, 1.6);
       pushDeathEffect(state, tx, ty);
       playSound('goblin_death', 0.7);
       appendLog(state, `Goblin #${target.id} killed by Minotaur #${t.id}.`);
@@ -465,6 +508,40 @@ function updateMinotaur(state: GameState, t: Minotaur) {
   }
 }
 
+export function nearestWaterSourceTo(state: GameState, b: Building) {
+  const c = buildingCenter(b);
+  let best = null;
+  let bestD = Infinity;
+  for (const w of state.waterSources.values()) {
+    // Use region center for distance comparison.
+    const wcx = (w.x0 + w.x1) / 2 * CELL;
+    const wcy = (w.y0 + w.y1) / 2 * CELL;
+    const dx = wcx - c.x;
+    const dy = wcy - c.y;
+    const d = dx * dx + dy * dy;
+    if (d < bestD) { bestD = d; best = w; }
+  }
+  return best;
+}
+
+// Standard kill payout, with a fatter pile for gold-tinted goblins.
+function goblinKillReward(g: Goblin) {
+  return g.gold ? GOLD_KILL_REWARD : KILL_REWARD;
+}
+
+// Closest unblocked perimeter cell of `b` to the goblin — used by water
+// carriers as the "delivery" cell where they touch the Datacentre.
+function pickDcDeliveryCell(state: GameState, b: Building, g: Goblin): Cell | null {
+  let best: Cell | null = null;
+  let bestD = Infinity;
+  for (const c of buildingPerimeter(b)) {
+    if (isCellBlocked(state, c.cx, c.cy, g.id)) continue;
+    const d = (c.cx - g.cell.cx) * (c.cx - g.cell.cx) + (c.cy - g.cell.cy) * (c.cy - g.cell.cy);
+    if (d < bestD) { bestD = d; best = c; }
+  }
+  return best;
+}
+
 function nearestFreeNeighbor(state: GameState, cell: Cell, hunter: Goblin): Cell | null {
   let best: Cell | null = null;
   let bestDist = Infinity;
@@ -482,8 +559,34 @@ function nearestFreeNeighbor(state: GameState, cell: Cell, hunter: Goblin): Cell
 
 // Cells on the ring just outside the 2×2 hole footprint, sorted with a
 // strong rightward bias and a mild "stay near the centerline" tiebreak.
-function pickHolePerimeterCell(state: GameState): Cell | null {
+// Same ring as `pickHolePerimeterCell` but the spawn-blocked check ignores
+// goblin occupancy (a fresh minotaur can crowd onto a goblin's cell — it'll
+// just kill them on the next tick) and rejects cells already held by another
+// minotaur. Used at summon time to prevent two minotaurs sharing a square.
+function pickMinotaurSpawnCell(state: GameState): Cell | null {
   const h = state.hole.cell;
+  const cx0 = h.cx + (HOLE_SIZE - 1) / 2;
+  const cy0 = h.cy + (HOLE_SIZE - 1) / 2;
+  const ring: Cell[] = [];
+  for (let dx = -1; dx <= HOLE_SIZE; dx++) {
+    for (let dy = -1; dy <= HOLE_SIZE; dy++) {
+      const inHole = dx >= 0 && dx < HOLE_SIZE && dy >= 0 && dy < HOLE_SIZE;
+      if (inHole) continue;
+      ring.push({ cx: h.cx + dx, cy: h.cy + dy });
+    }
+  }
+  ring.sort((a, b) => {
+    const sa = (a.cx - cx0) - 0.25 * Math.abs(a.cy - cy0);
+    const sb = (b.cx - cx0) - 0.25 * Math.abs(b.cy - cy0);
+    return sb - sa;
+  });
+  for (const c of ring) {
+    if (minotaurWalkable(state, c.cx, c.cy)) return c;
+  }
+  return null;
+}
+
+function pickHolePerimeterCellAt(state: GameState, h: Cell): Cell | null {
   const cx0 = h.cx + (HOLE_SIZE - 1) / 2;
   const cy0 = h.cy + (HOLE_SIZE - 1) / 2;
   const ring: Cell[] = [];
@@ -503,6 +606,10 @@ function pickHolePerimeterCell(state: GameState): Cell | null {
     if (!isCellBlocked(state, c.cx, c.cy)) return c;
   }
   return null;
+}
+
+function pickHolePerimeterCell(state: GameState): Cell | null {
+  return pickHolePerimeterCellAt(state, state.hole.cell);
 }
 
 // ─── Goblin update ──────────────────────────────────────────────────
@@ -527,6 +634,7 @@ function updateGoblin(state: GameState, g: Goblin) {
       g.cell = g.target;
       g.pos = tc;
       g.target = null;
+      g.lastCellChangedAt = state.now;
     } else {
       g.pos.x += (dx / d) * step;
       g.pos.y += (dy / d) * step;
@@ -668,6 +776,85 @@ function updateGoblin(state: GameState, g: Goblin) {
       return;
     }
 
+    case 'fetching_water': {
+      const b = state.buildings.get(s.buildingId);
+      const src = state.waterSources.get(s.sourceId);
+      if (!b || !src) {
+        // DC was destroyed or source vanished — drop the role.
+        if (b) {
+          const i = b.assignedGoblins.indexOf(g.id);
+          if (i >= 0) b.assignedGoblins.splice(i, 1);
+        }
+        g.state = { kind: 'idle' };
+        g.goal = null;
+        g.path = [];
+        return;
+      }
+      // Stuck check: if the goblin hasn't progressed a cell in 3s while on
+      // water duty, drop the role and idle.
+      if (state.now - g.lastCellChangedAt > 3) {
+        const i = b.assignedGoblins.indexOf(g.id);
+        if (i >= 0) b.assignedGoblins.splice(i, 1);
+        appendLog(state, `Goblin #${g.id} stuck — water duty cancelled.`);
+        g.state = { kind: 'idle' };
+        g.goal = null;
+        g.path = [];
+        return;
+      }
+      // 'to_source' counts as arrived once we step into ANY cell of the water
+      // region; 'to_dc' as soon as we're on the building's perimeter.
+      if (s.phase === 'to_source') {
+        if (isCellInWaterSource(src, g.cell)) {
+          s.phase = 'to_dc';
+          s.initialTarget = undefined;  // first trip done; closest point thereafter
+          g.goal = null;
+          g.path = [];
+          return;
+        }
+        // First trip aims at the click cell; later trips pick the closest
+        // reachable cell in the source region. If the click cell turns out to
+        // be unreachable, fall back to the closest in the same tick.
+        const desired = s.initialTarget ?? nearestCellInWaterSource(src, g.cell);
+        if (!g.goal || g.goal.cx !== desired.cx || g.goal.cy !== desired.cy) {
+          g.goal = desired;
+          g.path = [];
+        }
+        planStep(state, g);
+        if (!g.target && s.initialTarget) {
+          // Couldn't path to the click cell — drop it and try the closest.
+          s.initialTarget = undefined;
+          const fallback = nearestCellInWaterSource(src, g.cell);
+          g.goal = fallback;
+          g.path = [];
+          planStep(state, g);
+        }
+        return;
+      }
+      // phase === 'to_dc'
+      const dcTarget = pickDcDeliveryCell(state, b, g) ?? buildingPerimeter(b)[0];
+      if (!dcTarget) return;
+      if (g.cell.cx === dcTarget.cx && g.cell.cy === dcTarget.cy) {
+        // Delivery: bump the building's water meter by its per-delivery
+        // amount, capped at WATER_METER_MAX. The first such delivery flips
+        // firstLoopDone (kept around for any legacy paths that still read it).
+        const delivery = defOf(b).waterDeliveryAmount ?? 0;
+        if (delivery > 0) {
+          b.waterMeter = Math.min(WATER_METER_MAX, (b.waterMeter ?? 0) + delivery);
+        }
+        s.firstLoopDone = true;
+        s.phase = 'to_source';
+        g.goal = null;
+        g.path = [];
+        return;
+      }
+      if (!g.goal || g.goal.cx !== dcTarget.cx || g.goal.cy !== dcTarget.cy) {
+        g.goal = dcTarget;
+        g.path = [];
+      }
+      planStep(state, g);
+      return;
+    }
+
     case 'going_to_kill': {
       const target = state.goblins.get(s.targetId);
       if (!target || target.id === g.id) {
@@ -694,12 +881,13 @@ function updateGoblin(state: GameState, g: Goblin) {
           return;
         }
         const tx = target.pos.x, ty = target.pos.y;
+        const reward = goblinKillReward(target);
         removeGoblin(state, target.id);
-        state.money += KILL_REWARD.money;
-        state.blood += KILL_REWARD.blood;
+        state.money += reward.money;
+        state.blood += reward.blood;
         state.bloodUnlocked = true;
-        pushFloater(state, tx, ty, `+Ƶ${KILL_REWARD.money}`, 0xffd96b, 1.6);
-        pushFloater(state, tx, ty - 14, `+${KILL_REWARD.blood} blood`, 0xff8a8a, 1.6);
+        pushFloater(state, tx, ty, `+Ƶ${reward.money}`, 0xffd96b, 1.6);
+        pushFloater(state, tx, ty - 14, `+${reward.blood} blood`, 0xff8a8a, 1.6);
         pushDeathEffect(state, tx, ty);
         playSound('goblin_death', 0.7);
         appendLog(state, `Goblin #${target.id} killed by #${g.id}.`);
@@ -987,7 +1175,10 @@ function updateConstruction(state: GameState, b: Building) {
       g.goal = null;
     }
     b.assignedGoblins = newAssigned;
-    b.state = 'dormant';
+    // Buildings with no power draw and no maintainers (e.g. Goblin Hole)
+    // skip resolvePowerAndState and stay where we put them, so finish them
+    // straight to active.
+    b.state = (def.maintainersRequired === 0 && def.powerOutput === 0) ? 'active' : 'dormant';
     playSound('build_done');
     appendLog(state, `${def.name} #${b.id} construction complete.`);
   }
@@ -1013,9 +1204,19 @@ function resolvePowerAndState(state: GameState) {
     if (def.powerOutput >= 0) continue;
     const draw = -def.powerOutput;
     const staffed = maintainerCount(state, b) >= def.maintainersRequired;
-    let reason: 'no_staff' | 'no_power' | undefined;
+    // DC counts as watered only with at least one EFFECTIVE carrier (one
+    // who has completed a full source → DC loop). Carriers mid-first-loop
+    // are already counted in waterCarrierCount so they don't trigger more
+    // assignments, but they don't make the DC operational.
+    // New mechanic: a building with `waterDeliveryAmount` is watered while
+    // its meter is > 0. Carriers replenish on each delivery and the meter
+    // depletes between deliveries.
+    const drinks = (def.waterDeliveryAmount ?? 0) > 0;
+    const watered = !drinks || (b.waterMeter ?? 0) > 0;
+    let reason: 'no_staff' | 'no_power' | 'no_water' | undefined;
     let active = false;
     if (!staffed) reason = 'no_staff';
+    else if (!watered) reason = 'no_water';
     else if (consumed + draw > production) reason = 'no_power';
     else { active = true; consumed += draw; }
     setActiveOrDormant(state, b, active, reason);
@@ -1029,7 +1230,7 @@ function setActiveOrDormant(
   state: GameState,
   b: Building,
   active: boolean,
-  reason: 'no_staff' | 'no_power' | undefined,
+  reason: 'no_staff' | 'no_power' | 'no_water' | undefined,
 ) {
   const def = defOf(b);
   if (active) {
@@ -1047,9 +1248,10 @@ function setActiveOrDormant(
   } else {
     if (b.state !== 'dormant') {
       b.state = 'dormant';
-      const why = reason === 'no_power'
-        ? 'underpowered'
-        : `needs ${def.maintainersRequired} maintainer${def.maintainersRequired === 1 ? '' : 's'}`;
+      const why =
+        reason === 'no_power' ? 'underpowered' :
+        reason === 'no_water' ? 'needs water' :
+        `needs ${def.maintainersRequired} maintainer${def.maintainersRequired === 1 ? '' : 's'}`;
       appendLog(state, `${def.name} #${b.id} dormant — ${why}.`);
     }
   }

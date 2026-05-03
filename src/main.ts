@@ -1,12 +1,13 @@
 import { preloadSounds, playSound, setMasterVolume } from './audio';
 import {
-  CAMERA_SPEED, GOBLIN, KILL_REWARD, START_CELL, SUMMON_UPGRADES, TICK_MS, MINOTAUR,
+  AUTOSPAWN_TIERS, CAMERA_SPEED, CELL, DIG, GOBLIN, GOLD_KILL_REWARD, KILL_REWARD, START_CELL,
+  SUMMON_UPGRADES, TICK_MS, MINOTAUR,
 } from './config';
 import { setupInput } from './input';
 import { getOptions, onOptionsChange } from './options';
 import { setupOptionsUI } from './options-ui';
 import { centerCameraOn, clampCamera, createRender, render } from './render';
-import { appendLog, cellCenter, createInitialState, destroyBuilding, pushDeathEffect, pushFloater, removeGoblin } from './state';
+import { appendLog, cellCenter, createInitialState, destroyBuilding, digDirection, getSpawnCapacity, pushDeathEffect, pushFloater, removeGoblin } from './state';
 import { autoAssignAllIdle, spawnMinotaur, tick } from './sim';
 import { executeTaskSkip, refreshUI, setupUI } from './ui';
 
@@ -58,7 +59,7 @@ async function main() {
   setupUI(state, {
     onSpawnGoblin: () => {
       if (state.money < GOBLIN.spawnCost) { playSound('error'); return; }
-      const cap = state.hole.spawnCapacity;
+      const cap = getSpawnCapacity(state);
       if (state.spawnQueue.length >= cap) { playSound('error'); return; }
       const used = new Set(state.spawnQueue.map((s) => s.slot));
       let slot = -1;
@@ -89,39 +90,60 @@ async function main() {
       autoAssignAllIdle(state);
     },
     onBuyAutoSpawn: () => {
-      if (state.autoSpawnEnabled) return;
-      const cost = SUMMON_UPGRADES.autoSpawn.bloodCost;
-      if (state.blood < cost) { playSound('error'); return; }
-      state.blood -= cost;
-      state.autoSpawnEnabled = true;
-      state.autoSpawnTimer = SUMMON_UPGRADES.autoSpawn.intervalSeconds;
+      // Buy the next tier in AUTOSPAWN_TIERS. Each click promotes the
+      // multiplier 1 → 2 → 4 → 8 → 16 → 32, replacing the previous button.
+      const next = AUTOSPAWN_TIERS.find(t => t.multiplier > state.autoSpawnMultiplier);
+      if (!next) return;
+      if (state.blood < next.bloodCost) { playSound('error'); return; }
+      state.blood -= next.bloodCost;
+      const wasEnabled = state.autoSpawnEnabled;
+      state.autoSpawnMultiplier = next.multiplier;
+      if (!wasEnabled) {
+        state.autoSpawnEnabled = true;
+        state.autoSpawnTimer = SUMMON_UPGRADES.autoSpawn.intervalSeconds / next.multiplier;
+      }
       playSound('ritual');
-      appendLog(state, `Autospawn — a goblin hatches every ${SUMMON_UPGRADES.autoSpawn.intervalSeconds}s.`);
+      appendLog(state, next.multiplier === 1
+        ? `Autospawn — a goblin hatches every ${SUMMON_UPGRADES.autoSpawn.intervalSeconds}s.`
+        : `Autospawn x${next.multiplier} — staggered cadence.`);
     },
-    onBuyWiderHole: () => {
-      if (state.widerHoleEnabled) return;
-      const cost = SUMMON_UPGRADES.widerHole.bloodCost;
+    onBuyGoldgoblins: () => {
+      if (state.goldgoblinsEnabled) return;
+      const cost = SUMMON_UPGRADES.goldgoblins.bloodCost;
       if (state.blood < cost) { playSound('error'); return; }
       state.blood -= cost;
-      state.widerHoleEnabled = true;
-      state.hole.spawnCapacity = SUMMON_UPGRADES.widerHole.capacity;
+      state.goldgoblinsEnabled = true;
       playSound('ritual');
-      appendLog(state, `Goblinsixstack — up to ${SUMMON_UPGRADES.widerHole.capacity} concurrent spawns.`);
+      appendLog(state, 'Goldgoblins — 10% chance of gold-tinted spawns dropping Ƶ150.');
+    },
+    onDig: (dir) => {
+      if (state.dugDirections.has(dir)) return;
+      if (state.blood < DIG.bloodCost) { playSound('error'); return; }
+      const result = digDirection(state, dir);
+      if (!result.ok) {
+        playSound('error');
+        appendLog(state, `Dig ${dir.toUpperCase()} failed: ${result.reason}.`);
+        return;
+      }
+      state.blood -= DIG.bloodCost;
+      playSound('ritual');
+      appendLog(state, `Dug ${dir.toUpperCase()} — water found.`);
     },
     onKillGoblin: (id: number) => {
       const g = state.goblins.get(id);
       if (!g) return;
       const x = g.pos.x, y = g.pos.y;
+      const reward = g.gold ? GOLD_KILL_REWARD : KILL_REWARD;
       removeGoblin(state, id);
-      state.money += KILL_REWARD.money;
-      state.blood += KILL_REWARD.blood;
+      state.money += reward.money;
+      state.blood += reward.blood;
       state.bloodUnlocked = true;
       // Two stacked floaters so each value gets its own color.
-      pushFloater(state, x, y, `+Ƶ${KILL_REWARD.money}`, 0xffd96b, 1.6);
-      pushFloater(state, x, y - 14, `+${KILL_REWARD.blood} blood`, 0xff8a8a, 1.6);
+      pushFloater(state, x, y, `+Ƶ${reward.money}`, 0xffd96b, 1.6);
+      pushFloater(state, x, y - 14, `+${reward.blood} blood`, 0xff8a8a, 1.6);
       pushDeathEffect(state, x, y);
       playSound('goblin_death', 0.7);
-      appendLog(state, `Goblin #${id} killed — +Ƶ${KILL_REWARD.money}, +${KILL_REWARD.blood} blood.`);
+      appendLog(state, `Goblin #${id} killed — +Ƶ${reward.money}, +${reward.blood} blood.`);
     },
     onBuildBuilding: (kind) => {
       state.pendingBuild = state.pendingBuild?.kind === kind ? null : { kind };
@@ -133,9 +155,10 @@ async function main() {
     },
   });
 
-  // Center the camera on the starting area.
-  const startCenter = cellCenter(START_CELL);
-  centerCameraOn(ctx, startCenter.x, startCenter.y);
+  // Center the camera on the middle of the initial play area, not on the
+  // hole — the world is now much larger than the playable region.
+  const pa = state.playArea;
+  centerCameraOn(ctx, ((pa.x0 + pa.x1) / 2) * CELL, ((pa.y0 + pa.y1) / 2) * CELL);
 
   // ─── WASD camera panning ───────────────────────────────────────────
   const held = new Set<string>();
@@ -144,7 +167,12 @@ async function main() {
     k === 'arrowup' || k === 'arrowdown' || k === 'arrowleft' || k === 'arrowright';
   window.addEventListener('keydown', (e) => {
     const k = e.key.toLowerCase();
-    if (isPanKey(k)) { held.add(k); e.preventDefault(); }
+    if (isPanKey(k)) {
+      held.add(k);
+      // First pan input clears the on-screen hint.
+      state.panHintDismissed = true;
+      e.preventDefault();
+    }
   });
   window.addEventListener('keyup', (e) => {
     const k = e.key.toLowerCase();

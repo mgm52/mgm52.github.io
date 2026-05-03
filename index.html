@@ -35,9 +35,14 @@
       }
       #game canvas { display: block; touch-action: none; }
       #sidebar { width: 280px; background: var(--sidebar-bg); border-left: 1px solid var(--sidebar-border);
-        padding: 14px; overflow-y: auto; box-sizing: border-box; zoom: 1.5;
+        padding: 14px; box-sizing: border-box; zoom: 1.5;
+        display: flex; flex-direction: column; overflow: hidden;
         -webkit-overflow-scrolling: touch;
       }
+      /* Build panel takes the remaining vertical space and scrolls as a
+         single unit — Ritual + Build sub-sections live inside it so they
+         overflow together. The rest of the sidebar stays static. */
+      #panel-build { flex: 1; min-height: 0; overflow-y: auto; -webkit-overflow-scrolling: touch; margin-bottom: 0; }
 
       /* ───────── Portrait warning (mobile only) ───────── */
       #portrait-warning {
@@ -189,6 +194,13 @@
         background: rgba(0,0,0,0.7); padding: 6px 10px;
         border-radius: 3px; font-family: var(--font-body); font-size: calc(12px * var(--font-body-scale)); pointer-events: none;
         display: none; color: var(--sidebar-accent);
+      }
+      #pan-hint {
+        position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%);
+        background: rgba(0,0,0,0.7); padding: 10px 18px;
+        border-radius: 4px; font-family: var(--font-body); font-size: calc(20px * var(--font-body-scale));
+        pointer-events: none; color: #fff; letter-spacing: 2px;
+        display: none;
       }
 
       /* ───────── Bottom-left info panel ───────── */
@@ -446,6 +458,8 @@
     <div id="app">
       <div id="game">
         <div id="placement-hint"></div>
+        <!-- Surfaced once the player has dug; dismissed on first pan input. -->
+        <div id="pan-hint">↑ ↓ ← → / WASD</div>
         <div id="info-panel">
           <div class="info-portrait" id="info-portrait"></div>
           <div class="info-details">
@@ -453,6 +467,7 @@
             <div class="info-state" id="info-state"></div>
             <div class="info-extra" id="info-extra"></div>
             <button class="info-destroy" id="info-destroy" style="display:none">Destroy</button>
+            <div id="info-destroy-warning" style="display:none; color:#d96b6b; font-size: calc(10px * var(--font-body-scale)); margin-top:3px">needs minotaur</div>
             <button class="info-destroy" id="info-kill" style="display:none">Kill</button>
           </div>
         </div>
@@ -461,18 +476,21 @@
         <div class="panel">
           <div class="panel-title">Resources</div>
           <div class="resource-row"><span>Ƶ Money</span><span class="resource-value" id="money">0</span></div>
-          <div class="resource-row" id="row-blood" style="display:none"><span style="color:#d96b6b">Blood</span><span class="resource-value" id="blood" style="color:#ff8a8a">0</span></div>
+          <div class="resource-row" id="row-blood"><span style="color:#d96b6b">Blood</span><span class="resource-value" id="blood" style="color:#ff8a8a">0</span></div>
           <div class="resource-row" id="row-power" style="display:none"><span>Power</span><span class="resource-value" id="power">0 / 0 W</span></div>
         </div>
         <div class="panel" id="panel-summon">
           <div class="panel-title">Summon</div>
           <div id="summon-list"></div>
         </div>
-        <div class="panel" id="panel-ritual" style="display:none">
-          <div class="panel-title">Ritual</div>
-          <div id="ritual-list"></div>
-        </div>
         <div class="panel" id="panel-build">
+          <!-- Rituals + Build share one scroll container so they can overflow
+               together. Each subsection has its own title, and Ritual hides
+               itself before any of its content unlocks. -->
+          <div id="ritual-section" style="display:none">
+            <div class="panel-title">Ritual</div>
+            <div id="ritual-list"></div>
+          </div>
           <div class="panel-title">Build</div>
           <div id="build-list"></div>
         </div>
