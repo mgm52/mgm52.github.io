@@ -21,7 +21,7 @@ export type GoblinState =
   | { kind: 'moving' }
   | { kind: 'going_to_build'; buildingId: number }
   | { kind: 'going_to_maintain'; buildingId: number }
-  | { kind: 'building'; buildingId: number }
+  | { kind: 'building'; buildingId: number; nextWanderAt?: number }
   | { kind: 'maintaining'; buildingId: number; nextWanderAt: number }
   // Water carrier — cycles between a Datacentre and a water source. A
   // carrier only "waters" the DC after completing their first round trip
@@ -549,7 +549,7 @@ export function destroyBuilding(state: GameState, buildingId: number) {
   if (b.state === 'active' && def.powerOutput !== 0) {
     const c = buildingCenter(b);
     if (def.powerOutput > 0) {
-      pushFloater(state, c.x, c.y, `-${formatPower(def.powerOutput)}`, 0xd96b6b, 1.6);
+      pushFloater(state, c.x, c.y, `-${formatPower(def.powerOutput)}`, 0x8acfff, 1.6);
     } else {
       pushFloater(state, c.x, c.y, `+${formatPower(-def.powerOutput)}`, 0x8acfff, 1.6);
     }

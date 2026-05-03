@@ -783,7 +783,32 @@ function updateGoblin(state: GameState, g: Goblin) {
     }
 
     case 'building': {
-      if (!state.buildings.has(s.buildingId)) g.state = { kind: 'idle' };
+      const bb = state.buildings.get(s.buildingId);
+      if (!bb) { g.state = { kind: 'idle' }; g.goal = null; g.path = []; return; }
+      // Random idle-fidget every ~5s while standing inside the footprint
+      // (typically waiting for the rest of the build crew to show up). Picks
+      // a free 8-neighbor cell that's still inside the footprint and steps
+      // there. No-ops if the goblin is already in motion (target set).
+      if (s.nextWanderAt === undefined) s.nextWanderAt = state.now + 5;
+      if (!g.target && state.now >= s.nextWanderAt) {
+        const choices: Dir[] = [];
+        for (const d of ALL_DIRS) {
+          const nx = g.cell.cx + DX[d];
+          const ny = g.cell.cy + DY[d];
+          if (!isCellInBuilding(bb, nx, ny)) continue;
+          if (!canStep(state, g.cell.cx, g.cell.cy, nx, ny, g.id, bb.id)) continue;
+          choices.push(d);
+        }
+        if (choices.length > 0) {
+          const chosen = choices[Math.floor(Math.random() * choices.length)];
+          const nx = g.cell.cx + DX[chosen];
+          const ny = g.cell.cy + DY[chosen];
+          occupyCell(state, nx, ny, g.id);
+          g.target = { cx: nx, cy: ny };
+          g.facing = Math.atan2(DY[chosen], DX[chosen]);
+        }
+        s.nextWanderAt = state.now + 5;
+      }
       g.goal = null;
       g.path = [];
       return;
@@ -1268,7 +1293,7 @@ function setActiveOrDormant(
       if (def.powerOutput > 0) {
         pushFloater(state, c.x, c.y, `+${formatPower(def.powerOutput)}`, 0x8acfff, 1.6);
       } else if (def.powerOutput < 0) {
-        pushFloater(state, c.x, c.y, `-${formatPower(-def.powerOutput)}`, 0xd96b6b, 1.6);
+        pushFloater(state, c.x, c.y, `-${formatPower(-def.powerOutput)}`, 0x8acfff, 1.6);
       }
     }
   } else {

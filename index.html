@@ -220,8 +220,9 @@
       .build-button-compact .build-name { margin-bottom: 0; }
       .build-cost-side { font-family: var(--font-mono); font-size: calc(13px * var(--font-mono-scale)); white-space: nowrap; font-variant-numeric: tabular-nums; }
       .build-separator { height: 1px; background: rgba(255,255,255,0.08); margin: 8px 4px; }
-      .build-power-cost { color: #d96b6b; font-family: var(--font-mono); font-variant-numeric: tabular-nums; }
-      .build-power-cost.met { color: #6fbf73; }
+      /* Power costs always render in the same blue as power production —
+         we don't flip them red even when the player can't afford. */
+      .build-power-cost { color: #8acfff; font-family: var(--font-mono); font-variant-numeric: tabular-nums; }
       .build-req { color: #d96b6b; }
       .build-req.met { color: #6fbf73; }
       #placement-hint {

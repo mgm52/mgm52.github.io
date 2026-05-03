@@ -60,8 +60,8 @@ export function playSound(name: SoundName, volume = 1, playbackRate?: number) {
 // goblin_spawn / goblin_death plays a hair quieter than the last so the
 // audio doesn't pile up into a roar; clamps at GOBLIN_*_FLOOR.
 let goblinSpawnVolume = 0.325;
-const GOBLIN_SPAWN_VOLUME_FLOOR = 0.008;
-const GOBLIN_SPAWN_VOLUME_DECAY = 0.001;
+const GOBLIN_SPAWN_VOLUME_FLOOR = 0.015;
+const GOBLIN_SPAWN_VOLUME_DECAY = 0.002;
 export function playDecayingGoblinSpawn(rate?: number): void {
   playSound('goblin_spawn', goblinSpawnVolume, rate);
   goblinSpawnVolume = Math.max(
@@ -72,7 +72,7 @@ export function playDecayingGoblinSpawn(rate?: number): void {
 
 let goblinDeathVolume = 0.56;
 const GOBLIN_DEATH_VOLUME_FLOOR = 0.02;
-const GOBLIN_DEATH_VOLUME_DECAY = 0.001;
+const GOBLIN_DEATH_VOLUME_DECAY = 0.002;
 export function playDecayingGoblinDeath(rate?: number): void {
   playSound('goblin_death', goblinDeathVolume, rate);
   goblinDeathVolume = Math.max(
