@@ -207,6 +207,23 @@ export const BUILDING_DEFS = {
       constructing: 0x3a3f47, constructingBorder: 0x808890,
     },
   }),
+  dragon_beacon: def(3, {
+    name: 'Dragon Beacon',
+    short: 'DB',
+    cost: 10_000_000,
+    buildersRequired: 5,
+    buildTime: 30,
+    maintainersRequired: 0,
+    income: 0,
+    powerOutput: -10_000_000_000, // 10 GW
+    wanderInterval: 1.0,
+    wanderJitter: 0.2,
+    colors: {
+      active: 0xffa800, activeBorder: 0xffe080,
+      dormant: 0x6a4a1a, dormantBorder: 0xa07840,
+      constructing: 0x3a3f47, constructingBorder: 0x808890,
+    },
+  }),
   wall: def(1, {
     name: 'Wall',
     short: 'W',
@@ -280,7 +297,7 @@ export const BUILDING_DEFS = {
 } as const;
 
 export type BuildingKind = keyof typeof BUILDING_DEFS;
-export const BUILDABLE_KINDS: BuildingKind[] = ['goblin_wheel', 'gas_engine', 'datacentre', 'phone_farm', 'goblin_hole', 'nuclear_reactor', 'hypercentre', 'wall'];
+export const BUILDABLE_KINDS: BuildingKind[] = ['goblin_wheel', 'gas_engine', 'datacentre', 'phone_farm', 'goblin_hole', 'nuclear_reactor', 'hypercentre', 'dragon_beacon', 'wall'];
 
 export const START_MONEY = 0;
 export const START_GOBLINS = 0;

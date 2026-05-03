@@ -525,6 +525,17 @@ function placeBuilding(state: GameState, x: number, y: number) {
   playSound('place', 1.6);
   appendLog(state, `${def.name} #${b.id} construction started — right-click goblins onto it to staff the build.`);
   autoAssignAllIdle(state);
+
+  // Demo-end gag: placing the Dragon Beacon pops a celebratory alert.
+  if (kind === 'dragon_beacon') {
+    window.alert(
+      "congratulations, you completed the demo! dragon lives in your imagination, "
+      + "heart, and soul. just imagine how cool it would be if a dragon was implemented. "
+      + "ahaha yeah, honestly its amazing. im so glad you grinded here for it. "
+      + "its not in the game at all LMAO. thanks! have a great day! "
+      + "i hope it doesnt 'drag on' ;)"
+    );
+  }
 }
 
 // Wall placement — Ƶ1 per cell, instant, no Building entity. Just adds the

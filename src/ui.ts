@@ -14,7 +14,7 @@ import {
 // expander introduced alongside Datacentres, not a late-game item).
 const SORTED_KINDS: BuildingKind[] = [
   'goblin_wheel', 'phone_farm', 'gas_engine', 'datacentre',
-  'goblin_hole', 'nuclear_reactor', 'hypercentre', 'wall',
+  'goblin_hole', 'nuclear_reactor', 'hypercentre', 'dragon_beacon', 'wall',
 ];
 
 // Inserted between adjacent build buttons that belong to different tutorial
@@ -89,6 +89,18 @@ const TASKS: Task[] = [
       return false;
     },
     prereq: ['reach_6mw'],
+  },
+  {
+    id: 'build_hypercentre',
+    text: 'Build a Hypercentre',
+    unlocks: ['dragon_beacon'],
+    isDone: (s) => {
+      for (const b of s.buildings.values()) {
+        if (b.kind === 'hypercentre') return true;
+      }
+      return false;
+    },
+    prereq: ['run_datacentre'],
   },
 ];
 
@@ -837,6 +849,22 @@ export function executeTaskSkip(state: GameState): void {
       ensureBuildingCount(state, 'datacentre', 1);
       state.money = Math.max(state.money, 8000);
       state.blood = Math.max(state.blood, 500);
+      state.bloodUnlocked = true;
+      break;
+    }
+    case 'build_hypercentre': {
+      // Hypercentre needs 1 GW + 30 maintainers + 4 carriers. One Reactor
+      // covers the power and frees the gas engines from carrying the DC.
+      ensureGoblins(state, 80);
+      if (!state.dugDirections.has('n')) digDirection(state, 'n');
+      ensureBuildingCount(state, 'goblin_wheel', 2);
+      ensureBuildingCount(state, 'phone_farm', 1);
+      ensureBuildingCount(state, 'gas_engine', 3);
+      ensureBuildingCount(state, 'datacentre', 1);
+      ensureBuildingCount(state, 'nuclear_reactor', 1);
+      ensureBuildingCount(state, 'hypercentre', 1);
+      state.money = Math.max(state.money, 2_000_000);
+      state.blood = Math.max(state.blood, 1500);
       state.bloodUnlocked = true;
       break;
     }
