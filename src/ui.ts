@@ -853,15 +853,18 @@ export function executeTaskSkip(state: GameState): void {
       break;
     }
     case 'build_hypercentre': {
-      // Hypercentre needs 1 GW + 30 maintainers + 4 carriers. One Reactor
-      // covers the power and frees the gas engines from carrying the DC.
-      ensureGoblins(state, 80);
+      // Hypercentre needs 1 GW + 30 maintainers + 4 carriers. The Reactor
+      // (1 GW) does the heavy lifting; the gas engines stay around for
+      // redundancy and to power the DC + PF independently. Reactor placed
+      // before the bigger footprints so findFreeFootprint doesn't run out
+      // of space for its 2×2.
+      ensureGoblins(state, 90);
       if (!state.dugDirections.has('n')) digDirection(state, 'n');
       ensureBuildingCount(state, 'goblin_wheel', 2);
       ensureBuildingCount(state, 'phone_farm', 1);
+      ensureBuildingCount(state, 'nuclear_reactor', 1);
       ensureBuildingCount(state, 'gas_engine', 3);
       ensureBuildingCount(state, 'datacentre', 1);
-      ensureBuildingCount(state, 'nuclear_reactor', 1);
       ensureBuildingCount(state, 'hypercentre', 1);
       state.money = Math.max(state.money, 2_000_000);
       state.blood = Math.max(state.blood, 1500);

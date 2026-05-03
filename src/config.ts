@@ -196,7 +196,7 @@ export const BUILDING_DEFS = {
     cost: 500_000,
     buildersRequired: 4,
     buildTime: 60,
-    maintainersRequired: 5,
+    maintainersRequired: 4,
     income: 0,
     powerOutput: 1_000_000_000, // 1 GW
     wanderInterval: 1.2,

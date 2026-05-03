@@ -538,23 +538,29 @@ function placeBuilding(state: GameState, x: number, y: number) {
   }
 }
 
-// Wall placement — Ƶ1 per cell, instant, no Building entity. Just adds the
-// cell to state.walls and bumps the version so render redraws. Drag-paint
-// calls this with silent=true so duplicate-cell attempts don't beep.
+// Wall placement — Ƶ1 per cell, 1×1 Building entity that goes straight to
+// active. Using a real Building means the same destroy flow as everything
+// else (selection → destroy → minotaur smashes it) works for free.
+// Drag-paint calls this with silent=true so duplicate-cell attempts don't
+// beep on every drag tick.
 function tryPlaceWallAt(state: GameState, cx: number, cy: number, silent: boolean): boolean {
   if (!isInBounds(cx, cy)) return false;
   if (state.money < 1) {
     if (!silent) { playSound('error'); appendLog(state, 'Not enough Ƶ.'); }
     return false;
   }
-  const k = cellKey(cx, cy);
-  if (state.walls.has(k)) return false;
-  if (buildingAtCell(state, cx, cy)) return false;
-  if (state.occupancy.has(k)) return false;       // a goblin's standing here
-  if (holeAtCell(state, cx, cy)) return false;
+  if (isCellBlocked(state, cx, cy)) return false;
   state.money -= 1;
-  state.walls.add(k);
-  state.wallsVersion++;
+  const b: Building = {
+    id: state.nextId++,
+    kind: 'wall',
+    cell: { cx, cy },
+    state: 'active',
+    buildProgress: 1,
+    assignedGoblins: [],
+    selected: false,
+  };
+  state.buildings.set(b.id, b);
   return true;
 }
 
