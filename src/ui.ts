@@ -34,6 +34,11 @@ const previouslyCompletedTaskIds = new Set<string>();
 // instead of flashing through it.
 const revealedTaskIds = new Set<string>();
 
+// Building kinds the player has outgrown — sticky once the upgrade has gone
+// active even once. Mirrors the sticky-task-progress philosophy: destroying
+// the upgrade later doesn't bring the obsolete predecessor back.
+const obsoletedKinds = new Set<BuildingKind>();
+
 // Build/ritual buttons that have already been visible at least once. First
 // appearance gets a soft fade-in via the .fade-in CSS animation.
 const everVisibleButtonIds = new Set<string>();
@@ -442,11 +447,12 @@ function refreshAutospawnButton(state: GameState, gasEngineBuilt: boolean): void
   const canAfford = state.blood >= next.bloodCost;
   cost.classList.toggle('met', canAfford);
   cost.classList.remove('owned');
-  btn.disabled = !canAfford;
-
+  // Block the buy if the next tier would outpace the current spawn cap;
+  // the warning explains why the button is greyed out.
   const cap = getSpawnCapacity(state);
   const willOverflow = next.multiplier > cap;
   warn.style.display = willOverflow ? '' : 'none';
+  btn.disabled = !canAfford || willOverflow;
 }
 
 function progressTrack(id: string, slots: number): string {
@@ -629,10 +635,10 @@ export function refreshUI(state: GameState) {
     taskEl.style.display = 'none';
   }
 
-  // Buildings the player has outgrown — once a Gas Engine is running, the
-  // Goblin Wheel disappears; once a Datacentre is running, the Phone Farm
-  // disappears. The replacement just produces / earns more for the same role.
-  const obsoletedKinds = new Set<BuildingKind>();
+  // Buildings the player has outgrown — once a Gas Engine has gone active
+  // even once, the Goblin Wheel disappears for the rest of the session.
+  // Sticky: destroying the upgrade later doesn't unhide the predecessor
+  // (matches the sticky-task-progress philosophy).
   for (const b of state.buildings.values()) {
     if (b.state !== 'active') continue;
     if (b.kind === 'gas_engine') obsoletedKinds.add('goblin_wheel');

@@ -117,6 +117,10 @@ async function main() {
       const next = AUTOSPAWN_TIERS.find(t => t.multiplier > state.autoSpawnMultiplier);
       if (!next) return;
       if (state.blood < next.bloodCost) { playSound('error'); return; }
+      // Don't allow the multiplier to outrun spawn capacity — the UI
+      // already disables the button, but block here too in case it's
+      // triggered programmatically.
+      if (next.multiplier > getSpawnCapacity(state)) { playSound('error'); return; }
       state.blood -= next.bloodCost;
       const wasEnabled = state.autoSpawnEnabled;
       state.autoSpawnMultiplier = next.multiplier;
