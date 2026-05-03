@@ -662,11 +662,14 @@ function drawFloaters(ctx: RenderContext, state: GameState) {
     seen.add(f.id);
     let t = ctx.floaterViews.get(f.id);
     if (!t) {
+      const opts = getOptions();
       t = new Text({
         text: f.text,
         style: {
-          fontFamily: fontFamilyById(getOptions().fonts.mono.family).css,
-          fontSize: 14,
+          fontFamily: fontFamilyById(opts.fonts.mono.family).css,
+          // Baseline 14 px, scaled by the global font multiplier so the same
+          // slider that resizes UI text also resizes in-world numbers.
+          fontSize: 14 * opts.globalFontScale,
           fill: f.color,
           fontWeight: 'bold',
           stroke: { color: 0x000000, width: 3 },
@@ -829,9 +832,9 @@ export function render(state: GameState, ctx: RenderContext) {
     }
     for (const s of v.outline) s.visible = opts.goblinOutline;
     let tint = 0xffffff;
-    // Gold goblins keep their gold tint regardless of role; if they're on
-    // water duty the blue still wins so the player can find their carriers.
-    if (g.state.kind === 'fetching_water') tint = 0x2060ff;
+    // Water carriers tint blue only while actually hauling water back to the
+    // DC (phase to_dc). On the outbound walk to the source they look normal.
+    if (g.state.kind === 'fetching_water' && g.state.phase === 'to_dc') tint = 0x2060ff;
     else if (g.gold) tint = 0xffa800;
     else if (g.state.kind === 'building' || g.state.kind === 'going_to_build') tint = 0xfff0a8;
     else if (g.state.kind === 'maintaining' || g.state.kind === 'going_to_maintain') tint = 0xa8d8ff;

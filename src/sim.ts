@@ -1,4 +1,4 @@
-import { playSound } from './audio';
+import { playDecayingGoblinDeath, playDecayingGoblinSpawn, playSound } from './audio';
 import { BUILDING_DEFS, CELL, COLS, GOBLIN, GOLD_GOBLIN_CHANCE, GOLD_KILL_REWARD, KILL_REWARD, MINOTAUR_KILL_REWARD, SUMMON_UPGRADES, TICK_S, MINOTAUR, WATER_DEPLETION_PP_PER_SEC, WATER_METER_MAX, formatPower } from './config';
 import {
   ALL_DIRS, Building, Cell, DX, DY, Dir, GameState, Goblin, HOLE_SIZE, Minotaur,
@@ -89,7 +89,7 @@ export function tick(state: GameState) {
       const def = defOf(b);
       if (def.income <= 0) continue;
       const c = buildingCenter(b);
-      pushFloater(state, c.x, c.y, `+Ƶ${def.income}`, 0xffd96b);
+      pushFloater(state, c.x, c.y, `+Ƶ${def.income.toLocaleString('en-US')}`, 0xffd96b);
     }
     state.nextIncomeFloatAt = state.now + 1;
   }
@@ -149,7 +149,9 @@ function spawnGoblin(state: GameState) {
   state.goblins.set(id, g);
   occupyCell(state, cell.cx, cell.cy, id);
   state.spawnsCompleted++;
-  playSound('goblin_spawn', 0.5);
+  // Decaying-volume helper in audio.ts so a wall of late-game goblins
+  // doesn't drown the rest of the soundscape.
+  playDecayingGoblinSpawn();
   appendLog(state, isGold ? `Gold Goblin #${id} hatched!` : `Goblin #${id} hatched.`);
   if (state.autoAssignEnabled) autoAssignAllIdle(state);
 }
@@ -409,7 +411,7 @@ function updateMinotaur(state: GameState, t: Minotaur) {
       appendLog(state, `Minotaur #${t.id} smashes ${def.name} #${b.id}.`);
       pushDeathEffect(state, c.x, c.y);
       destroyBuilding(state, b.id);
-      playSound('goblin_death', 0.5, 0.3);
+      playSound('goblin_death', 0.4, 0.3);
       t.state = { kind: 'wander' };
       t.nextWanderAt = state.now + MINOTAUR.wanderInterval;
       return;
@@ -444,10 +446,10 @@ function updateMinotaur(state: GameState, t: Minotaur) {
       state.money += MINOTAUR_KILL_REWARD.money;
       state.blood += MINOTAUR_KILL_REWARD.blood;
       state.bloodUnlocked = true;
-      pushFloater(state, tx, ty, `+Ƶ${MINOTAUR_KILL_REWARD.money}`, 0xffd96b, 1.6);
+      pushFloater(state, tx, ty, `+Ƶ${MINOTAUR_KILL_REWARD.money.toLocaleString('en-US')}`, 0xffd96b, 1.6);
       pushFloater(state, tx, ty - 14, `+${MINOTAUR_KILL_REWARD.blood} blood`, 0xff8a8a, 1.6);
       pushDeathEffect(state, tx, ty);
-      playSound('goblin_death', 0.7, 0.3);
+      playSound('goblin_death', 0.56, 0.3);
       appendLog(state, `Minotaur #${target.id} gored by Minotaur #${t.id}.`);
       t.state = { kind: 'wander' };
       t.nextWanderAt = state.now + MINOTAUR.wanderInterval;
@@ -483,10 +485,10 @@ function updateMinotaur(state: GameState, t: Minotaur) {
       state.money += reward.money;
       state.blood += reward.blood;
       state.bloodUnlocked = true;
-      pushFloater(state, tx, ty, `+Ƶ${reward.money}`, 0xffd96b, 1.6);
+      pushFloater(state, tx, ty, `+Ƶ${reward.money.toLocaleString('en-US')}`, 0xffd96b, 1.6);
       pushFloater(state, tx, ty - 14, `+${reward.blood} blood`, 0xff8a8a, 1.6);
       pushDeathEffect(state, tx, ty);
-      playSound('goblin_death', 0.7);
+      playDecayingGoblinDeath();
       appendLog(state, `Goblin #${target.id} killed by Minotaur #${t.id}.`);
       t.state = { kind: 'wander' };
       t.nextWanderAt = state.now + MINOTAUR.wanderInterval;
@@ -863,6 +865,7 @@ function updateGoblin(state: GameState, g: Goblin) {
         const fullyStaffed = maintainerCount(state, b) >= def2.maintainersRequired;
         if (delivery > 0 && fullyStaffed) {
           b.waterMeter = Math.min(WATER_METER_MAX, (b.waterMeter ?? 0) + delivery);
+          playSound('water_splash', 0.5);
         }
         s.firstLoopDone = true;
         s.phase = 'to_source';
@@ -909,10 +912,10 @@ function updateGoblin(state: GameState, g: Goblin) {
         state.money += reward.money;
         state.blood += reward.blood;
         state.bloodUnlocked = true;
-        pushFloater(state, tx, ty, `+Ƶ${reward.money}`, 0xffd96b, 1.6);
+        pushFloater(state, tx, ty, `+Ƶ${reward.money.toLocaleString('en-US')}`, 0xffd96b, 1.6);
         pushFloater(state, tx, ty - 14, `+${reward.blood} blood`, 0xff8a8a, 1.6);
         pushDeathEffect(state, tx, ty);
-        playSound('goblin_death', 0.7);
+        playSound('goblin_death', 0.56);
         appendLog(state, `Goblin #${target.id} killed by #${g.id}.`);
         g.state = { kind: 'idle' };
         g.goal = null;

@@ -123,8 +123,10 @@ export type BuildingDef = {
   // as watered while the meter is > 0.
   waterDeliveryAmount?: number;
   // Auto-assign target — Autotask will keep this many carriers on the
-  // building. Manual right-click ignores the cap (no per-building limit).
+  // building. Manual right-click ignores the auto cap, but stops at
+  // `waterCarrierMax` so a single DC can't soak up the whole goblin pool.
   waterAutoAssignTarget?: number;
+  waterCarrierMax?: number;
   income: number;         // Ƶ/sec while active
   powerOutput: number;    // watts: positive = produces, negative = consumes
   wanderInterval: number;
@@ -180,6 +182,7 @@ export const BUILDING_DEFS = {
     maintainersRequired: 15,
     waterDeliveryAmount: 50,
     waterAutoAssignTarget: 2,
+    waterCarrierMax: 5,
     income: 1000,
     powerOutput: -6_000_000, // 6 MW draw
     wanderInterval: 1.4,
@@ -250,6 +253,7 @@ export const BUILDING_DEFS = {
     maintainersRequired: 30,
     waterDeliveryAmount: 20,
     waterAutoAssignTarget: 5,
+    waterCarrierMax: 15,
     income: 50_000,
     powerOutput: -1_000_000_000, // 1 GW draw
     wanderInterval: 1.6,

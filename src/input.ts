@@ -1,6 +1,7 @@
 import { Application, Container, FederatedPointerEvent, Graphics } from 'pixi.js';
 import { playSound } from './audio';
 import { BUILDING_DEFS, BuildingKind, CELL, GOBLIN, MINOTAUR, RENDER_SCALE, WORLD, formatPower } from './config';
+import { unlockOptionsCog } from './options-ui';
 import { RenderContext, clampCamera } from './render';
 import { autoAssignAllIdle } from './sim';
 import {
@@ -285,17 +286,20 @@ function waterSourceAt(state: GameState, cell: Cell): WaterSource | null {
   return waterSourceAtCell(state, cell);
 }
 
-// Pick a building that drinks water (DC, HC). No carrier cap applies — the
-// player can pile as many goblins onto a single building as they want. We
-// favour the lowest-meter building so manual right-clicks always go to the
-// thirstiest target first.
+// Pick a building that drinks water (DC, HC). Skips any building that's
+// already at its `waterCarrierMax` so a single DC can't hoover up every
+// idle goblin. Among eligible drinkers, favours the one with the lowest
+// meter — manual right-clicks should hit the thirstiest target first.
 function nearestThirstyDatacentre(state: GameState): Building | null {
   let best: Building | null = null;
   let bestMeter = Infinity;
   for (const b of state.buildings.values()) {
-    const drinks = (defOf(b).waterDeliveryAmount ?? 0) > 0;
+    const def = defOf(b);
+    const drinks = (def.waterDeliveryAmount ?? 0) > 0;
     if (!drinks) continue;
     if (b.state === 'constructing') continue;
+    const max = def.waterCarrierMax ?? Infinity;
+    if (waterCarrierCount(state, b) >= max) continue;
     const m = b.waterMeter ?? 0;
     if (m < bestMeter) { bestMeter = m; best = b; }
   }
@@ -526,7 +530,9 @@ function placeBuilding(state: GameState, x: number, y: number) {
   appendLog(state, `${def.name} #${b.id} construction started — right-click goblins onto it to staff the build.`);
   autoAssignAllIdle(state);
 
-  // Demo-end gag: placing the Dragon Beacon pops a celebratory alert.
+  // Demo-end gag: placing the Dragon Beacon pops a celebratory alert, then
+  // a second one revealing the secret options menu (hidden until now in
+  // production builds).
   if (kind === 'dragon_beacon') {
     window.alert(
       "congratulations, you completed the demo! dragon lives in your imagination, "
@@ -534,6 +540,12 @@ function placeBuilding(state: GameState, x: number, y: number) {
       + "ahaha yeah, honestly its amazing. im so glad you grinded here for it. "
       + "its not in the game at all LMAO. thanks! have a great day! "
       + "i hope it doesnt 'drag on' ;)"
+    );
+    state.optionsUnlocked = true;
+    unlockOptionsCog();
+    window.alert(
+      "BUT WAIT --- YOU HAVE UNLOCKED THE SECRET SETTINGS MENU OF JUSTICE!!!!!!!!!! "
+      + "FIND IT IN THE BOTTOM RIGHT OF THE PLAY AREA. ENJOY"
     );
   }
 }
