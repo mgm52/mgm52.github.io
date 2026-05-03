@@ -92,8 +92,8 @@
         .resource-value { font-size: calc(13px * var(--font-mono-scale)); }
         .build-button { padding: 6px 8px; margin-bottom: 4px; }
         .build-name { font-size: calc(12px * var(--font-display-scale)); margin-bottom: 1px; }
-        .build-meta { font-size: calc(9px * var(--font-body-scale)); }
-        .build-yields { font-size: calc(10px * var(--font-body-scale)); line-height: 1.3; }
+        .build-meta { font-size: calc(11px * var(--font-mono-scale)); }
+        .build-yields { font-size: calc(11px * var(--font-mono-scale)); line-height: 1.3; }
         .task-text { font-size: calc(10px * var(--font-body-scale)); padding: 4px 2px; line-height: 1.3; }
         #info-panel {
           zoom: 1;
@@ -126,6 +126,7 @@
         text-align: left; cursor: pointer; border-radius: 4px;
         font-family: var(--font-body); transition: background 0.1s, border-color 0.1s;
       }
+      body.no-rounded-buttons .build-button { border-radius: 0; }
       .build-button:hover:not(:disabled) { background: #353a42; border-color: #5a6470; }
       .build-button:disabled { opacity: 0.55; cursor: not-allowed; }
       .build-button.active { background: #3a4a5e; border-color: #6a8eb0; box-shadow: 0 0 0 1px #6a8eb0; }
@@ -149,9 +150,10 @@
       .build-content { position: relative; z-index: 1; display: flex; align-items: center; gap: 10px; }
       .build-text { flex: 1; min-width: 0; }
       .build-yields {
-        font-family: var(--font-body);
-        font-size: calc(12px * var(--font-body-scale)); font-weight: 600;
+        font-family: var(--font-mono);
+        font-size: calc(12px * var(--font-mono-scale)); font-weight: 600;
         text-align: right; white-space: nowrap; line-height: 1.4;
+        font-variant-numeric: tabular-nums;
       }
       .build-yields .yield-money { color: var(--sidebar-accent); }
       .build-yields .yield-power { color: #8acfff; }
@@ -177,15 +179,15 @@
         pointer-events: none;
       }
       .build-name { font-family: var(--font-display); font-size: calc(14px * var(--font-display-scale)); font-weight: 400; letter-spacing: 0.5px; margin-bottom: 3px; }
-      .build-meta { font-family: var(--font-body); font-size: calc(11px * var(--font-body-scale)); color: var(--sidebar-title); line-height: 1.5; }
-      .build-cost { color: #d96b6b; }
+      .build-meta { font-family: var(--font-mono); font-size: calc(13px * var(--font-mono-scale)); color: var(--sidebar-title); line-height: 1.5; font-variant-numeric: tabular-nums; }
+      .build-cost { color: #d96b6b; font-family: var(--font-mono); font-variant-numeric: tabular-nums; }
       .build-cost.met { color: #6fbf73; }
       .build-cost.owned { color: #6a7080; }
       .build-button-compact { padding: 5px 10px; }
       .build-button-compact .build-name { margin-bottom: 0; }
-      .build-cost-side { font-family: var(--font-body); font-size: calc(11px * var(--font-body-scale)); white-space: nowrap; }
+      .build-cost-side { font-family: var(--font-mono); font-size: calc(13px * var(--font-mono-scale)); white-space: nowrap; font-variant-numeric: tabular-nums; }
       .build-separator { height: 1px; background: rgba(255,255,255,0.08); margin: 8px 4px; }
-      .build-power-cost { color: #d96b6b; }
+      .build-power-cost { color: #d96b6b; font-family: var(--font-mono); font-variant-numeric: tabular-nums; }
       .build-power-cost.met { color: #6fbf73; }
       .build-req { color: #d96b6b; }
       .build-req.met { color: #6fbf73; }
@@ -475,7 +477,7 @@
       <div id="sidebar">
         <div class="panel">
           <div class="panel-title">Resources</div>
-          <div class="resource-row"><span>Ƶ Money</span><span class="resource-value" id="money">0</span></div>
+          <div class="resource-row"><span>Ƶ Cash</span><span class="resource-value" id="money">0</span></div>
           <div class="resource-row" id="row-blood"><span style="color:#d96b6b">Blood</span><span class="resource-value" id="blood" style="color:#ff8a8a">0</span></div>
           <div class="resource-row" id="row-power" style="display:none"><span>Power</span><span class="resource-value" id="power">0 / 0 W</span></div>
         </div>

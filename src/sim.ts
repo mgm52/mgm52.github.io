@@ -268,7 +268,7 @@ export function spawnMinotaur(state: GameState): boolean {
   };
   state.minotaurs.set(id, t);
   appendLog(state, `Minotaur #${id} crawls out of the hole.`);
-  playSound('goblin_spawn', 1.4);
+  playSound('goblin_spawn', 1.4, 0.3);
   return true;
 }
 
@@ -409,7 +409,7 @@ function updateMinotaur(state: GameState, t: Minotaur) {
       appendLog(state, `Minotaur #${t.id} smashes ${def.name} #${b.id}.`);
       pushDeathEffect(state, c.x, c.y);
       destroyBuilding(state, b.id);
-      playSound('goblin_death', 0.5);
+      playSound('goblin_death', 0.5, 0.3);
       t.state = { kind: 'wander' };
       t.nextWanderAt = state.now + MINOTAUR.wanderInterval;
       return;
@@ -447,7 +447,7 @@ function updateMinotaur(state: GameState, t: Minotaur) {
       pushFloater(state, tx, ty, `+Ƶ${MINOTAUR_KILL_REWARD.money}`, 0xffd96b, 1.6);
       pushFloater(state, tx, ty - 14, `+${MINOTAUR_KILL_REWARD.blood} blood`, 0xff8a8a, 1.6);
       pushDeathEffect(state, tx, ty);
-      playSound('goblin_death', 0.7);
+      playSound('goblin_death', 0.7, 0.3);
       appendLog(state, `Minotaur #${target.id} gored by Minotaur #${t.id}.`);
       t.state = { kind: 'wander' };
       t.nextWanderAt = state.now + MINOTAUR.wanderInterval;

@@ -11,7 +11,7 @@ extensions.add(GifAsset);
 type DeathFrames = { textures: Texture[]; ends: number[]; duration: number };
 import { CELL, COLS, GOBLIN, RENDER_SCALE, ROWS, MINOTAUR, WORLD } from './config';
 import { ensureFontLoaded, fontFamilyById, getOptions, onOptionsChange, type FontConfig, type Options } from './options';
-import { Building, GameState, Goblin, HOLE_SIZE, Minotaur, WaterSource, buildingCenter, cellCenter, defOf, holeCenter, maintainerCount } from './state';
+import { Building, GameState, Goblin, HOLE_SIZE, Minotaur, WaterSource, buildingCenter, cellCenter, defOf, holeCenter, isInPlayCell, maintainerCount } from './state';
 
 export type Camera = { x: number; y: number };
 
@@ -193,6 +193,7 @@ export type RenderContext = {
   // Mutable references — used by applyOptions() to redraw on the fly.
   walls: Set<string>;
   wallsVersion: number;     // last drawn version; render compares vs state.wallsVersion
+  state: GameState;         // most-recent state ref, kept updated each render
   playBg: Graphics;
   wallGfx: Graphics;
   grid: Graphics;
@@ -201,7 +202,8 @@ export type RenderContext = {
   buildingFilter: ColorMatrixFilter;
 };
 
-export async function createRender(parent: HTMLElement, walls: Set<string>): Promise<RenderContext> {
+export async function createRender(parent: HTMLElement, state: GameState): Promise<RenderContext> {
+  const walls = state.walls;
   await loadGoblinSheets();
   const initW = parent.clientWidth || window.innerWidth || WORLD.width;
   const initH = parent.clientHeight || window.innerHeight || WORLD.height;
@@ -271,7 +273,7 @@ export async function createRender(parent: HTMLElement, walls: Set<string>): Pro
     floatersLayer, floaterViews: new Map(),
     effectsLayer, deathViews: new Map(),
     deathFrames: null,
-    walls, wallsVersion: -1, playBg, wallGfx, grid, goblinFilter, minotaurFilter, buildingFilter,
+    walls, wallsVersion: -1, state, playBg, wallGfx, grid, goblinFilter, minotaurFilter, buildingFilter,
   };
 
   // Decode the GIF once into AnimatedSprite frames. Sharing GifSprite across
@@ -343,6 +345,9 @@ function applyOptions(ctx: RenderContext, o: Options) {
   applyFilter(ctx.buildingLayer, ctx.buildingFilter, o.buildingSaturation, o.buildingBrightness);
   applySidebarColors(o);
   applyFonts(ctx, o);
+  // Build/ritual button corner rounding — toggle via body class so the CSS
+  // can override .build-button border-radius.
+  document.body.classList.toggle('no-rounded-buttons', !o.buttonsRounded);
 }
 
 function applySidebarColors(o: Options) {
@@ -362,27 +367,39 @@ function cssHex(n: number): string {
 function redrawBackground(ctx: RenderContext, o: Options) {
   const g = ctx.playBg;
   g.clear();
-  if (o.bgPattern === 'checker') {
-    // Cell-sized checker over the playable area only (walls cover the rest).
-    for (let cy = 0; cy < ROWS; cy++) {
-      for (let cx = 0; cx < COLS; cx++) {
-        const fill = ((cx + cy) & 1) === 0 ? o.bgColor : o.bgColor2;
-        g.rect(cx * CELL, cy * CELL, CELL, CELL).fill(fill);
-      }
+  // Only fill cells that are inside the plus-shaped play area. Cells outside
+  // get nothing here — the canvas oobColor shows through, and the wall layer
+  // paints the 2-cell border on top of it.
+  const state = ctx.state;
+  for (let cy = 0; cy < ROWS; cy++) {
+    for (let cx = 0; cx < COLS; cx++) {
+      if (!isInPlayCell(state, cx, cy)) continue;
+      const fill = o.bgPattern === 'checker'
+        ? (((cx + cy) & 1) === 0 ? o.bgColor : o.bgColor2)
+        : o.bgColor;
+      g.rect(cx * CELL, cy * CELL, CELL, CELL).fill(fill);
     }
-  } else {
-    g.rect(0, 0, WORLD.width, WORLD.height).fill(o.bgColor);
   }
 }
 
 function redrawWalls(ctx: RenderContext, o: Options) {
   const g = ctx.wallGfx;
   g.clear();
+  // Only paint cells that are within 2 cells (Chebyshev) of any play cell —
+  // that's the wall band around the plus-shape. Anything further out is
+  // void (renders as the canvas oobColor, no fill).
+  const state = ctx.state;
   for (const key of ctx.walls) {
     const [cxs, cys] = key.split(',');
     const cx = +cxs;
     const cy = +cys;
-    g.rect(cx * CELL, cy * CELL, CELL, CELL).fill(o.wallColor);
+    let nearPlay = false;
+    for (let dy = -2; dy <= 2 && !nearPlay; dy++) {
+      for (let dx = -2; dx <= 2 && !nearPlay; dx++) {
+        if (isInPlayCell(state, cx + dx, cy + dy)) nearPlay = true;
+      }
+    }
+    if (nearPlay) g.rect(cx * CELL, cy * CELL, CELL, CELL).fill(o.wallColor);
   }
 }
 
@@ -418,11 +435,14 @@ function applyFonts(ctx: RenderContext, o: Options) {
   root.style.setProperty('--font-display', display);
   root.style.setProperty('--font-mono', mono);
   root.style.setProperty('--font-body', body);
-  root.style.setProperty('--font-display-scale', String(o.fonts.display.scale));
-  root.style.setProperty('--font-mono-scale', String(o.fonts.mono.scale));
-  root.style.setProperty('--font-body-scale', String(o.fonts.body.scale));
-  root.style.setProperty('--font-building-label-scale', String(o.fonts.buildingLabel.scale));
-  root.style.setProperty('--font-building-warning-scale', String(o.fonts.buildingWarning.scale));
+  // globalFontScale multiplies every per-key scale uniformly so the player
+  // can blow up (or shrink) all UI text from a single slider.
+  const gs = o.globalFontScale;
+  root.style.setProperty('--font-display-scale', String(o.fonts.display.scale * gs));
+  root.style.setProperty('--font-mono-scale', String(o.fonts.mono.scale * gs));
+  root.style.setProperty('--font-body-scale', String(o.fonts.body.scale * gs));
+  root.style.setProperty('--font-building-label-scale', String(o.fonts.buildingLabel.scale * gs));
+  root.style.setProperty('--font-building-warning-scale', String(o.fonts.buildingWarning.scale * gs));
 
   // In-canvas Text — update existing buildings live; new views read from
   // options on creation.
@@ -430,9 +450,9 @@ function applyFonts(ctx: RenderContext, o: Options) {
   const warningCss = fontFamilyById(o.fonts.buildingWarning.family).css;
   for (const v of ctx.buildingViews.values()) {
     v.label.style.fontFamily = labelCss;
-    v.label.style.fontSize = buildingLabelSize(v.cellSize, o.fonts.buildingLabel.scale);
+    v.label.style.fontSize = buildingLabelSize(v.cellSize, o.fonts.buildingLabel.scale * gs);
     v.warning.style.fontFamily = warningCss;
-    v.warning.style.fontSize = buildingWarningSize(o.fonts.buildingWarning.scale);
+    v.warning.style.fontSize = buildingWarningSize(o.fonts.buildingWarning.scale * gs);
   }
 }
 
@@ -536,11 +556,12 @@ function makeBuildingView(b: Building): BuildingView {
   const o = getOptions();
   const labelCfg: FontConfig = o.fonts.buildingLabel;
   const warningCfg: FontConfig = o.fonts.buildingWarning;
+  const gs = o.globalFontScale;
   const label = new Text({
     text: def.short,
     style: {
       fontFamily: fontFamilyById(labelCfg.family).css,
-      fontSize: buildingLabelSize(def.cellSize, labelCfg.scale),
+      fontSize: buildingLabelSize(def.cellSize, labelCfg.scale * gs),
       fill: 0xffffff,
       fontWeight: 'bold',
     },
@@ -553,7 +574,7 @@ function makeBuildingView(b: Building): BuildingView {
     text: '',
     style: {
       fontFamily: fontFamilyById(warningCfg.family).css,
-      fontSize: buildingWarningSize(warningCfg.scale),
+      fontSize: buildingWarningSize(warningCfg.scale * gs),
       fill: 0xffb0b0,
       fontWeight: 'bold',
       stroke: { color: 0x000000, width: 3 },
@@ -735,8 +756,10 @@ export function render(state: GameState, ctx: RenderContext) {
   const displayPx = opts.goblinDisplayPx;
 
   // Walls expand when a Dig is purchased; redraw lazily on version drift.
+  ctx.state = state;
   if (state.wallsVersion !== ctx.wallsVersion) {
     ctx.walls = state.walls;
+    redrawBackground(ctx, opts);
     redrawWalls(ctx, opts);
     ctx.wallsVersion = state.wallsVersion;
   }
@@ -770,6 +793,13 @@ export function render(state: GameState, ctx: RenderContext) {
       v.shadow.position.set(0, displayPx * 0.32);
       const sy = displayPx / 64;
       v.shadow.scale.set(sy * 0.75, sy);
+    }
+    // Per-frame sprite-Y offset so the player can tune sprite-to-cell
+    // alignment from the options panel. Outline copies preserve their
+    // cardinal offsets relative to the sprite.
+    v.sprite.y = opts.goblinSpriteYOffset;
+    for (let i = 0; i < v.outline.length; i++) {
+      v.outline[i].y = OUTLINE_OFFSETS[i][1] + opts.goblinSpriteYOffset;
     }
     // Walk while interpolating between cells; idle when stationary; break into
     // breakdance once a goblin's been continuously idle for long enough.
@@ -834,6 +864,7 @@ export function render(state: GameState, ctx: RenderContext) {
       const sy = minotaurDisplayPx / 64;
       v.shadow.scale.set(sy * 0.75, sy);
     }
+    v.sprite.y = opts.minotaurSpriteYOffset;
     const winding =
       (t.state.kind === 'going_to_kill' || t.state.kind === 'going_to_kill_minotaur' || t.state.kind === 'going_to_destroy')
       && t.state.attackAt !== undefined;

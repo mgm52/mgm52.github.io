@@ -1,6 +1,6 @@
 import {
   DEFAULT_OPTIONS, FONT_FAMILIES, FONT_KEYS, ensureFontLoaded,
-  getOptions, resetOptions, setFontConfig, setOption,
+  getOptions, resetOptions, setAllFontFamilies, setFontConfig, setOption,
   type BgPattern, type FontKey, type Options,
 } from './options';
 
@@ -66,6 +66,7 @@ function rebuildPanel(panel: HTMLElement, callbacks: OptionsUICallbacks): void {
     slider('Saturation', o.goblinSaturation, 0, 2, 0.05, (v) => setOption('goblinSaturation', v)),
     slider('Brightness', o.goblinBrightness, 0.2, 2, 0.05, (v) => setOption('goblinBrightness', v)),
     slider('Sprite size', o.goblinDisplayPx, 24, 96, 1, (v) => setOption('goblinDisplayPx', v)),
+    slider('Sprite Y offset', o.goblinSpriteYOffset, -32, 32, 1, (v) => setOption('goblinSpriteYOffset', v)),
     toggle('Foot shadow',   o.goblinShadow,  (v) => setOption('goblinShadow', v)),
     toggle('Black outline', o.goblinOutline, (v) => setOption('goblinOutline', v)),
   ]));
@@ -74,6 +75,7 @@ function rebuildPanel(panel: HTMLElement, callbacks: OptionsUICallbacks): void {
     slider('Saturation', o.minotaurSaturation, 0, 2, 0.05, (v) => setOption('minotaurSaturation', v)),
     slider('Brightness', o.minotaurBrightness, 0.2, 2, 0.05, (v) => setOption('minotaurBrightness', v)),
     slider('Sprite size', o.minotaurDisplayPx, 40, 200, 1, (v) => setOption('minotaurDisplayPx', v)),
+    slider('Sprite Y offset', o.minotaurSpriteYOffset, -64, 64, 1, (v) => setOption('minotaurSpriteYOffset', v)),
   ]));
 
   panel.appendChild(section('Buildings', [
@@ -88,6 +90,7 @@ function rebuildPanel(panel: HTMLElement, callbacks: OptionsUICallbacks): void {
     color('Button border',  o.sidebarButtonBorder, (v) => setOption('sidebarButtonBorder', v)),
     color('Accent (Ƶ)',     o.sidebarAccent,       (v) => setOption('sidebarAccent', v)),
     color('Title text',     o.sidebarTitleColor,   (v) => setOption('sidebarTitleColor', v)),
+    toggle('Rounded buttons', o.buttonsRounded,    (v) => setOption('buttonsRounded', v)),
   ]));
 
   panel.appendChild(section('Audio', [
@@ -124,6 +127,14 @@ function rebuildPanel(panel: HTMLElement, callbacks: OptionsUICallbacks): void {
 function fontsSection(o: Options): HTMLElement {
   const familyOpts = FONT_FAMILIES.map(f => ({ value: f.id, label: f.label }));
   const rows: HTMLElement[] = [];
+  // Convenience controls at the top: a single "set all to" picker that
+  // syncs every font key, and a global scale multiplier.
+  rows.push(select('Set all fonts to', '', [{ value: '', label: '— pick —' }, ...familyOpts], (v) => {
+    if (!v) return;
+    ensureFontLoaded(v);
+    setAllFontFamilies(v);
+  }));
+  rows.push(slider('Global scale', o.globalFontScale, 0.4, 2.5, 0.05, (v) => setOption('globalFontScale', v)));
   for (const { key, label } of FONT_KEYS) {
     const cfg = o.fonts[key];
     rows.push(fontRow(label, key, cfg.family, cfg.scale, familyOpts));

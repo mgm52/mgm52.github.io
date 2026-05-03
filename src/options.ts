@@ -31,6 +31,26 @@ export const FONT_FAMILIES: FontFamily[] = [
   // Local-only fallbacks: rely on the OS having these installed (no Google
   // Fonts URL). If the user's system lacks them they fall back to the listed
   // generics, which is fine.
+  { id: 'russoOne',    label: 'Russo One',       css: '"Russo One", system-ui, sans-serif',
+    url: 'https://fonts.googleapis.com/css2?family=Russo+One&display=swap' },
+  { id: 'spaceGrotesk', label: 'Space Grotesk',  css: '"Space Grotesk", system-ui, sans-serif',
+    url: 'https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;600&display=swap' },
+  { id: 'robotoMono',  label: 'Roboto Mono',     css: '"Roboto Mono", "Consolas", monospace',
+    url: 'https://fonts.googleapis.com/css2?family=Roboto+Mono:wght@400;500&display=swap' },
+  { id: 'ibmPlexMono', label: 'IBM Plex Mono',   css: '"IBM Plex Mono", "Consolas", monospace',
+    url: 'https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&display=swap' },
+  { id: 'anton',       label: 'Anton',           css: '"Anton", system-ui, sans-serif',
+    url: 'https://fonts.googleapis.com/css2?family=Anton&display=swap' },
+  { id: 'cinzel',      label: 'Cinzel',          css: '"Cinzel", serif',
+    url: 'https://fonts.googleapis.com/css2?family=Cinzel:wght@400;700&display=swap' },
+  { id: 'quicksand',   label: 'Quicksand',       css: '"Quicksand", system-ui, sans-serif',
+    url: 'https://fonts.googleapis.com/css2?family=Quicksand:wght@400;600&display=swap' },
+  { id: 'lobster',     label: 'Lobster',         css: '"Lobster", cursive',
+    url: 'https://fonts.googleapis.com/css2?family=Lobster&display=swap' },
+  { id: 'creepster',   label: 'Creepster',       css: '"Creepster", cursive',
+    url: 'https://fonts.googleapis.com/css2?family=Creepster&display=swap' },
+  { id: 'metalMania',  label: 'Metal Mania',     css: '"Metal Mania", cursive',
+    url: 'https://fonts.googleapis.com/css2?family=Metal+Mania&display=swap' },
   { id: 'comicSans',   label: 'Comic Sans',      css: '"Comic Sans MS", "Comic Sans", cursive, sans-serif' },
   { id: 'timesNewRoman', label: 'Times New Roman', css: '"Times New Roman", Times, serif' },
 ];
@@ -81,10 +101,12 @@ export type Options = {
   goblinDisplayPx: number;
   goblinShadow: boolean;
   goblinOutline: boolean;
+  goblinSpriteYOffset: number;   // pixels to nudge the sprite vertically inside its cell
   // Minotaur sprites
   minotaurSaturation: number;
   minotaurBrightness: number;
   minotaurDisplayPx: number;
+  minotaurSpriteYOffset: number;
   // Buildings
   buildingSaturation: number;
   buildingBrightness: number;
@@ -95,8 +117,12 @@ export type Options = {
   sidebarButtonBorder: number;
   sidebarAccent: number;     // yellow numbers (Ƶ values, resource counters)
   sidebarTitleColor: number; // muted-gray panel titles
+  buttonsRounded: boolean;   // build/ritual button corner rounding
   // Fonts (per-category family + size scale)
   fonts: Record<FontKey, FontConfig>;
+  // Multiplier applied to every font's per-key scale. Lets the player blow
+  // every label up at once without touching the individual scale sliders.
+  globalFontScale: number;
   // Audio
   volume: number;
 };
@@ -115,12 +141,14 @@ export const DEFAULT_OPTIONS: Options = {
   goblinDisplayPx: 50,
   goblinShadow: true,
   goblinOutline: false,
+  goblinSpriteYOffset: 0,
   // Default minotaur is roughly the goblin's render-relative size — same
   // formula as before (radius ratio) baked into the default value, but now
   // independently tunable.
   minotaurSaturation: 1.4,
   minotaurBrightness: 1.4,
   minotaurDisplayPx: 90,
+  minotaurSpriteYOffset: 0,
   buildingSaturation: 1.50,
   buildingBrightness: 1.05,
   sidebarBg: 0x000000,
@@ -129,6 +157,7 @@ export const DEFAULT_OPTIONS: Options = {
   sidebarButtonBorder: 0x33373d,
   sidebarAccent: 0xffd96b,
   sidebarTitleColor: 0x8a9099,
+  buttonsRounded: true,
   fonts: {
     display:         { family: 'audiowide', scale: 0.95 },
     mono:            { family: 'majorMono', scale: 0.70 },
@@ -136,8 +165,17 @@ export const DEFAULT_OPTIONS: Options = {
     buildingLabel:   { family: 'majorMono', scale: 0.50 },
     buildingWarning: { family: 'majorMono', scale: 1.00 },
   },
+  globalFontScale: 1.0,
   volume: 0.7,
 };
+
+// Set every font key to the same family at once. Convenience for the options
+// panel's "set all fonts to" picker.
+export function setAllFontFamilies(family: string): void {
+  for (const { key } of FONT_KEYS) {
+    setFontConfig(key, { family });
+  }
+}
 
 const STORAGE_KEY = 'rts.options.v2';
 

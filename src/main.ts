@@ -47,7 +47,7 @@ async function main() {
   setMasterVolume(getOptions().volume);
   onOptionsChange((o) => setMasterVolume(o.volume));
   const state = createInitialState();
-  const ctx = await createRender(document.getElementById('game')!, state.walls);
+  const ctx = await createRender(document.getElementById('game')!, state);
   setupInput(state, ctx.app, ctx.uiLayer, ctx.worldLayer, ctx);
   setupOptionsUI(document.getElementById('game')!, {
     onCheatMoney: () => {
