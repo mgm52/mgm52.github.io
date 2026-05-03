@@ -1,6 +1,6 @@
 import { playSound } from './audio';
 import {
-  AUTOSPAWN_TIERS, BUILDABLE_KINDS, BUILDING_DEFS, BuildingKind, DIG, GOBLIN, SUMMON_UPGRADES,
+  AUTOSPAWN_TIERS, BUILDABLE_KINDS, BUILDING_DEFS, BuildingKind, GOBLIN, SUMMON_UPGRADES, digBloodCost,
   MINOTAUR, formatPower,
 } from './config';
 import {
@@ -281,7 +281,7 @@ export function setupUI(state: GameState, callbacks: UICallbacks) {
     b.innerHTML = `
       <div class="build-content" style="flex-direction:column; align-items:center; gap:1px">
         <div class="build-name" style="font-size: calc(13px * var(--font-display-scale))">Dig ${dir.toUpperCase()}</div>
-        <span class="build-cost" id="cost-dig-${dir}" style="font-size: calc(10px * var(--font-body-scale))">${DIG.bloodCost}</span>
+        <span class="build-cost" id="cost-dig-${dir}" style="font-size: calc(10px * var(--font-body-scale))"></span>
       </div>
     `;
     b.addEventListener('click', () => { playSound('click', 1, 0.75); callbacks.onDig(dir); });
@@ -611,13 +611,14 @@ export function refreshUI(state: GameState) {
     const btn = document.getElementById(`btn-dig-${dir}`) as HTMLButtonElement;
     if (!btn) continue;
     const dug = state.dugDirections.has(dir);
-    const canAfford = state.blood >= DIG.bloodCost;
+    const nextCost = digBloodCost(state.dugDirections.size);
+    const canAfford = state.blood >= nextCost;
     btn.disabled = dug || !canAfford;
     const label = btn.querySelector('.build-name') as HTMLElement | null;
     if (label) label.textContent = dug ? `${dir.toUpperCase()} ✓` : `Dig ${dir.toUpperCase()}`;
     const cost = document.getElementById(`cost-dig-${dir}`);
     if (cost) {
-      cost.textContent = dug ? '' : `${DIG.bloodCost} blood`;
+      cost.textContent = dug ? '' : `${nextCost} blood`;
       cost.classList.toggle('met', !dug && canAfford);
     }
   }

@@ -72,9 +72,18 @@ export const AUTOSPAWN_TIERS: { multiplier: number; bloodCost: number }[] = [
   { multiplier: 32, bloodCost: 416 },
 ];
 
-// Cost per dig direction (NESW). The growth distance lives in
-// DIG_GROWTH_CELLS so it can also size the world grid.
-export const DIG = { bloodCost: 100, cells: DIG_GROWTH_CELLS };
+// Dig cost ramps after the first hole — the freebie unlocks the mechanic,
+// subsequent digs cost a small fortune so the player can't trivially
+// surround everything with water.
+export const DIG = {
+  firstBloodCost: 100,
+  laterBloodCost: 2000,
+  cells: DIG_GROWTH_CELLS,
+};
+// Returns the blood cost of the next dig given the dug-direction set.
+export function digBloodCost(dugCount: number): number {
+  return dugCount === 0 ? DIG.firstBloodCost : DIG.laterBloodCost;
+}
 
 // Water meter — every building with `waterDeliveryAmount` keeps a 0..100
 // score that depletes at this rate and is bumped per delivery.
@@ -215,7 +224,7 @@ export const BUILDING_DEFS = {
     short: 'DB',
     cost: 10_000_000,
     buildersRequired: 5,
-    buildTime: 30,
+    buildTime: 15,
     maintainersRequired: 0,
     income: 0,
     powerOutput: -10_000_000_000, // 10 GW
@@ -249,9 +258,9 @@ export const BUILDING_DEFS = {
     short: 'HC',
     cost: 500_000,
     buildersRequired: 20,
-    buildTime: 90,
+    buildTime: 30,
     maintainersRequired: 30,
-    waterDeliveryAmount: 20,
+    waterDeliveryAmount: 10,
     waterAutoAssignTarget: 5,
     waterCarrierMax: 15,
     income: 50_000,

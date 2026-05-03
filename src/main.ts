@@ -1,7 +1,7 @@
 import { playSound, preloadSounds, setMasterVolume, startBackgroundMusic } from './audio';
 import {
-  AUTOSPAWN_TIERS, CAMERA_SPEED, CELL, DIG, GOBLIN, GOLD_KILL_REWARD, KILL_REWARD, START_CELL,
-  SUMMON_UPGRADES, TICK_MS, MINOTAUR,
+  AUTOSPAWN_TIERS, CAMERA_SPEED, CELL, GOBLIN, GOLD_KILL_REWARD, KILL_REWARD, START_CELL,
+  SUMMON_UPGRADES, TICK_MS, MINOTAUR, digBloodCost,
 } from './config';
 import { setupInput } from './input';
 import { getOptions, onOptionsChange } from './options';
@@ -154,14 +154,15 @@ async function main() {
     },
     onDig: (dir) => {
       if (state.dugDirections.has(dir)) return;
-      if (state.blood < DIG.bloodCost) { playSound('error'); return; }
+      const cost = digBloodCost(state.dugDirections.size);
+      if (state.blood < cost) { playSound('error'); return; }
       const result = digDirection(state, dir);
       if (!result.ok) {
         playSound('error');
         appendLog(state, `Dig ${dir.toUpperCase()} failed: ${result.reason}.`);
         return;
       }
-      state.blood -= DIG.bloodCost;
+      state.blood -= cost;
       playSound('ritual');
       appendLog(state, `Dug ${dir.toUpperCase()} — water found.`);
     },
