@@ -10,14 +10,15 @@ import {
 } from './state';
 
 // Build buttons appear in this fixed order. Mostly cheapest-first, with
-// goblin_hole slotted right below datacentre (it's an auxiliary capacity
+// goblin_hole slotted right above datacentre (it's an auxiliary capacity
 // expander introduced alongside Datacentres, not a late-game item).
 const SORTED_KINDS: BuildingKind[] = [
   // Wall sits at the top of the build list once unlocked — it's a quick
   // utility the player drops constantly, so keeping it within reach helps.
   'wall',
-  'goblin_wheel', 'phone_farm', 'gas_engine', 'datacentre',
-  'goblin_hole', 'nuclear_reactor', 'hypercentre', 'dragon_beacon',
+  'goblin_wheel', 'phone_farm', 'gas_engine',
+  'goblin_hole', 'datacentre',
+  'nuclear_reactor', 'hypercentre', 'dragon_beacon',
 ];
 
 // Inserted between adjacent build buttons that belong to different tutorial
@@ -809,7 +810,7 @@ function showWaterSource(state: GameState, w: WaterSource, panel: HTMLElement,
     if (g.state.kind === 'fetching_water' && g.state.sourceId === w.id) attending++;
   }
   stateEl.textContent = attending === 1 ? '1 goblin collecting' : `${attending} goblins collecting`;
-  extra.innerHTML = `<span style="color:#6a7080">Send goblins here to collect water</span>`;
+  extra.textContent = '';
 }
 
 function showGoblin(g: Goblin, panel: HTMLElement, portrait: HTMLElement,
