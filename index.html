@@ -66,7 +66,7 @@
          button is clicked to give the gesture a sense of impact. */
       .click-emanate {
         position: fixed;
-        width: 30px; height: 30px;
+        width: 20px; height: 20px;
         border: 2px solid #e15a5a;
         border-radius: 50%;
         pointer-events: none;
@@ -169,7 +169,10 @@
         0%, 40% { transform: rotate(0deg); }
         60%, 100% { transform: rotate(-90deg); }
       }
-      @media (orientation: portrait) {
+      /* Only show the rotate-device prompt on phone-sized portrait viewports
+         (max-width: 600px). Desktop windows dragged narrow technically count
+         as `orientation: portrait` but should keep the landscape layout. */
+      @media (orientation: portrait) and (max-width: 600px) {
         #app { display: none; }
         #portrait-warning { display: flex; }
       }
@@ -305,6 +308,11 @@
       }
       .task-text strong { color: #b8bec6; font-weight: 600; }
       .build-button.locked { display: none; }
+      /* The browser's default [hidden] { display: none } loses to our
+         .build-button { display: block }, so the `hidden` attribute had no
+         effect on title-screen buttons. Re-assert it at the same specificity
+         as .build-button so resume/erase actually hide. */
+      .build-button[hidden] { display: none; }
       /* Applied for one animation cycle the first time a build/ritual
          button becomes visible — gives newly-revealed buttons a soft
          fade-in instead of just popping into existence. Disabled buttons
@@ -469,10 +477,14 @@
       }
       .hole-toggle input { cursor: pointer; pointer-events: auto; }
 
-      /* ───────── Options cog + panel ───────── */
-      #options-cog {
+      /* ───────── Options cogs + panels ───────── */
+      /* Two cogs: public (always visible, master/music sliders + flavour) and
+         admin (full options, hidden until Dragon Beacon unlock in prod). The
+         admin cog sits to the left of the public one when both are shown. */
+      #options-cog,
+      #options-cog-public {
         position: absolute;
-        right: 10px; bottom: 10px;
+        bottom: 10px;
         width: 26px; height: 26px;
         padding: 0; line-height: 1;
         font-size: 16px;
@@ -486,10 +498,14 @@
         font-family: inherit;
         transition: background 0.1s, color 0.1s, transform 0.1s;
       }
-      #options-cog:hover { background: rgba(40, 48, 60, 0.9); color: #fff; transform: rotate(15deg); }
-      #options-panel {
+      #options-cog-public { right: 10px; }
+      #options-cog        { right: 44px; }
+      #options-cog:hover,
+      #options-cog-public:hover { background: rgba(40, 48, 60, 0.9); color: #fff; transform: rotate(15deg); }
+      #options-panel,
+      #options-panel-public {
         position: absolute;
-        right: 10px; bottom: 44px;
+        bottom: 44px;
         width: 280px;
         max-height: 70vh;
         overflow-y: auto;
@@ -503,7 +519,19 @@
         color: #d8dee4;
         box-shadow: 0 6px 20px rgba(0, 0, 0, 0.5);
       }
-      #options-panel[hidden] { display: none; }
+      #options-panel-public { right: 10px; width: 240px; }
+      #options-panel        { right: 44px; }
+      #options-panel[hidden],
+      #options-panel-public[hidden] { display: none; }
+      .options-flavor {
+        margin-top: 6px;
+        padding: 6px 4px 2px;
+        font-style: italic;
+        font-size: 11px;
+        color: #8a9099;
+        text-align: center;
+        letter-spacing: 0.04em;
+      }
       .options-section { margin-bottom: 14px; }
       .options-section-title {
         font-family: var(--font-display);
@@ -582,17 +610,32 @@
         margin: 0; color: #ffffff;
         text-transform: lowercase;
       }
-      /* Play button styled like the in-game build/spawn button so the title
-         transition feels continuous with gameplay. The 2s fill is driven by
-         JS — see showTitleScreen in main.ts. */
-      #title-play.build-button {
+      /* Play / resume buttons styled like the in-game build/spawn button so
+         the title transition feels continuous with gameplay. The 2s fill is
+         driven by JS — see showTitleScreen in main.ts. */
+      #title-play.build-button,
+      #title-resume.build-button,
+      #title-erase.build-button {
         width: 240px;
         font-family: var(--font-display);
         color: #ffffff;
       }
-      #title-play.build-button:hover:not(:disabled) { border-color: #e25555; }
-      #title-play .build-name {
-        font-size: 18px; letter-spacing: 0.15em; text-align: center;
+      #title-play.build-button:hover:not(:disabled),
+      #title-resume.build-button:hover:not(:disabled),
+      #title-erase.build-button:hover:not(:disabled) { border-color: #e25555; }
+      #title-play .build-name,
+      #title-resume .build-name,
+      #title-erase .build-name {
+        font-size: 18px; letter-spacing: 0.15em; text-align: left;
+      }
+      .title-button-stack { width: 100%; display: flex; flex-direction: column; align-items: flex-start; }
+      .title-resume-meta {
+        font-family: var(--font-body);
+        font-size: 11px;
+        color: rgba(255, 255, 255, 0.55);
+        letter-spacing: 0.05em;
+        text-align: left;
+        margin-top: 4px;
       }
     </style>
   </head>
@@ -607,12 +650,31 @@
     <div id="title-screen">
       <div class="title-content">
         <h1>goblin scaling</h1>
+        <button id="title-resume" class="build-button" hidden>
+          <div class="build-progress-track">
+            <div class="seg"><div class="fill" id="title-resume-fill"></div></div>
+          </div>
+          <div class="build-content">
+            <div class="title-button-stack">
+              <div class="build-name">Resume</div>
+              <div class="title-resume-meta" id="title-resume-meta"></div>
+            </div>
+          </div>
+        </button>
+        <button id="title-erase" class="build-button" hidden>
+          <div class="build-progress-track">
+            <div class="seg"><div class="fill" id="title-erase-fill"></div></div>
+          </div>
+          <div class="build-content">
+            <div class="build-name">Erase Data</div>
+          </div>
+        </button>
         <button id="title-play" class="build-button">
           <div class="build-progress-track">
             <div class="seg"><div class="fill" id="title-play-fill"></div></div>
           </div>
           <div class="build-content">
-            <div class="build-name">spawn</div>
+            <div class="build-name" id="title-play-label">Spawn</div>
           </div>
         </button>
       </div>

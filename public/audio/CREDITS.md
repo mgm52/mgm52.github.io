@@ -20,4 +20,5 @@
 
 | File | Source | License | Author |
 |---|---|---|---|
-| `assets/01.03. String Quartet No.4_ Allegretto; Allegretto.mp3` | _TODO: source unknown_ | _TODO_ | _TODO_ |
+| `assets/Dmitri Shostakovich String Quartet No. 4 in D major Op.83 1949.mp3` | Public domain recording | _TODO_ | Dmitri Shostakovich (1949) |
+| `assets/vinyl_crackle.mp3` | [Freesound #571373](https://freesound.org/s/571373/) | _check freesound page_ | tim.kahn |

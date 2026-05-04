@@ -18,7 +18,8 @@
 
 | File | Author |
 |---|---|
-| `01.03. String Quartet No.4_ Allegretto; Allegretto.mp3` | _TODO: source unknown_ |
+| `Dmitri Shostakovich String Quartet No. 4 in D major Op.83 1949.mp3` | Dmitri Shostakovich (1949) |
+| `vinyl_crackle.mp3` | tim.kahn (Freesound #571373) |
 
 ## Effects
 

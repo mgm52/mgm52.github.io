@@ -182,7 +182,9 @@ export type Options = {
   // every label up at once without touching the individual scale sliders.
   globalFontScale: number;
   // Audio
-  volume: number;
+  volume: number;        // master — applied to both SFX and music
+  musicVolume: number;   // additional multiplier on background music + crackle
+  crackleEnabled: boolean; // toggle the vinyl-crackle ambience layer
 };
 
 export const DEFAULT_OPTIONS: Options = {
@@ -227,6 +229,10 @@ export const DEFAULT_OPTIONS: Options = {
   },
   globalFontScale: 1.05,
   volume: 0.7,
+  // 0.7 master × 0.7 music = 0.49 effective — about 30% softer than the
+  // earlier music-at-master-volume default.
+  musicVolume: 0.7,
+  crackleEnabled: true,
 };
 
 // Set every font key to the same family at once. Convenience for the options

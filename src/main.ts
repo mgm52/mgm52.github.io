@@ -1,4 +1,4 @@
-import { playSound, preloadSounds, setMasterVolume, startBackgroundMusic } from './audio';
+import { playSound, preloadSounds, setCrackleEnabled, setMasterVolume, setMusicVolume, startBackgroundCrackle, startBackgroundMusic } from './audio';
 import {
   AUTOSPAWN_TIERS, CAMERA_SPEED, CELL, GOBLIN, GOLD_KILL_REWARD, KILL_REWARD, START_CELL,
   SUMMON_UPGRADES, TICK_MS, MINOTAUR, digBloodCost,
@@ -7,52 +7,121 @@ import { setupInput } from './input';
 import { getOptions, onOptionsChange } from './options';
 import { setupOptionsUI } from './options-ui';
 import { centerCameraOn, clampCamera, createRender, render } from './render';
-import { appendLog, cellCenter, createInitialState, destroyBuilding, digDirection, getSpawnCapacity, pushDeathEffect, pushFloater, removeGoblin } from './state';
+import { appendLog, cellCenter, createInitialState, destroyBuilding, digDirection, getSpawnCapacity, pushDeathEffect, pushFloater, removeGoblin, type GameState } from './state';
 import { autoAssignAllIdle, spawnMinotaur, tick } from './sim';
 import { executeTaskSkip, refreshUI, setupUI } from './ui';
+import { clearSave, formatRelativeTime, loadGame, saveGame } from './save';
 
-function showTitleScreen(): void {
-  const screen = document.getElementById('title-screen');
-  const playBtn = document.getElementById('title-play') as HTMLButtonElement | null;
-  const fill = document.getElementById('title-play-fill');
-  if (!screen || !playBtn || !fill) return;
-  // Reset state so this can be called repeatedly (debug "Show title screen"
-  // button in dev mode reuses the same DOM).
-  screen.style.display = 'flex';
-  screen.classList.remove('fading-out', 'shown');
-  fill.style.transition = 'none';
-  fill.style.width = '0%';
-  // Force a layout flush so the next transition: width starts from 0%.
-  void fill.offsetWidth;
-  playBtn.disabled = false;
-  document.documentElement.classList.remove('dev');
-  // Backdrop is already black (inline CSS). Fade the content in next frame.
-  requestAnimationFrame(() => screen.classList.add('shown'));
-  playBtn.addEventListener('click', () => {
-    playBtn.disabled = true;
-    // Kick the looping background music off the same gesture so the
-    // browser's autoplay policy lets it through.
-    startBackgroundMusic(BACKGROUND_MUSIC_URL);
-    // 2-second fill, then the existing two-stage fade.
-    const fillDuration = 2000;
-    fill.style.transition = `width ${fillDuration}ms linear`;
-    requestAnimationFrame(() => { fill.style.width = '100%'; });
-    setTimeout(() => {
+// Returns the player's choice — 'resume' if they clicked the resume button,
+// 'new' if they clicked the spawn button. The fade-out animation runs in
+// parallel; main() can begin state setup as soon as the promise resolves.
+//
+// Erase Data takes a third path that doesn't resolve: it clears the save,
+// fades the content out + back in, and re-renders the screen with just the
+// Spawn button. The user then clicks Spawn to start fresh.
+function showTitleScreen(savedAt: number | null = null): Promise<'new' | 'resume'> {
+  return new Promise<'new' | 'resume'>((resolve) => {
+    const screen     = document.getElementById('title-screen');
+    const playBtn    = document.getElementById('title-play') as HTMLButtonElement | null;
+    const playFill   = document.getElementById('title-play-fill');
+    const playLabel  = document.getElementById('title-play-label');
+    const resumeBtn  = document.getElementById('title-resume') as HTMLButtonElement | null;
+    const resumeFill = document.getElementById('title-resume-fill');
+    const resumeMeta = document.getElementById('title-resume-meta');
+    const eraseBtn   = document.getElementById('title-erase') as HTMLButtonElement | null;
+    const eraseFill  = document.getElementById('title-erase-fill');
+    if (!screen || !playBtn || !playFill || !playLabel || !resumeBtn || !resumeFill || !resumeMeta || !eraseBtn || !eraseFill) {
+      resolve('new');
+      return;
+    }
+    // Reset state so this can be called repeatedly (debug "Show title screen"
+    // button in dev mode reuses the same DOM).
+    screen.style.display = 'flex';
+    screen.classList.remove('fading-out', 'shown');
+    document.documentElement.classList.remove('dev');
+
+    const resetFill = (f: HTMLElement) => {
+      f.style.transition = 'none';
+      f.style.width = '0%';
+      void f.offsetWidth;
+    };
+
+    const renderLayout = (haveSave: boolean, savedAtForMeta: number | null) => {
+      resumeBtn.hidden = !haveSave;
+      eraseBtn.hidden  = !haveSave;
+      playBtn.hidden   = haveSave;
+      if (haveSave && savedAtForMeta !== null) {
+        resumeMeta.textContent = formatRelativeTime(savedAtForMeta);
+      }
+      playLabel.textContent = 'Spawn';
+      resetFill(playFill);
+      resetFill(resumeFill);
+      resetFill(eraseFill);
+      playBtn.disabled = false;
+      resumeBtn.disabled = false;
+      eraseBtn.disabled = false;
+    };
+
+    let resolved = false;
+    const finalChoice = (btn: HTMLButtonElement, fill: HTMLElement, choice: 'new' | 'resume') => {
+      if (resolved) return;
+      resolved = true;
+      playBtn.disabled = true; resumeBtn.disabled = true; eraseBtn.disabled = true;
+      // Kick the looping background music + vinyl crackle off the same
+      // gesture so the browser's autoplay policy lets them through. Crackle
+      // starts immediately; music is delayed so the crackle settles in first.
+      startBackgroundCrackle(BACKGROUND_CRACKLE_URL);
+      setTimeout(() => startBackgroundMusic(BACKGROUND_MUSIC_URL), MUSIC_LEAD_IN_MS);
+      const fillDuration = 2000;
+      fill.style.transition = `width ${fillDuration}ms linear`;
+      requestAnimationFrame(() => { fill.style.width = '100%'; });
+      setTimeout(() => {
+        screen.classList.remove('shown');
+        setTimeout(() => {
+          screen.classList.add('fading-out');
+          setTimeout(() => { screen.style.display = 'none'; }, 1500);
+        }, 1500);
+      }, fillDuration);
+      resolve(choice);
+    };
+
+    const onErase = () => {
+      if (resolved) return;
+      playBtn.disabled = true; resumeBtn.disabled = true; eraseBtn.disabled = true;
+      clearSave();
+      // 1400ms matches the .title-content opacity transition. Fade out, swap
+      // to the no-save layout, fade back in. Spawn's listener was attached at
+      // init so it stays live across the swap.
       screen.classList.remove('shown');
       setTimeout(() => {
-        screen.classList.add('fading-out');
-        setTimeout(() => { screen.style.display = 'none'; }, 1500);
-      }, 1500);
-    }, fillDuration);
-  }, { once: true });
+        renderLayout(false, null);
+        requestAnimationFrame(() => screen.classList.add('shown'));
+      }, 1400);
+    };
+
+    renderLayout(savedAt !== null, savedAt);
+    playBtn.addEventListener('click',   () => finalChoice(playBtn, playFill, 'new'),       { once: true });
+    resumeBtn.addEventListener('click', () => finalChoice(resumeBtn, resumeFill, 'resume'), { once: true });
+    eraseBtn.addEventListener('click', onErase, { once: true });
+
+    requestAnimationFrame(() => screen.classList.add('shown'));
+  });
 }
 
-const BACKGROUND_MUSIC_URL = encodeURI('assets/01.03. String Quartet No.4_ Allegretto; Allegretto.mp3');
+const BACKGROUND_MUSIC_URL = encodeURI('assets/Dmitri Shostakovich String Quartet No. 4 in D major Op.83 1949.mp3');
+const BACKGROUND_CRACKLE_URL = 'assets/vinyl_crackle.mp3';
+// Crackle gets a head-start so the room "settles" before the quartet enters.
+const MUSIC_LEAD_IN_MS = 2000;
 
 async function main() {
   // Production-only title gate. Click here also satisfies the browser's
   // user-gesture requirement so audio can play immediately afterwards.
-  if (import.meta.env.PROD) showTitleScreen();
+  // Saved-game lookup happens up-front so the title screen can show the
+  // resume button (with relative-time meta) when one exists.
+  const saved = import.meta.env.PROD ? loadGame() : null;
+  const choicePromise: Promise<'new' | 'resume'> = import.meta.env.PROD
+    ? showTitleScreen(saved?.savedAt ?? null)
+    : Promise.resolve('new');
 
   // Wait for thematic fonts to be ready so Pixi caches the right glyphs.
   if ('fonts' in document) {
@@ -67,8 +136,24 @@ async function main() {
   }
   preloadSounds();
   setMasterVolume(getOptions().volume);
-  onOptionsChange((o) => setMasterVolume(o.volume));
-  const state = createInitialState();
+  setMusicVolume(getOptions().musicVolume);
+  setCrackleEnabled(getOptions().crackleEnabled);
+  onOptionsChange((o) => {
+    setMasterVolume(o.volume);
+    setMusicVolume(o.musicVolume);
+    setCrackleEnabled(o.crackleEnabled);
+  });
+
+  // Now that fonts/sounds are ready, see what the player picked. Resume swaps
+  // in the saved state; new game wipes any prior save and starts fresh.
+  const choice = await choicePromise;
+  let state: GameState;
+  if (choice === 'resume' && saved) {
+    state = saved.state;
+  } else {
+    clearSave();
+    state = createInitialState();
+  }
   const ctx = await createRender(document.getElementById('game')!, state);
   setupInput(state, ctx.app, ctx.uiLayer, ctx.worldLayer, ctx);
   setupOptionsUI(document.getElementById('game')!, {
@@ -77,7 +162,7 @@ async function main() {
       appendLog(state, 'Cheat: +Ƶ100,000.');
     },
     onTaskSkip: () => executeTaskSkip(state),
-    onShowTitleScreen: () => showTitleScreen(),
+    onShowTitleScreen: () => { void showTitleScreen(); },
   });
   setupUI(state, {
     onSpawnGoblin: () => {
@@ -221,6 +306,16 @@ async function main() {
   // Drop held keys if the window loses focus (otherwise camera "drifts" forever).
   window.addEventListener('blur', () => held.clear());
 
+  // Autosave to localStorage every SAVE_INTERVAL_MS, plus on visibilitychange
+  // and pagehide so a closed tab loses at most this much progress.
+  const SAVE_INTERVAL_MS = 10_000;
+  let saveAcc = 0;
+  const flushSave = () => { saveGame(state); saveAcc = 0; };
+  window.addEventListener('pagehide', flushSave);
+  window.addEventListener('visibilitychange', () => {
+    if (document.visibilityState === 'hidden') flushSave();
+  });
+
   let acc = 0;
   let last = performance.now();
   function frame(now: number) {
@@ -232,6 +327,8 @@ async function main() {
       tick(state);
       acc -= TICK_MS;
     }
+    saveAcc += dt;
+    if (saveAcc >= SAVE_INTERVAL_MS) flushSave();
     // Update camera based on held pan keys
     let dx = 0, dy = 0;
     if (held.has('a') || held.has('arrowleft')) dx -= 1;

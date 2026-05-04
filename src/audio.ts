@@ -26,6 +26,7 @@ const REGISTRY = {
 export type SoundName = keyof typeof REGISTRY;
 
 let masterVolume = 0.7;
+let musicVolume = 0.7;
 let muted = false;
 
 export function preloadSounds() {
@@ -84,6 +85,12 @@ export function playDecayingGoblinDeath(rate?: number): void {
 export function setMasterVolume(v: number) {
   masterVolume = Math.max(0, Math.min(1, v));
   if (musicEl) musicEl.volume = effectiveMusicVolume();
+  if (crackleEl) crackleEl.volume = effectiveCrackleVolume();
+}
+export function setMusicVolume(v: number) {
+  musicVolume = Math.max(0, Math.min(1, v));
+  if (musicEl) musicEl.volume = effectiveMusicVolume();
+  if (crackleEl) crackleEl.volume = effectiveCrackleVolume();
 }
 export function setMuted(m: boolean) { muted = m; }
 export function isMuted() { return muted; }
@@ -91,11 +98,11 @@ export function isMuted() { return muted; }
 // ─── Looping background music ───────────────────────────────────────
 // One persistent <audio> element, lazy-started after first user gesture so
 // the browser's autoplay policy lets it through. The source mp3 is
-// loudness-normalised offline (-14 LUFS) so MUSIC_GAIN stays at 1.0.
-const MUSIC_GAIN = 1.0;
+// loudness-normalised offline (-14 LUFS); the music slider attenuates it
+// further on top of the master volume.
 let musicEl: HTMLAudioElement | null = null;
 function effectiveMusicVolume(): number {
-  return Math.max(0, Math.min(1, masterVolume * MUSIC_GAIN));
+  return Math.max(0, Math.min(1, masterVolume * musicVolume));
 }
 export function startBackgroundMusic(url: string): void {
   if (musicEl) return;
@@ -105,4 +112,78 @@ export function startBackgroundMusic(url: string): void {
   a.volume = effectiveMusicVolume();
   a.play().catch(() => {/* gated until next gesture; caller should retry */});
   musicEl = a;
+}
+
+// ─── Vinyl crackle (second background layer) ───────────────────────
+// Treated as music for volume purposes (rides the music slider). The user-
+// facing control is just a checkbox; behind the scenes the layer plays at
+// CRACKLE_HOLD for the first CRACKLE_HOLD_MS after spawn, then ramps over
+// CRACKLE_RAMP_MS down to CRACKLE_STEADY. Toggling off pauses the element
+// rather than destroying it so re-enabling resumes without buffering.
+const CRACKLE_HOLD = 1.0;
+const CRACKLE_STEADY = 0.5;
+const CRACKLE_HOLD_MS = 5000;
+const CRACKLE_RAMP_MS = 5000;
+let crackleEl: HTMLAudioElement | null = null;
+let crackleEnabled = true;
+let crackleUrl: string | null = null;
+let crackleStartedAt: number | null = null;
+let crackleRampInterval: number | null = null;
+function currentCrackleGain(): number {
+  if (crackleStartedAt === null) return CRACKLE_STEADY;
+  const elapsed = Date.now() - crackleStartedAt;
+  if (elapsed < CRACKLE_HOLD_MS) return CRACKLE_HOLD;
+  if (elapsed < CRACKLE_HOLD_MS + CRACKLE_RAMP_MS) {
+    const t = (elapsed - CRACKLE_HOLD_MS) / CRACKLE_RAMP_MS;
+    return CRACKLE_HOLD + t * (CRACKLE_STEADY - CRACKLE_HOLD);
+  }
+  return CRACKLE_STEADY;
+}
+function effectiveCrackleVolume(): number {
+  if (!crackleEnabled) return 0;
+  return Math.max(0, Math.min(1, masterVolume * musicVolume * currentCrackleGain()));
+}
+function tickCrackleRamp(): void {
+  if (crackleEl) crackleEl.volume = effectiveCrackleVolume();
+  if (crackleStartedAt !== null && Date.now() - crackleStartedAt >= CRACKLE_HOLD_MS + CRACKLE_RAMP_MS) {
+    if (crackleRampInterval !== null) {
+      clearInterval(crackleRampInterval);
+      crackleRampInterval = null;
+    }
+  }
+}
+export function startBackgroundCrackle(url: string): void {
+  crackleUrl = url;
+  if (!crackleEnabled) return;
+  if (crackleEl) {
+    if (crackleEl.paused) crackleEl.play().catch(() => {});
+    return;
+  }
+  const a = new Audio(url);
+  a.loop = true;
+  a.preload = 'auto';
+  if (crackleStartedAt === null) crackleStartedAt = Date.now();
+  a.volume = effectiveCrackleVolume();
+  a.play().catch(() => {/* gated until next gesture; caller should retry */});
+  crackleEl = a;
+  // 50ms is fine-grained enough that the linear ramp reads as smooth — at
+  // 0.5 step over 5s that's a 0.005 increment per tick.
+  if (crackleRampInterval === null) {
+    crackleRampInterval = window.setInterval(tickCrackleRamp, 50);
+  }
+}
+export function setCrackleEnabled(enabled: boolean): void {
+  crackleEnabled = enabled;
+  if (!enabled) {
+    if (crackleEl) crackleEl.pause();
+    return;
+  }
+  if (!crackleEl && crackleUrl) {
+    startBackgroundCrackle(crackleUrl);
+    return;
+  }
+  if (crackleEl) {
+    if (crackleEl.paused) crackleEl.play().catch(() => {});
+    crackleEl.volume = effectiveCrackleVolume();
+  }
 }

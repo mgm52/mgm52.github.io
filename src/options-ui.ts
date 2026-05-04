@@ -15,36 +15,79 @@ export function setupOptionsUI(root: HTMLElement, callbacks: OptionsUICallbacks)
   // the panel or the renderer applies them.
   for (const cfg of Object.values(getOptions().fonts)) ensureFontLoaded(cfg.family);
 
-  const cog = document.createElement('button');
-  cog.id = 'options-cog';
-  cog.type = 'button';
-  cog.setAttribute('aria-label', 'Options');
-  cog.textContent = '⚙';
-  // In prod the cog is hidden until the player places a Dragon Beacon —
-  // unlockOptionsCog() flips it visible (and persists the flag in
+  // Public cog — always visible. Holds master/music volume + a flavour line.
+  const publicCog = document.createElement('button');
+  publicCog.id = 'options-cog-public';
+  publicCog.type = 'button';
+  publicCog.setAttribute('aria-label', 'Options');
+  publicCog.textContent = '⚙';
+
+  const publicPanel = document.createElement('div');
+  publicPanel.id = 'options-panel-public';
+  publicPanel.hidden = true;
+
+  // Admin cog — full options. In prod hidden until the player places a Dragon
+  // Beacon (unlockOptionsCog() flips it visible and persists the flag in
   // localStorage so the unlock survives reloads). Dev keeps it always-on.
+  const adminCog = document.createElement('button');
+  adminCog.id = 'options-cog';
+  adminCog.type = 'button';
+  adminCog.setAttribute('aria-label', 'Dragon admin options');
+  adminCog.textContent = 'D';
   if (!import.meta.env.DEV && localStorage.getItem(SECRET_UNLOCK_KEY) !== '1') {
-    cog.style.display = 'none';
+    adminCog.style.display = 'none';
   }
 
-  const panel = document.createElement('div');
-  panel.id = 'options-panel';
-  panel.hidden = true;
+  const adminPanel = document.createElement('div');
+  adminPanel.id = 'options-panel';
+  adminPanel.hidden = true;
 
-  cog.addEventListener('click', (e) => {
+  // Each cog opens its own panel and closes the other so they don't overlap.
+  publicCog.addEventListener('click', (e) => {
     e.stopPropagation();
-    panel.hidden = !panel.hidden;
+    adminPanel.hidden = true;
+    publicPanel.hidden = !publicPanel.hidden;
+  });
+  adminCog.addEventListener('click', (e) => {
+    e.stopPropagation();
+    publicPanel.hidden = true;
+    adminPanel.hidden = !adminPanel.hidden;
   });
   document.addEventListener('click', (e) => {
-    if (panel.hidden) return;
-    if (e.target instanceof Node && (panel.contains(e.target) || cog.contains(e.target))) return;
-    panel.hidden = true;
+    if (!(e.target instanceof Node)) return;
+    if (!publicPanel.hidden && !publicPanel.contains(e.target) && !publicCog.contains(e.target)) {
+      publicPanel.hidden = true;
+    }
+    if (!adminPanel.hidden && !adminPanel.contains(e.target) && !adminCog.contains(e.target)) {
+      adminPanel.hidden = true;
+    }
   });
 
-  rebuildPanel(panel, callbacks);
+  rebuildPublicPanel(publicPanel);
+  rebuildPanel(adminPanel, callbacks, () => rebuildPublicPanel(publicPanel));
 
-  root.appendChild(cog);
-  root.appendChild(panel);
+  root.appendChild(publicCog);
+  root.appendChild(publicPanel);
+  root.appendChild(adminCog);
+  root.appendChild(adminPanel);
+}
+
+// Compact panel for the always-visible public cog. The admin panel mirrors
+// the same audio sliders so changing one keeps the other in sync after a
+// rebuild — but the public panel is intentionally minimal, plus a flavour
+// line for atmosphere.
+function rebuildPublicPanel(panel: HTMLElement): void {
+  panel.innerHTML = '';
+  const o = getOptions();
+  panel.appendChild(section('Audio', [
+    slider('Master volume', o.volume,         0, 1, 0.05, (v) => setOption('volume', v)),
+    slider('Music volume',  o.musicVolume,    0, 1, 0.05, (v) => setOption('musicVolume', v)),
+    toggle('Vinyl crackle', o.crackleEnabled,                (v) => setOption('crackleEnabled', v)),
+  ]));
+  const flavor = document.createElement('div');
+  flavor.className = 'options-flavor';
+  flavor.textContent = 'there is no war in ba sing se';
+  panel.appendChild(flavor);
 }
 
 const SECRET_UNLOCK_KEY = 'gs.optionsCog.secretUnlocked';
@@ -59,7 +102,7 @@ export function unlockOptionsCog(): void {
 }
 
 // ─── Panel construction ─────────────────────────────────────────────
-function rebuildPanel(panel: HTMLElement, callbacks: OptionsUICallbacks): void {
+function rebuildPanel(panel: HTMLElement, callbacks: OptionsUICallbacks, refreshPublic?: () => void): void {
   panel.innerHTML = '';
   const o = getOptions();
 
@@ -113,7 +156,9 @@ function rebuildPanel(panel: HTMLElement, callbacks: OptionsUICallbacks): void {
   ]));
 
   panel.appendChild(section('Audio', [
-    slider('Volume', o.volume, 0, 1, 0.05, (v) => setOption('volume', v)),
+    slider('Master volume', o.volume,         0, 1, 0.05, (v) => { setOption('volume', v);         refreshPublic?.(); }),
+    slider('Music volume',  o.musicVolume,    0, 1, 0.05, (v) => { setOption('musicVolume', v);    refreshPublic?.(); }),
+    toggle('Vinyl crackle', o.crackleEnabled,                (v) => { setOption('crackleEnabled', v); refreshPublic?.(); }),
   ]));
 
   panel.appendChild(fontsSection(o));
@@ -145,7 +190,8 @@ function rebuildPanel(panel: HTMLElement, callbacks: OptionsUICallbacks): void {
   reset.textContent = 'Reset to defaults';
   reset.addEventListener('click', () => {
     resetOptions();
-    rebuildPanel(panel, callbacks);
+    rebuildPanel(panel, callbacks, refreshPublic);
+    refreshPublic?.();
   });
   panel.appendChild(reset);
 }

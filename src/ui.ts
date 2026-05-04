@@ -482,7 +482,22 @@ function progressTrack(id: string, slots: number): string {
   return `<div class="build-progress-track">${segs}</div>`;
 }
 
+// One-shot init: when refreshUI is first called against a state, mark every
+// already-done task as both completed and revealed. Resuming a saved game
+// would otherwise replay every TASK COMPLETE celebration on the first frame.
+let firstRefreshDone = false;
+
 export function refreshUI(state: GameState) {
+  if (!firstRefreshDone) {
+    firstRefreshDone = true;
+    for (const t of TASKS) {
+      if (t.isDone(state)) {
+        completedTaskIds.add(t.id);
+        previouslyCompletedTaskIds.add(t.id);
+        revealedTaskIds.add(t.id);
+      }
+    }
+  }
   const idle = countIdle(state);
 
   setText('money', Math.floor(state.money).toLocaleString('en-US'));
