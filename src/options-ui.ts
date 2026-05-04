@@ -108,6 +108,7 @@ function rebuildPanel(panel: HTMLElement, callbacks: OptionsUICallbacks): void {
     color('Button border',  o.sidebarButtonBorder, (v) => setOption('sidebarButtonBorder', v)),
     color('Accent (Ƶ)',     o.sidebarAccent,       (v) => setOption('sidebarAccent', v)),
     color('Title text',     o.sidebarTitleColor,   (v) => setOption('sidebarTitleColor', v)),
+    color('Button hover border', o.sidebarButtonHoverBorder, (v) => setOption('sidebarButtonHoverBorder', v)),
     toggle('Rounded buttons', o.buttonsRounded,    (v) => setOption('buttonsRounded', v)),
   ]));
 

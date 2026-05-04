@@ -29,6 +29,36 @@
         -webkit-text-size-adjust: 100%;
         -webkit-tap-highlight-color: transparent;
       }
+      /* Custom cursors by Karnation Karnage. Default arrow for the world,
+         glove for clickable controls. The originals are 256×256 — most
+         browsers cap CSS cursors at 32×32 and silently fall back to the
+         system default if larger, so we ship downscaled 32px copies.
+         Hotspots picked roughly at the arrow tip / glove fingertip. */
+      body { cursor: url('assets/GothicCursor-24.png') 1 1, default; }
+      /* Glove cursor only on hover over clickable controls — gothic
+         arrow stays everywhere else (including the game canvas). */
+      button:not(:disabled), .build-button:not(:disabled), #title-play, .options-reset, #options-cog,
+      input[type="range"], input[type="color"], select {
+        cursor: url('assets/GloveCursor-24.png') 9 1, pointer !important;
+      }
+      /* Transient gothic arrow that twists from -20° back to 0° over
+         0.3s on a right-click command. Pivots from the bottom of the
+         sprite for a "swing" feel. Hotspot matches the cursor rule. */
+      .cursor-flash {
+        position: fixed;
+        width: 24px; height: 24px;
+        margin-left: -1px; margin-top: -1px;
+        background: url('assets/GothicCursor-24.png') no-repeat;
+        background-size: 24px 24px;
+        pointer-events: none;
+        z-index: 99999;
+        transform-origin: 1px 24px;
+        animation: cursor-twist 0.3s ease-out forwards;
+      }
+      @keyframes cursor-twist {
+        0%   { transform: rotate(-20deg); opacity: 1; }
+        100% { transform: rotate(0deg);   opacity: 0; }
+      }
       #app { display: flex; height: 100vh; height: 100dvh; }
       #game { flex: 1; position: relative; background: #000000; overflow: hidden;
         touch-action: none; -webkit-user-select: none; user-select: none; -webkit-touch-callout: none;
@@ -151,7 +181,7 @@
         font-family: var(--font-body); transition: background 0.1s, border-color 0.1s;
       }
       body.no-rounded-buttons .build-button { border-radius: 0; }
-      .build-button:hover:not(:disabled) { background: #353a42; border-color: #5a6470; }
+      .build-button:hover:not(:disabled) { background: #353a42; border-color: var(--sidebar-button-hover-border, #5a6470); }
       .build-button:disabled { opacity: 0.55; cursor: not-allowed; }
       .build-button.active { background: #3a4a5e; border-color: #6a8eb0; box-shadow: 0 0 0 1px #6a8eb0; }
       .build-button.in-progress { border-color: #6a8eb0; opacity: 0.85; }
@@ -467,7 +497,9 @@
         width: 240px;
         font-family: var(--font-display);
         color: #ffffff;
+        border-color: #c14040;
       }
+      #title-play.build-button:hover:not(:disabled) { border-color: #e25555; }
       #title-play .build-name {
         font-size: 18px; letter-spacing: 0.15em; text-align: center;
       }

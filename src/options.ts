@@ -173,6 +173,7 @@ export type Options = {
   sidebarButtonBorder: number;
   sidebarAccent: number;     // yellow numbers (Ƶ values, resource counters)
   sidebarTitleColor: number; // muted-gray panel titles
+  sidebarButtonHoverBorder: number; // border colour on .build-button:hover
   buttonsRounded: boolean;   // build/ritual button corner rounding
   // Fonts (per-category family + size scale)
   fonts: Record<FontKey, FontConfig>;
@@ -212,6 +213,7 @@ export const DEFAULT_OPTIONS: Options = {
   sidebarButtonBorder: 0x060606,
   sidebarAccent: 0xffd96b,
   sidebarTitleColor: 0x8a9099,
+  sidebarButtonHoverBorder: 0x5a6470,
   buttonsRounded: true,
   // Default font is New Rocker across the board — gives the UI a gothic
   // medieval-rocker tone that matches the goblin/minotaur theme.

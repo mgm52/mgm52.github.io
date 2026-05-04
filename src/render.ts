@@ -358,6 +358,7 @@ function applySidebarColors(o: Options) {
   root.style.setProperty('--sidebar-button-border', cssHex(o.sidebarButtonBorder));
   root.style.setProperty('--sidebar-accent', cssHex(o.sidebarAccent));
   root.style.setProperty('--sidebar-title', cssHex(o.sidebarTitleColor));
+  root.style.setProperty('--sidebar-button-hover-border', cssHex(o.sidebarButtonHoverBorder));
 }
 
 function cssHex(n: number): string {

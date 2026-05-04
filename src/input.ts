@@ -1,5 +1,6 @@
 import { Application, Container, FederatedPointerEvent, Graphics } from 'pixi.js';
 import { playSound } from './audio';
+import { flashCursor } from './cursor-fx';
 import { BUILDING_DEFS, BuildingKind, CELL, GOBLIN, MINOTAUR, RENDER_SCALE, WORLD, formatPower } from './config';
 import { unlockOptionsCog } from './options-ui';
 import { RenderContext, clampCamera } from './render';
@@ -79,6 +80,7 @@ export function setupInput(
     }
 
     if (e.button === 2) {
+      flashCursor(e.clientX, e.clientY);
       handleRightClick(state, local.x, local.y);
       return;
     }
@@ -244,6 +246,7 @@ function scheduleLongPress(
       return;
     }
     const world = worldLayer.toLocal({ x: tracked.x, y: tracked.y });
+    flashCursor(tracked.x, tracked.y);
     handleRightClick(state, world.x, world.y);
   }, LONG_PRESS_MS);
 }
