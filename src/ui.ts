@@ -564,9 +564,6 @@ export function refreshUI(state: GameState) {
   }
   const firstTaskDone = completedTaskIds.has('earn_100');
   currentTaskCached = activeTasks[0] ?? null;
-  // Build subsection only appears once the first tutorial task is done.
-  // We hide the inner #build-section, NOT the outer #panel-build, so the
-  // task-text stays visible (it lives inside the same scroll container).
   const buildSection = document.getElementById('build-section')!;
   buildSection.style.display = firstTaskDone ? '' : 'none';
 
@@ -579,8 +576,14 @@ export function refreshUI(state: GameState) {
   // dig + find water before placing a Datacentre, instead of being blocked by
   // a thirsty DC.
   const digUnlocked = completedTaskIds.has('reach_6mw');
+  const ritualVisible = phoneFarmBuilt || gasEngineBuilt || digUnlocked;
   const ritualSection = document.getElementById('ritual-section')!;
-  ritualSection.style.display = (phoneFarmBuilt || gasEngineBuilt || digUnlocked) ? '' : 'none';
+  ritualSection.style.display = ritualVisible ? '' : 'none';
+  // Now that the panel renders as a bordered card, an empty container shows
+  // up as a thin empty bar — hide the outer panel until either subsection
+  // unlocks.
+  const panelBuild = document.getElementById('panel-build')!;
+  panelBuild.style.display = (firstTaskDone || ritualVisible) ? '' : 'none';
 
   refreshRitualButton(
     'btn-buy-autoassign', 'cost-buy-autoassign',
