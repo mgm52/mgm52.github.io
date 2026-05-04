@@ -1115,6 +1115,14 @@ function confineToBuildingFor(g: Goblin): number | undefined {
 // Numeric cell key used inside BFS — avoids string allocation.
 function nkey(cx: number, cy: number): number { return cy * COLS + cx; }
 
+// Cardinals first, diagonals last. Every step costs 1 in this BFS, so
+// cardinal and diagonal moves tie — and whichever neighbor is enqueued first
+// claims the cell and freezes the prev-link. Visiting cardinals first means a
+// straight-axis step wins ties over a diagonal that would happen to land on
+// the same cell, so paths hug the axis instead of drifting "wide" before
+// curving back.
+const BFS_DIRS: Dir[] = [0, 2, 4, 6, 1, 3, 5, 7];
+
 function bfsPath(
   state: GameState,
   gid: number,
@@ -1147,7 +1155,7 @@ function bfsPath(
     }
     const cx = curKey % COLS;
     const cy = (curKey - cx) / COLS;
-    for (const d of ALL_DIRS) {
+    for (const d of BFS_DIRS) {
       const nx = cx + DX[d];
       const ny = cy + DY[d];
       const k = nkey(nx, ny);
