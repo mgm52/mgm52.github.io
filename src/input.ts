@@ -173,16 +173,19 @@ export function setupInput(
       const m = g ? null : minotaurAt(state, local.x, local.y);
       let b: Building | null = null;
       let onHole = false;
+      let w: WaterSource | null = null;
       if (!g && !m) {
         const c = pixelToCell(local.x, local.y);
         b = buildingAtCell(state, c.cx, c.cy);
         if (!b) onHole = holeAtCell(state, c.cx, c.cy);
+        if (!b && !onHole) w = waterSourceAtCell(state, c);
       }
       if (!additive) clearSelection(state);
       if (g) { g.selected = true; playSound('select', 0.33); }
       else if (m) { m.selected = true; playSound('select', 0.33); }
       else if (b) { b.selected = true; playSound('select', 0.33); }
       else if (onHole) { state.hole.selected = true; playSound('select', 0.33); }
+      else if (w) { w.selected = true; playSound('select', 0.33); }
     } else {
       const x1 = Math.min(input.dragStart.x, local.x);
       const y1 = Math.min(input.dragStart.y, local.y);
@@ -275,6 +278,7 @@ function clearSelection(state: GameState) {
   for (const g of state.goblins.values()) g.selected = false;
   for (const m of state.minotaurs.values()) m.selected = false;
   for (const b of state.buildings.values()) b.selected = false;
+  for (const w of state.waterSources.values()) w.selected = false;
   state.hole.selected = false;
 }
 

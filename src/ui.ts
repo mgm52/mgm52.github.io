@@ -4,7 +4,7 @@ import {
   MINOTAUR, formatPower,
 } from './config';
 import {
-  Building, Cell, GameState, Goblin, GoblinState,
+  Building, Cell, GameState, Goblin, GoblinState, WaterSource,
   appendLog, buildingCenter, cellCenter, cellKey, countIdle, defOf, digDirection, getSpawnCapacity,
   holeBlockedByBuilding, isCellBlocked, isInBounds, maintainerCount, occupyCell,
 } from './state';
@@ -722,6 +722,7 @@ function refreshInfoPanel(state: GameState) {
 
   const selectedGoblins = [...state.goblins.values()].filter((g) => g.selected);
   const selectedBuildings = [...state.buildings.values()].filter((b) => b.selected);
+  const selectedWater = [...state.waterSources.values()].find((w) => w.selected) ?? null;
 
   const destroyBtn = document.getElementById('info-destroy')!;
   const killBtn = document.getElementById('info-kill')!;
@@ -740,6 +741,8 @@ function refreshInfoPanel(state: GameState) {
     extra.innerHTML = `<span style="color:#6a7080">Right-click to command</span>`;
   } else if (state.hole.selected) {
     showHole(state, panel, portrait, name, stateEl, extra);
+  } else if (selectedWater) {
+    showWaterSource(state, selectedWater, panel, portrait, name, stateEl, extra);
   } else {
     const selectedMinotaurs = [...state.minotaurs.values()].filter((m) => m.selected);
     if (selectedMinotaurs.length === 1 && selectedGoblins.length === 0 && selectedBuildings.length === 0) {
@@ -782,6 +785,20 @@ function showHole(state: GameState, panel: HTMLElement, portrait: HTMLElement,
     stateEl.textContent = '';
   }
   extra.textContent = '';
+}
+
+function showWaterSource(state: GameState, w: WaterSource, panel: HTMLElement,
+                         portrait: HTMLElement, name: HTMLElement,
+                         stateEl: HTMLElement, extra: HTMLElement) {
+  panel.classList.add('visible');
+  portrait.innerHTML = `<div class="portrait-water"></div>`;
+  name.textContent = 'Water';
+  let attending = 0;
+  for (const g of state.goblins.values()) {
+    if (g.state.kind === 'fetching_water' && g.state.sourceId === w.id) attending++;
+  }
+  stateEl.textContent = attending === 1 ? '1 goblin collecting' : `${attending} goblins collecting`;
+  extra.innerHTML = `<span style="color:#6a7080">Send goblins here to collect water</span>`;
 }
 
 function showGoblin(g: Goblin, panel: HTMLElement, portrait: HTMLElement,

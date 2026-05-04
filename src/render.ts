@@ -149,6 +149,7 @@ type MinotaurView = {
 type WaterView = {
   container: Container;
   body: Graphics;
+  selectionRing: Graphics;
 };
 
 type BuildingView = {
@@ -537,8 +538,12 @@ function makeWaterView(w: WaterSource): WaterView {
     body.circle(rx, ry, rr).fill({ color: 0x4a8acf, alpha: 0.7 });
     body.circle(rx + rr * 0.4, ry - rr * 0.4, rr * 0.3).fill({ color: 0xffffff, alpha: 0.35 });
   }
+  const selectionRing = new Graphics();
+  selectionRing.rect(x - 1, y - 1, wpx + 2, hpx + 2).stroke({ width: 2, color: 0xffd96b });
+  selectionRing.visible = false;
   c.addChild(body);
-  return { container: c, body };
+  c.addChild(selectionRing);
+  return { container: c, body, selectionRing };
 }
 
 function makeBuildingView(b: Building): BuildingView {
@@ -898,6 +903,7 @@ export function render(state: GameState, ctx: RenderContext) {
       ctx.waterLayer.addChild(v.container);
       ctx.waterViews.set(w.id, v);
     }
+    v.selectionRing.visible = w.selected;
     // Region is fixed once spawned, so the view only needs to be positioned
     // once at create time.
   }

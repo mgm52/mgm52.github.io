@@ -68,6 +68,7 @@ export type WaterSource = {
   id: number;
   x0: number; y0: number;
   x1: number; y1: number;   // exclusive upper bounds
+  selected: boolean;
 };
 
 export function isCellInWaterSource(w: WaterSource, c: Cell): boolean {
@@ -409,7 +410,7 @@ export function digDirection(state: GameState, dir: 'n' | 'e' | 's' | 'w'): { ok
   else region = { x0: c.x1 + grow - third, x1: c.x1 + grow, y0: c.y0, y1: c.y1 };
 
   const id = state.nextId++;
-  state.waterSources.set(id, { id, ...region });
+  state.waterSources.set(id, { id, ...region, selected: false });
   return { ok: true };
 }
 
