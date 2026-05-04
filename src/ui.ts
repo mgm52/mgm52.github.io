@@ -51,6 +51,14 @@ function applyFadeInOnFirstShow(btnId: string): void {
   window.setTimeout(() => btn.classList.remove('fade-in'), 700);
 }
 
+// Brief blood-red flash on summon-button click. Reflow forces the animation
+// to restart when clicking again before the previous one finishes.
+function flashSummonClick(btn: HTMLElement): void {
+  btn.classList.remove('click-flash');
+  void btn.offsetWidth;
+  btn.classList.add('click-flash');
+}
+
 // Plays the "TASK COMPLETE" overlay + a short Skyrim-ish drum-then-fanfare
 // tap. Idempotent in the sense that re-triggers stack the timer; the overlay
 // just stays "shown" longer if multiple tasks complete in quick succession.
@@ -180,7 +188,7 @@ export function setupUI(state: GameState, callbacks: UICallbacks) {
     </div>
     <div class="build-warning" id="warn-spawn-goblin" style="display:none">Hole blocked</div>
   `;
-  spawnBtn.addEventListener('click', () => { playSound('click', 1, 0.75); callbacks.onSpawnGoblin(); });
+  spawnBtn.addEventListener('click', () => { playSound('click', 1, 0.75); flashSummonClick(spawnBtn); callbacks.onSpawnGoblin(); });
   summonList.appendChild(spawnBtn);
 
   // Minotaur — unlocks alongside the Datacentre (once a Gas Engine is built).
@@ -197,7 +205,7 @@ export function setupUI(state: GameState, callbacks: UICallbacks) {
       <div class="build-cost-side"><span class="build-cost" id="cost-summon-minotaur">${MINOTAUR.bloodCost} blood</span></div>
     </div>
   `;
-  minotaurBtn.addEventListener('click', () => { playSound('click', 1, 0.75); callbacks.onSummonMinotaur(); });
+  minotaurBtn.addEventListener('click', () => { playSound('click', 1, 0.75); flashSummonClick(minotaurBtn); callbacks.onSummonMinotaur(); });
   summonList.appendChild(minotaurBtn);
 
   // Ritual upgrades — surfaced once a Phone Farm has finished building.
