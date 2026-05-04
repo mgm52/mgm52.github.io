@@ -90,8 +90,8 @@ export function isMuted() { return muted; }
 
 // ─── Looping background music ───────────────────────────────────────
 // One persistent <audio> element, lazy-started after first user gesture so
-// the browser's autoplay policy lets it through. Volume rides on top of
-// masterVolume scaled by MUSIC_GAIN.
+// the browser's autoplay policy lets it through. The source mp3 is
+// loudness-normalised offline (-14 LUFS) so MUSIC_GAIN stays at 1.0.
 const MUSIC_GAIN = 1.0;
 let musicEl: HTMLAudioElement | null = null;
 function effectiveMusicVolume(): number {

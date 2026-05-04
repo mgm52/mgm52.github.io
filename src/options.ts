@@ -238,7 +238,12 @@ export function setAllFontFamilies(family: string): void {
 
 const STORAGE_KEY = 'rts.options.v2';
 
-let current: Options = mergeDefaults(loadFromStorage());
+// Production starts every session with default options — so visitors get a
+// consistent first experience and can't accidentally lock themselves out
+// with a bad colour/font choice. Dev keeps persisted settings for iteration.
+let current: Options = import.meta.env.DEV
+  ? mergeDefaults(loadFromStorage())
+  : { ...DEFAULT_OPTIONS, fonts: { ...DEFAULT_OPTIONS.fonts } };
 const listeners = new Set<(o: Options) => void>();
 
 export function getOptions(): Options { return current; }
