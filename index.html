@@ -62,6 +62,22 @@
         0%   { transform: rotate(-20deg); opacity: 1; }
         100% { transform: rotate(0deg);   opacity: 0; }
       }
+      /* Red shockwave ring centred on the click point — used when a spawn
+         button is clicked to give the gesture a sense of impact. */
+      .click-emanate {
+        position: fixed;
+        width: 40px; height: 40px;
+        border: 2px solid #e15a5a;
+        border-radius: 50%;
+        pointer-events: none;
+        z-index: 99999;
+        transform: translate(-50%, -50%) scale(0.3);
+        animation: click-emanate 500ms ease-out forwards;
+      }
+      @keyframes click-emanate {
+        0%   { transform: translate(-50%, -50%) scale(0.3); opacity: 0.95; }
+        100% { transform: translate(-50%, -50%) scale(2.6); opacity: 0; }
+      }
       #app { display: flex; height: 100vh; height: 100dvh; }
       #game { flex: 1; position: relative; background: #000000; overflow: hidden;
         touch-action: none; -webkit-user-select: none; user-select: none; -webkit-touch-callout: none;
@@ -236,9 +252,9 @@
          hover colour so the animation can hand off seamlessly to :hover (no
          visible snap). If the cursor isn't on the button, the existing 0.1s
          background transition smooths the rest of the way to the default. */
-      .build-button.click-flash { animation: spawn-click-flash 400ms ease-out; }
+      .build-button.click-flash { animation: spawn-click-flash 200ms ease-out; }
       @keyframes spawn-click-flash {
-        0%   { background-color: #8a929e; border-color: #b8c0cc; }
+        0%   { background-color: #0a0c10; border-color: #1a1e24; }
         100% { background-color: #353a42; border-color: #5a6470; }
       }
       .build-progress-track {
