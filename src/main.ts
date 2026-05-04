@@ -58,6 +58,7 @@ async function main() {
   if ('fonts' in document) {
     try {
       await Promise.all([
+        document.fonts.load('16px "New Rocker"'),
         document.fonts.load('16px VT323'),
         document.fonts.load('16px Audiowide'),
         document.fonts.load('16px "Major Mono Display"'),

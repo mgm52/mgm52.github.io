@@ -6,12 +6,15 @@
     <title>Goblin Scaling</title>
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link href="https://fonts.googleapis.com/css2?family=Audiowide&family=Major+Mono+Display&family=VT323&display=swap" rel="stylesheet">
+    <link href="https://fonts.googleapis.com/css2?family=Audiowide&family=Major+Mono+Display&family=New+Rocker&family=VT323&display=swap" rel="stylesheet">
     <style>
       :root {
-        --font-display: 'Audiowide', system-ui, sans-serif;
-        --font-mono: 'VT323', 'Consolas', monospace;
-        --font-body: system-ui, -apple-system, "Segoe UI", sans-serif;
+        /* Cold-paint defaults match the production options (New Rocker across
+           the board) so the title screen doesn't briefly render in Audiowide
+           before render.ts swaps in the user/default font. */
+        --font-display: 'New Rocker', system-ui, serif;
+        --font-mono: 'New Rocker', 'Consolas', monospace;
+        --font-body: 'New Rocker', system-ui, -apple-system, "Segoe UI", sans-serif;
         --font-display-scale: 1;
         --font-mono-scale: 1;
         --font-body-scale: 1;

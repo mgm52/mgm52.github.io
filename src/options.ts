@@ -2,7 +2,8 @@ export type BgPattern = 'solid' | 'checker';
 
 // ─── Fonts ──────────────────────────────────────────────────────────
 // Curated families. Anything with a `url` lazy-loads on first use so the cold
-// page-load only ships Audiowide + VT323 (declared in index.html).
+// page-load only ships the bundled fonts (New Rocker + Audiowide + VT323 +
+// Major Mono Display, declared in index.html).
 export type FontFamily = {
   id: string;
   label: string;
