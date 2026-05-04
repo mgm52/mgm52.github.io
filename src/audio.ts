@@ -82,6 +82,13 @@ export function playDecayingGoblinDeath(rate?: number): void {
     goblinDeathVolume - GOBLIN_DEATH_VOLUME_DECAY,
   );
 }
+// Cash sample is a touch louder than the death sound at full fidelity (0.7 vs
+// 0.56). Riding the same decay keeps spammy minotaur kills tonally balanced —
+// the cha-ching softens in proportion rather than blasting over the deaths.
+const CASH_TO_DEATH_RATIO = 0.7 / 0.56;
+export function playDecayingGoldKillCash(rate?: number): void {
+  playSound('cash', goblinDeathVolume * CASH_TO_DEATH_RATIO, rate);
+}
 
 export function setMasterVolume(v: number) {
   masterVolume = Math.max(0, Math.min(1, v));

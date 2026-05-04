@@ -127,10 +127,15 @@ export type BuildingDef = {
   maintainersRequired: number;
   // Per-delivery water bump (0..100). Set on buildings that drink (DC, HC).
   // The building maintains a 0..100 waterMeter that depletes at
-  // WATER_DEPLETION_PP_PER_SEC and is bumped by this amount each time a
-  // carrier completes a source → building round trip. The building counts
-  // as watered while the meter is > 0.
+  // WATER_DEPLETION_PP_PER_SEC (or `waterDepletionPerSec` if overridden)
+  // and is bumped by this amount each time a carrier completes a
+  // source → building round trip. The building counts as watered while
+  // the meter is > 0.
   waterDeliveryAmount?: number;
+  // Optional per-def override of the global depletion rate (pp/sec). Lets
+  // a thirsty endgame building drain faster or a tier-1 sip more gently
+  // without changing the global constant.
+  waterDepletionPerSec?: number;
   // Auto-assign target — Autotask will keep this many carriers on the
   // building. Manual right-click ignores the auto cap; `waterCarrierMax`
   // is a soft preference (drinkers below it are picked first) so a single
@@ -193,6 +198,9 @@ export const BUILDING_DEFS = {
     waterDeliveryAmount: 50,
     waterAutoAssignTarget: 2,
     waterCarrierMax: 5,
+    // 30% slower than the global default so a single carrier round-trip can
+    // keep the DC sated longer.
+    waterDepletionPerSec: 7,
     income: 1000,
     powerOutput: -6_000_000, // 6 MW draw
     wanderInterval: 1.4,

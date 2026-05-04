@@ -1,4 +1,4 @@
-import { playDecayingGoblinDeath, playDecayingGoblinSpawn, playSound } from './audio';
+import { playDecayingGoblinDeath, playDecayingGoblinSpawn, playDecayingGoldKillCash, playSound } from './audio';
 import { BUILDING_DEFS, CELL, COLS, GOBLIN, GOLD_GOBLIN_CHANCE, GOLD_KILL_REWARD, KILL_REWARD, MINOTAUR_KILL_REWARD, SUMMON_UPGRADES, TICK_S, MINOTAUR, WATER_DEPLETION_PP_PER_SEC, WATER_METER_MAX, formatPower } from './config';
 import {
   ALL_DIRS, Building, Cell, DX, DY, Dir, GameState, Goblin, HOLE_SIZE, Minotaur,
@@ -70,7 +70,8 @@ export function tick(state: GameState) {
     const def = defOf(b);
     if (!def.waterDeliveryAmount || b.state === 'constructing') continue;
     if (b.waterMeter === undefined) b.waterMeter = 0;
-    b.waterMeter = Math.max(0, b.waterMeter - WATER_DEPLETION_PP_PER_SEC * TICK_S);
+    const depletion = defOf(b).waterDepletionPerSec ?? WATER_DEPLETION_PP_PER_SEC;
+    b.waterMeter = Math.max(0, b.waterMeter - depletion * TICK_S);
   }
 
   // ── 4. Power balance + active/dormant resolution ──────────────────
@@ -411,7 +412,7 @@ function updateMinotaur(state: GameState, t: Minotaur) {
       appendLog(state, `Minotaur #${t.id} smashes ${def.name} #${b.id}.`);
       pushDeathEffect(state, c.x, c.y);
       destroyBuilding(state, b.id);
-      playSound('goblin_death', 0.4, 0.3);
+      playSound('destroy', 0.5);
       t.state = { kind: 'wander' };
       t.nextWanderAt = state.now + MINOTAUR.wanderInterval;
       return;
@@ -490,7 +491,7 @@ function updateMinotaur(state: GameState, t: Minotaur) {
       pushFloater(state, tx, ty - 14, `+${reward.blood} blood`, 0xff8a8a, 1.6);
       pushDeathEffect(state, tx, ty);
       playDecayingGoblinDeath();
-      if (wasGold) playSound('cash', 0.7);
+      if (wasGold) playDecayingGoldKillCash();
       appendLog(state, `Goblin #${target.id} killed by Minotaur #${t.id}.`);
       t.state = { kind: 'wander' };
       t.nextWanderAt = state.now + MINOTAUR.wanderInterval;
