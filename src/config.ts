@@ -293,7 +293,7 @@ export const BUILDING_DEFS = {
   goblin_hole: def(1, {
     name: 'Goblin Hole',
     short: 'GH',
-    cost: 666,
+    cost: 1313,
     buildersRequired: 0,
     buildTime: 4,
     maintainersRequired: 0,

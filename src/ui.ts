@@ -60,11 +60,11 @@ function flashSummonClick(btn: HTMLElement): void {
   btn.classList.add('click-flash');
 }
 
-// Spawns a red shockwave ring at the cursor position. Element self-removes
-// when the animation finishes.
-function emanateAtCursor(x: number, y: number): void {
+// Spawns a shockwave ring at the cursor position. Element self-removes when
+// the animation finishes. Pass 'white' for goblin spawn; default is red.
+function emanateAtCursor(x: number, y: number, variant?: 'white'): void {
   const el = document.createElement('div');
-  el.className = 'click-emanate';
+  el.className = variant === 'white' ? 'click-emanate white' : 'click-emanate';
   el.style.left = `${x}px`;
   el.style.top = `${y}px`;
   document.body.appendChild(el);
@@ -200,7 +200,7 @@ export function setupUI(state: GameState, callbacks: UICallbacks) {
     </div>
     <div class="build-warning" id="warn-spawn-goblin" style="display:none">Hole blocked</div>
   `;
-  spawnBtn.addEventListener('click', (e) => { playSound('click', 1, 0.75); flashSummonClick(spawnBtn); emanateAtCursor(e.clientX, e.clientY); callbacks.onSpawnGoblin(); });
+  spawnBtn.addEventListener('click', (e) => { playSound('click', 1, 0.75); flashSummonClick(spawnBtn); emanateAtCursor(e.clientX, e.clientY, 'white'); callbacks.onSpawnGoblin(); });
   summonList.appendChild(spawnBtn);
 
   // Minotaur — unlocks alongside the Datacentre (once a Gas Engine is built).
