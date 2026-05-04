@@ -21,6 +21,7 @@ const REGISTRY = {
   goblin_death: 'audio/goblin_death.mp3',
   task_complete: 'audio/task_complete.mp3',
   water_splash: 'audio/water_splash.mp3',
+  cash:         'audio/cash.mp3',
 } as const;
 
 export type SoundName = keyof typeof REGISTRY;

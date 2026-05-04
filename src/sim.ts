@@ -481,6 +481,7 @@ function updateMinotaur(state: GameState, t: Minotaur) {
       if (state.now < s.attackAt) return;
       const tx = target.pos.x, ty = target.pos.y;
       const reward = goblinKillReward(state, target);
+      const wasGold = !!target.gold;
       removeGoblin(state, target.id);
       state.money += reward.money;
       state.blood += reward.blood;
@@ -489,6 +490,7 @@ function updateMinotaur(state: GameState, t: Minotaur) {
       pushFloater(state, tx, ty - 14, `+${reward.blood} blood`, 0xff8a8a, 1.6);
       pushDeathEffect(state, tx, ty);
       playDecayingGoblinDeath();
+      if (wasGold) playSound('cash', 0.7);
       appendLog(state, `Goblin #${target.id} killed by Minotaur #${t.id}.`);
       t.state = { kind: 'wander' };
       t.nextWanderAt = state.now + MINOTAUR.wanderInterval;
@@ -933,6 +935,7 @@ function updateGoblin(state: GameState, g: Goblin) {
         }
         const tx = target.pos.x, ty = target.pos.y;
         const reward = goblinKillReward(state, target);
+        const wasGold = !!target.gold;
         removeGoblin(state, target.id);
         state.money += reward.money;
         state.blood += reward.blood;
@@ -941,6 +944,7 @@ function updateGoblin(state: GameState, g: Goblin) {
         pushFloater(state, tx, ty - 14, `+${reward.blood} blood`, 0xff8a8a, 1.6);
         pushDeathEffect(state, tx, ty);
         playSound('goblin_death', 0.56);
+        if (wasGold) playSound('cash', 0.7);
         appendLog(state, `Goblin #${target.id} killed by #${g.id}.`);
         g.state = { kind: 'idle' };
         g.goal = null;

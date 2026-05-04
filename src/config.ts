@@ -277,9 +277,9 @@ export const BUILDING_DEFS = {
     name: 'Gas Engine',
     short: 'GE',
     cost: 1500,
-    buildersRequired: 3,
+    buildersRequired: 5,
     buildTime: 7.5,
-    maintainersRequired: 3,
+    maintainersRequired: 5,
     income: 0,
     powerOutput: 2_500_000, // 2.5 MW
     wanderInterval: 0.9,

@@ -15,6 +15,7 @@
 | ritual.mp3 | _TODO: source unknown_ | _TODO_ | _TODO_ |
 | task_complete.mp3 | [Freesound #672801](https://freesound.org/s/672801/) — "Level Up/Mission Complete (Resistance)" | per author requirement | Dylan Kelk |
 | water_splash.mp3 | [Freesound #829676](https://freesound.org/s/829676/) | CC0 1.0 | n/a |
+| cash.mp3 | [Freesound #733333](https://freesound.org/s/733333/), clipped 0.15–1.0s | _check freesound page_ | haulaway |
 
 ## Music
 

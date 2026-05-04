@@ -8,6 +8,7 @@ import {
   appendLog, buildingCenter, cellCenter, cellKey, countIdle, defOf, digDirection, getSpawnCapacity,
   holeBlockedByBuilding, isCellBlocked, isInBounds, maintainerCount, occupyCell,
 } from './state';
+import { spawnMinotaur } from './sim';
 
 // Build buttons appear in this fixed order. Mostly cheapest-first, with
 // goblin_hole slotted right above datacentre (it's an auxiliary capacity
@@ -129,7 +130,7 @@ const TASKS: Task[] = [
   {
     id: 'build_gas_engine',
     text: 'Build a Gas Engine',
-    unlocks: ['datacentre', 'goblin_hole'],
+    unlocks: ['datacentre'],
     isDone: (s) => {
       for (const b of s.buildings.values()) {
         if (b.kind === 'gas_engine' && b.state !== 'constructing') return true;
@@ -139,10 +140,11 @@ const TASKS: Task[] = [
     prereq: ['run_phone_farm'],
   },
   {
-    id: 'reach_6mw',
-    text: 'Generate 6 MW of power',
-    unlocks: [],
-    isDone: (s) => s.lastPowerProduced >= 6_000_000,
+    id: 'summon_minotaur',
+    text: 'Summon a Minotaur',
+    // Gates Goblin Hole + Goldblins + dig — see refreshUI below.
+    unlocks: ['goblin_hole'],
+    isDone: (s) => s.minotaurs.size > 0,
     prereq: ['build_gas_engine'],
   },
   {
@@ -155,7 +157,7 @@ const TASKS: Task[] = [
       }
       return false;
     },
-    prereq: ['reach_6mw'],
+    prereq: ['build_gas_engine'],
   },
   {
     id: 'build_hypercentre',
@@ -260,7 +262,7 @@ export function setupUI(state: GameState, callbacks: UICallbacks) {
   goldGoblinsBtn.innerHTML = `
     <div class="build-content">
       <div class="build-text">
-        <div class="build-name">Goldgoblins</div>
+        <div class="build-name">Goldblins</div>
       </div>
       <div class="build-cost-side"><span class="build-cost" id="cost-buy-goldgoblins">${SUMMON_UPGRADES.goldgoblins.bloodCost} blood</span></div>
     </div>
@@ -277,7 +279,7 @@ export function setupUI(state: GameState, callbacks: UICallbacks) {
   goldX10Btn.innerHTML = `
     <div class="build-content">
       <div class="build-text">
-        <div class="build-name">Goldgoblins x10</div>
+        <div class="build-name">Goldblins x10</div>
       </div>
       <div class="build-cost-side"><span class="build-cost" id="cost-buy-goldgoblins-x10">${SUMMON_UPGRADES.goldgoblinsX10.bloodCost} blood</span></div>
     </div>
@@ -607,10 +609,12 @@ export function refreshUI(state: GameState) {
   // visible but go disabled.
   const phoneFarmBuilt = anyPhoneFarmBuilt(state);
   const gasEngineBuilt = anyGasEngineBuilt(state);
-  // Dig becomes available once the player reaches 6 MW — that way they can
-  // dig + find water before placing a Datacentre, instead of being blocked by
-  // a thirsty DC.
-  const digUnlocked = completedTaskIds.has('reach_6mw');
+  // Dig becomes available once the player has summoned a Minotaur — that
+  // task runs in parallel with run_datacentre so the player can dig + find
+  // water for the DC after meeting the gating ritual. Gated on
+  // revealedTaskIds (not completedTaskIds) so the buttons emerge AFTER the
+  // TASK COMPLETE overlay fades, letting the fade-in animation play.
+  const digUnlocked = revealedTaskIds.has('summon_minotaur');
   const ritualVisible = phoneFarmBuilt || gasEngineBuilt || digUnlocked;
   const ritualSection = document.getElementById('ritual-section')!;
   ritualSection.style.display = ritualVisible ? '' : 'none';
@@ -626,11 +630,12 @@ export function refreshUI(state: GameState) {
     `${SUMMON_UPGRADES.autoAssign.bloodCost} blood`,
   );
   refreshAutospawnButton(state, gasEngineBuilt);
-  // Goldgoblins → Goldgoblins x10 form a replace chain (like Autospawn):
-  // base button hides once owned, x10 takes its place; x10 hides once owned.
+  // Goldblins → Goldblins x10 form a replace chain (like Autospawn): base
+  // button hides once owned, x10 takes its place; x10 hides once owned. Gate
+  // both on the minotaur unlock so they appear in the same window as dig.
   refreshRitualButton(
     'btn-buy-goldgoblins', 'cost-buy-goldgoblins',
-    gasEngineBuilt && !state.goldgoblinsEnabled, false,
+    digUnlocked && !state.goldgoblinsEnabled, false,
     state.blood >= SUMMON_UPGRADES.goldgoblins.bloodCost,
     `${SUMMON_UPGRADES.goldgoblins.bloodCost} blood`,
   );
@@ -642,12 +647,14 @@ export function refreshUI(state: GameState) {
     `${SUMMON_UPGRADES.goldgoblinsX10.bloodCost} blood`,
   );
 
-  // Dig row: visible once a Datacentre is built. Each direction is one-shot.
+  // Dig row: visible once the player has summoned a Minotaur. Each direction
+  // is one-shot. First time the row appears, each button fades in.
   const digRow = document.getElementById('dig-row')!;
   digRow.style.display = digUnlocked ? 'flex' : 'none';
   for (const dir of ['n', 'e', 's', 'w'] as const) {
     const btn = document.getElementById(`btn-dig-${dir}`) as HTMLButtonElement;
     if (!btn) continue;
+    if (digUnlocked) applyFadeInOnFirstShow(`btn-dig-${dir}`);
     const dug = state.dugDirections.has(dir);
     const nextCost = digBloodCost(state.dugDirections.size);
     const canAfford = state.blood >= nextCost;
@@ -972,14 +979,15 @@ export function executeTaskSkip(state: GameState): void {
       state.bloodUnlocked = true;
       break;
     }
-    case 'reach_6mw': {
-      // Reach 6 MW production. Three Gas Engines (2.5 MW each) cover it
-      // with headroom. No Datacentre placed yet — the next task is to run
-      // one, which involves digging, placing the DC, and watering it.
+    case 'summon_minotaur': {
+      // Plant a single Minotaur to satisfy the parallel ritual gate. Keep the
+      // build-out modest — run_datacentre's skip will scale things up if the
+      // player keeps clicking past it.
       ensureGoblins(state, 24);
       ensureBuildingCount(state, 'goblin_wheel', 2);
       ensureBuildingCount(state, 'phone_farm', 1);
-      ensureBuildingCount(state, 'gas_engine', 3);
+      ensureBuildingCount(state, 'gas_engine', 2);
+      if (state.minotaurs.size === 0) spawnMinotaur(state);
       state.money = Math.max(state.money, 3000);
       state.blood = Math.max(state.blood, 150);
       state.bloodUnlocked = true;
@@ -987,7 +995,8 @@ export function executeTaskSkip(state: GameState): void {
     }
     case 'run_datacentre': {
       // Full DC setup: dig water + maintainers + carriers so the DC powers
-      // up. The previous tier's reach_6mw skip already provided gas engines.
+      // up. Bumps gas-engine count to 3 since this task may be skipped before
+      // summon_minotaur (they're in parallel).
       ensureGoblins(state, 40);
       if (!state.dugDirections.has('n')) digDirection(state, 'n');
       ensureBuildingCount(state, 'goblin_wheel', 2);

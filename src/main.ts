@@ -226,7 +226,7 @@ async function main() {
       state.blood -= cost;
       state.goldgoblinsEnabled = true;
       playSound('ritual');
-      appendLog(state, 'Goldgoblins — gold-tinted spawns drop Ƶ250.');
+      appendLog(state, 'Goldblins — gold-tinted spawns drop Ƶ250.');
     },
     onBuyGoldgoblinsX10: () => {
       if (!state.goldgoblinsEnabled) return;
@@ -236,7 +236,7 @@ async function main() {
       state.blood -= cost;
       state.goldgoblinMultiplier = SUMMON_UPGRADES.goldgoblinsX10.multiplier;
       playSound('ritual');
-      appendLog(state, 'Goldgoblins x10 — gold drops jump to Ƶ2500.');
+      appendLog(state, 'Goldblins x10 — gold drops jump to Ƶ2500.');
     },
     onDig: (dir) => {
       if (state.dugDirections.has(dir)) return;
@@ -268,6 +268,8 @@ async function main() {
       pushFloater(state, x, y - 14, `+${reward.blood} blood`, 0xff8a8a, 1.6);
       pushDeathEffect(state, x, y);
       playSound('goblin_death', 0.56);
+      // Bonus cha-ching when the slain goblin was gold-tinted.
+      if (g.gold) playSound('cash', 0.7);
       appendLog(state, `Goblin #${id} killed — +Ƶ${reward.money.toLocaleString('en-US')}, +${reward.blood} blood.`);
     },
     onBuildBuilding: (kind) => {
