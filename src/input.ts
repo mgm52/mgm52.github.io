@@ -293,24 +293,30 @@ function waterSourceAt(state: GameState, cell: Cell): WaterSource | null {
   return waterSourceAtCell(state, cell);
 }
 
-// Pick a building that drinks water (DC, HC). Skips any building that's
-// already at its `waterCarrierMax` so a single DC can't hoover up every
-// idle goblin. Among eligible drinkers, favours the one with the lowest
-// meter — manual right-clicks should hit the thirstiest target first.
+// Pick a building that drinks water (DC, HC). `waterCarrierMax` is a soft
+// preference rather than a hard cap: drinkers below the cap are picked
+// first; only when every drinker is at/above its cap do we fall back to
+// the at-cap pool. Within each tier we still favour the lowest water meter
+// so the thirstiest target wins.
 function nearestThirstyDatacentre(state: GameState): Building | null {
-  let best: Building | null = null;
-  let bestMeter = Infinity;
+  let bestBelow: Building | null = null;
+  let bestBelowMeter = Infinity;
+  let bestAbove: Building | null = null;
+  let bestAboveMeter = Infinity;
   for (const b of state.buildings.values()) {
     const def = defOf(b);
     const drinks = (def.waterDeliveryAmount ?? 0) > 0;
     if (!drinks) continue;
     if (b.state === 'constructing') continue;
     const max = def.waterCarrierMax ?? Infinity;
-    if (waterCarrierCount(state, b) >= max) continue;
     const m = b.waterMeter ?? 0;
-    if (m < bestMeter) { bestMeter = m; best = b; }
+    if (waterCarrierCount(state, b) < max) {
+      if (m < bestBelowMeter) { bestBelowMeter = m; bestBelow = b; }
+    } else {
+      if (m < bestAboveMeter) { bestAboveMeter = m; bestAbove = b; }
+    }
   }
-  return best;
+  return bestBelow ?? bestAbove;
 }
 
 function minotaurAt(state: GameState, x: number, y: number): Minotaur | null {

@@ -132,8 +132,9 @@ export type BuildingDef = {
   // as watered while the meter is > 0.
   waterDeliveryAmount?: number;
   // Auto-assign target — Autotask will keep this many carriers on the
-  // building. Manual right-click ignores the auto cap, but stops at
-  // `waterCarrierMax` so a single DC can't soak up the whole goblin pool.
+  // building. Manual right-click ignores the auto cap; `waterCarrierMax`
+  // is a soft preference (drinkers below it are picked first) so a single
+  // DC won't hoover up every goblin while another building is still dry.
   waterAutoAssignTarget?: number;
   waterCarrierMax?: number;
   income: number;         // Ƶ/sec while active
