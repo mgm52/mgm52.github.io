@@ -142,6 +142,11 @@ function rebuildPanel(panel: HTMLElement, callbacks: OptionsUICallbacks, refresh
   panel.appendChild(section('Buildings', [
     slider('Saturation', o.buildingSaturation, 0, 2, 0.05, (v) => setOption('buildingSaturation', v)),
     slider('Brightness', o.buildingBrightness, 0.2, 2, 0.05, (v) => setOption('buildingBrightness', v)),
+    toggle('Show sprite',      o.buildingSpriteEnabled, (v) => setOption('buildingSpriteEnabled', v)),
+    toggle('Show color fill',  o.buildingFillEnabled,   (v) => setOption('buildingFillEnabled', v)),
+    slider('Fill alpha',       o.buildingFillAlpha, 0, 1, 0.05, (v) => setOption('buildingFillAlpha', v)),
+    toggle('Show border',      o.buildingBorderEnabled, (v) => setOption('buildingBorderEnabled', v)),
+    toggle('Show short label', o.buildingLabelEnabled,  (v) => setOption('buildingLabelEnabled', v)),
   ]));
 
   panel.appendChild(section('Sidebar colors', [

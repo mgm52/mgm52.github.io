@@ -167,6 +167,13 @@ export type Options = {
   // Buildings
   buildingSaturation: number;
   buildingBrightness: number;
+  // Visual layers — independently toggleable so a player who swaps in custom
+  // sprites can hide the old colored body / border / short-label overlay.
+  buildingSpriteEnabled: boolean;
+  buildingFillEnabled: boolean;
+  buildingFillAlpha: number;       // 0..1, multiplier on the body's translucent fill
+  buildingBorderEnabled: boolean;
+  buildingLabelEnabled: boolean;
   // Sidebar
   sidebarBg: number;
   sidebarBorder: number;
@@ -204,12 +211,17 @@ export const DEFAULT_OPTIONS: Options = {
   goblinSpriteYOffset: -7,
   // Minotaur defaults — independently tunable saturation / brightness /
   // size / Y-offset so the player can dial in the look.
-  minotaurSaturation: 1.4,
-  minotaurBrightness: 1.7,
-  minotaurDisplayPx: 90,
+  minotaurSaturation: 1.8,
+  minotaurBrightness: 1.95,
+  minotaurDisplayPx: 96,
   minotaurSpriteYOffset: -22,
   buildingSaturation: 1.50,
   buildingBrightness: 1.05,
+  buildingSpriteEnabled: true,
+  buildingFillEnabled: true,
+  buildingFillAlpha: 1.0,
+  buildingBorderEnabled: true,
+  buildingLabelEnabled: false,
   sidebarBg: 0x040404,
   sidebarBorder: 0x2e3238,
   sidebarButtonBg: 0x151b1e,

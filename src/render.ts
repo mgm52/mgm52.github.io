@@ -9,7 +9,7 @@ extensions.add(GifAsset);
 // game seconds. Used as a manual sprite-sheet — we pick the frame ourselves
 // each tick based on (state.now - spawnAt) so playback always starts at frame 0.
 type DeathFrames = { textures: Texture[]; ends: number[]; duration: number };
-import { CELL, COLS, GOBLIN, RENDER_SCALE, ROWS, MINOTAUR, WORLD } from './config';
+import { BUILDING_DEFS, BuildingKind, CELL, COLS, GOBLIN, RENDER_SCALE, ROWS, MINOTAUR, WORLD } from './config';
 import { ensureFontLoaded, fontFamilyById, getOptions, onOptionsChange, type FontConfig, type Options } from './options';
 import { Building, GameState, Goblin, HOLE_SIZE, Minotaur, WaterSource, buildingCenter, cellCenter, defOf, holeCenter, isInPlayCell, maintainerCount } from './state';
 
@@ -70,6 +70,22 @@ async function loadSheet(base: string): Promise<Sheet> {
   const span = Math.max(0.001, (meta.trimEndPct - meta.trimStartPct) / 100);
   const fps = meta.framesPerDirection / (meta.clipDuration * span);
   return { meta, frames, fps };
+}
+
+// ─── Building sprites ───────────────────────────────────────────────
+// One PNG per building kind, keyed by the kind id. Drawn as a Sprite scaled
+// to the building's pixel size. The colored body / border / short label
+// underneath are independently toggleable via options.
+const buildingTextures: Partial<Record<BuildingKind, Texture>> = {};
+async function loadBuildingTextures(): Promise<void> {
+  const kinds = Object.keys(BUILDING_DEFS) as BuildingKind[];
+  await Promise.all(kinds.map(async (k) => {
+    try {
+      buildingTextures[k] = await Assets.load<Texture>(`assets/buildings/${k}.png`);
+    } catch (err) {
+      console.warn(`building sprite ${k} failed to load`, err);
+    }
+  }));
 }
 
 async function loadGoblinSheets(): Promise<void> {
@@ -155,6 +171,7 @@ type WaterView = {
 type BuildingView = {
   container: Container;
   body: Graphics;
+  sprite: Sprite;
   selectionRing: Graphics;
   label: Text;
   progress: Graphics;
@@ -163,6 +180,12 @@ type BuildingView = {
   lastWarning: string;
   lastSize: number;
   cellSize: number;
+  // Snapshot of the option toggles last used to draw the body — lets us redraw
+  // when any of them flip without doing it every frame.
+  lastBodyKey: string;
+  // Tracks whether the sprite is currently greyscaled. Separate from lastState
+  // because lastState gets overwritten by the bodyKey-based redraw block.
+  greyscaled: boolean;
 };
 
 export type RenderContext = {
@@ -205,7 +228,7 @@ export type RenderContext = {
 
 export async function createRender(parent: HTMLElement, state: GameState): Promise<RenderContext> {
   const walls = state.walls;
-  await loadGoblinSheets();
+  await Promise.all([loadGoblinSheets(), loadBuildingTextures()]);
   const initW = parent.clientWidth || window.innerWidth || WORLD.width;
   const initH = parent.clientHeight || window.innerHeight || WORLD.height;
   const app = new Application();
@@ -556,10 +579,18 @@ function makeBuildingView(b: Building): BuildingView {
   drawSelectionRing(selectionRing, def.size);
   selectionRing.visible = false;
 
-  const body = new Graphics();
-  drawBuildingBody(body, b);
-
   const o = getOptions();
+  const body = new Graphics();
+  drawBuildingBody(body, b, o);
+
+  const tex = buildingTextures[b.kind] ?? Texture.EMPTY;
+  const sprite = new Sprite(tex);
+  sprite.anchor.set(0.5);
+  sizeBuildingSprite(sprite, def.size);
+  sprite.visible = o.buildingSpriteEnabled;
+  const startGrey = b.state !== 'active';
+  if (startGrey) sprite.filters = [getBuildingGreyscaleFilter()];
+
   const labelCfg: FontConfig = o.fonts.buildingLabel;
   const warningCfg: FontConfig = o.fonts.buildingWarning;
   const gs = o.globalFontScale;
@@ -573,6 +604,7 @@ function makeBuildingView(b: Building): BuildingView {
     },
   });
   label.anchor.set(0.5);
+  label.visible = o.buildingLabelEnabled;
 
   const progress = new Graphics();
 
@@ -592,14 +624,50 @@ function makeBuildingView(b: Building): BuildingView {
 
   c.addChild(selectionRing);
   c.addChild(body);
+  c.addChild(sprite);
   c.addChild(label);
   c.addChild(progress);
   c.addChild(warning);
 
   return {
-    container: c, body, selectionRing, label, progress, warning,
+    container: c, body, sprite, selectionRing, label, progress, warning,
     lastState: '', lastWarning: '', lastSize: def.size, cellSize: def.cellSize,
+    lastBodyKey: bodyKey(b, o),
+    greyscaled: startGrey,
   };
+}
+
+// Shared full-desaturate filter applied to building sprites that aren't yet
+// running (constructing or dormant). One instance is reused across sprites —
+// Pixi handles a filter being attached to multiple display objects.
+let buildingGreyscaleFilter: ColorMatrixFilter | null = null;
+function getBuildingGreyscaleFilter(): ColorMatrixFilter {
+  if (buildingGreyscaleFilter) return buildingGreyscaleFilter;
+  const f = new ColorMatrixFilter();
+  f.saturate(-1, false);
+  buildingGreyscaleFilter = f;
+  return f;
+}
+
+// Scale a building sprite so its longest side matches the building's pixel
+// size. Source PNGs are square; this works for non-square art too.
+function sizeBuildingSprite(s: Sprite, size: number): void {
+  const w = s.texture.width || size;
+  const h = s.texture.height || size;
+  const sc = size / Math.max(w, h);
+  s.scale.set(sc);
+}
+
+// Encodes the inputs that drawBuildingBody depends on, so we can redraw only
+// when one of them changes. Includes options that toggle visual layers and
+// the alpha multiplier on the fill.
+function bodyKey(b: Building, o: Options): string {
+  return [
+    b.state,
+    o.buildingFillEnabled ? 1 : 0,
+    o.buildingBorderEnabled ? 1 : 0,
+    o.buildingFillAlpha.toFixed(3),
+  ].join('|');
 }
 
 // Both the starting Goblin Hole (state.hole) and Goblin Hole buildings render
@@ -704,46 +772,53 @@ function drawSelectionRing(g: Graphics, size: number) {
   g.rect(-half, -half, half * 2, half * 2).stroke({ width: 2, color: 0xffd96b });
 }
 
-function drawBuildingBody(g: Graphics, b: Building) {
+function drawBuildingBody(g: Graphics, b: Building, o: Options) {
   const def = defOf(b);
   const half = def.size / 2;
   g.clear();
   // Goblin Hole buildings render identically to the starting hole — black
-  // circle, white outline — no purple-pad rectangle.
+  // circle, white outline — no purple-pad rectangle. Skip when the player
+  // has disabled the fill layer (the sprite alone is enough).
   if (b.kind === 'goblin_hole') {
-    drawHoleAt(g, 0, 0);
+    if (o.buildingFillEnabled) drawHoleAt(g, 0, 0);
     return;
   }
   const c = def.colors;
   let fill = c.constructing, border = c.constructingBorder;
   if (b.state === 'active') { fill = c.active; border = c.activeBorder; }
   else if (b.state === 'dormant') { fill = c.dormant; border = c.dormantBorder; }
-  g.rect(-half, -half, def.size, def.size).fill(fill).stroke({ width: 2, color: border });
-  // simple texture per kind
+  const alpha = Math.max(0, Math.min(1, o.buildingFillAlpha));
+  if (o.buildingFillEnabled && alpha > 0) {
+    g.rect(-half, -half, def.size, def.size).fill({ color: fill, alpha });
+  }
+  if (o.buildingBorderEnabled) {
+    g.rect(-half, -half, def.size, def.size).stroke({ width: 2, color: border });
+  }
+  // The colored fill carries the per-kind texture (server racks, smokestacks,
+  // etc). Skip it when the fill layer is off so a custom sprite isn't muddied.
+  if (!o.buildingFillEnabled) return;
   if (b.kind === 'phone_farm') {
     for (let i = -1; i <= 1; i++) {
-      g.rect(-half + 14, -10 + i * 14, def.size - 28, 7).fill({ color: 0x000000, alpha: 0.25 });
+      g.rect(-half + 14, -10 + i * 14, def.size - 28, 7).fill({ color: 0x000000, alpha: 0.25 * alpha });
     }
   } else if (b.kind === 'datacentre') {
-    // Big server-rack grid suggesting a real mining hall.
     for (let row = -2; row <= 2; row++) {
-      g.rect(-half + 16, row * 14 - 3, def.size - 32, 6).fill({ color: 0x000000, alpha: 0.28 });
+      g.rect(-half + 16, row * 14 - 3, def.size - 32, 6).fill({ color: 0x000000, alpha: 0.28 * alpha });
     }
   } else if (b.kind === 'goblin_wheel') {
-    g.circle(0, 0, def.size / 2 - 8).stroke({ width: 3, color: 0x000000, alpha: 0.35 });
+    g.circle(0, 0, def.size / 2 - 8).stroke({ width: 3, color: 0x000000, alpha: 0.35 * alpha });
     for (let a = 0; a < 4; a++) {
       const ang = (a / 4) * Math.PI;
       const r = def.size / 2 - 8;
       g.moveTo(-Math.cos(ang) * r, -Math.sin(ang) * r)
         .lineTo(Math.cos(ang) * r, Math.sin(ang) * r)
-        .stroke({ width: 1, color: 0x000000, alpha: 0.3 });
+        .stroke({ width: 1, color: 0x000000, alpha: 0.3 * alpha });
     }
   } else if (b.kind === 'gas_engine') {
-    // smokestacks: 3 narrow rectangles along the top
     const w = 10;
     for (let i = -1; i <= 1; i++) {
       g.rect(i * 24 - w / 2, -half + 6, w, def.size - 18)
-        .fill({ color: 0x000000, alpha: 0.32 });
+        .fill({ color: 0x000000, alpha: 0.32 * alpha });
     }
   }
 }
@@ -928,14 +1003,29 @@ export function render(state: GameState, ctx: RenderContext) {
     const ctr = buildingCenter(b);
     v.container.position.set(ctr.x, ctr.y);
     v.selectionRing.visible = b.selected;
-    if (v.lastState !== b.state) {
-      drawBuildingBody(v.body, b);
+    // Redraw the colored body when state changes OR when any of the body-affecting
+    // option toggles flip. bodyKey collapses both into a single string compare.
+    const key = bodyKey(b, opts);
+    if (v.lastBodyKey !== key) {
+      drawBuildingBody(v.body, b, opts);
       v.lastState = b.state;
+      v.lastBodyKey = key;
     }
     if (v.lastSize !== def.size) {
       drawSelectionRing(v.selectionRing, def.size);
       v.warning.position.set(0, -def.size / 2 + 4);
+      sizeBuildingSprite(v.sprite, def.size);
       v.lastSize = def.size;
+    }
+    v.sprite.visible = opts.buildingSpriteEnabled;
+    v.label.visible = opts.buildingLabelEnabled;
+    // Greyscale the sprite until the building is fully running. Reassigning
+    // .filters every frame would force a filter-pass rebuild; gate on the
+    // cached flag so it only flips when running-state actually changes.
+    const wantGrey = b.state !== 'active';
+    if (wantGrey !== v.greyscaled) {
+      v.sprite.filters = wantGrey ? [getBuildingGreyscaleFilter()] : [];
+      v.greyscaled = wantGrey;
     }
 
     // progress bar — yellow construction fill while building, blue water
