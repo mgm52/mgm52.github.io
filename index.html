@@ -450,6 +450,11 @@
       .info-name { font-family: var(--font-display); font-size: calc(15px * var(--font-display-scale)); font-weight: 400; letter-spacing: 0.5px; margin-bottom: 4px; color: #fff; }
       .info-state { font-family: var(--font-body); font-size: calc(12px * var(--font-body-scale)); color: var(--sidebar-title); line-height: 1.5; }
       .info-extra { font-family: var(--font-body); font-size: calc(12px * var(--font-body-scale)); color: #ccc; line-height: 1.5; margin-top: 2px; }
+      .command-hint-pulse { animation: command-hint-pulse 1s ease-in-out infinite; }
+      @keyframes command-hint-pulse {
+        0%, 100% { color: #6a7080; }
+        50% { color: #ffffff; }
+      }
       #info-panel button { pointer-events: auto; }
       .info-destroy {
         align-self: flex-start;
