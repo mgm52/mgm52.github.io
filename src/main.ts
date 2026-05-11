@@ -130,17 +130,20 @@ async function main() {
     ? showTitleScreen(saved?.savedAt ?? null)
     : Promise.resolve('new');
 
-  // Wait for thematic fonts to be ready so Pixi caches the right glyphs.
-  if ('fonts' in document) {
-    try {
-      await Promise.all([
+  // Kick off font loading in parallel — Pixi (createRender) is the only
+  // consumer that needs the glyphs cached before first draw, so we just
+  // need this resolved before createRender. DOM text gets display:swap
+  // fallback from the @font-face declaration in the meantime, so the
+  // sidebar can render immediately without blocking on mobile networks.
+  const fontsReady: Promise<unknown> = 'fonts' in document
+    ? Promise.all([
         document.fonts.load('16px "New Rocker"'),
         document.fonts.load('16px VT323'),
         document.fonts.load('16px Audiowide'),
         document.fonts.load('16px "Major Mono Display"'),
-      ]);
-    } catch { /* fall through to fallback fonts */ }
-  }
+      ]).catch(() => undefined)
+    : Promise.resolve();
+
   preloadSounds();
   setMasterVolume(getOptions().volume);
   setMusicVolume(getOptions().musicVolume);
@@ -151,7 +154,7 @@ async function main() {
     setCrackleEnabled(o.crackleEnabled);
   });
 
-  // Now that fonts/sounds are ready, see what the player picked. Resume swaps
+  // Now that sounds are queued, see what the player picked. Resume swaps
   // in the saved state; new game wipes any prior save and starts fresh.
   const choice = await choicePromise;
   // Reveal the first task a beat after the game has faded in. In prod the
@@ -177,8 +180,10 @@ async function main() {
     clearSave();
     state = createInitialState();
   }
-  const ctx = await createRender(document.getElementById('game')!, state);
-  setupInput(state, ctx.app, ctx.uiLayer, ctx.worldLayer, ctx);
+  // Wire up the DOM-only UI (sidebar buttons, options cog, task text) and
+  // run one refresh now so the sidebar is fully populated while the title
+  // screen is still fading out. Pixi setup (createRender/setupInput) can
+  // continue in the background and only blocks canvas interaction.
   setupOptionsUI(document.getElementById('game')!, {
     onCheatMoney: () => {
       state.money += 100_000;
@@ -304,6 +309,16 @@ async function main() {
       appendLog(state, `Building #${id} destroyed.`);
     },
   });
+  // Populate task text + show/hide panels now so the sidebar isn't blank
+  // under the (still-fading) title screen on slow mobile loads.
+  refreshUI(state);
+
+  // Pixi caches glyphs at first text render, so we have to have the fonts
+  // loaded before createRender. Until now they've been loading in parallel
+  // with the title screen + the sidebar setup above.
+  await fontsReady;
+  const ctx = await createRender(document.getElementById('game')!, state);
+  setupInput(state, ctx.app, ctx.uiLayer, ctx.worldLayer, ctx);
 
   // Center the camera on the middle of the initial play area, not on the
   // hole — the world is now much larger than the playable region.
