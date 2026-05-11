@@ -796,13 +796,13 @@ function refreshInfoPanel(state: GameState) {
       portrait.innerHTML = `<div class="portrait-goblin" style="background:#6a1a1a;border-color:#a06aff;color:#ffe0a0">M</div>`;
       name.textContent = `Minotaur #${m.id}`;
       stateEl.textContent = describeMinotaurState(m.state);
-      extra.innerHTML = `<span style="color:#6a7080">Right-click to command</span>`;
+      extra.innerHTML = `<span style="color:#6a7080">Right click anywhere to command</span>`;
     } else if (selectedMinotaurs.length > 1) {
       panel.classList.add('visible');
       portrait.innerHTML = `<div class="portrait-goblin" style="background:#6a1a1a;border-color:#a06aff;color:#ffe0a0">M</div>`;
       name.textContent = `${selectedMinotaurs.length} minotaurs`;
       stateEl.textContent = '';
-      extra.innerHTML = `<span style="color:#6a7080">Right-click to command</span>`;
+      extra.innerHTML = `<span style="color:#6a7080">Right click anywhere to command</span>`;
     } else {
       panel.classList.remove('visible');
     }
@@ -857,7 +857,7 @@ function showGoblin(state: GameState, g: Goblin, panel: HTMLElement, portrait: H
 
 function commandHintHtml(state: GameState): string {
   const cls = state.bloodUnlocked ? '' : ' command-hint-pulse';
-  return `<span class="command-hint${cls}" style="color:#6a7080">Right-click to command</span>`;
+  return `<span class="command-hint${cls}" style="color:#6a7080">Right click anywhere to command</span>`;
 }
 
 function showBuilding(state: GameState, b: Building, panel: HTMLElement, portrait: HTMLElement,
