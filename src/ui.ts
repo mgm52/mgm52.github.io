@@ -857,7 +857,7 @@ function showGoblin(state: GameState, g: Goblin, panel: HTMLElement, portrait: H
 
 function commandHintHtml(state: GameState): string {
   const cls = state.bloodUnlocked ? '' : ' command-hint-pulse';
-  return `<span class="command-hint${cls}" style="color:#6a7080">Right click anywhere to command</span>`;
+  return `<span class="command-hint${cls}">Right click anywhere to command</span>`;
 }
 
 function showBuilding(state: GameState, b: Building, panel: HTMLElement, portrait: HTMLElement,
