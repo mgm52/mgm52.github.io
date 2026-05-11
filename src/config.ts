@@ -26,10 +26,10 @@ export const RENDER_SCALE = 1.3; // visual zoom factor applied to the world laye
 export const WATER_HINT_DELAY_SEC = 4;
 
 // Onboarding hint: nudges the player to spawn + kill goblins. Surfaces when
-// either bar passes: 2 minutes with zero spawns, or 5 minutes without
-// completing the first task (earn Ƶ100, which requires killing goblins).
-export const SPAWN_HINT_NO_SPAWN_SEC = 120;
-export const SPAWN_HINT_NO_TASK_SEC = 300;
+// either bar passes: 30 s with zero spawns, or 90 s without completing the
+// first task (earn Ƶ100, which requires killing goblins).
+export const SPAWN_HINT_NO_SPAWN_SEC = 30;
+export const SPAWN_HINT_NO_TASK_SEC = 90;
 
 export const GOBLIN = {
   speed: 110,
