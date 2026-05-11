@@ -361,6 +361,19 @@
         display: none;
         z-index: 5;
       }
+      /* Spawn-hint fades in opacity-only (display stays block) so the
+         transition can actually run. The .visible class is toggled by
+         refreshUI when the no-spawn / no-task timers trip. */
+      #spawn-hint {
+        position: absolute; top: 30%; left: 50%; transform: translate(-50%, -50%);
+        background: rgba(0,0,0,0.7); padding: 10px 18px;
+        border-radius: 4px; font-family: var(--font-body); font-size: calc(18px * var(--font-body-scale));
+        pointer-events: none; color: #fff; letter-spacing: 1px;
+        opacity: 0;
+        transition: opacity 1200ms ease;
+        z-index: 5;
+      }
+      #spawn-hint.visible { opacity: 1; }
 
       /* ───────── Bottom-left info panel ───────── */
       #info-panel {
@@ -695,6 +708,8 @@
         <div id="placement-hint"></div>
         <!-- Surfaced once the player has dug; dismissed on first pan input. -->
         <div id="pan-hint">↑ ↓ ← → / WASD</div>
+        <!-- Onboarding nudge — fades in via .visible (see refreshUI). -->
+        <div id="spawn-hint">Hint: spawn goblins; command into violence</div>
         <div id="info-panel">
           <div class="info-portrait" id="info-portrait"></div>
           <div class="info-details">

@@ -21,6 +21,16 @@ export const INITIAL_PLAY_Y0 = DIG_GROWTH_CELLS;
 export const CAMERA_SPEED = 700; // px/sec when panning with WASD
 export const RENDER_SCALE = 1.3; // visual zoom factor applied to the world layer
 
+// Seconds after the first dig before the pan-hint (WASD/arrows) appears, if
+// the player hasn't already panned the camera to bring water into view.
+export const WATER_HINT_DELAY_SEC = 4;
+
+// Onboarding hint: nudges the player to spawn + kill goblins. Surfaces when
+// either bar passes: 2 minutes with zero spawns, or 5 minutes without
+// completing the first task (earn Ƶ100, which requires killing goblins).
+export const SPAWN_HINT_NO_SPAWN_SEC = 120;
+export const SPAWN_HINT_NO_TASK_SEC = 300;
+
 export const GOBLIN = {
   speed: 110,
   radius: 12,

@@ -202,8 +202,13 @@ export type GameState = {
   lastPowerConsumed: number;
   // Tutorial counters (cumulative — only ever increase).
   spawnsCompleted: number;
-  // Hint UI: dismissed once the player presses any pan key (WASD/arrows).
-  panHintDismissed: boolean;
+  // Pan-hint state: `firstDugAt` is the state.now timestamp of the player's
+  // first successful dig (null until then). `waterSeen` flips sticky-true the
+  // first frame any water source intersects the viewport. The hint appears
+  // WATER_HINT_DELAY_SEC after firstDugAt, and disappears forever once the
+  // player has actually looked at the water.
+  firstDugAt: number | null;
+  waterSeen: boolean;
   // In production builds the options cog is hidden until the player places a
   // Dragon Beacon — that's the demo-end gag, so the secret-settings reveal
   // gates on getting that far. Sticky once flipped.
@@ -395,6 +400,7 @@ export function computePlayBounds(state: GameState): { x0: number; y0: number; x
 export function digDirection(state: GameState, dir: 'n' | 'e' | 's' | 'w'): { ok: boolean; reason?: string } {
   if (state.dugDirections.has(dir)) return { ok: false, reason: 'already-dug' };
   state.dugDirections.add(dir);
+  if (state.firstDugAt == null) state.firstDugAt = state.now;
   state.walls = rebuildWalls(state);
   state.wallsVersion++;
   state.playArea = computePlayBounds(state);
@@ -451,7 +457,8 @@ export function createInitialState(): GameState {
     lastPowerProduced: 0,
     lastPowerConsumed: 0,
     spawnsCompleted: 0,
-    panHintDismissed: false,
+    firstDugAt: null,
+    waterSeen: false,
     optionsUnlocked: false,
   };
   state.walls = rebuildWalls(state);

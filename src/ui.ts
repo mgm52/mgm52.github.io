@@ -1,7 +1,7 @@
 import { playSound } from './audio';
 import {
-  AUTOSPAWN_TIERS, BUILDABLE_KINDS, BUILDING_DEFS, BuildingKind, GOBLIN, SUMMON_UPGRADES, digBloodCost,
-  MINOTAUR, formatPower,
+  AUTOSPAWN_TIERS, BUILDABLE_KINDS, BUILDING_DEFS, BuildingKind, GOBLIN, SPAWN_HINT_NO_SPAWN_SEC,
+  SPAWN_HINT_NO_TASK_SEC, SUMMON_UPGRADES, WATER_HINT_DELAY_SEC, digBloodCost, MINOTAUR, formatPower,
 } from './config';
 import {
   Building, Cell, GameState, Goblin, GoblinState, WaterSource,
@@ -750,10 +750,21 @@ export function refreshUI(state: GameState) {
     hint.style.display = 'none';
   }
 
-  // Pan-key hint — surfaces once the player has dug at least once, hides
-  // on first WASD/arrow press (panHintDismissed).
+  // Pan-key hint — surfaces a few seconds after the first dig if the player
+  // still hasn't brought any water source into the viewport. Hides forever
+  // (sticky `waterSeen`) the first frame water appears on screen.
   const panHint = document.getElementById('pan-hint')!;
-  panHint.style.display = (state.dugDirections.size > 0 && !state.panHintDismissed) ? 'block' : 'none';
+  const dugDelayElapsed = state.firstDugAt != null && (state.now - state.firstDugAt) >= WATER_HINT_DELAY_SEC;
+  panHint.style.display = (dugDelayElapsed && !state.waterSeen) ? 'block' : 'none';
+
+  // Spawn-hint — onboarding nudge that fades in once either timeout trips.
+  // First task is `earn_100`; check sticky completion as well as live state
+  // so a save resumed mid-game doesn't pop the hint back up.
+  const spawnHint = document.getElementById('spawn-hint')!;
+  const earn100Done = completedTaskIds.has('earn_100') || TASKS[0].isDone(state);
+  const noSpawnTrip = state.spawnsCompleted === 0 && state.now >= SPAWN_HINT_NO_SPAWN_SEC;
+  const noTaskTrip = !earn100Done && state.now >= SPAWN_HINT_NO_TASK_SEC;
+  spawnHint.classList.toggle('visible', noSpawnTrip || noTaskTrip);
 
   refreshInfoPanel(state);
 }

@@ -1,6 +1,6 @@
 import { playSound, preloadSounds, setCrackleEnabled, setMasterVolume, setMusicVolume, startBackgroundCrackle, startBackgroundMusic } from './audio';
 import {
-  AUTOSPAWN_TIERS, CAMERA_SPEED, CELL, GOBLIN, GOLD_KILL_REWARD, KILL_REWARD, START_CELL,
+  AUTOSPAWN_TIERS, CAMERA_SPEED, CELL, GOBLIN, GOLD_KILL_REWARD, KILL_REWARD, RENDER_SCALE, START_CELL,
   SUMMON_UPGRADES, TICK_MS, MINOTAUR, digBloodCost,
 } from './config';
 import { setupInput } from './input';
@@ -150,6 +150,13 @@ async function main() {
   let state: GameState;
   if (choice === 'resume' && saved) {
     state = saved.state;
+    // Migrate older saves that pre-date firstDugAt/waterSeen. If the player
+    // had already dug we kick off the hint timer from "now" so we don't
+    // surface the hint forever for a session that never panned.
+    if (state.firstDugAt === undefined) {
+      state.firstDugAt = state.dugDirections.size > 0 ? state.now : null;
+    }
+    if (state.waterSeen === undefined) state.waterSeen = false;
   } else {
     clearSave();
     state = createInitialState();
@@ -296,8 +303,6 @@ async function main() {
     const k = e.key.toLowerCase();
     if (isPanKey(k)) {
       held.add(k);
-      // First pan input clears the on-screen hint.
-      state.panHintDismissed = true;
       e.preventDefault();
     }
   });
@@ -343,6 +348,20 @@ async function main() {
       ctx.camera.x += (dx / len) * move;
       ctx.camera.y += (dy / len) * move;
       clampCamera(ctx);
+    }
+    // Pan-hint trigger: once any water source intersects the camera's visible
+    // rect, mark `waterSeen` sticky-true. The hint flips off in refreshUI.
+    if (!state.waterSeen && state.waterSources.size > 0) {
+      const vx0 = ctx.camera.x;
+      const vy0 = ctx.camera.y;
+      const vx1 = vx0 + ctx.viewport.width / RENDER_SCALE;
+      const vy1 = vy0 + ctx.viewport.height / RENDER_SCALE;
+      for (const w of state.waterSources.values()) {
+        if (w.x1 * CELL > vx0 && w.x0 * CELL < vx1 && w.y1 * CELL > vy0 && w.y0 * CELL < vy1) {
+          state.waterSeen = true;
+          break;
+        }
+      }
     }
     render(state, ctx);
     refreshUI(state);
