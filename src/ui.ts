@@ -783,7 +783,7 @@ function refreshInfoPanel(state: GameState) {
     portrait.innerHTML = `<div class="portrait-goblin">G</div>`;
     name.textContent = `${selectedGoblins.length} goblins`;
     stateEl.textContent = '';
-    extra.innerHTML = commandHintHtml(state);
+    setCommandHint(extra, state);
   } else if (state.hole.selected) {
     showHole(state, panel, portrait, name, stateEl, extra);
   } else if (selectedWater) {
@@ -852,12 +852,22 @@ function showGoblin(state: GameState, g: Goblin, panel: HTMLElement, portrait: H
   portrait.innerHTML = `<div class="portrait-goblin">G</div>`;
   name.textContent = `Goblin #${g.id}`;
   stateEl.textContent = describeGoblinState(g.state);
-  extra.innerHTML = commandHintHtml(state);
+  setCommandHint(extra, state);
 }
 
-function commandHintHtml(state: GameState): string {
-  const cls = state.bloodUnlocked ? '' : ' command-hint-pulse';
-  return `<span class="command-hint${cls}">Right click anywhere to command</span>`;
+// Persist the hint span across frames so its pulse animation keeps running —
+// refreshInfoPanel ticks every rAF, and replacing innerHTML each time would
+// reset the animation to 0% and freeze the colour at the base hue.
+function setCommandHint(extra: HTMLElement, state: GameState): void {
+  let span = extra.firstElementChild as HTMLElement | null;
+  if (!span || !span.classList.contains('command-hint') || extra.childNodes.length !== 1) {
+    extra.textContent = '';
+    span = document.createElement('span');
+    span.className = 'command-hint';
+    span.textContent = 'Right click anywhere to command';
+    extra.appendChild(span);
+  }
+  span.classList.toggle('command-hint-pulse', !state.bloodUnlocked);
 }
 
 function showBuilding(state: GameState, b: Building, panel: HTMLElement, portrait: HTMLElement,
