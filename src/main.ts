@@ -113,6 +113,13 @@ const BACKGROUND_CRACKLE_URL = 'assets/vinyl_crackle.mp3';
 // Crackle gets a head-start so the room "settles" before the quartet enters.
 const MUSIC_LEAD_IN_MS = 2000;
 
+// Total time from the title Play/Resume click until the title overlay's
+// opacity reaches 0 (game fully faded in). Mirrors the setTimeout chain in
+// showTitleScreen — fill (2000) + hold (1500) + screen opacity transition (1400).
+const TITLE_FADE_OUT_TOTAL_MS = 2000 + 1500 + 1400;
+// Extra beat after the game appears before the first task fades in.
+const TASK_REVEAL_AFTER_GAME_VISIBLE_MS = 1000;
+
 async function main() {
   // Production-only title gate. Click here also satisfies the browser's
   // user-gesture requirement so audio can play immediately afterwards.
@@ -147,6 +154,15 @@ async function main() {
   // Now that fonts/sounds are ready, see what the player picked. Resume swaps
   // in the saved state; new game wipes any prior save and starts fresh.
   const choice = await choicePromise;
+  // Reveal the first task a beat after the game has faded in. In prod the
+  // title overlay is still fading out for ~5s after the click; in dev the
+  // game is visible immediately so we only wait the 1s beat.
+  const taskRevealDelayMs = import.meta.env.PROD
+    ? TITLE_FADE_OUT_TOTAL_MS + TASK_REVEAL_AFTER_GAME_VISIBLE_MS
+    : TASK_REVEAL_AFTER_GAME_VISIBLE_MS;
+  window.setTimeout(() => {
+    document.getElementById('task-text')?.classList.add('revealed');
+  }, taskRevealDelayMs);
   let state: GameState;
   if (choice === 'resume' && saved) {
     state = saved.state;
