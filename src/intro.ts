@@ -30,12 +30,12 @@ const SCRIPT: IntroStep[] = [
   ]},
   { kind: 'pause', ms: 3000 },
   // Glance off toward the screen's bottom-right corner (SE = row 3) on the
-  // self-doubt line, then snap back to face camera for goodbye.
+  // self-doubt line, then snap back to face camera for the sign-off.
   { kind: 'face', row: 3 },
   { kind: 'speak', text: "i've been clicking around for ages but i don't know how to play i've been trying to figure it out but i think i just don't have the executive mindset for it" },
   { kind: 'pause', ms: 3000 },
   { kind: 'face', row: 4 },
-  { kind: 'speak', text: 'goodbye' },
+  { kind: 'speak', text: 'good luck' },
   { kind: 'down' },
 ];
 
