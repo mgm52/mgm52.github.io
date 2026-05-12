@@ -508,7 +508,8 @@ export function refreshUI(state: GameState) {
   setText('blood', state.blood.toString());
 
   // Power: hide entirely until any production exists, then show consumed /
-  // produced. Tinted red on deficit.
+  // produced. Always blue — the deficit signal lives on individual buildings
+  // (their dormant state + warning), not on the resource line.
   const produced = state.lastPowerProduced;
   const consumed = state.lastPowerConsumed;
   const powerRow = document.getElementById('row-power')!;
@@ -519,15 +520,7 @@ export function refreshUI(state: GameState) {
   } else {
     powerEl.textContent = formatPower(produced);
   }
-  // Determine if any consumer is unpowered (heuristic: dormant + staffed)
-  let unpowered = false;
-  for (const b of state.buildings.values()) {
-    if (b.state !== 'dormant') continue;
-    const def = defOf(b);
-    if (def.powerOutput >= 0) continue;
-    if (maintainerCount(state, b) >= def.maintainersRequired) { unpowered = true; break; }
-  }
-  powerEl.style.color = unpowered ? '#d96b6b' : '#8acfff';
+  powerEl.style.color = '#8acfff';
 
   // Spawn Goblin button — sidebar, always visible. Surfaces a "Hole blocked"
   // warning when a building is on the hole.
