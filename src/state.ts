@@ -98,6 +98,13 @@ export type Minotaur = {
   state: MinotaurState;
   nextWanderAt: number;
   selected: boolean;
+  // Stuck detection: minotaurs only step greedily (Chebyshev-toward-target)
+  // with no real pathfinding, so an obstacle can trap them ping-ponging in a
+  // tiny area. We periodically sample the cell and bail back to `wander`
+  // when the sample stays inside a small box for too long. See updateMinotaur.
+  stuckSampleCell: Cell | null;
+  stuckSampleAt: number;
+  stuckStreak: number;
 };
 
 export type BuildingState = 'constructing' | 'active' | 'dormant';
@@ -209,6 +216,10 @@ export type GameState = {
   // player has actually looked at the water.
   firstDugAt: number | null;
   waterSeen: boolean;
+  // Drag-select onboarding state. Flips sticky-true the first time the player
+  // performs a drag-rectangle that picks up 2+ creatures; used to gate the
+  // "Hint: drag to choose many creatures" nudge in refreshUI.
+  multiSelectSeen: boolean;
   // In production builds the options cog is hidden until the player places a
   // Dragon Beacon — that's the demo-end gag, so the secret-settings reveal
   // gates on getting that far. Sticky once flipped.
@@ -459,6 +470,7 @@ export function createInitialState(): GameState {
     spawnsCompleted: 0,
     firstDugAt: null,
     waterSeen: false,
+    multiSelectSeen: false,
     optionsUnlocked: false,
   };
   state.walls = rebuildWalls(state);

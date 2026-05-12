@@ -427,6 +427,18 @@
         z-index: 5;
       }
       #spawn-hint.visible { opacity: 1; }
+      /* Drag-select hint — same fade-in pattern as #spawn-hint, parked a
+         bit lower so it doesn't collide if both happen to be on screen. */
+      #drag-select-hint {
+        position: absolute; top: 40%; left: 50%; transform: translate(-50%, -50%);
+        background: rgba(0,0,0,0.7); padding: 10px 18px;
+        border-radius: 4px; font-family: var(--font-body); font-size: calc(18px * var(--font-body-scale));
+        pointer-events: none; color: #fff; letter-spacing: 1px;
+        opacity: 0;
+        transition: opacity 1200ms ease;
+        z-index: 5;
+      }
+      #drag-select-hint.visible { opacity: 1; }
 
       /* ───────── Bottom-left info panel ───────── */
       #info-panel {
@@ -950,6 +962,7 @@
          steal focus from the goblin's lines. The hint reappears naturally
          after the intro releases the hold. */
       body.intro-hold #spawn-hint { display: none !important; }
+      body.intro-hold #drag-select-hint { display: none !important; }
     </style>
   </head>
   <body>
@@ -1018,6 +1031,9 @@
         <div id="pan-hint">↑ ↓ ← → / WASD</div>
         <!-- Onboarding nudge — fades in via .visible (see refreshUI). -->
         <div id="spawn-hint">Hint: spawn goblins; command into violence</div>
+        <!-- Drag-select onboarding nudge — surfaces after a long idle once
+             past the first task and the player still hasn't multi-selected. -->
+        <div id="drag-select-hint">Hint: drag to choose many creatures</div>
         <button id="pause-btn" type="button" aria-label="Pause">⏸</button>
         <div id="pause-overlay">
           <div class="pause-title">PAUSED</div>

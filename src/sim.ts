@@ -268,6 +268,9 @@ export function spawnMinotaur(state: GameState): boolean {
     state: { kind: 'wander' },
     nextWanderAt: state.now + MINOTAUR.wanderInterval,
     selected: false,
+    stuckSampleCell: null,
+    stuckSampleAt: state.now,
+    stuckStreak: 0,
   };
   state.minotaurs.set(id, t);
   appendLog(state, `Minotaur #${id} crawls out of the hole.`);
@@ -351,6 +354,53 @@ function minotaurStepTowardBuilding(state: GameState, t: Minotaur, b: Building):
   return best;
 }
 
+// Stuck detection. Minotaurs only step greedily (Chebyshev-toward-target) with
+// no real pathfinding, so any obstacle pinch — a wall corner, a goblin huddle
+// blocking a doorway — can trap them ping-ponging in a tiny area. Every
+// STUCK_SAMPLE_PERIOD we snapshot the cell; if the cell hasn't moved more than
+// STUCK_BOX_RADIUS in STUCK_THRESHOLD consecutive samples, drop the current
+// order and fall back to `wander`. Wander itself never triggers this — it's
+// the default state and we don't want to "rescue" a minotaur that's just
+// idling somewhere.
+const STUCK_SAMPLE_PERIOD = 2;
+const STUCK_BOX_RADIUS = 2;
+const STUCK_THRESHOLD = 4;
+function applyMinotaurStuckCheck(state: GameState, t: Minotaur): boolean {
+  if (t.state.kind === 'wander') {
+    t.stuckStreak = 0;
+    t.stuckSampleCell = t.cell;
+    t.stuckSampleAt = state.now;
+    return false;
+  }
+  // Defensive defaults for saves persisted before these fields existed.
+  if (t.stuckSampleAt === undefined) t.stuckSampleAt = state.now;
+  if (t.stuckStreak === undefined) t.stuckStreak = 0;
+  if (state.now - t.stuckSampleAt < STUCK_SAMPLE_PERIOD) return false;
+  const prev = t.stuckSampleCell;
+  t.stuckSampleAt = state.now;
+  if (!prev) {
+    t.stuckSampleCell = t.cell;
+    return false;
+  }
+  const cd = Math.max(Math.abs(t.cell.cx - prev.cx), Math.abs(t.cell.cy - prev.cy));
+  if (cd > STUCK_BOX_RADIUS) {
+    t.stuckStreak = 0;
+  } else {
+    t.stuckStreak++;
+  }
+  t.stuckSampleCell = t.cell;
+  if (t.stuckStreak >= STUCK_THRESHOLD) {
+    appendLog(state, `Minotaur #${t.id} can't find a path — standing down.`);
+    t.state = { kind: 'wander' };
+    t.target = null;
+    t.nextWanderAt = state.now + MINOTAUR.wanderInterval;
+    t.stuckStreak = 0;
+    t.stuckSampleCell = t.cell;
+    return true;
+  }
+  return false;
+}
+
 function updateMinotaur(state: GameState, t: Minotaur) {
   // Mid-step pixel lerp (shared with goblin movement model).
   if (t.target) {
@@ -370,6 +420,8 @@ function updateMinotaur(state: GameState, t: Minotaur) {
       return;
     }
   }
+
+  if (applyMinotaurStuckCheck(state, t)) return;
 
   // Player-issued commands take priority over auto-targeting.
   if (t.state.kind === 'moving_to') {
