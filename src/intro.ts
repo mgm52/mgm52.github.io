@@ -36,6 +36,10 @@ const SCRIPT: IntroStep[] = [
 
 const TYPE_MS_PER_CHAR = 45;
 const MID_LINE_PAUSE_MS = 1500;
+// Held after the last character of a line types out before the click wall
+// arms — prevents an over-eager click from advancing the dialog the instant
+// the line completes.
+const POST_LINE_BUFFER_MS = 200;
 // Slow rise on the way in; quicker exit on the way out.
 const SLIDE_UP_MS = 6000;
 const SLIDE_DOWN_MS = 2200;
@@ -127,12 +131,17 @@ async function runSpeak(
   // surfacing the glove cursor and arming the wall's "advance" listener
   // in the same beat so the prompt is never live without a live target.
   await typeLine(speechEl, text);
+  // Small buffer after the last character so the player can't immediately
+  // click through — gives the eye a beat to register the completed line.
+  await sleep(POST_LINE_BUFFER_MS);
   overlay.classList.add('click-armed');
   await waitForClick(clickWall);
   playSound('click', 0.6, 0.9);
   overlay.classList.remove('click-armed');
   overlay.classList.remove('speaking');
-  speechEl.classList.remove('done');
+  // Leave the .done class on — the next typeLine() will clear it when it
+  // starts the next line. Removing it here would un-hide the blinking caret
+  // during the 200ms speech fade-out and read as a glitchy reappearance.
 }
 
 async function turnGoblinAround(goblinEl: HTMLElement) {
