@@ -252,7 +252,7 @@ export const DEFAULT_OPTIONS: Options = {
     body:            { family: 'newRocker', scale: 1.00 },
     buildingLabel:   { family: 'newRocker', scale: 0.50 },
     buildingWarning: { family: 'newRocker', scale: 1.10 },
-    dialogue:        { family: 'newRocker', scale: 1.00 },
+    dialogue:        { family: 'vt323', scale: 1.20 },
   },
   globalFontScale: 1.05,
   volume: 0.7,

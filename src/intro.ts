@@ -18,6 +18,7 @@ type IntroStep =
   | { kind: 'speak'; text: string }
   | { kind: 'pause'; ms: number }
   | { kind: 'choice'; choices: IntroChoice[] }
+  | { kind: 'face'; row: number }
   | { kind: 'down' };
 
 const SCRIPT: IntroStep[] = [
@@ -28,8 +29,12 @@ const SCRIPT: IntroStep[] = [
     { label: 'NO',  nextLine: "that's good because i have no idea" },
   ]},
   { kind: 'pause', ms: 3000 },
+  // Glance off toward the screen's bottom-right corner (SE = row 3) on the
+  // self-doubt line, then snap back to face camera for goodbye.
+  { kind: 'face', row: 3 },
   { kind: 'speak', text: "i've been clicking around for ages but i don't know how to play i've been trying to figure it out but i think i just don't have the executive mindset for it" },
   { kind: 'pause', ms: 3000 },
+  { kind: 'face', row: 4 },
   { kind: 'speak', text: 'goodbye' },
   { kind: 'down' },
 ];
@@ -202,6 +207,19 @@ async function turnGoblinAround(goblinEl: HTMLElement) {
   }
 }
 
+// Animate from the current sprite row to `target`, stepping one row at a time
+// at TURN_STEP_MS each. Used by 'face' steps so a mid-dialogue glance reads
+// as a turn rather than an instant pose swap.
+async function faceRow(goblinEl: HTMLElement, target: number) {
+  const current = Number(goblinEl.style.getPropertyValue('--row') || '0');
+  if (current === target) return;
+  const step = current < target ? 1 : -1;
+  for (let r = current + step; step > 0 ? r <= target : r >= target; r += step) {
+    goblinEl.style.setProperty('--row', String(r));
+    await sleep(TURN_STEP_MS);
+  }
+}
+
 export async function runIntro(): Promise<void> {
   const overlay = document.getElementById('intro-overlay');
   const goblinEl = document.getElementById('intro-goblin');
@@ -214,13 +232,18 @@ export async function runIntro(): Promise<void> {
   // Reset the goblin's facing each run (so dev reloads play out the full
   // turn-around rather than starting already facing camera).
   goblinEl.style.setProperty('--row', '0');
+  overlay.classList.remove('faced');
 
   overlay.classList.add('visible');
   await sleep(50);
   overlay.classList.add('up');
   await sleep(SLIDE_UP_MS + 100);
-  // Hold at the top, then pivot to face the player.
+  // Hold at the top, then pivot to face the player. The .faced class triggers
+  // a smooth rise from the slide-in resting position (-22vh) to the
+  // post-turn-around position (-14vh) — see #intro-goblin CSS for the
+  // motivation (row 0 vs row 4 sprite geometry).
   await sleep(POST_SLIDE_BEAT_MS);
+  overlay.classList.add('faced');
   await turnGoblinAround(goblinEl);
 
   for (const step of SCRIPT) {
@@ -251,6 +274,8 @@ export async function runIntro(): Promise<void> {
       await sleep(200);
       // Play the follow-up line the chosen branch carries.
       await runSpeak(overlay, speechEl, clickWall, step.choices[picked].nextLine);
+    } else if (step.kind === 'face') {
+      await faceRow(goblinEl, step.row);
     } else if (step.kind === 'down') {
       overlay.classList.remove('up');
       overlay.classList.add('down');
