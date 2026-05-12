@@ -1,15 +1,16 @@
 // Records the goblin intro sequence to a webm video using Playwright.
-// Run: node scripts/record-intro.mjs (vite dev server must be at :5173)
+// Run: node scripts/record-intro.mjs [yes|no] (vite dev server at :5173)
 //
-// We rely on dev-mode skipping the title screen so the intro fires
-// immediately. The script:
+// The optional argument picks which branch to record at the YES/NO choice
+// (defaults to YES). We rely on dev-mode skipping the title screen so the
+// intro fires immediately. The script:
 //   1. Opens the page in a 1280x720 viewport with video recording on.
 //   2. Waits for the intro overlay to become visible (goblin slides up).
 //   3. For each speech line, waits until #intro-speech has the .done class
 //      (typing finished), then clicks the click-wall to advance.
-//   4. For the YES step, clicks #intro-yes when it appears.
+//   4. For the choice step, clicks YES or NO per the CLI arg.
 //   5. Waits for the goblin to slide back out and the spawn panel to fade in.
-//   6. Saves the recorded webm into the repo at videos/.
+//   6. Converts the recording to MP4 (H.264) so iOS Safari plays it inline.
 
 import { chromium } from 'playwright';
 import path from 'node:path';
@@ -42,13 +43,23 @@ await page.goto('http://localhost:5173', { waitUntil: 'networkidle' });
 // from here. Just let the 10s play out; the spec said 10s and we want a
 // faithful recording.
 
+// CLI arg: which branch to follow at the YES/NO choice. Defaults to YES.
+const branch = (process.argv[2] || 'yes').toLowerCase();
+if (branch !== 'yes' && branch !== 'no') {
+  console.error(`Usage: node scripts/record-intro.mjs [yes|no]`);
+  process.exit(1);
+}
+console.log(`Recording branch: ${branch.toUpperCase()}`);
+
 console.log('Waiting for intro overlay to become visible…');
 await page.waitForSelector('#intro-overlay.visible', { timeout: 30_000 });
-console.log('Overlay visible — waiting for slide-up to finish…');
+console.log('Overlay visible — waiting for slide-up + turn-around to finish…');
 
-// Slide-up duration is 3000ms in CSS; wait for the overlay to have `up`.
+// Slide-up duration is 3000ms; then a 1200ms hold; then the turn-around
+// runs through TURN_SEQUENCE.length-1 = 4 frames at 220ms each = ~880ms.
+// Total ≈ 5100ms before the first speak step kicks off.
 await page.waitForSelector('#intro-overlay.up', { timeout: 10_000 });
-await sleep(3200);
+await sleep(5200);
 
 // Walk the dialog. For each "speak" step the typing finishes when
 // #intro-speech gains `.done`. We then wait POST_LINE_HOLD_MS before
@@ -66,12 +77,12 @@ const advanceSpeak = async (label) => {
 await advanceSpeak('hello');
 await advanceSpeak('do you want to (...) know how to play');
 
-console.log('  button: YES');
-await page.waitForSelector('#intro-overlay.show-yes', { timeout: 15_000 });
+console.log(`  button: ${branch.toUpperCase()}`);
+await page.waitForSelector('#intro-overlay.show-buttons', { timeout: 15_000 });
 await sleep(800);
-await page.click('#intro-yes');
+await page.click(branch === 'yes' ? '#intro-yes' : '#intro-no');
 
-await advanceSpeak('me too');
+await advanceSpeak(branch === 'yes' ? 'me too' : "that's good because i have no idea");
 
 // (…) (…) pause
 console.log('  pause 3s');
@@ -107,7 +118,7 @@ const newest = files
   .sort((a, b) => b.t - a.t)[0];
 if (newest) {
   const webm = path.join(OUT_DIR, newest.f);
-  const mp4 = path.join(OUT_DIR, 'goblin-intro.mp4');
+  const mp4 = path.join(OUT_DIR, `goblin-intro-${branch}.mp4`);
   console.log('Converting to mp4…');
   execFileSync('ffmpeg', [
     '-y', '-i', webm,
