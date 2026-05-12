@@ -70,6 +70,16 @@ export function setupOptionsUI(root: HTMLElement, callbacks: OptionsUICallbacks)
   root.appendChild(publicPanel);
   root.appendChild(adminCog);
   root.appendChild(adminPanel);
+
+  // Secret unlock: shift-clicking the leading "R" of the sidebar's Resources
+  // title reveals the admin cog. Bare clicks do nothing so we don't tip our
+  // hand on accidental hits.
+  const resourcesSecret = document.getElementById('resources-secret');
+  resourcesSecret?.addEventListener('click', (e) => {
+    if (!e.shiftKey) return;
+    e.stopPropagation();
+    unlockOptionsCog();
+  });
 }
 
 // Compact panel for the always-visible public cog. The admin panel mirrors
