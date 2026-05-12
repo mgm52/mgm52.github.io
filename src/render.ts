@@ -463,12 +463,14 @@ function applyFonts(ctx: RenderContext, o: Options) {
   // Lazy-load any presets that haven't loaded yet.
   for (const cfg of Object.values(o.fonts)) ensureFontLoaded(cfg.family);
 
-  const display = fontFamilyById(o.fonts.display.family).css;
-  const mono    = fontFamilyById(o.fonts.mono.family).css;
-  const body    = fontFamilyById(o.fonts.body.family).css;
+  const display  = fontFamilyById(o.fonts.display.family).css;
+  const mono     = fontFamilyById(o.fonts.mono.family).css;
+  const body     = fontFamilyById(o.fonts.body.family).css;
+  const dialogue = fontFamilyById(o.fonts.dialogue.family).css;
   root.style.setProperty('--font-display', display);
   root.style.setProperty('--font-mono', mono);
   root.style.setProperty('--font-body', body);
+  root.style.setProperty('--font-dialogue', dialogue);
   // globalFontScale multiplies every per-key scale uniformly so the player
   // can blow up (or shrink) all UI text from a single slider.
   const gs = o.globalFontScale;
@@ -477,6 +479,7 @@ function applyFonts(ctx: RenderContext, o: Options) {
   root.style.setProperty('--font-body-scale', String(o.fonts.body.scale * gs));
   root.style.setProperty('--font-building-label-scale', String(o.fonts.buildingLabel.scale * gs));
   root.style.setProperty('--font-building-warning-scale', String(o.fonts.buildingWarning.scale * gs));
+  root.style.setProperty('--font-dialogue-scale', String(o.fonts.dialogue.scale * gs));
 
   // In-canvas Text — update existing buildings live; new views read from
   // options on creation.

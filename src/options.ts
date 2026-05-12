@@ -128,13 +128,14 @@ export function ensureFontLoaded(id: string): void {
   document.head.appendChild(link);
 }
 
-export type FontKey = 'display' | 'mono' | 'body' | 'buildingLabel' | 'buildingWarning';
+export type FontKey = 'display' | 'mono' | 'body' | 'buildingLabel' | 'buildingWarning' | 'dialogue';
 export const FONT_KEYS: { key: FontKey; label: string }[] = [
   { key: 'display',         label: 'Display (titles)' },
   { key: 'mono',            label: 'Mono (numbers)' },
   { key: 'body',            label: 'Body text' },
   { key: 'buildingLabel',   label: 'Building label' },
   { key: 'buildingWarning', label: 'Building warning' },
+  { key: 'dialogue',        label: 'Talky dialogue' },
 ];
 
 export type FontConfig = { family: string; scale: number };
@@ -251,6 +252,7 @@ export const DEFAULT_OPTIONS: Options = {
     body:            { family: 'newRocker', scale: 1.00 },
     buildingLabel:   { family: 'newRocker', scale: 0.50 },
     buildingWarning: { family: 'newRocker', scale: 1.10 },
+    dialogue:        { family: 'newRocker', scale: 1.00 },
   },
   globalFontScale: 1.05,
   volume: 0.7,

@@ -876,8 +876,8 @@
         max-width: min(640px, 78vw);
         text-align: center;
         color: #ffd96b;
-        font-family: var(--font-display);
-        font-size: clamp(16px, 2.6vh, 26px);
+        font-family: var(--font-dialogue, var(--font-display));
+        font-size: calc(clamp(16px, 2.6vh, 26px) * var(--font-dialogue-scale, 1));
         letter-spacing: 0.05em;
         line-height: 1.25;
         text-shadow:
