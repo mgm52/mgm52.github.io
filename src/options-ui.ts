@@ -111,6 +111,17 @@ export function unlockOptionsCog(): void {
   if (cog) cog.style.display = '';
 }
 
+// Wipe the persisted unlock and re-hide the cog. Called from the title
+// screen's Erase Data path so a fresh start is genuinely fresh — without
+// this, an old unlock from a prior playthrough would persist past the
+// reset. No-op in dev where the cog is always visible by design.
+export function relockOptionsCog(): void {
+  try { localStorage.removeItem(SECRET_UNLOCK_KEY); } catch { /* no-op */ }
+  if (import.meta.env.DEV) return;
+  const cog = document.getElementById('options-cog');
+  if (cog) cog.style.display = 'none';
+}
+
 // ─── Panel construction ─────────────────────────────────────────────
 function rebuildPanel(panel: HTMLElement, callbacks: OptionsUICallbacks, refreshPublic?: () => void): void {
   panel.innerHTML = '';
