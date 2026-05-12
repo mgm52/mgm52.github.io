@@ -122,7 +122,12 @@ const TITLE_FADE_OUT_TOTAL_MS = 2000 + 1500 + 1400;
 const TASK_REVEAL_AFTER_GAME_VISIBLE_MS = 1000;
 // For new games only: how long the player gets to wander and click the empty
 // world before the goblin slides up and starts talking.
-const PRE_INTRO_FREE_CLICK_MS = 10_000;
+const PRE_INTRO_FREE_CLICK_MS = 6_000;
+// Staggered fade-in after the intro resolves: the summon panel comes in
+// first, then the task line trails behind so the eye doesn't see both
+// reveal at once.
+const POST_INTRO_SUMMON_DELAY_MS = 1_000;
+const POST_INTRO_TASK_DELAY_MS   = 2_000;
 
 const sleep = (ms: number) => new Promise<void>((r) => window.setTimeout(r, ms));
 
@@ -186,12 +191,16 @@ async function main() {
   };
   if (introWillPlay) {
     // Wait for the game to be fully visible, then PRE_INTRO_FREE_CLICK_MS of
-    // free-click time before the goblin emerges. After the intro resolves
-    // we fade in the spawn panel + task on the same beat the intro releases.
+    // free-click time before the goblin emerges. Once the intro resolves we
+    // stagger the reveals: summon panel after POST_INTRO_SUMMON_DELAY_MS,
+    // task line after POST_INTRO_TASK_DELAY_MS.
     window.setTimeout(async () => {
       await sleep(PRE_INTRO_FREE_CLICK_MS);
       await runIntro();
-      revealPanelsAndTask();
+      await sleep(POST_INTRO_SUMMON_DELAY_MS);
+      document.body.classList.remove('intro-hold');
+      await sleep(POST_INTRO_TASK_DELAY_MS - POST_INTRO_SUMMON_DELAY_MS);
+      document.getElementById('task-text')?.classList.add('revealed');
     }, gameVisibleDelayMs);
   } else {
     window.setTimeout(revealPanelsAndTask, gameVisibleDelayMs + TASK_REVEAL_AFTER_GAME_VISIBLE_MS);

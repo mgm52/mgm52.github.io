@@ -824,11 +824,10 @@
          viewport regardless of how the speech line wrapped. */
       #intro-buttons {
         position: absolute;
-        /* Anchor by bottom so the row tracks the speech text — the speech
-           is bottom-aligned 1vh above the goblin's head, so the buttons sit
-           just under that with a small gap. */
-        left: 50%; bottom: 64vh;
-        transform: translateX(-50%);
+        /* Centred vertically in the viewport so the choice prompt lands in
+           the player's eyeline rather than tucked up under the speech text. */
+        left: 50%; top: 50%;
+        transform: translate(-50%, -50%);
         display: flex;
         gap: 18px;
         opacity: 0;
