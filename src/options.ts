@@ -201,8 +201,8 @@ export type Options = {
 
 export const DEFAULT_OPTIONS: Options = {
   bgPattern: 'checker',
-  bgColor: 0x040404,
-  bgColor2: 0x060606,
+  bgColor: 0x060606,
+  bgColor2: 0x0a0a0a,
   oobColor: 0x040404,
   gridVisible: false,
   gridColor: 0x000000,
