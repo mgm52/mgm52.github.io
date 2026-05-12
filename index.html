@@ -965,8 +965,10 @@
         <div class="panel panel-resources">
           <!-- The leading R is a secret unlock for the dev cog: shift-click
                it to reveal options-ui's admin cog (same effect as placing a
-               Dragon Beacon). See setupOptionsUI in options-ui.ts. -->
-          <div class="panel-title"><span id="resources-secret">R</span>esources</div>
+               Dragon Beacon). The outer span keeps the word as a single flex
+               item — without it, .panel-title's flex gap would split the
+               "R" off from "esources". See setupOptionsUI in options-ui.ts. -->
+          <div class="panel-title"><span><span id="resources-secret">R</span>esources</span></div>
           <div class="resource-row"><span style="color: var(--sidebar-accent)">Ƶ Cash</span><span class="resource-value" id="money">0</span></div>
           <div class="resource-row" id="row-blood"><span style="color:#d96b6b">Blood</span><span class="resource-value" id="blood" style="color:#ff8a8a">0</span></div>
           <div class="resource-row" id="row-power" style="display:none"><span style="color:#8acfff">Power</span><span class="resource-value" id="power">0 / 0 W</span></div>
