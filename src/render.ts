@@ -367,10 +367,16 @@ function applyOptions(ctx: RenderContext, o: Options) {
   applyFilter(ctx.goblinLayer, ctx.goblinFilter, o.goblinSaturation, o.goblinBrightness);
   applyFilter(ctx.minotaurLayer, ctx.minotaurFilter, o.minotaurSaturation, o.minotaurBrightness);
   applyFilter(ctx.buildingLayer, ctx.buildingFilter, o.buildingSaturation, o.buildingBrightness);
-  applySidebarColors(o);
+  applyDomOptions(o);
   applyFonts(ctx, o);
-  // Build/ritual button corner rounding — toggle via body class so the CSS
-  // can override .build-button border-radius.
+}
+
+// DOM-only side of applyOptions — sidebar CSS vars + button corner classes.
+// Split out so main() can call it before Pixi exists (i.e. while the title
+// screen is up), otherwise the title's .build-buttons render with rounded
+// corners until the player clicks and createRender runs applyOptions.
+export function applyDomOptions(o: Options) {
+  applySidebarColors(o);
   document.body.classList.toggle('no-rounded-buttons', !o.buttonsRounded);
   document.body.classList.toggle('cut-corner-buttons', o.buttonsCutCorners);
   document.documentElement.style.setProperty('--button-cut', `${o.buttonCutSize}px`);

@@ -7,7 +7,7 @@ import { setupInput } from './input';
 import { runIntro, setIntroPaused } from './intro';
 import { getOptions, onOptionsChange } from './options';
 import { relockOptionsCog, setupOptionsUI } from './options-ui';
-import { centerCameraOn, clampCamera, createRender, render } from './render';
+import { applyDomOptions, centerCameraOn, clampCamera, createRender, render } from './render';
 import { appendLog, cellCenter, createInitialState, destroyBuilding, digDirection, getSpawnCapacity, pushDeathEffect, pushFloater, removeGoblin, type GameState } from './state';
 import { autoAssignAllIdle, spawnMinotaur, tick } from './sim';
 import { executeTaskSkip, refreshUI, setupUI } from './ui';
@@ -136,6 +136,13 @@ const POST_INTRO_TASK_DELAY_MS   = 2_000;
 const sleep = (ms: number) => new Promise<void>((r) => window.setTimeout(r, ms));
 
 async function main() {
+  // Apply the DOM-only options (sidebar CSS vars, cut-corner button class)
+  // up-front so the title screen's .build-buttons render with the correct
+  // shape on first paint — otherwise they pop from rounded to cut-corner
+  // only once createRender runs applyOptions after the player clicks.
+  // applyOptions inside createRender re-applies these for any later changes.
+  applyDomOptions(getOptions());
+
   // Production-only title gate. Click here also satisfies the browser's
   // user-gesture requirement so audio can play immediately afterwards.
   // Saved-game lookup happens up-front so the title screen can show the
