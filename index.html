@@ -251,11 +251,10 @@
       body.no-rounded-buttons .build-button { border-radius: 0; }
       /* Cut-corner buttons: clip to an octagon. --button-cut controls how
          many pixels each corner is shaved off (set from render.ts). The
-         clip also hides the rectangular border, so we draw the slanted
-         edges by overlaying a same-shape, slightly-smaller mask via a
-         background gradient is unnecessary — instead we just rely on the
-         element's existing background colour since the border vanishes
-         under clip-path anyway. */
+         clip hides the rectangular border, so we redraw the octagon's
+         own outline using four 1px drop-shadows in --button-cut-border.
+         drop-shadow respects clip-path, so the shadow hugs the slanted
+         edges; the four cardinal offsets sum to a uniform ring. */
       body.cut-corner-buttons .build-button {
         border-radius: 0;
         clip-path: polygon(
@@ -268,6 +267,11 @@
           0 calc(100% - var(--button-cut)),
           0 var(--button-cut)
         );
+        filter:
+          drop-shadow( 1px  0  0 var(--button-cut-border))
+          drop-shadow(-1px  0  0 var(--button-cut-border))
+          drop-shadow( 0   1px 0 var(--button-cut-border))
+          drop-shadow( 0  -1px 0 var(--button-cut-border));
       }
       .build-button:hover:not(:disabled) { background: #353a42; border-color: var(--sidebar-button-hover-border, #5a6470); }
       .build-button:disabled { opacity: 0.55; cursor: not-allowed; border-color: transparent; }
