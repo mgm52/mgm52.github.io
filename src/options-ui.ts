@@ -130,6 +130,8 @@ function rebuildPanel(panel: HTMLElement, callbacks: OptionsUICallbacks, refresh
     slider('Sprite Y offset', o.goblinSpriteYOffset, -32, 32, 1, (v) => setOption('goblinSpriteYOffset', v)),
     toggle('Foot shadow',   o.goblinShadow,  (v) => setOption('goblinShadow', v)),
     toggle('Black outline', o.goblinOutline, (v) => setOption('goblinOutline', v)),
+    color('Water-goblin color', o.waterGoblinColor, (v) => setOption('waterGoblinColor', v)),
+    color('Blood color', o.bloodColor, (v) => setOption('bloodColor', v)),
   ]));
 
   panel.appendChild(section('Minotaurs', [

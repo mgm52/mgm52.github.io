@@ -356,17 +356,71 @@ async function main() {
 
   let acc = 0;
   let last = performance.now();
+
+  // ─── Pause ────────────────────────────────────────────────────────
+  // Paused state freezes the tick loop (state.now stops advancing, so all
+  // sprite animations also freeze). Render keeps running so the overlay can
+  // still be drawn. Pausing flushes a save and surfaces a transient
+  // "Game saved" line on the overlay.
+  let paused = false;
+  const pauseBtn = document.getElementById('pause-btn');
+  const pauseOverlay = document.getElementById('pause-overlay');
+  const pauseSaved = document.getElementById('pause-saved');
+  let savedFadeTimer: number | null = null;
+  const setPaused = (p: boolean) => {
+    if (p === paused) return;
+    paused = p;
+    if (paused) {
+      flushSave();
+      pauseOverlay?.classList.add('visible');
+      pauseBtn?.classList.add('paused');
+      pauseBtn?.setAttribute('aria-label', 'Resume');
+      if (pauseSaved) {
+        pauseSaved.classList.add('shown');
+        if (savedFadeTimer !== null) window.clearTimeout(savedFadeTimer);
+        savedFadeTimer = window.setTimeout(() => pauseSaved.classList.remove('shown'), 2000);
+      }
+    } else {
+      pauseOverlay?.classList.remove('visible');
+      pauseBtn?.classList.remove('paused');
+      pauseBtn?.setAttribute('aria-label', 'Pause');
+      // Reset the rAF accumulator so unpausing doesn't dump a giant dt
+      // into the tick loop.
+      last = performance.now();
+      acc = 0;
+    }
+  };
+  const togglePause = () => setPaused(!paused);
+  pauseBtn?.addEventListener('click', (e) => { e.stopPropagation(); togglePause(); });
+  pauseOverlay?.addEventListener('click', () => setPaused(false));
+  // Capture-phase so we run before input.ts's bubble-phase ESC handler — that
+  // way we can tell whether ESC was used to cancel a pending build (input.ts
+  // handles it) or to toggle pause (no pending build, we handle it).
+  window.addEventListener('keydown', (e) => {
+    const k = e.key.toLowerCase();
+    if (e.key === 'Escape') {
+      if (state.pendingBuild) return; // input.ts clears the ghost
+      togglePause();
+    } else if (k === 'p') {
+      // Ignore P while typing in an input/select (options panel sliders, etc.)
+      const tgt = e.target as HTMLElement | null;
+      if (tgt && (tgt.tagName === 'INPUT' || tgt.tagName === 'SELECT' || tgt.tagName === 'TEXTAREA')) return;
+      togglePause();
+    }
+  }, { capture: true });
   function frame(now: number) {
     const dt = now - last;
     last = now;
-    acc += dt;
-    if (acc > TICK_MS * 10) acc = TICK_MS * 10;
-    while (acc >= TICK_MS) {
-      tick(state);
-      acc -= TICK_MS;
+    if (!paused) {
+      acc += dt;
+      if (acc > TICK_MS * 10) acc = TICK_MS * 10;
+      while (acc >= TICK_MS) {
+        tick(state);
+        acc -= TICK_MS;
+      }
+      saveAcc += dt;
+      if (saveAcc >= SAVE_INTERVAL_MS) flushSave();
     }
-    saveAcc += dt;
-    if (saveAcc >= SAVE_INTERVAL_MS) flushSave();
     // Update camera based on held pan keys
     let dx = 0, dy = 0;
     if (held.has('a') || held.has('arrowleft')) dx -= 1;

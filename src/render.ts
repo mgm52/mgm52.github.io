@@ -709,6 +709,7 @@ function drawDeathEffects(ctx: RenderContext, state: GameState) {
       ctx.effectsLayer.addChild(sprite);
       ctx.deathViews.set(e.id, sprite);
     }
+    sprite.tint = getOptions().bloodColor;
     const elapsed = state.now - e.spawnAt;
     if (elapsed >= frames.duration) {
       sprite.visible = false;
@@ -915,7 +916,7 @@ export function render(state: GameState, ctx: RenderContext) {
     let tint = 0xffffff;
     // Water carriers tint blue only while actually hauling water back to the
     // DC (phase to_dc). On the outbound walk to the source they look normal.
-    if (g.state.kind === 'fetching_water' && g.state.phase === 'to_dc') tint = 0x2060ff;
+    if (g.state.kind === 'fetching_water' && g.state.phase === 'to_dc') tint = opts.waterGoblinColor;
     else if (g.gold) tint = 0xffa800;
     else if (g.state.kind === 'building' || g.state.kind === 'going_to_build') tint = 0xfff0a8;
     else if (g.state.kind === 'maintaining' || g.state.kind === 'going_to_maintain') tint = 0xa8d8ff;
