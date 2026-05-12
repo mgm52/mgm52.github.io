@@ -54,7 +54,57 @@ const TURN_STEP_MS = 220;
 // camera). Clockwise: 0 → 1 (NE) → 2 (E) → 3 (SE) → 4 (S).
 const TURN_SEQUENCE = [0, 1, 2, 3, 4] as const;
 
-const sleep = (ms: number) => new Promise<void>((r) => window.setTimeout(r, ms));
+// Pausable sleep: the global pause toggle (main.ts) calls setIntroPaused()
+// to freeze every outstanding sleep — the timer is cleared, its remaining
+// time tracked, and re-armed on resume. Without this, dialog typing, the
+// turn-around step, and the inter-line waits would all blow past the pause
+// overlay because they're driven by setTimeout, not by the game's tick loop.
+let introPaused = false;
+type PendingSleep = {
+  remaining: number;
+  startedAt: number;
+  timerId: number | null;
+  resolve: () => void;
+};
+const pendingSleeps = new Set<PendingSleep>();
+
+const sleep = (ms: number): Promise<void> =>
+  new Promise<void>((resolve) => {
+    const entry: PendingSleep = {
+      remaining: ms,
+      startedAt: 0,
+      timerId: null,
+      resolve: () => {
+        pendingSleeps.delete(entry);
+        resolve();
+      },
+    };
+    pendingSleeps.add(entry);
+    if (!introPaused) {
+      entry.startedAt = Date.now();
+      entry.timerId = window.setTimeout(entry.resolve, entry.remaining);
+    }
+  });
+
+export function setIntroPaused(paused: boolean): void {
+  if (paused === introPaused) return;
+  introPaused = paused;
+  for (const entry of pendingSleeps) {
+    if (paused) {
+      if (entry.timerId !== null) {
+        window.clearTimeout(entry.timerId);
+        entry.timerId = null;
+        entry.remaining = Math.max(0, entry.remaining - (Date.now() - entry.startedAt));
+      }
+    } else if (entry.timerId === null) {
+      entry.startedAt = Date.now();
+      entry.timerId = window.setTimeout(entry.resolve, entry.remaining);
+    }
+  }
+  // Freezes the goblin idle bob, the slide-up/down animations, and the
+  // speech caret blink. See body.intro-paused rules in index.html.
+  document.body.classList.toggle('intro-paused', paused);
+}
 
 function waitForClick(target: HTMLElement): Promise<void> {
   return new Promise((resolve) => {

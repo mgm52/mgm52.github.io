@@ -769,7 +769,6 @@
         --row: 0;
         width: var(--goblin-size); height: var(--goblin-size);
         transform: translate(-50%, 110%);
-        transition: transform 6000ms cubic-bezier(0.22, 1, 0.36, 1);
         background-image: url('assets/rigged_goblin_dancing_aligol3dart_orc_idle.png');
         background-repeat: no-repeat;
         /* Sheet is 8×8 frames of 64px. We size the rendered sheet to 8× the
@@ -786,10 +785,39 @@
         animation: intro-goblin-idle 1.6s steps(8) infinite;
         filter: drop-shadow(0 8px 24px rgba(0, 0, 0, 0.6));
       }
-      #intro-overlay.up #intro-goblin { transform: translate(-50%, 0); }
+      /* The slide-up/down are CSS animations (not transitions) so the global
+         pause toggle (body.intro-paused) can freeze them at the right
+         fractional progress via animation-play-state — a transition has no
+         equivalent pause primitive. Both stack on top of the idle bob so the
+         goblin keeps stepping through its 8-column row while it rises. */
+      #intro-overlay.up #intro-goblin {
+        transform: translate(-50%, 0);
+        animation:
+          intro-goblin-idle 1.6s steps(8) infinite,
+          intro-goblin-slide-up 6000ms cubic-bezier(0.22, 1, 0.36, 1) forwards;
+      }
       #intro-overlay.down #intro-goblin {
         transform: translate(-50%, 110%);
-        transition: transform 2200ms cubic-bezier(0.55, 0, 0.78, 0.36);
+        animation:
+          intro-goblin-idle 1.6s steps(8) infinite,
+          intro-goblin-slide-down 2200ms cubic-bezier(0.55, 0, 0.78, 0.36) forwards;
+      }
+      @keyframes intro-goblin-slide-up {
+        from { transform: translate(-50%, 110%); }
+        to   { transform: translate(-50%, 0); }
+      }
+      @keyframes intro-goblin-slide-down {
+        from { transform: translate(-50%, 0); }
+        to   { transform: translate(-50%, 110%); }
+      }
+      /* Global pause hook: intro.ts toggles body.intro-paused alongside the
+         pause overlay so the goblin (slide + idle), turn-around -driven row
+         changes, and the speech caret all freeze at the same instant the
+         tick loop does. JS sleeps (line typing, between-line waits) are
+         paused separately in intro.ts. */
+      body.intro-paused #intro-goblin,
+      body.intro-paused #intro-speech::after {
+        animation-play-state: paused;
       }
       /* Step through the 8 columns of the current row. The row is set via
          the --row custom property (background-position-y, above) — JS bumps

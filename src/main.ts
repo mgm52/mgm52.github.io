@@ -4,7 +4,7 @@ import {
   SUMMON_UPGRADES, TICK_MS, MINOTAUR, digBloodCost,
 } from './config';
 import { setupInput } from './input';
-import { runIntro } from './intro';
+import { runIntro, setIntroPaused } from './intro';
 import { getOptions, onOptionsChange } from './options';
 import { relockOptionsCog, setupOptionsUI } from './options-ui';
 import { centerCameraOn, clampCamera, createRender, render } from './render';
@@ -413,6 +413,9 @@ async function main() {
   const setPaused = (p: boolean) => {
     if (p === paused) return;
     paused = p;
+    // Freeze/unfreeze the intro sequence (goblin slide, dialog typing,
+    // between-line waits) in lockstep with the rest of the game.
+    setIntroPaused(paused);
     if (paused) {
       flushSave();
       pauseOverlay?.classList.add('visible');
