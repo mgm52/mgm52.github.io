@@ -249,14 +249,15 @@
         font-family: var(--font-body); transition: background 0.1s, border-color 0.1s;
       }
       body.no-rounded-buttons .build-button { border-radius: 0; }
-      /* Cut-corner buttons: clip to an octagon. --button-cut controls how
-         many pixels each corner is shaved off (set from render.ts). The
-         clip hides the rectangular border, so we redraw the octagon's
-         own outline using four 1px drop-shadows in --button-cut-border.
-         drop-shadow respects clip-path, so the shadow hugs the slanted
-         edges; the four cardinal offsets sum to a uniform ring. */
+      /* Cut-corner buttons: clip to an octagon and paint the outline as the
+         element's own background, then overlay a same-shape ::before inset
+         by 1px holding the actual button fill. The visible ring between the
+         two octagons is the outline — crisp on every edge including the
+         slanted cuts, because both shapes share the same clip-path. */
       body.cut-corner-buttons .build-button {
         border-radius: 0;
+        border: none;
+        background: var(--button-cut-border);
         clip-path: polygon(
           var(--button-cut) 0,
           calc(100% - var(--button-cut)) 0,
@@ -267,16 +268,37 @@
           0 calc(100% - var(--button-cut)),
           0 var(--button-cut)
         );
-        filter:
-          drop-shadow( 1px  0  0 var(--button-cut-border))
-          drop-shadow(-1px  0  0 var(--button-cut-border))
-          drop-shadow( 0   1px 0 var(--button-cut-border))
-          drop-shadow( 0  -1px 0 var(--button-cut-border));
+      }
+      body.cut-corner-buttons .build-button::before {
+        content: "";
+        position: absolute; inset: 1px;
+        background: var(--sidebar-button-bg);
+        clip-path: polygon(
+          var(--button-cut) 0,
+          calc(100% - var(--button-cut)) 0,
+          100% var(--button-cut),
+          100% calc(100% - var(--button-cut)),
+          calc(100% - var(--button-cut)) 100%,
+          var(--button-cut) 100%,
+          0 calc(100% - var(--button-cut)),
+          0 var(--button-cut)
+        );
+        pointer-events: none;
+        transition: background 0.1s;
+        z-index: 0;
       }
       .build-button:hover:not(:disabled) { background: #353a42; border-color: var(--sidebar-button-hover-border, #5a6470); }
       .build-button:disabled { opacity: 0.55; cursor: not-allowed; border-color: transparent; }
       .build-button.active { background: #3a4a5e; border-color: #6a8eb0; box-shadow: 0 0 0 1px #6a8eb0; }
       .build-button.in-progress { border-color: #6a8eb0; opacity: 0.85; }
+      /* Cut-corner state-color overrides: redirect hover/active/in-progress
+         tints onto ::before (the inner fill) so the outline ring stays
+         intact. The outer element keeps the outline color throughout. */
+      body.cut-corner-buttons .build-button:hover:not(:disabled) { background: var(--button-cut-border); }
+      body.cut-corner-buttons .build-button:hover:not(:disabled)::before { background: #353a42; }
+      body.cut-corner-buttons .build-button.active { background: #6a8eb0; box-shadow: none; }
+      body.cut-corner-buttons .build-button.active::before { background: #3a4a5e; }
+      body.cut-corner-buttons .build-button.in-progress { background: #6a8eb0; }
       /* Click feedback for spawn buttons — flash white, then fade to the
          hover colour so the animation can hand off seamlessly to :hover (no
          visible snap). If the cursor isn't on the button, the existing 0.1s

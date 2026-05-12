@@ -240,7 +240,7 @@ export const DEFAULT_OPTIONS: Options = {
   sidebarTitleColor: 0x8a9099,
   sidebarButtonHoverBorder: 0x5a6470,
   buttonsRounded: true,
-  buttonsCutCorners: false,
+  buttonsCutCorners: true,
   buttonCutSize: 8,
   buttonCutBorderColor: 0x5a6470,
   // Default font is New Rocker across the board — gives the UI a gothic
