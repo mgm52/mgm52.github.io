@@ -346,11 +346,11 @@
       .build-button-compact .build-name { margin-bottom: 0; }
       .build-cost-side { font-family: var(--font-mono); font-size: calc(13px * var(--font-mono-scale)); white-space: nowrap; font-variant-numeric: tabular-nums; }
       .build-separator { height: 1px; background: rgba(255,255,255,0.08); margin: 8px 4px; }
-      /* Power costs render blue until the requirement is met, then green —
-         mirroring the money cost's red→green flip but staying in the
-         power-colour palette while unmet. */
-      .build-power-cost { color: #8acfff; font-family: var(--font-mono); font-variant-numeric: tabular-nums; }
-      .build-power-cost.met { color: #6fbf73; }
+      /* Power costs render red until the requirement is met, then blue —
+         the blue matches the power production colour so a satisfied draw
+         reads as "wired up" rather than "missing". */
+      .build-power-cost { color: #d96b6b; font-family: var(--font-mono); font-variant-numeric: tabular-nums; }
+      .build-power-cost.met { color: #8acfff; }
       .build-req { color: #d96b6b; }
       .build-req.met { color: #6fbf73; }
       #placement-hint {
