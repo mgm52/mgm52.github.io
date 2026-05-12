@@ -55,11 +55,11 @@ console.log('Waiting for intro overlay to become visible…');
 await page.waitForSelector('#intro-overlay.visible', { timeout: 30_000 });
 console.log('Overlay visible — waiting for slide-up + turn-around to finish…');
 
-// Slide-up duration is 3000ms; then a 1200ms hold; then the turn-around
+// Slide-up duration is 6000ms; then a 1200ms hold; then the turn-around
 // runs through TURN_SEQUENCE.length-1 = 4 frames at 220ms each = ~880ms.
-// Total ≈ 5100ms before the first speak step kicks off.
-await page.waitForSelector('#intro-overlay.up', { timeout: 10_000 });
-await sleep(5200);
+// Total ≈ 8100ms before the first speak step kicks off.
+await page.waitForSelector('#intro-overlay.up', { timeout: 15_000 });
+await sleep(8200);
 
 // Walk the dialog. For each "speak" step the typing finishes when
 // #intro-speech gains `.done`. We then wait POST_LINE_HOLD_MS before

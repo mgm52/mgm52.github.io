@@ -441,7 +441,12 @@ async function main() {
   function frame(now: number) {
     const dt = now - last;
     last = now;
-    if (!paused) {
+    // Freeze game ticks while the intro is on-screen so state.now (and with
+    // it the spawn-hint / no-task timers in refreshUI) doesn't drift forward
+    // during the intro's preamble + dialog. Once the intro releases the
+    // hold, ticks resume from 0 and the hint gets its full 30s/90s grace.
+    const introActive = document.body.classList.contains('intro-hold');
+    if (!paused && !introActive) {
       acc += dt;
       if (acc > TICK_MS * 10) acc = TICK_MS * 10;
       while (acc >= TICK_MS) {
@@ -450,6 +455,10 @@ async function main() {
       }
       saveAcc += dt;
       if (saveAcc >= SAVE_INTERVAL_MS) flushSave();
+    } else {
+      // Drop any pending accumulator so the post-intro/unpause frame
+      // doesn't dump a burst of ticks into the world.
+      acc = 0;
     }
     // Update camera based on held pan keys
     let dx = 0, dy = 0;

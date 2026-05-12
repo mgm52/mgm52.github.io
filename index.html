@@ -737,16 +737,16 @@
          in-game render uses for orc_idle. */
       #intro-goblin {
         position: absolute;
-        bottom: -9vh; left: 50%;
+        bottom: -14vh; left: 50%;
         /* The 64-px sprite frames carry the goblin from y=4 to y=61 at the
            widest extent (rows 0..4, all idle columns). With element height
-           = 90vh and a -9vh bottom offset, the ear-tips land around 25vh
-           from the top and the feet sit ~5vh below the viewport bottom. */
+           = 90vh and a -14vh bottom offset, the ear-tips land around 30vh
+           from the top and the feet clip ~8vh below the viewport bottom. */
         --goblin-size: 90vh;
         --row: 0;
         width: var(--goblin-size); height: var(--goblin-size);
         transform: translate(-50%, 110%);
-        transition: transform 3000ms cubic-bezier(0.22, 1, 0.36, 1);
+        transition: transform 6000ms cubic-bezier(0.22, 1, 0.36, 1);
         background-image: url('assets/rigged_goblin_dancing_aligol3dart_orc_idle.png');
         background-repeat: no-repeat;
         /* Sheet is 8×8 frames of 64px. We size the rendered sheet to 8× the
@@ -775,20 +775,20 @@
         from { background-position-x: 0; }
         to   { background-position-x: calc(var(--goblin-size) * -8); }
       }
-      /* Speech text — yellow, large, near the goblin's head. The head sits
-         at ~25vh from the top (the sprite art occupies roughly the upper
-         third of its 64×64 frame, so the visible head is closer to ~30vh);
-         we float the speech above that, capped so very long lines don't
-         climb past the viewport top. */
+      /* Speech text — yellow, bottom-anchored so the line's bottom edge sits
+         a hair above the goblin's ear-tips (head top ≈ 30vh from screen top,
+         so bottom: 71vh keeps a ~1vh breathing room). Bottom anchoring means
+         multi-line lines grow UP rather than pushing into the goblin's face
+         as more characters type out. */
       #intro-speech {
         position: absolute;
-        left: 50%; top: 8vh;
+        left: 50%; bottom: 71vh;
         transform: translateX(-50%);
-        max-width: min(720px, 80vw);
+        max-width: min(640px, 78vw);
         text-align: center;
         color: #ffd96b;
         font-family: var(--font-display);
-        font-size: clamp(20px, 3.4vh, 36px);
+        font-size: clamp(16px, 2.6vh, 26px);
         letter-spacing: 0.05em;
         line-height: 1.25;
         text-shadow:
@@ -821,7 +821,10 @@
          viewport regardless of how the speech line wrapped. */
       #intro-buttons {
         position: absolute;
-        left: 50%; top: 22vh;
+        /* Anchor by bottom so the row tracks the speech text — the speech
+           is bottom-aligned 1vh above the goblin's head, so the buttons sit
+           just under that with a small gap. */
+        left: 50%; bottom: 64vh;
         transform: translateX(-50%);
         display: flex;
         gap: 18px;

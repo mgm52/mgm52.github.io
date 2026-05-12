@@ -36,7 +36,8 @@ const SCRIPT: IntroStep[] = [
 
 const TYPE_MS_PER_CHAR = 45;
 const MID_LINE_PAUSE_MS = 1500;
-const SLIDE_UP_MS = 3000;
+// Slow rise on the way in; quicker exit on the way out.
+const SLIDE_UP_MS = 6000;
 const SLIDE_DOWN_MS = 2200;
 const POST_LINE_HOLD_MS = 300;
 // Beat between landing at the top and starting to turn around. Gives the
