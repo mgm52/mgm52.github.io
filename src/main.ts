@@ -6,7 +6,7 @@ import {
 import { setupInput } from './input';
 import { runIntro } from './intro';
 import { getOptions, onOptionsChange } from './options';
-import { setupOptionsUI } from './options-ui';
+import { relockOptionsCog, setupOptionsUI } from './options-ui';
 import { centerCameraOn, clampCamera, createRender, render } from './render';
 import { appendLog, cellCenter, createInitialState, destroyBuilding, digDirection, getSpawnCapacity, pushDeathEffect, pushFloater, removeGoblin, type GameState } from './state';
 import { autoAssignAllIdle, spawnMinotaur, tick } from './sim';
@@ -90,6 +90,10 @@ function showTitleScreen(savedAt: number | null = null): Promise<'new' | 'resume
       if (resolved) return;
       playBtn.disabled = true; resumeBtn.disabled = true; eraseBtn.disabled = true;
       clearSave();
+      // The dev-cog unlock lives in its own localStorage key; clearSave only
+      // touches the save itself, so wipe the unlock here too — otherwise an
+      // old unlock would survive Erase Data.
+      relockOptionsCog();
       // 1400ms matches the .title-content opacity transition. Fade out, swap
       // to the no-save layout, fade back in. Spawn's listener was attached at
       // init so it stays live across the swap.

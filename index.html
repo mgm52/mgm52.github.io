@@ -842,7 +842,14 @@
         opacity: 1;
         pointer-events: auto;
       }
-      #intro-buttons .build-button { width: 130px; }
+      #intro-buttons .build-button {
+        width: 130px;
+        /* Soft drop shadow so the buttons lift off the dim canvas behind
+           them — a faint dark halo plus a tighter offset shadow for body. */
+        box-shadow:
+          0 6px 18px rgba(0, 0, 0, 0.55),
+          0 2px 6px rgba(0, 0, 0, 0.45);
+      }
       #intro-buttons .build-name {
         font-family: var(--font-display);
         font-size: 22px;
