@@ -804,7 +804,10 @@
       }
       #intro-overlay.speaking #intro-speech { opacity: 1; }
       /* Blinking caret at the end of the typing line — hides once the line
-         is fully typed (JS adds .done to #intro-speech). */
+         is fully typed (JS adds .done to #intro-speech). visibility (not
+         display) on the .done state so the caret's slot is still reserved
+         in the centred line — otherwise the text would jitter sideways the
+         instant the caret vanishes. */
       #intro-speech::after {
         content: "▍";
         display: inline-block;
@@ -813,7 +816,7 @@
         animation: intro-caret 0.9s steps(2, end) infinite;
         opacity: 0.8;
       }
-      #intro-speech.done::after { display: none; }
+      #intro-speech.done::after { visibility: hidden; }
       @keyframes intro-caret {
         0%, 49% { opacity: 0.8; }
         50%, 100% { opacity: 0; }
