@@ -214,7 +214,7 @@ export const DEFAULT_OPTIONS: Options = {
   goblinShadow: true,
   goblinOutline: false,
   goblinSpriteYOffset: -7,
-  waterGoblinColor: 0x2060ff,
+  waterGoblinColor: 0x7aa0ff,
   bloodColor: 0xffffff,
   // Minotaur defaults — independently tunable saturation / brightness /
   // size / Y-offset so the player can dial in the look.
