@@ -31,6 +31,11 @@ export const WATER_HINT_DELAY_SEC = 4;
 export const SPAWN_HINT_NO_SPAWN_SEC = 30;
 export const SPAWN_HINT_NO_TASK_SEC = 90;
 
+// Drag-select onboarding nudge. Once the player is past the first task, surface
+// a "drag to select many" hint if they still haven't done a multi-creature
+// drag-select after this many seconds of total play. Sticky once seen.
+export const DRAG_SELECT_HINT_DELAY_SEC = 300;
+
 export const GOBLIN = {
   speed: 110,
   radius: 12,

@@ -1,6 +1,7 @@
 import { playSound } from './audio';
 import {
-  AUTOSPAWN_TIERS, BUILDABLE_KINDS, BUILDING_DEFS, BuildingKind, GOBLIN, SPAWN_HINT_NO_SPAWN_SEC,
+  AUTOSPAWN_TIERS, BUILDABLE_KINDS, BUILDING_DEFS, BuildingKind, DRAG_SELECT_HINT_DELAY_SEC,
+  GOBLIN, SPAWN_HINT_NO_SPAWN_SEC,
   SPAWN_HINT_NO_TASK_SEC, SUMMON_UPGRADES, WATER_HINT_DELAY_SEC, digBloodCost, MINOTAUR, formatPower,
 } from './config';
 import {
@@ -758,6 +759,15 @@ export function refreshUI(state: GameState) {
   const noSpawnTrip = state.spawnsCompleted === 0 && state.now >= SPAWN_HINT_NO_SPAWN_SEC;
   const noTaskTrip = !earn100Done && state.now >= SPAWN_HINT_NO_TASK_SEC;
   spawnHint.classList.toggle('visible', noSpawnTrip || noTaskTrip);
+
+  // Drag-select hint — once past the first task, surface after DRAG_SELECT_HINT_DELAY_SEC
+  // of play if the player still hasn't done a 2+ multi-select. Sticky-hidden
+  // forever after the first successful multi-drag.
+  const dragSelectHint = document.getElementById('drag-select-hint')!;
+  const dragSelectTrip = earn100Done
+    && !state.multiSelectSeen
+    && state.now >= DRAG_SELECT_HINT_DELAY_SEC;
+  dragSelectHint.classList.toggle('visible', dragSelectTrip);
 
   refreshInfoPanel(state);
 }

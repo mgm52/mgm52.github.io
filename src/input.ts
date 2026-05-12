@@ -193,19 +193,25 @@ export function setupInput(
       const y2 = Math.max(input.dragStart.y, local.y);
       if (!additive) clearSelection(state);
       let any = false;
+      let count = 0;
       for (const g of state.goblins.values()) {
         if (g.pos.x >= x1 && g.pos.x <= x2 && g.pos.y >= y1 && g.pos.y <= y2) {
           g.selected = true;
           any = true;
+          count++;
         }
       }
       for (const m of state.minotaurs.values()) {
         if (m.pos.x >= x1 && m.pos.x <= x2 && m.pos.y >= y1 && m.pos.y <= y2) {
           m.selected = true;
           any = true;
+          count++;
         }
       }
       if (any) playSound('select', 0.33);
+      // Onboarding gate: any drag that grabbed 2+ creatures counts as the
+      // player "discovering" multi-select, hiding the drag-select hint forever.
+      if (count >= 2) state.multiSelectSeen = true;
     }
     input.selectionGfx.clear();
   };
@@ -274,6 +280,26 @@ function playGruntBurst(count: number) {
   }
 }
 
+// New player command — give the minotaur a fresh stuck-detection window so a
+// stale streak from the previous order doesn't immediately bail this one out.
+function resetMinotaurStuck(m: Minotaur, now: number) {
+  m.stuckSampleCell = m.cell;
+  m.stuckSampleAt = now;
+  m.stuckStreak = 0;
+}
+
+// Minotaur version of the grunt burst — same sample but at a much lower
+// playback rate so it reads as a deeper, beastlier bellow than the goblin grunt.
+function playMinotaurGruntBurst(count: number) {
+  for (let i = 0; i < count; i++) {
+    const delay = i * 140;
+    setTimeout(() => {
+      const rate = 0.28 + Math.random() * 0.16;
+      playSound('command_3', 1, rate);
+    }, delay);
+  }
+}
+
 function clearSelection(state: GameState) {
   for (const g of state.goblins.values()) g.selected = false;
   for (const m of state.minotaurs.values()) m.selected = false;
@@ -333,6 +359,7 @@ function handleRightClick(state: GameState, x: number, y: number) {
   const selectedMinotaurs = [...state.minotaurs.values()].filter((m) => m.selected);
   if (selectedGoblins.length === 0 && selectedMinotaurs.length === 0) return;
   if (selectedGoblins.length > 0) playGruntBurst(selectedGoblins.length);
+  if (selectedMinotaurs.length > 0) playMinotaurGruntBurst(selectedMinotaurs.length);
 
   const targetGoblin = goblinAt(state, x, y);
   const targetMinotaur = targetGoblin ? null : minotaurAt(state, x, y);
@@ -383,6 +410,7 @@ function handleRightClick(state: GameState, x: number, y: number) {
       for (const m of attackers) {
         m.target = null;
         m.state = { kind: 'going_to_kill_minotaur', targetId: targetMinotaur.id };
+        resetMinotaurStuck(m, state.now);
       }
       if (attackers.length > 0) {
         appendLog(state, `${attackers.length} minotaur(s) ordered to gore Minotaur #${targetMinotaur.id}.`);
@@ -391,6 +419,7 @@ function handleRightClick(state: GameState, x: number, y: number) {
       for (const m of selectedMinotaurs) {
         m.target = null;
         m.state = { kind: 'going_to_destroy', buildingId: targetBuilding.id };
+        resetMinotaurStuck(m, state.now);
       }
       appendLog(state, `${selectedMinotaurs.length} minotaur(s) ordered to smash ${defOf(targetBuilding).name} #${targetBuilding.id}.`);
     } else {
@@ -398,6 +427,7 @@ function handleRightClick(state: GameState, x: number, y: number) {
       for (const m of selectedMinotaurs) {
         m.target = null;
         m.state = { kind: 'moving_to', goal: { cx: targetCell.cx, cy: targetCell.cy } };
+        resetMinotaurStuck(m, state.now);
       }
       appendLog(state, `${selectedMinotaurs.length} minotaur(s) on the move.`);
     }
