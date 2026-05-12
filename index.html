@@ -718,15 +718,18 @@
         transition: opacity 600ms ease;
       }
       #intro-overlay.visible { opacity: 1; }
-      /* Full-screen click target that advances dialog. Activated only while a
-         line of speech is being shown — see #intro-overlay.click-armed. Uses
-         the glove cursor so the player knows clicking is meaningful. */
+      /* Full-screen click target. While the overlay is .visible the wall
+         always absorbs clicks (so the player can't accidentally interact
+         with the canvas behind it), but it only shows the glove cursor and
+         fires the "advance" listener when intro.ts arms it via .click-armed
+         (i.e. once the current line has finished typing). The YES/NO
+         buttons sit at z-index 11 so they still receive clicks through. */
       #intro-clickwall {
         position: absolute; inset: 0;
         pointer-events: none;
       }
+      #intro-overlay.visible #intro-clickwall { pointer-events: auto; }
       #intro-overlay.click-armed #intro-clickwall {
-        pointer-events: auto;
         cursor: url('assets/GloveCursor-24.png') 9 1, pointer;
       }
       /* Goblin sprite — anchored to bottom-center, height = 75vh so the head

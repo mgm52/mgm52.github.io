@@ -28,7 +28,7 @@ const SCRIPT: IntroStep[] = [
     { label: 'NO',  nextLine: "that's good because i have no idea" },
   ]},
   { kind: 'pause', ms: 3000 },
-  { kind: 'speak', text: "i've been clicking around for years trying to figure out how to play but i don't know how to play i don't have the executive mindset for it" },
+  { kind: 'speak', text: "i've been clicking around for ages but i don't know how to play i've been trying to figure it out but i think i just don't have the executive mindset for it" },
   { kind: 'pause', ms: 3000 },
   { kind: 'speak', text: 'goodbye' },
   { kind: 'down' },
@@ -39,7 +39,6 @@ const MID_LINE_PAUSE_MS = 1500;
 // Slow rise on the way in; quicker exit on the way out.
 const SLIDE_UP_MS = 6000;
 const SLIDE_DOWN_MS = 2200;
-const POST_LINE_HOLD_MS = 300;
 // Beat between landing at the top and starting to turn around. Gives the
 // rise its own moment before the goblin pivots to address the player.
 const POST_SLIDE_BEAT_MS = 1200;
@@ -93,7 +92,7 @@ function splitOnPauseMarkers(text: string): string[] {
     .filter((s) => s.length > 0);
 }
 
-async function typeLine(speechEl: HTMLElement, text: string, skipRef: { skip: boolean }) {
+async function typeLine(speechEl: HTMLElement, text: string) {
   speechEl.classList.remove('done');
   const segments = splitOnPauseMarkers(text);
   let rendered = '';
@@ -101,18 +100,10 @@ async function typeLine(speechEl: HTMLElement, text: string, skipRef: { skip: bo
     if (s > 0) {
       rendered += ' ';
       speechEl.textContent = rendered;
-      const pauseUntil = performance.now() + MID_LINE_PAUSE_MS;
-      while (performance.now() < pauseUntil && !skipRef.skip) await sleep(40);
+      await sleep(MID_LINE_PAUSE_MS);
     }
     const seg = segments[s];
     for (let i = 0; i < seg.length; i++) {
-      if (skipRef.skip) {
-        const tail = segments.slice(s + 1).join(' ');
-        speechEl.textContent = rendered + seg + (tail ? ' ' + tail : '');
-        rendered = speechEl.textContent;
-        speechEl.classList.add('done');
-        return;
-      }
       rendered += seg[i];
       speechEl.textContent = rendered;
       await sleep(TYPE_MS_PER_CHAR);
@@ -129,13 +120,14 @@ async function runSpeak(
 ) {
   speechEl.textContent = '';
   overlay.classList.add('speaking');
-  const skipRef = { skip: false };
+  // No click-arming while the line is typing: clicks on the wall are
+  // absorbed (so they don't leak through to the canvas) but neither skip
+  // the typing nor advance the dialog. The cursor stays as the default
+  // arrow until the line completes — only THEN does click-armed flip on,
+  // surfacing the glove cursor and arming the wall's "advance" listener
+  // in the same beat so the prompt is never live without a live target.
+  await typeLine(speechEl, text);
   overlay.classList.add('click-armed');
-  const onSkip = () => { skipRef.skip = true; };
-  clickWall.addEventListener('click', onSkip);
-  await typeLine(speechEl, text, skipRef);
-  clickWall.removeEventListener('click', onSkip);
-  await sleep(POST_LINE_HOLD_MS);
   await waitForClick(clickWall);
   playSound('click', 0.6, 0.9);
   overlay.classList.remove('click-armed');
