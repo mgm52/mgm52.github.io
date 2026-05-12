@@ -704,6 +704,166 @@
         text-align: left;
         margin-top: 4px;
       }
+
+      /* ───────── Intro goblin sequence ───────── */
+      /* Sits above the game canvas (z-index 10) but below options panels (50)
+         so the cog and pause UI keep working if the player digs them out.
+         Pointer-events: none by default — only the speech-click hitbox and
+         YES button capture clicks. */
+      #intro-overlay {
+        position: absolute; inset: 0;
+        pointer-events: none;
+        z-index: 10;
+        opacity: 0;
+        transition: opacity 600ms ease;
+      }
+      #intro-overlay.visible { opacity: 1; }
+      /* Full-screen click target that advances dialog. Activated only while a
+         line of speech is being shown — see #intro-overlay.click-armed. Uses
+         the glove cursor so the player knows clicking is meaningful. */
+      #intro-clickwall {
+        position: absolute; inset: 0;
+        pointer-events: none;
+      }
+      #intro-overlay.click-armed #intro-clickwall {
+        pointer-events: auto;
+        cursor: url('assets/GloveCursor-24.png') 9 1, pointer;
+      }
+      /* Goblin sprite — anchored to bottom-center, height = 75vh so the head
+         reaches ~25% from the top. Starts off-screen (translateY 105%); JS
+         adds .up to slide them in, .down to slide back out. The PNG sheet is
+         8 cols × 8 rows of 64px frames; we show row 0 (compass N, facing the
+         camera) and step through its 8 columns at the same 5fps cadence the
+         in-game render uses for orc_idle. */
+      #intro-goblin {
+        position: absolute;
+        bottom: -14vh; left: 50%;
+        /* The 64-px sprite frames carry the goblin from y=4 to y=61 at the
+           widest extent (rows 0..4, all idle columns). With element height
+           = 90vh and a -14vh bottom offset, the ear-tips land around 30vh
+           from the top and the feet clip ~8vh below the viewport bottom. */
+        --goblin-size: 90vh;
+        --row: 0;
+        width: var(--goblin-size); height: var(--goblin-size);
+        transform: translate(-50%, 110%);
+        transition: transform 6000ms cubic-bezier(0.22, 1, 0.36, 1);
+        background-image: url('assets/rigged_goblin_dancing_aligol3dart_orc_idle.png');
+        background-repeat: no-repeat;
+        /* Sheet is 8×8 frames of 64px. We size the rendered sheet to 8× the
+           goblin height so each frame is exactly one element-size square.
+           Pixel values keep background-position math sane (percentage values
+           behave non-linearly when the image is larger than the container). */
+        background-size: calc(var(--goblin-size) * 8) calc(var(--goblin-size) * 8);
+        /* The idle animation only writes background-position-x; -y stays
+           pinned to whatever --row is set to, so JS can swap the facing
+           direction independently of the column-stepping animation. */
+        background-position-x: 0;
+        background-position-y: calc(var(--goblin-size) * var(--row) * -1);
+        image-rendering: pixelated;
+        animation: intro-goblin-idle 1.6s steps(8) infinite;
+        filter: drop-shadow(0 8px 24px rgba(0, 0, 0, 0.6));
+      }
+      #intro-overlay.up #intro-goblin { transform: translate(-50%, 0); }
+      #intro-overlay.down #intro-goblin {
+        transform: translate(-50%, 110%);
+        transition: transform 2200ms cubic-bezier(0.55, 0, 0.78, 0.36);
+      }
+      /* Step through the 8 columns of the current row. The row is set via
+         the --row custom property (background-position-y, above) — JS bumps
+         it during the turn-around animation. */
+      @keyframes intro-goblin-idle {
+        from { background-position-x: 0; }
+        to   { background-position-x: calc(var(--goblin-size) * -8); }
+      }
+      /* Speech text — yellow, bottom-anchored so the line's bottom edge sits
+         a hair above the goblin's ear-tips (head top ≈ 30vh from screen top,
+         so bottom: 71vh keeps a ~1vh breathing room). Bottom anchoring means
+         multi-line lines grow UP rather than pushing into the goblin's face
+         as more characters type out. */
+      #intro-speech {
+        position: absolute;
+        left: 50%; bottom: 71vh;
+        transform: translateX(-50%);
+        max-width: min(640px, 78vw);
+        text-align: center;
+        color: #ffd96b;
+        font-family: var(--font-display);
+        font-size: clamp(16px, 2.6vh, 26px);
+        letter-spacing: 0.05em;
+        line-height: 1.25;
+        text-shadow:
+          0 0 10px rgba(0, 0, 0, 0.95),
+          0 2px 6px rgba(0, 0, 0, 0.85),
+          0 0 22px rgba(0, 0, 0, 0.7);
+        opacity: 0;
+        transition: opacity 200ms ease;
+        pointer-events: none;
+      }
+      #intro-overlay.speaking #intro-speech { opacity: 1; }
+      /* Blinking caret at the end of the typing line — hides once the line
+         is fully typed (JS adds .done to #intro-speech). */
+      #intro-speech::after {
+        content: "▍";
+        display: inline-block;
+        margin-left: 4px;
+        color: #ffd96b;
+        animation: intro-caret 0.9s steps(2, end) infinite;
+        opacity: 0.8;
+      }
+      #intro-speech.done::after { display: none; }
+      @keyframes intro-caret {
+        0%, 49% { opacity: 0.8; }
+        50%, 100% { opacity: 0; }
+      }
+      /* YES / NO buttons — appear for choice steps right under the speech
+         text so the player doesn't have to glance away from the goblin. The
+         container is positioned absolutely so the row stays centred in the
+         viewport regardless of how the speech line wrapped. */
+      #intro-buttons {
+        position: absolute;
+        /* Anchor by bottom so the row tracks the speech text — the speech
+           is bottom-aligned 1vh above the goblin's head, so the buttons sit
+           just under that with a small gap. */
+        left: 50%; bottom: 64vh;
+        transform: translateX(-50%);
+        display: flex;
+        gap: 18px;
+        opacity: 0;
+        pointer-events: none;
+        transition: opacity 400ms ease;
+        z-index: 11;
+      }
+      #intro-overlay.show-buttons #intro-buttons {
+        opacity: 1;
+        pointer-events: auto;
+      }
+      #intro-buttons .build-button { width: 130px; }
+      #intro-buttons .build-name {
+        font-family: var(--font-display);
+        font-size: 22px;
+        letter-spacing: 0.2em;
+        text-align: center;
+      }
+      /* Each button can be hidden individually so a step with only one
+         choice (currently unused, but cheap to support) renders cleanly. */
+      #intro-buttons .build-button[hidden] { display: none; }
+      /* Panel-summon and task-text start hidden when the intro is going to
+         play (main.ts opts in via .intro-hold on body before the intro fires).
+         Both fade in once the intro releases the hold. The task-text already
+         has its own .revealed gate, so we only need to keep panel-summon in
+         sync. */
+      body.intro-hold #panel-summon {
+        opacity: 0;
+        pointer-events: none;
+      }
+      #panel-summon {
+        transition: opacity 1200ms ease;
+      }
+      /* The "spawn goblins; command into violence" onboarding hint fires off
+         a 30-second game-time timer — it would otherwise pop up mid-intro and
+         steal focus from the goblin's lines. The hint reappears naturally
+         after the intro releases the hold. */
+      body.intro-hold #spawn-hint { display: none !important; }
     </style>
   </head>
   <body>
@@ -763,6 +923,23 @@
           <div class="pause-title">PAUSED</div>
           <div class="pause-saved" id="pause-saved">Game saved</div>
           <div class="pause-hint">click, press P or Esc to resume</div>
+        </div>
+        <div id="intro-overlay">
+          <div id="intro-goblin"></div>
+          <div id="intro-speech"></div>
+          <div id="intro-buttons">
+            <button id="intro-yes" class="build-button" type="button">
+              <div class="build-content">
+                <div class="build-name">YES</div>
+              </div>
+            </button>
+            <button id="intro-no" class="build-button" type="button">
+              <div class="build-content">
+                <div class="build-name">NO</div>
+              </div>
+            </button>
+          </div>
+          <div id="intro-clickwall"></div>
         </div>
         <div id="info-panel">
           <div class="info-portrait" id="info-portrait"></div>
