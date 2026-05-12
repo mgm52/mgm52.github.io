@@ -346,9 +346,11 @@
       .build-button-compact .build-name { margin-bottom: 0; }
       .build-cost-side { font-family: var(--font-mono); font-size: calc(13px * var(--font-mono-scale)); white-space: nowrap; font-variant-numeric: tabular-nums; }
       .build-separator { height: 1px; background: rgba(255,255,255,0.08); margin: 8px 4px; }
-      /* Power costs always render in the same blue as power production —
-         we don't flip them red even when the player can't afford. */
+      /* Power costs render blue until the requirement is met, then green —
+         mirroring the money cost's red→green flip but staying in the
+         power-colour palette while unmet. */
       .build-power-cost { color: #8acfff; font-family: var(--font-mono); font-variant-numeric: tabular-nums; }
+      .build-power-cost.met { color: #6fbf73; }
       .build-req { color: #d96b6b; }
       .build-req.met { color: #6fbf73; }
       #placement-hint {
@@ -504,9 +506,11 @@
       /* ───────── Options cogs + panels ───────── */
       /* Two cogs: public (always visible, master/music sliders + flavour) and
          admin (full options, hidden until Dragon Beacon unlock in prod). The
-         admin cog sits to the left of the public one when both are shown. */
+         admin cog sits to the left of the public one when both are shown.
+         Pause button sits to the left of both. */
       #options-cog,
-      #options-cog-public {
+      #options-cog-public,
+      #pause-btn {
         position: absolute;
         bottom: 10px;
         width: 26px; height: 26px;
@@ -524,8 +528,47 @@
       }
       #options-cog-public { right: 10px; }
       #options-cog        { right: 44px; }
+      #pause-btn          { right: 78px; z-index: 70; }
       #options-cog:hover,
       #options-cog-public:hover { background: rgba(40, 48, 60, 0.9); color: #fff; transform: rotate(15deg); }
+      #pause-btn:hover { background: rgba(40, 48, 60, 0.9); color: #fff; }
+      #pause-btn.paused { color: #ffd96b; border-color: #ffd96b; }
+      /* Centred overlay shown while the game is paused. Click the overlay,
+         press P or Esc to resume. The "Game saved" line fades after 2s but
+         the PAUSED title stays until the player resumes. */
+      #pause-overlay {
+        position: absolute; inset: 0;
+        display: none;
+        align-items: center; justify-content: center;
+        flex-direction: column;
+        background: rgba(0, 0, 0, 0.55);
+        z-index: 60;
+        pointer-events: auto;
+        cursor: pointer;
+      }
+      #pause-overlay.visible { display: flex; }
+      #pause-overlay .pause-title {
+        font-family: var(--font-display);
+        font-size: calc(48px * var(--font-display-scale));
+        letter-spacing: 0.2em;
+        color: #fff;
+        margin-bottom: 12px;
+      }
+      #pause-overlay .pause-saved {
+        font-family: var(--font-body);
+        font-size: calc(16px * var(--font-body-scale));
+        color: #6fbf73;
+        opacity: 0;
+        transition: opacity 400ms ease;
+      }
+      #pause-overlay .pause-saved.shown { opacity: 1; }
+      #pause-overlay .pause-hint {
+        font-family: var(--font-body);
+        font-size: calc(12px * var(--font-body-scale));
+        color: #8a9099;
+        margin-top: 18px;
+        letter-spacing: 0.08em;
+      }
       #options-panel,
       #options-panel-public {
         position: absolute;
@@ -715,6 +758,12 @@
         <div id="pan-hint">↑ ↓ ← → / WASD</div>
         <!-- Onboarding nudge — fades in via .visible (see refreshUI). -->
         <div id="spawn-hint">Hint: spawn goblins; command into violence</div>
+        <button id="pause-btn" type="button" aria-label="Pause">⏸</button>
+        <div id="pause-overlay">
+          <div class="pause-title">PAUSED</div>
+          <div class="pause-saved" id="pause-saved">Game saved</div>
+          <div class="pause-hint">click, press P or Esc to resume</div>
+        </div>
         <div id="info-panel">
           <div class="info-portrait" id="info-portrait"></div>
           <div class="info-details">

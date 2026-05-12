@@ -159,6 +159,11 @@ export type Options = {
   goblinShadow: boolean;
   goblinOutline: boolean;
   goblinSpriteYOffset: number;   // pixels to nudge the sprite vertically inside its cell
+  // Tint applied to a goblin while it's hauling water back to a Datacentre
+  // (state.kind === 'fetching_water', phase === 'to_dc').
+  waterGoblinColor: number;
+  // Tint applied to the blood-explosion GIF when a goblin/minotaur dies.
+  bloodColor: number;
   // Minotaur sprites
   minotaurSaturation: number;
   minotaurBrightness: number;
@@ -209,6 +214,8 @@ export const DEFAULT_OPTIONS: Options = {
   goblinShadow: true,
   goblinOutline: false,
   goblinSpriteYOffset: -7,
+  waterGoblinColor: 0x2060ff,
+  bloodColor: 0xffffff,
   // Minotaur defaults — independently tunable saturation / brightness /
   // size / Y-offset so the player can dial in the look.
   minotaurSaturation: 1.8,
