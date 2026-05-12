@@ -473,8 +473,13 @@ function handleRightClick(state: GameState, x: number, y: number) {
 
 function releaseFromBuilding(state: GameState, g: Goblin) {
   const s = g.state;
+  // Every state that carries a buildingId must scrub from that building's
+  // assignedGoblins. Missing fetching_water here was the source of the
+  // "duplicate IDs on Hypercentre" save bloat — a water carrier reassigned to
+  // a new role left a permanent reference behind on its old DC.
   if (s.kind === 'building' || s.kind === 'maintaining' ||
-      s.kind === 'going_to_build' || s.kind === 'going_to_maintain') {
+      s.kind === 'going_to_build' || s.kind === 'going_to_maintain' ||
+      s.kind === 'fetching_water') {
     const b = state.buildings.get(s.buildingId);
     if (b) {
       const i = b.assignedGoblins.indexOf(g.id);

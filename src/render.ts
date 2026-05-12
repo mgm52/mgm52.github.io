@@ -252,6 +252,15 @@ export async function createRender(parent: HTMLElement, state: GameState): Promi
   const waterLayer = new Container();
   const uiLayer = new Container();
 
+  // Per-child culling on the high-cardinality dynamic layers. Pixi v8 skips
+  // children whose getBounds() falls outside the projected view, which
+  // matters once a session crosses ~hundreds of goblins / floaters.
+  // Building footprints don't move and there are few of them, so it isn't
+  // worth the bounds check there.
+  goblinLayer.cullableChildren = true;
+  minotaurLayer.cullableChildren = true;
+  // floatersLayer + effectsLayer are declared below; flag them at creation.
+
   // Playable-area background, walls, and grid — drawn lazily from current options.
   const playBg = new Graphics();
   const wallGfx = new Graphics();
@@ -261,6 +270,8 @@ export async function createRender(parent: HTMLElement, state: GameState): Promi
 
   const floatersLayer = new Container();
   const effectsLayer = new Container();
+  floatersLayer.cullableChildren = true;
+  effectsLayer.cullableChildren = true;
 
   worldLayer.addChild(playBg);
   worldLayer.addChild(wallGfx);
@@ -718,6 +729,7 @@ function drawDeathEffects(ctx: RenderContext, state: GameState) {
       const target = 40;
       const sc = target / Math.max(frames.textures[0].width || target, 1);
       sprite.scale.set(sc);
+      sprite.cullable = true;
       ctx.effectsLayer.addChild(sprite);
       ctx.deathViews.set(e.id, sprite);
     }
@@ -763,6 +775,7 @@ function drawFloaters(ctx: RenderContext, state: GameState) {
         },
       });
       t.anchor.set(0.5, 1);
+      t.cullable = true;
       ctx.floatersLayer.addChild(t);
       ctx.floaterViews.set(f.id, t);
     }
@@ -879,6 +892,10 @@ export function render(state: GameState, ctx: RenderContext) {
     let v = ctx.goblinViews.get(g.id);
     if (!v) {
       v = makeGoblinView(g);
+      // Per-child cullable flag is needed alongside the parent layer's
+      // cullableChildren; without it Pixi v8 won't run the bounds check
+      // and the goblin renders even when off-camera.
+      v.container.cullable = true;
       ctx.goblinLayer.addChild(v.container);
       ctx.goblinViews.set(g.id, v);
     }
@@ -950,6 +967,7 @@ export function render(state: GameState, ctx: RenderContext) {
     let v = ctx.minotaurViews.get(t.id);
     if (!v) {
       v = makeMinotaurView();
+      v.container.cullable = true;
       ctx.minotaurLayer.addChild(v.container);
       ctx.minotaurViews.set(t.id, v);
     }

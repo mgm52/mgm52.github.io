@@ -560,6 +560,31 @@ export function removeGoblin(state: GameState, goblinId: number) {
   state.goblins.delete(goblinId);
 }
 
+// Walks every building's assignedGoblins and removes duplicate entries plus
+// any ID that doesn't currently reference this building via its goblin state.
+// Run on save load to repair pre-fix bloat, and cheap to call defensively
+// after batch operations that touch assignments.
+export function pruneAllAssignedGoblins(state: GameState): void {
+  for (const b of state.buildings.values()) {
+    const seen = new Set<number>();
+    const kept: number[] = [];
+    for (const gid of b.assignedGoblins) {
+      if (seen.has(gid)) continue;
+      const g = state.goblins.get(gid);
+      if (!g) continue;
+      const s = g.state;
+      const refsThisBuilding =
+        (s.kind === 'building' || s.kind === 'maintaining' ||
+         s.kind === 'going_to_build' || s.kind === 'going_to_maintain' ||
+         s.kind === 'fetching_water') && s.buildingId === b.id;
+      if (!refsThisBuilding) continue;
+      seen.add(gid);
+      kept.push(gid);
+    }
+    b.assignedGoblins = kept;
+  }
+}
+
 export function destroyBuilding(state: GameState, buildingId: number) {
   const b = state.buildings.get(buildingId);
   if (!b) return;
