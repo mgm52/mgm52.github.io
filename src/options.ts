@@ -190,6 +190,7 @@ export type Options = {
   buttonsRounded: boolean;   // build/ritual button corner rounding
   buttonsCutCorners: boolean; // clip-path octagon shape on build/ritual buttons
   buttonCutSize: number;     // cut size in px when buttonsCutCorners is on
+  buttonCutBorderColor: number; // outline drawn around the octagon (drop-shadow)
   // Fonts (per-category family + size scale)
   fonts: Record<FontKey, FontConfig>;
   // Multiplier applied to every font's per-key scale. Lets the player blow
@@ -241,6 +242,7 @@ export const DEFAULT_OPTIONS: Options = {
   buttonsRounded: true,
   buttonsCutCorners: false,
   buttonCutSize: 8,
+  buttonCutBorderColor: 0x5a6470,
   // Default font is New Rocker across the board — gives the UI a gothic
   // medieval-rocker tone that matches the goblin/minotaur theme.
   fonts: {

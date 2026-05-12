@@ -374,6 +374,7 @@ function applyOptions(ctx: RenderContext, o: Options) {
   document.body.classList.toggle('no-rounded-buttons', !o.buttonsRounded);
   document.body.classList.toggle('cut-corner-buttons', o.buttonsCutCorners);
   document.documentElement.style.setProperty('--button-cut', `${o.buttonCutSize}px`);
+  document.documentElement.style.setProperty('--button-cut-border', cssHex(o.buttonCutBorderColor));
 }
 
 function applySidebarColors(o: Options) {

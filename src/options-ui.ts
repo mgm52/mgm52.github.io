@@ -183,6 +183,7 @@ function rebuildPanel(panel: HTMLElement, callbacks: OptionsUICallbacks, refresh
     toggle('Rounded buttons', o.buttonsRounded,    (v) => setOption('buttonsRounded', v)),
     toggle('Cut corner buttons', o.buttonsCutCorners, (v) => setOption('buttonsCutCorners', v)),
     slider('Corner cut size', o.buttonCutSize, 0, 24, 1, (v) => setOption('buttonCutSize', v)),
+    color('Cut corner border', o.buttonCutBorderColor, (v) => setOption('buttonCutBorderColor', v)),
   ]));
 
   panel.appendChild(section('Audio', [
