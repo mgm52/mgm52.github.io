@@ -372,6 +372,8 @@ function applyOptions(ctx: RenderContext, o: Options) {
   // Build/ritual button corner rounding — toggle via body class so the CSS
   // can override .build-button border-radius.
   document.body.classList.toggle('no-rounded-buttons', !o.buttonsRounded);
+  document.body.classList.toggle('cut-corner-buttons', o.buttonsCutCorners);
+  document.documentElement.style.setProperty('--button-cut', `${o.buttonCutSize}px`);
 }
 
 function applySidebarColors(o: Options) {

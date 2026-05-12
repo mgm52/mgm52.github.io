@@ -249,6 +249,26 @@
         font-family: var(--font-body); transition: background 0.1s, border-color 0.1s;
       }
       body.no-rounded-buttons .build-button { border-radius: 0; }
+      /* Cut-corner buttons: clip to an octagon. --button-cut controls how
+         many pixels each corner is shaved off (set from render.ts). The
+         clip also hides the rectangular border, so we draw the slanted
+         edges by overlaying a same-shape, slightly-smaller mask via a
+         background gradient is unnecessary — instead we just rely on the
+         element's existing background colour since the border vanishes
+         under clip-path anyway. */
+      body.cut-corner-buttons .build-button {
+        border-radius: 0;
+        clip-path: polygon(
+          var(--button-cut) 0,
+          calc(100% - var(--button-cut)) 0,
+          100% var(--button-cut),
+          100% calc(100% - var(--button-cut)),
+          calc(100% - var(--button-cut)) 100%,
+          var(--button-cut) 100%,
+          0 calc(100% - var(--button-cut)),
+          0 var(--button-cut)
+        );
+      }
       .build-button:hover:not(:disabled) { background: #353a42; border-color: var(--sidebar-button-hover-border, #5a6470); }
       .build-button:disabled { opacity: 0.55; cursor: not-allowed; border-color: transparent; }
       .build-button.active { background: #3a4a5e; border-color: #6a8eb0; box-shadow: 0 0 0 1px #6a8eb0; }
@@ -885,6 +905,20 @@
       if (location.hostname === 'localhost' || location.hostname.startsWith('127.')) {
         document.documentElement.classList.add('dev');
       }
+      // When a new deploy ships, any browser still on the previous index.html
+      // points at hashed chunks (e.g. pixi.js's dynamically-imported
+      // WebGLRenderer-*.js) that no longer exist. Vite fires vite:preloadError
+      // in that case — auto-reload once so the user fetches the fresh
+      // index.html instead of seeing a hard error.
+      window.addEventListener('vite:preloadError', function (e) {
+        if (sessionStorage.getItem('gs.preloadReload') === '1') return;
+        sessionStorage.setItem('gs.preloadReload', '1');
+        e.preventDefault();
+        location.reload();
+      });
+      window.addEventListener('load', function () {
+        sessionStorage.removeItem('gs.preloadReload');
+      });
     </script>
     <div id="title-screen">
       <div class="title-content">
