@@ -222,6 +222,13 @@ function rebuildPanel(panel: HTMLElement, callbacks: OptionsUICallbacks, refresh
     refreshPublic?.();
   });
   panel.appendChild(reset);
+
+  // Reminder of the unlock gesture in case the player hides the cog (via
+  // Erase Data) and forgets how to get it back.
+  const unlockHint = document.createElement('div');
+  unlockHint.className = 'options-flavor';
+  unlockHint.textContent = 'shift-click the R in Resources to re-unlock';
+  panel.appendChild(unlockHint);
 }
 
 function fontsSection(o: Options): HTMLElement {
