@@ -74,7 +74,7 @@ export const MINOTAUR = {
 export const SUMMON_UPGRADES = {
   autoAssign: { bloodCost: 13 },
   autoSpawn: { bloodCost: 13, intervalSeconds: 3 },
-  autoWater: { bloodCost: 64 },
+  autoWater: { bloodCost: 128 },
   goldgoblins: { bloodCost: 26 },
   goldgoblinsX10: { bloodCost: 128, multiplier: 10 },
 };
