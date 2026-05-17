@@ -177,6 +177,9 @@ export type GameState = {
   // Ritual upgrades — sticky once bought, apply game-wide.
   autoAssignEnabled: boolean;
   autoSpawnEnabled: boolean;
+  // Extends Autotask: when on, idle goblins are also auto-routed onto
+  // watering duty for thirsty buildings. Requires autoAssignEnabled.
+  autoWaterEnabled: boolean;
   goldgoblinsEnabled: boolean;
   // Multiplier applied to a gold goblin's GOLD_KILL_REWARD.money on death.
   // 1 by default; 10 once Goldgoblins x10 is purchased.
@@ -268,10 +271,17 @@ export function isCellInBuilding(b: Building, cx: number, cy: number): boolean {
 }
 
 export function buildingAtCell(state: GameState, cx: number, cy: number): Building | null {
+  // Goblin Holes sit at "ground level" — like the original hole, other
+  // buildings can be placed on top of them. When a cell is shared, return the
+  // building stacked above so selection / right-click / blocking target it,
+  // and only fall back to the hole when nothing else covers the cell.
+  let hole: Building | null = null;
   for (const b of state.buildings.values()) {
-    if (isCellInBuilding(b, cx, cy)) return b;
+    if (!isCellInBuilding(b, cx, cy)) continue;
+    if (b.kind === 'goblin_hole') hole = b;
+    else return b;
   }
-  return null;
+  return hole;
 }
 
 export function isCellBlocked(
@@ -446,6 +456,7 @@ export function createInitialState(): GameState {
     },
     autoAssignEnabled: false,
     autoSpawnEnabled: false,
+    autoWaterEnabled: false,
     goldgoblinsEnabled: false,
     goldgoblinMultiplier: 1,
     autoSpawnTimer: 0,

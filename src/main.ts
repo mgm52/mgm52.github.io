@@ -275,6 +275,17 @@ async function main() {
       appendLog(state, 'Autotask unlocked — new goblins route themselves to needy buildings.');
       autoAssignAllIdle(state);
     },
+    onBuyAutoWater: () => {
+      if (state.autoWaterEnabled) return;
+      if (!state.autoAssignEnabled) { playSound('error'); return; }
+      const cost = SUMMON_UPGRADES.autoWater.bloodCost;
+      if (state.blood < cost) { playSound('error'); return; }
+      state.blood -= cost;
+      state.autoWaterEnabled = true;
+      playSound('ritual');
+      appendLog(state, 'Autowater unlocked — idle goblins route themselves onto watering duty.');
+      autoAssignAllIdle(state);
+    },
     onBuyAutoSpawn: () => {
       // Buy the next tier in AUTOSPAWN_TIERS. Each click promotes the
       // multiplier 1 → 2 → 4 → 8 → 16 → 32, replacing the previous button.

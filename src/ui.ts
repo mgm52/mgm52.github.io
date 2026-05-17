@@ -42,6 +42,10 @@ const revealedTaskIds = new Set<string>();
 // the upgrade later doesn't bring the obsolete predecessor back.
 const obsoletedKinds = new Set<BuildingKind>();
 
+// Building kinds the player has ever placed — sticky. A build button only
+// flashes for attention while the player has never built one of that kind.
+const everBuiltKinds = new Set<BuildingKind>();
+
 // Build/ritual buttons that have already been visible at least once. First
 // appearance gets a soft fade-in via the .fade-in CSS animation.
 const everVisibleButtonIds = new Set<string>();
@@ -178,6 +182,7 @@ export type UICallbacks = {
   onSpawnGoblin: () => void;
   onSummonMinotaur: () => void;
   onBuyAutoAssign: () => void;
+  onBuyAutoWater: () => void;
   onBuyAutoSpawn: () => void;
   onBuyGoldgoblins: () => void;
   onBuyGoldgoblinsX10: () => void;
@@ -238,6 +243,23 @@ export function setupUI(state: GameState, callbacks: UICallbacks) {
   `;
   autoAssignBtn.addEventListener('click', () => { playSound('click', 1, 0.75); callbacks.onBuyAutoAssign(); });
   ritualList.appendChild(autoAssignBtn);
+
+  // Autowater — extends Autotask onto watering duty. Surfaces once Autotask
+  // is owned and a water source has been dug.
+  const autoWaterBtn = document.createElement('button');
+  autoWaterBtn.className = 'build-button build-button-compact';
+  autoWaterBtn.id = 'btn-buy-autowater';
+  autoWaterBtn.style.display = 'none';
+  autoWaterBtn.innerHTML = `
+    <div class="build-content">
+      <div class="build-text">
+        <div class="build-name">Autowater</div>
+      </div>
+      <div class="build-cost-side"><span class="build-cost" id="cost-buy-autowater">${SUMMON_UPGRADES.autoWater.bloodCost} blood</span></div>
+    </div>
+  `;
+  autoWaterBtn.addEventListener('click', () => { playSound('click', 1, 0.75); callbacks.onBuyAutoWater(); });
+  ritualList.appendChild(autoWaterBtn);
 
   const autoSpawnBtn = document.createElement('button');
   autoSpawnBtn.className = 'build-button build-button-compact';
@@ -340,7 +362,14 @@ export function setupUI(state: GameState, callbacks: UICallbacks) {
       : '';
     const yieldBits: string[] = [];
     if (def.income) yieldBits.push(`<span class="yield-money">+Ƶ${def.income.toLocaleString('en-US')}/s</span>`);
-    if (def.powerOutput > 0) yieldBits.push(`<span class="yield-power">+${formatPower(def.powerOutput)}</span>`);
+    if (def.powerOutput > 0) {
+      // Gas Engine spells its gain out in plain watts rather than the
+      // MW-rounded form, so its modest output reads precisely.
+      const powerText = kind === 'gas_engine'
+        ? `${def.powerOutput.toLocaleString('en-US')} W`
+        : formatPower(def.powerOutput);
+      yieldBits.push(`<span class="yield-power">+${powerText}</span>`);
+    }
     const yieldHtml = yieldBits.length > 0
       ? `<div class="build-yields">${yieldBits.join('<br>')}</div>`
       : '';
@@ -418,6 +447,13 @@ function anyDatacentreBuilt(state: GameState): boolean {
   return false;
 }
 
+// Toggles the gentle attention-flash on a build/ritual button. Surfaces only
+// for purchasables the player has never bought before that they can afford
+// right now — see refreshUI for the per-button predicates.
+function setBuyFlash(btnId: string, on: boolean): void {
+  document.getElementById(btnId)?.classList.toggle('buy-flash', on);
+}
+
 function refreshRitualButton(
   btnId: string, costId: string,
   visible: boolean, owned: boolean, canAfford: boolean,
@@ -426,7 +462,7 @@ function refreshRitualButton(
   const btn = document.getElementById(btnId) as HTMLButtonElement;
   const cost = document.getElementById(costId)!;
   btn.style.display = visible ? '' : 'none';
-  if (!visible) return;
+  if (!visible) { setBuyFlash(btnId, false); return; }
   if (owned) {
     btn.disabled = true;
     cost.textContent = 'owned';
@@ -440,6 +476,8 @@ function refreshRitualButton(
   }
   // Set disabled BEFORE applying the fade-in so the right keyframes pick.
   applyFadeInOnFirstShow(btnId);
+  // Never-bought one-shot rituals flash while affordable.
+  setBuyFlash(btnId, !owned && canAfford);
 }
 
 // Single Autospawn button that levels up through AUTOSPAWN_TIERS. The same
@@ -454,6 +492,7 @@ function refreshAutospawnButton(state: GameState, gasEngineBuilt: boolean): void
   const warn = document.getElementById('warn-buy-autospawn')!;
   if (!gasEngineBuilt) {
     btn.style.display = 'none';
+    setBuyFlash('btn-buy-autospawn', false);
     return;
   }
   const current = state.autoSpawnMultiplier;
@@ -462,6 +501,7 @@ function refreshAutospawnButton(state: GameState, gasEngineBuilt: boolean): void
   if (!next) {
     // Already at max — hide the button.
     btn.style.display = 'none';
+    setBuyFlash('btn-buy-autospawn', false);
     return;
   }
   btn.style.display = '';
@@ -476,6 +516,9 @@ function refreshAutospawnButton(state: GameState, gasEngineBuilt: boolean): void
   const willOverflow = next.multiplier > cap;
   warn.style.display = willOverflow ? '' : 'none';
   btn.disabled = !canAfford || willOverflow;
+  // Flash only the very first purchase — once Autospawn has ever been bought
+  // the player knows the upgrade exists, so later tiers don't flash.
+  setBuyFlash('btn-buy-autospawn', current === 0 && canAfford && !willOverflow);
 }
 
 function progressTrack(id: string, slots: number): string {
@@ -623,6 +666,14 @@ export function refreshUI(state: GameState) {
     phoneFarmBuilt, state.autoAssignEnabled, state.blood >= SUMMON_UPGRADES.autoAssign.bloodCost,
     `${SUMMON_UPGRADES.autoAssign.bloodCost} blood`,
   );
+  // Autowater — appears once Autotask is owned and a water source has been
+  // dug (so the upgrade actually has something to act on).
+  refreshRitualButton(
+    'btn-buy-autowater', 'cost-buy-autowater',
+    state.autoAssignEnabled && state.waterSources.size > 0,
+    state.autoWaterEnabled, state.blood >= SUMMON_UPGRADES.autoWater.bloodCost,
+    `${SUMMON_UPGRADES.autoWater.bloodCost} blood`,
+  );
   refreshAutospawnButton(state, gasEngineBuilt);
   // Goldblins → Goldblins x10 form a replace chain (like Autospawn): base
   // button hides once owned, x10 takes its place; x10 hides once owned. Gate
@@ -653,6 +704,7 @@ export function refreshUI(state: GameState) {
     const nextCost = digBloodCost(state.dugDirections.size);
     const canAfford = state.blood >= nextCost;
     btn.disabled = dug || !canAfford;
+    setBuyFlash(`btn-dig-${dir}`, digUnlocked && !dug && canAfford);
     const label = btn.querySelector('.build-name') as HTMLElement | null;
     if (label) label.textContent = dug ? `${dir.toUpperCase()} ✓` : `Dig ${dir.toUpperCase()}`;
     const cost = document.getElementById(`cost-dig-${dir}`);
@@ -680,6 +732,7 @@ export function refreshUI(state: GameState) {
   // Sticky: destroying the upgrade later doesn't unhide the predecessor
   // (matches the sticky-task-progress philosophy).
   for (const b of state.buildings.values()) {
+    everBuiltKinds.add(b.kind);
     if (b.state !== 'active') continue;
     if (b.kind === 'gas_engine') obsoletedKinds.add('goblin_wheel');
     if (b.kind === 'datacentre') obsoletedKinds.add('phone_farm');
@@ -694,7 +747,7 @@ export function refreshUI(state: GameState) {
     const btn = document.getElementById(btnId(kind)) as HTMLButtonElement;
     const visible = unlocked.has(kind) && !obsoletedKinds.has(kind);
     btn.classList.toggle('locked', !visible);
-    if (!visible) continue;
+    if (!visible) { setBuyFlash(btnId(kind), false); continue; }
     const canAffordMoney = state.money >= def.cost;
     const canAffordBlood = !def.bloodCost || state.blood >= def.bloodCost;
     const draw = def.powerOutput < 0 ? -def.powerOutput : 0;
@@ -703,6 +756,8 @@ export function refreshUI(state: GameState) {
     // keyframes (full vs disabled-target opacity) get picked.
     btn.disabled = !canAffordMoney || !canAffordBlood || !enoughPower;
     applyFadeInOnFirstShow(btnId(kind));
+    // Flash for attention while affordable and never built before.
+    setBuyFlash(btnId(kind), !btn.disabled && !everBuiltKinds.has(kind));
     btn.classList.toggle('active', state.pendingBuild?.kind === kind);
     document.getElementById(`cost-${kind}`)!.classList.toggle('met', canAffordMoney);
     const powerCostEl = document.getElementById(`power-cost-${kind}`);
