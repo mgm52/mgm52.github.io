@@ -185,8 +185,9 @@ export function autoAssignAllIdle(state: GameState) {
 
   // First: keep every thirsty building staffed with its auto-assign target
   // of carriers as long as a water source exists and idle goblins remain.
-  // (Manual right-click ignores this cap.)
-  if (state.waterSources.size > 0) {
+  // (Manual right-click ignores this cap.) Gated on the Autowater ritual —
+  // plain Autotask staffs maintainers/builders but never watering duty.
+  if (state.autoWaterEnabled && state.waterSources.size > 0) {
     for (const b of state.buildings.values()) {
       const def = defOf(b);
       const target = def.waterAutoAssignTarget ?? 0;

@@ -68,10 +68,13 @@ export const MINOTAUR = {
 // Farm has been built; Autospawn unlocks once a Gas Engine has been built.
 // "Autotask": newly-hatched goblins route themselves to understaffed
 // buildings. "Goblinsixstack": permanent capacity bump (3 → 6).
-// "Autospawn": queues a free spawn every 3 seconds.
+// "Autospawn": queues a free spawn every 3 seconds. "Autowater": extends
+// Autotask so idle goblins are also routed onto watering duty — unlocks once
+// Autotask is owned and a water source has been dug.
 export const SUMMON_UPGRADES = {
   autoAssign: { bloodCost: 13 },
   autoSpawn: { bloodCost: 13, intervalSeconds: 3 },
+  autoWater: { bloodCost: 64 },
   goldgoblins: { bloodCost: 26 },
   goldgoblinsX10: { bloodCost: 128, multiplier: 10 },
 };

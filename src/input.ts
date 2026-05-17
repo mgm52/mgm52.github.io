@@ -1,14 +1,14 @@
 import { Application, Container, FederatedPointerEvent, Graphics } from 'pixi.js';
 import { playSound } from './audio';
 import { flashCursor } from './cursor-fx';
-import { BUILDING_DEFS, BuildingKind, CELL, GOBLIN, MINOTAUR, RENDER_SCALE, WORLD, formatPower } from './config';
+import { BUILDABLE_KINDS, BUILDING_DEFS, BuildingKind, CELL, GOBLIN, MINOTAUR, RENDER_SCALE, WORLD, formatPower } from './config';
 import { unlockOptionsCog } from './options-ui';
 import { RenderContext, clampCamera } from './render';
 import { autoAssignAllIdle } from './sim';
 import {
   Building, Cell, GameState, Goblin, Minotaur, WaterSource,
   appendLog, buildingAtCell, cellKey, defOf, findFreeCellNear,
-  holeAtCell, isCellBlocked, isInBounds, pixelToCell, waterCarrierCount, waterSourceAtCell,
+  holeAtCell, isInBounds, pixelToCell, waterCarrierCount, waterSourceAtCell,
 } from './state';
 
 type ActivePointer = {
@@ -226,7 +226,98 @@ export function setupInput(
     }
   });
 
+  setupBuildButtonDrag(state, app, worldLayer, input);
+
   return input;
+}
+
+// Drag-and-drop placement: pressing a sidebar build button and dragging onto
+// the play area places that building where the pointer is released — an
+// alternative to the click-then-tap-to-place flow. A press that doesn't move
+// past the threshold falls through to the button's own click handler.
+function setupBuildButtonDrag(
+  state: GameState,
+  app: Application,
+  worldLayer: Container,
+  input: InputState,
+) {
+  const DRAG_THRESHOLD = 8; // screen-space px before a press becomes a drag
+  let dragKind: BuildingKind | null = null;
+  let dragBtn: HTMLElement | null = null;
+  let startX = 0, startY = 0;
+  let dragging = false;
+
+  // Screen → world: returns world coords when the pointer is over the canvas,
+  // or null when it's outside the play area (sidebar, off-window, etc.).
+  const worldAt = (clientX: number, clientY: number): { x: number; y: number } | null => {
+    const rect = app.canvas.getBoundingClientRect();
+    if (clientX < rect.left || clientX > rect.right ||
+        clientY < rect.top || clientY > rect.bottom) return null;
+    return worldLayer.toLocal({ x: clientX - rect.left, y: clientY - rect.top });
+  };
+
+  for (const kind of BUILDABLE_KINDS) {
+    const btn = document.getElementById(`btn-build-${kind}`);
+    if (!btn) continue;
+    btn.addEventListener('pointerdown', (e) => {
+      if (e.button !== 0) return;
+      if ((btn as HTMLButtonElement).disabled) return;
+      dragKind = kind;
+      dragBtn = btn;
+      startX = e.clientX;
+      startY = e.clientY;
+      dragging = false;
+    });
+  }
+
+  window.addEventListener('pointermove', (e) => {
+    if (!dragKind) return;
+    if (!dragging) {
+      if (Math.hypot(e.clientX - startX, e.clientY - startY) < DRAG_THRESHOLD) return;
+      dragging = true;
+      // Enter placement mode so the ghost + existing canvas handlers engage.
+      state.pendingBuild = { kind: dragKind };
+    }
+    const world = worldAt(e.clientX, e.clientY);
+    if (world) drawGhost(input, world.x, world.y, state);
+    else input.placementGhost.clear();
+  });
+
+  window.addEventListener('pointerup', (e) => {
+    if (!dragKind) return;
+    const wasDragging = dragging;
+    const btn = dragBtn;
+    dragKind = null;
+    dragBtn = null;
+    dragging = false;
+    // A press that never crossed the threshold is a plain click — leave it
+    // to the button's own click handler.
+    if (!wasDragging) return;
+    const world = worldAt(e.clientX, e.clientY);
+    if (world) placeBuilding(state, world.x, world.y);
+    // The drag gesture is self-contained: clear any pending placement so a
+    // failed/edge drop doesn't leave a sticky ghost (placeBuilding already
+    // clears it on a successful non-wall placement).
+    state.pendingBuild = null;
+    input.placementGhost.clear();
+    // Swallow the click the browser dispatches after this pointerup so it
+    // doesn't re-toggle pendingBuild via the button's click handler.
+    if (btn) {
+      const swallow = (ev: Event) => { ev.stopImmediatePropagation(); ev.preventDefault(); };
+      btn.addEventListener('click', swallow, { capture: true, once: true });
+      window.setTimeout(() => btn.removeEventListener('click', swallow, true), 0);
+    }
+  });
+
+  window.addEventListener('pointercancel', () => {
+    if (dragKind && dragging) {
+      state.pendingBuild = null;
+      input.placementGhost.clear();
+    }
+    dragKind = null;
+    dragBtn = null;
+    dragging = false;
+  });
 }
 
 function scheduleLongPress(
@@ -519,14 +610,25 @@ function topLeftFromClick(x: number, y: number, kind: BuildingKind): Cell {
   return { cx: center.cx - half, cy: center.cy - half };
 }
 
+// Like isCellBlocked, but Goblin Holes (the original and man-made ones) don't
+// block — buildings, including Walls, can be placed on top of them.
+function cellBlocksPlacement(state: GameState, cx: number, cy: number): boolean {
+  if (!isInBounds(cx, cy)) return true;
+  if (state.walls.has(cellKey(cx, cy))) return true;
+  const b = buildingAtCell(state, cx, cy);
+  if (b && b.kind !== 'goblin_hole') return true;
+  if (state.occupancy.has(cellKey(cx, cy))) return true;
+  if (waterSourceAtCell(state, { cx, cy })) return true;
+  return false;
+}
+
 function canPlaceBuilding(state: GameState, topLeft: Cell, kind: BuildingKind): boolean {
   const n = BUILDING_DEFS[kind].cellSize;
   for (let dx = 0; dx < n; dx++) {
     for (let dy = 0; dy < n; dy++) {
       const cx = topLeft.cx + dx;
       const cy = topLeft.cy + dy;
-      if (!isInBounds(cx, cy)) return false;
-      if (isCellBlocked(state, cx, cy)) return false;
+      if (cellBlocksPlacement(state, cx, cy)) return false;
     }
   }
   return true;
@@ -609,7 +711,7 @@ function tryPlaceWallAt(state: GameState, cx: number, cy: number, silent: boolea
     if (!silent) { playSound('error'); appendLog(state, 'Not enough Ƶ.'); }
     return false;
   }
-  if (isCellBlocked(state, cx, cy)) return false;
+  if (cellBlocksPlacement(state, cx, cy)) return false;
   state.money -= 1;
   const b: Building = {
     id: state.nextId++,
