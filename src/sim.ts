@@ -78,21 +78,22 @@ export function tick(state: GameState) {
   resolvePowerAndState(state);
 
   // ── 5. Income ─────────────────────────────────────────────────────
+  // Income arrives in discrete one-second chunks rather than trickling in
+  // every tick: an active income building pays its full `income` once per
+  // second. Each building's payout phase is anchored to when it first
+  // became active (nextIncomeAt), so buildings placed at different times
+  // pay on different ticks instead of all firing on the same second.
   for (const b of state.buildings.values()) {
-    if (b.state === 'active') state.money += defOf(b).income * TICK_S;
-  }
-
-  // 1Hz floater pulse: surface per-second income for each active income
-  // building so the player can see their gains accumulate.
-  if (state.now >= state.nextIncomeFloatAt) {
-    for (const b of state.buildings.values()) {
-      if (b.state !== 'active') continue;
-      const def = defOf(b);
-      if (def.income <= 0) continue;
+    if (b.state !== 'active') continue;
+    const def = defOf(b);
+    if (def.income <= 0) continue;
+    if (b.nextIncomeAt === undefined) { b.nextIncomeAt = state.now + 1; continue; }
+    if (state.now >= b.nextIncomeAt) {
+      state.money += def.income;
+      b.nextIncomeAt = state.now + 1;
       const c = buildingCenter(b);
       pushFloater(state, c.x, c.y, `+Ƶ${def.income.toLocaleString('en-US')}`, 0xffd96b);
     }
-    state.nextIncomeFloatAt = state.now + 1;
   }
 
   // Expire aged-out floaters and death-effect markers.
@@ -186,7 +187,7 @@ export function autoAssignAllIdle(state: GameState) {
   // First: keep every thirsty building staffed with its auto-assign target
   // of carriers as long as a water source exists and idle goblins remain.
   // (Manual right-click ignores this cap.) Gated on the Autowater ritual —
-  // plain Autotask staffs maintainers/builders but never watering duty.
+  // plain Autocommand staffs maintainers/builders but never watering duty.
   if (state.autoWaterEnabled && state.waterSources.size > 0) {
     for (const b of state.buildings.values()) {
       const def = defOf(b);

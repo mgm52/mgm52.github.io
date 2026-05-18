@@ -272,7 +272,7 @@ async function main() {
       state.blood -= cost;
       state.autoAssignEnabled = true;
       playSound('ritual');
-      appendLog(state, 'Autotask unlocked — new goblins route themselves to needy buildings.');
+      appendLog(state, 'Autocommand unlocked — new goblins route themselves to needy buildings.');
       autoAssignAllIdle(state);
     },
     onBuyAutoWater: () => {

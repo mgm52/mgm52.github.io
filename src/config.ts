@@ -64,13 +64,12 @@ export const MINOTAUR = {
   wanderInterval: 1.2,
 };
 
-// One-shot Ritual upgrades. Autotask + Goblinsixstack unlock once a Phone
+// One-shot Ritual upgrades. Autocommand + Goldblins unlock once a Phone
 // Farm has been built; Autospawn unlocks once a Gas Engine has been built.
-// "Autotask": newly-hatched goblins route themselves to understaffed
-// buildings. "Goblinsixstack": permanent capacity bump (3 → 6).
-// "Autospawn": queues a free spawn every 3 seconds. "Autowater": extends
-// Autotask so idle goblins are also routed onto watering duty — unlocks once
-// Autotask is owned and a water source has been dug.
+// "Autocommand": newly-hatched goblins route themselves to understaffed
+// buildings. "Autospawn": queues a free spawn every 3 seconds. "Autowater":
+// extends Autocommand so idle goblins are also routed onto watering duty —
+// unlocks once Autocommand is owned and a water source has been dug.
 export const SUMMON_UPGRADES = {
   autoAssign: { bloodCost: 13 },
   autoSpawn: { bloodCost: 13, intervalSeconds: 3 },
@@ -154,7 +153,7 @@ export type BuildingDef = {
   // a thirsty endgame building drain faster or a tier-1 sip more gently
   // without changing the global constant.
   waterDepletionPerSec?: number;
-  // Auto-assign target — Autotask will keep this many carriers on the
+  // Auto-assign target — Autocommand will keep this many carriers on the
   // building. Manual right-click ignores the auto cap; `waterCarrierMax`
   // is a soft preference (drinkers below it are picked first) so a single
   // DC won't hoover up every goblin while another building is still dry.
