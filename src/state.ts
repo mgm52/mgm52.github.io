@@ -117,6 +117,11 @@ export type Building = {
   buildProgress: number;
   assignedGoblins: number[];
   selected: boolean;
+  // Wall-clock time (state.now) of this building's next income payout.
+  // Income arrives in discrete one-second chunks; the phase is anchored to
+  // when the building first became active, so buildings placed at different
+  // times pay on different ticks. Undefined until the first active tick.
+  nextIncomeAt?: number;
   // 0..100 percent. For buildings with `waterDeliveryAmount`, depletes at
   // WATER_DEPLETION_PP_PER_SEC; each carrier delivery bumps it by the def's
   // delivery amount. The building counts as "watered" while > 0.
@@ -177,7 +182,7 @@ export type GameState = {
   // Ritual upgrades — sticky once bought, apply game-wide.
   autoAssignEnabled: boolean;
   autoSpawnEnabled: boolean;
-  // Extends Autotask: when on, idle goblins are also auto-routed onto
+  // Extends Autocommand: when on, idle goblins are also auto-routed onto
   // watering duty for thirsty buildings. Requires autoAssignEnabled.
   autoWaterEnabled: boolean;
   goldgoblinsEnabled: boolean;
@@ -196,8 +201,6 @@ export type GameState = {
   playArea: { x0: number; y0: number; x1: number; y1: number };
   floaters: Floater[];
   deathEffects: DeathEffect[];
-  // Tick state for the 1Hz income-floater cadence.
-  nextIncomeFloatAt: number;
   spawnQueue: { remaining: number; slot: number }[];
   minotaurSpawnQueue: { remaining: number }[];
   pendingBuild: PendingBuild;
@@ -466,7 +469,6 @@ export function createInitialState(): GameState {
     playArea: initialPlayArea(),
     floaters: [],
     deathEffects: [],
-    nextIncomeFloatAt: 1,
     spawnQueue: [],
     minotaurSpawnQueue: [],
     pendingBuild: null,

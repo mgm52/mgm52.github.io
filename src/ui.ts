@@ -134,7 +134,7 @@ const TASKS: Task[] = [
   },
   {
     id: 'build_gas_engine',
-    text: 'Build a Gas Engine',
+    text: 'Construct a Gas Engine',
     unlocks: ['datacentre'],
     isDone: (s) => {
       for (const b of s.buildings.values()) {
@@ -147,14 +147,14 @@ const TASKS: Task[] = [
   {
     id: 'summon_minotaur',
     text: 'Summon a Minotaur',
-    // Gates Goblin Hole + Goldblins + dig — see refreshUI below.
+    // Gates Goblin Hole + dig — see refreshUI below.
     unlocks: ['goblin_hole'],
     isDone: (s) => s.minotaurs.size > 0,
     prereq: ['build_gas_engine'],
   },
   {
     id: 'run_datacentre',
-    text: 'Get a datacentre running',
+    text: 'Run your first datacentre',
     unlocks: ['nuclear_reactor', 'hypercentre', 'wall'],
     isDone: (s) => {
       for (const b of s.buildings.values()) {
@@ -236,7 +236,7 @@ export function setupUI(state: GameState, callbacks: UICallbacks) {
   autoAssignBtn.innerHTML = `
     <div class="build-content">
       <div class="build-text">
-        <div class="build-name">Autotask</div>
+        <div class="build-name">Autocommand</div>
       </div>
       <div class="build-cost-side"><span class="build-cost" id="cost-buy-autoassign">${SUMMON_UPGRADES.autoAssign.bloodCost} blood</span></div>
     </div>
@@ -244,8 +244,8 @@ export function setupUI(state: GameState, callbacks: UICallbacks) {
   autoAssignBtn.addEventListener('click', () => { playSound('click', 1, 0.75); callbacks.onBuyAutoAssign(); });
   ritualList.appendChild(autoAssignBtn);
 
-  // Autowater — extends Autotask onto watering duty. Surfaces once Autotask
-  // is owned and a water source has been dug.
+  // Autowater — extends Autocommand onto watering duty. Surfaces once
+  // Autocommand is owned and a water source has been dug.
   const autoWaterBtn = document.createElement('button');
   autoWaterBtn.className = 'build-button build-button-compact';
   autoWaterBtn.id = 'btn-buy-autowater';
@@ -276,8 +276,9 @@ export function setupUI(state: GameState, callbacks: UICallbacks) {
   autoSpawnBtn.addEventListener('click', () => { playSound('click', 1, 0.75); callbacks.onBuyAutoSpawn(); });
   ritualList.appendChild(autoSpawnBtn);
 
-  // Goldgoblins — appears alongside Goblin Hole (post-Gas Engine). Once
-  // bought, ~10% of new goblins spawn gold-tinted and drop Ƶ150 each.
+  // Goldgoblins — appears alongside Autocommand (once a Phone Farm is
+  // built). Once bought, ~10% of new goblins spawn gold-tinted and drop
+  // Ƶ150 each.
   const goldGoblinsBtn = document.createElement('button');
   goldGoblinsBtn.className = 'build-button build-button-compact';
   goldGoblinsBtn.id = 'btn-buy-goldgoblins';
@@ -641,7 +642,7 @@ export function refreshUI(state: GameState) {
   const buildSection = document.getElementById('build-section')!;
   buildSection.style.display = firstTaskDone ? '' : 'none';
 
-  // Ritual upgrades — Autotask and Goblinsixstack appear once a Phone Farm is
+  // Ritual upgrades — Autocommand and Goldblins appear once a Phone Farm is
   // built; Autospawn appears once a Gas Engine is built. Bought ones stay
   // visible but go disabled.
   const phoneFarmBuilt = anyPhoneFarmBuilt(state);
@@ -666,8 +667,8 @@ export function refreshUI(state: GameState) {
     phoneFarmBuilt, state.autoAssignEnabled, state.blood >= SUMMON_UPGRADES.autoAssign.bloodCost,
     `${SUMMON_UPGRADES.autoAssign.bloodCost} blood`,
   );
-  // Autowater — appears once Autotask is owned and a water source has been
-  // dug (so the upgrade actually has something to act on).
+  // Autowater — appears once Autocommand is owned and a water source has
+  // been dug (so the upgrade actually has something to act on).
   refreshRitualButton(
     'btn-buy-autowater', 'cost-buy-autowater',
     state.autoAssignEnabled && state.waterSources.size > 0,
@@ -676,11 +677,12 @@ export function refreshUI(state: GameState) {
   );
   refreshAutospawnButton(state, gasEngineBuilt);
   // Goldblins → Goldblins x10 form a replace chain (like Autospawn): base
-  // button hides once owned, x10 takes its place; x10 hides once owned. Gate
-  // both on the minotaur unlock so they appear in the same window as dig.
+  // button hides once owned, x10 takes its place; x10 hides once owned.
+  // Base Goldblins unlocks alongside Autocommand (once a Phone Farm is
+  // built); x10 follows once base Goldblins is owned.
   refreshRitualButton(
     'btn-buy-goldgoblins', 'cost-buy-goldgoblins',
-    digUnlocked && !state.goldgoblinsEnabled, false,
+    phoneFarmBuilt && !state.goldgoblinsEnabled, false,
     state.blood >= SUMMON_UPGRADES.goldgoblins.bloodCost,
     `${SUMMON_UPGRADES.goldgoblins.bloodCost} blood`,
   );
@@ -720,7 +722,7 @@ export function refreshUI(state: GameState) {
     taskEl.innerHTML = activeTasks
       .map(t => {
         let progress = '';
-        return `<div><strong>Task:</strong> ${t.text}${progress}</div>`;
+        return `<div><strong>Work:</strong> ${t.text}${progress}</div>`;
       })
       .join('');
   } else {
@@ -1026,7 +1028,7 @@ export function executeTaskSkip(state: GameState): void {
     if (prereqsDone) { next = t; break; }
   }
   if (!next) {
-    appendLog(state, 'Task skip: nothing to skip.');
+    appendLog(state, 'Work skip: nothing to skip.');
     return;
   }
 
@@ -1118,7 +1120,7 @@ export function executeTaskSkip(state: GameState): void {
   // and reveal the unlocks immediately rather than waiting on the overlay.
   previouslyCompletedTaskIds.add(next.id);
   revealedTaskIds.add(next.id);
-  appendLog(state, `Task skip: "${next.text}" marked complete.`);
+  appendLog(state, `Work skip: "${next.text}" marked complete.`);
 }
 
 function ensureGoblins(state: GameState, count: number): void {

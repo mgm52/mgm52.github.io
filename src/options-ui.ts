@@ -204,7 +204,7 @@ function rebuildPanel(panel: HTMLElement, callbacks: OptionsUICallbacks, refresh
   const taskSkip = document.createElement('button');
   taskSkip.type = 'button';
   taskSkip.className = 'options-reset';
-  taskSkip.textContent = 'Task skip';
+  taskSkip.textContent = 'Work skip';
   taskSkip.addEventListener('click', () => callbacks.onTaskSkip());
   panel.appendChild(taskSkip);
 
