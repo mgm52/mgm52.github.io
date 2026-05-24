@@ -282,23 +282,6 @@ export function setupUI(state: GameState, callbacks: UICallbacks) {
   minotaurBtn.addEventListener('click', (e) => { playSound('click', 1, 0.75); flashSummonClick(minotaurBtn); emanateAtCursor(e.clientX, e.clientY); callbacks.onSummonMinotaur(); });
   summonList.appendChild(minotaurBtn);
 
-  // Tinytaur — secret summon, hidden until the horde gets too packed to grow.
-  // Instant (no spawn track), so just a name + blood cost.
-  const tinytaurBtn = document.createElement('button');
-  tinytaurBtn.className = 'build-button build-button-compact';
-  tinytaurBtn.id = 'btn-summon-tinytaur';
-  tinytaurBtn.style.display = 'none';
-  tinytaurBtn.innerHTML = `
-    <div class="build-content">
-      <div class="build-text">
-        <div class="build-name">Tinytaur</div>
-      </div>
-      <div class="build-cost-side"><span class="build-cost" id="cost-summon-tinytaur">${TINYTAUR.bloodCost} blood</span></div>
-    </div>
-  `;
-  tinytaurBtn.addEventListener('click', (e) => { playSound('click', 1, 0.75); flashSummonClick(tinytaurBtn); emanateAtCursor(e.clientX, e.clientY); callbacks.onSummonTinytaur(); });
-  summonList.appendChild(tinytaurBtn);
-
   // Lightning Strike — an aimed ability unlocked once the Run-your-first-
   // datacentre task is done. Clicking arms it; the next map click calls the
   // bolt down.
@@ -316,6 +299,23 @@ export function setupUI(state: GameState, callbacks: UICallbacks) {
   `;
   lightningBtn.addEventListener('click', (e) => { playSound('click', 1, 0.75); flashSummonClick(lightningBtn); emanateAtCursor(e.clientX, e.clientY, 'white'); callbacks.onLightningStrike(); });
   summonList.appendChild(lightningBtn);
+
+  // Tinytaur — secret summon, hidden until the horde gets too packed to grow.
+  // Instant (no spawn track), so just a name + blood cost.
+  const tinytaurBtn = document.createElement('button');
+  tinytaurBtn.className = 'build-button build-button-compact';
+  tinytaurBtn.id = 'btn-summon-tinytaur';
+  tinytaurBtn.style.display = 'none';
+  tinytaurBtn.innerHTML = `
+    <div class="build-content">
+      <div class="build-text">
+        <div class="build-name">Tinytaur</div>
+      </div>
+      <div class="build-cost-side"><span class="build-cost" id="cost-summon-tinytaur">${TINYTAUR.bloodCost} blood</span></div>
+    </div>
+  `;
+  tinytaurBtn.addEventListener('click', (e) => { playSound('click', 1, 0.75); flashSummonClick(tinytaurBtn); emanateAtCursor(e.clientX, e.clientY); callbacks.onSummonTinytaur(); });
+  summonList.appendChild(tinytaurBtn);
 
   // Ritual upgrades — surfaced once a Phone Farm has finished building.
   // Bought ones stay visible but go disabled.
