@@ -12,8 +12,8 @@ import {
 import { spawnMinotaur } from './sim';
 
 // Build buttons appear in this fixed order. Mostly cheapest-first, with
-// goblin_hole slotted right above datacentre (it's an auxiliary capacity
-// expander introduced alongside Datacentres, not a late-game item).
+// goblin_hole slotted next to the gas_engine it now unlocks alongside (it's an
+// auxiliary capacity expander, not a late-game item).
 const SORTED_KINDS: BuildingKind[] = [
   // Wall sits at the top of the build list once unlocked — it's a quick
   // utility the player drops constantly, so keeping it within reach helps.
@@ -45,6 +45,11 @@ const obsoletedKinds = new Set<BuildingKind>();
 // Building kinds the player has ever placed — sticky. A build button only
 // flashes for attention while the player has never built one of that kind.
 const everBuiltKinds = new Set<BuildingKind>();
+
+// Sticky: flips true the first time a Minotaur exists. Digging needs a Minotaur,
+// so the dig buttons show a "requires Minotaur" banner until this is set — and
+// it stays unlocked afterwards even if every Minotaur later dies.
+let minotaurEverSummoned = false;
 
 // Build/ritual buttons that have already been visible at least once. First
 // appearance gets a soft fade-in via the .fade-in CSS animation.
@@ -123,7 +128,8 @@ const TASKS: Task[] = [
   {
     id: 'run_phone_farm',
     text: 'Run a Phone Farm',
-    unlocks: ['gas_engine'],
+    // Goblin Hole unlocks alongside the Gas Engine.
+    unlocks: ['gas_engine', 'goblin_hole'],
     isDone: (s) => {
       for (const b of s.buildings.values()) {
         if (b.kind === 'phone_farm' && b.state === 'active') return true;
@@ -135,6 +141,7 @@ const TASKS: Task[] = [
   {
     id: 'build_gas_engine',
     text: 'Construct a Gas Engine',
+    // Datacentre unlocks here; digging (gated in refreshUI) unlocks alongside it.
     unlocks: ['datacentre'],
     isDone: (s) => {
       for (const b of s.buildings.values()) {
@@ -143,14 +150,6 @@ const TASKS: Task[] = [
       return false;
     },
     prereq: ['run_phone_farm'],
-  },
-  {
-    id: 'summon_minotaur',
-    text: 'Summon a Minotaur',
-    // Gates Goblin Hole + dig — see refreshUI below.
-    unlocks: ['goblin_hole'],
-    isDone: (s) => s.minotaurs.size > 0,
-    prereq: ['build_gas_engine'],
   },
   {
     id: 'run_datacentre',
@@ -311,11 +310,14 @@ export function setupUI(state: GameState, callbacks: UICallbacks) {
   goldX10Btn.addEventListener('click', () => { playSound('click', 1, 0.75); callbacks.onBuyGoldgoblinsX10(); });
   ritualList.appendChild(goldX10Btn);
 
-  // Dig row — four compact buttons (NESW) on a single line, gated on a
-  // Datacentre being built. Each is one-shot and costs DIG.bloodCost blood.
+  // Dig row — four compact buttons (NESW) on a single line, unlocked alongside
+  // the Datacentre. Each is one-shot and costs DIG.bloodCost blood. Digging
+  // still needs a Minotaur, so until one is summoned a "requires Minotaur"
+  // banner sits across the row and the buttons stay disabled.
   const digRow = document.createElement('div');
   digRow.id = 'dig-row';
   digRow.style.display = 'none';
+  digRow.style.position = 'relative';
   digRow.style.gap = '4px';
   digRow.style.marginBottom = '6px';
   for (const dir of ['n', 'e', 's', 'w'] as const) {
@@ -333,6 +335,26 @@ export function setupUI(state: GameState, callbacks: UICallbacks) {
     b.addEventListener('click', () => { playSound('click', 1, 0.75); callbacks.onDig(dir); });
     digRow.appendChild(b);
   }
+  // "requires Minotaur" banner overlaid across the dig buttons; shown until a
+  // Minotaur has been summoned. pointer-events:none so it's purely cosmetic —
+  // the buttons underneath are independently disabled in refreshUI.
+  const digOverlay = document.createElement('div');
+  digOverlay.id = 'dig-overlay';
+  digOverlay.textContent = 'requires Minotaur';
+  digOverlay.style.position = 'absolute';
+  digOverlay.style.inset = '0';
+  digOverlay.style.display = 'none';
+  digOverlay.style.alignItems = 'center';
+  digOverlay.style.justifyContent = 'center';
+  digOverlay.style.pointerEvents = 'none';
+  digOverlay.style.fontSize = 'calc(12px * var(--font-display-scale))';
+  digOverlay.style.fontWeight = 'bold';
+  digOverlay.style.letterSpacing = '1px';
+  digOverlay.style.color = '#e0a0a0';
+  digOverlay.style.background = 'rgba(18,14,14,0.74)';
+  digOverlay.style.borderRadius = '4px';
+  digOverlay.style.zIndex = '2';
+  digRow.appendChild(digOverlay);
   ritualList.appendChild(digRow);
 
   // Map each buildable kind back to the task that unlocks it. Used both for
@@ -661,12 +683,11 @@ export function refreshUI(state: GameState) {
   // visible but go disabled.
   const phoneFarmBuilt = anyPhoneFarmBuilt(state);
   const gasEngineBuilt = anyGasEngineBuilt(state);
-  // Dig becomes available once the player has summoned a Minotaur — that
-  // task runs in parallel with run_datacentre so the player can dig + find
-  // water for the DC after meeting the gating ritual. Gated on
+  // Dig unlocks alongside the Datacentre (the build_gas_engine task). Gated on
   // revealedTaskIds (not completedTaskIds) so the buttons emerge AFTER the
-  // TASK COMPLETE overlay fades, letting the fade-in animation play.
-  const digUnlocked = revealedTaskIds.has('summon_minotaur');
+  // TASK COMPLETE overlay fades, letting the fade-in animation play. Digging
+  // itself still needs a Minotaur (see the dig-overlay banner below).
+  const digUnlocked = revealedTaskIds.has('build_gas_engine');
   const ritualVisible = phoneFarmBuilt || gasEngineBuilt || digUnlocked;
   const ritualSection = document.getElementById('ritual-section')!;
   ritualSection.style.display = ritualVisible ? '' : 'none';
@@ -708,10 +729,16 @@ export function refreshUI(state: GameState) {
     `${SUMMON_UPGRADES.goldgoblinsX10.bloodCost} blood`,
   );
 
-  // Dig row: visible once the player has summoned a Minotaur. Each direction
-  // is one-shot. First time the row appears, each button fades in.
+  // Dig row: visible once the Datacentre unlocks. Each direction is one-shot.
+  // First time the row appears, each button fades in. Until a Minotaur has been
+  // summoned, a "requires Minotaur" banner covers the row and the buttons are
+  // disabled.
+  if (state.minotaurs.size > 0) minotaurEverSummoned = true;
+  const needsMinotaur = !minotaurEverSummoned;
   const digRow = document.getElementById('dig-row')!;
   digRow.style.display = digUnlocked ? 'flex' : 'none';
+  const digOverlay = document.getElementById('dig-overlay');
+  if (digOverlay) digOverlay.style.display = (digUnlocked && needsMinotaur) ? 'flex' : 'none';
   for (const dir of ['n', 'e', 's', 'w'] as const) {
     const btn = document.getElementById(`btn-dig-${dir}`) as HTMLButtonElement;
     if (!btn) continue;
@@ -719,8 +746,8 @@ export function refreshUI(state: GameState) {
     const dug = state.dugDirections.has(dir);
     const nextCost = digBloodCost(state.dugDirections.size);
     const canAfford = state.blood >= nextCost;
-    btn.disabled = dug || !canAfford;
-    setBuyFlash(`btn-dig-${dir}`, digUnlocked && !dug && canAfford);
+    btn.disabled = dug || !canAfford || needsMinotaur;
+    setBuyFlash(`btn-dig-${dir}`, digUnlocked && !needsMinotaur && !dug && canAfford);
     const label = btn.querySelector('.build-name') as HTMLElement | null;
     if (label) label.textContent = dug ? `${dir.toUpperCase()} ✓` : `Dig ${dir.toUpperCase()}`;
     const cost = document.getElementById(`cost-dig-${dir}`);
@@ -1083,25 +1110,11 @@ export function executeTaskSkip(state: GameState): void {
       state.bloodUnlocked = true;
       break;
     }
-    case 'summon_minotaur': {
-      // Plant a single Minotaur to satisfy the parallel ritual gate. Keep the
-      // build-out modest — run_datacentre's skip will scale things up if the
-      // player keeps clicking past it.
-      ensureGoblins(state, 24);
-      ensureBuildingCount(state, 'goblin_wheel', 2);
-      ensureBuildingCount(state, 'phone_farm', 1);
-      ensureBuildingCount(state, 'gas_engine', 2);
-      if (state.minotaurs.size === 0) spawnMinotaur(state);
-      state.money = Math.max(state.money, 3000);
-      state.blood = Math.max(state.blood, 150);
-      state.bloodUnlocked = true;
-      break;
-    }
     case 'run_datacentre': {
-      // Full DC setup: dig water + maintainers + carriers so the DC powers
-      // up. Bumps gas-engine count to 3 since this task may be skipped before
-      // summon_minotaur (they're in parallel).
+      // Full DC setup: dig water + maintainers + carriers so the DC powers up.
+      // Digging needs a Minotaur, so plant one before the dig.
       ensureGoblins(state, 40);
+      if (state.minotaurs.size === 0) spawnMinotaur(state);
       if (!state.dugDirections.has('n')) digDirection(state, 'n');
       ensureBuildingCount(state, 'goblin_wheel', 2);
       ensureBuildingCount(state, 'phone_farm', 1);
