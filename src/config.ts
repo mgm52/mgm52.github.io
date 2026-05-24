@@ -71,7 +71,7 @@ export const MINOTAUR = {
 // queue) and cheaply, so the player can field several. Reuses the Minotaur unit
 // internally (a Minotaur with `tiny: true`).
 export const TINYTAUR = {
-  bloodCost: 16,
+  bloodCost: 88,
   speed: 170,       // vs MINOTAUR.speed 70
   attackWindup: 0.2, // vs MINOTAUR.attackWindup 0.5
   scale: 0.5,       // render size multiplier vs a full Minotaur
