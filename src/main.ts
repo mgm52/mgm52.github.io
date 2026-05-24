@@ -126,7 +126,7 @@ const TITLE_FADE_OUT_TOTAL_MS = 2000 + 1500 + 1400;
 const TASK_REVEAL_AFTER_GAME_VISIBLE_MS = 1000;
 // For new games only: how long the player gets to wander and click the empty
 // world before the goblin slides up and starts talking.
-const PRE_INTRO_FREE_CLICK_MS = 6_000;
+const PRE_INTRO_FREE_CLICK_MS = 7_000;
 // Staggered fade-in after the intro resolves: the summon panel comes in
 // first, then the task line trails behind so the eye doesn't see both
 // reveal at once.
