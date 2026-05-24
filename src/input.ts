@@ -28,6 +28,9 @@ type InputState = {
   longPressTimer: number | null;
   longPressPointerId: number | null;
   longPressFired: boolean;
+  // Latest pointer position, updated on every hover/move, so the keyboard
+  // "command" shortcut (Space) can act at the cursor without a pointer event.
+  lastPointer: { global: { x: number; y: number }; client: { x: number; y: number } } | null;
 };
 
 const LONG_PRESS_MS = 450;
@@ -54,6 +57,7 @@ export function setupInput(
     longPressTimer: null,
     longPressPointerId: null,
     longPressFired: false,
+    lastPointer: null,
   };
 
   app.stage.eventMode = 'static';
@@ -63,6 +67,10 @@ export function setupInput(
 
   app.stage.on('pointerdown', (e: FederatedPointerEvent) => {
     const local = e.getLocalPosition(worldLayer);
+    input.lastPointer = {
+      global: { x: e.global.x, y: e.global.y },
+      client: { x: e.clientX, y: e.clientY },
+    };
     input.pointers.set(e.pointerId, {
       startX: e.global.x, startY: e.global.y,
       x: e.global.x, y: e.global.y,
@@ -99,6 +107,10 @@ export function setupInput(
   });
 
   app.stage.on('pointermove', (e: FederatedPointerEvent) => {
+    input.lastPointer = {
+      global: { x: e.global.x, y: e.global.y },
+      client: { x: e.clientX, y: e.clientY },
+    };
     const tracked = input.pointers.get(e.pointerId);
     if (tracked) {
       tracked.x = e.global.x;
@@ -223,6 +235,18 @@ export function setupInput(
     if (e.key === 'Escape') {
       state.pendingBuild = null;
       input.placementGhost.clear();
+      return;
+    }
+    // Space = "give a command" at the cursor, mirroring a desktop right-click.
+    if (e.code === 'Space') {
+      const ae = document.activeElement as HTMLElement | null;
+      if (ae && (ae.tagName === 'INPUT' || ae.tagName === 'TEXTAREA' || ae.isContentEditable)) return;
+      e.preventDefault();
+      const lp = input.lastPointer;
+      if (!lp) return;
+      const world = worldLayer.toLocal({ x: lp.global.x, y: lp.global.y });
+      flashCursor(lp.client.x, lp.client.y);
+      handleRightClick(state, world.x, world.y);
     }
   });
 
