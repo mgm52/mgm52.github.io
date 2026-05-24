@@ -65,6 +65,11 @@ export function loadGame(): { state: GameState; savedAt: number } | null {
     const env = tryDecodeV2(raw) ?? tryDecodeV1(raw);
     if (!env || !env.state) return null;
 
+    // Defaults for fields added after a save was written, so resuming an older
+    // save doesn't hit undefined arrays/flags.
+    env.state.lightningBolts ??= [];
+    env.state.powerBoosts ??= [];
+    env.state.pendingStrike = false;
     // Walls are deterministic from playArea; rebuild after load so any future
     // schema drift in the persisted Set doesn't desync rendering / pathing.
     env.state.walls = rebuildWalls(env.state);

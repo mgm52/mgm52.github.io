@@ -214,6 +214,11 @@ export type RenderContext = {
   effectsLayer: Container;
   deathViews: Map<number, Sprite>;
   deathFrames: DeathFrames | null;
+  // Lightning Strike: white blood splatters live in their own layer carrying a
+  // force-white color matrix (a plain white tint can't brighten the red blood
+  // asset). The bolt itself is a single re-drawn Graphics.
+  whiteEffectsLayer: Container;
+  lightningGfx: Graphics;
   // Mutable references — used by applyOptions() to redraw on the fly.
   walls: Set<string>;
   wallsVersion: number;     // last drawn version; render compares vs state.wallsVersion
@@ -270,8 +275,21 @@ export async function createRender(parent: HTMLElement, state: GameState): Promi
 
   const floatersLayer = new Container();
   const effectsLayer = new Container();
+  const whiteEffectsLayer = new Container();
   floatersLayer.cullableChildren = true;
   effectsLayer.cullableChildren = true;
+  whiteEffectsLayer.cullableChildren = true;
+  // Map every pixel to opaque-following white so the blood asset reads as a
+  // pale lightning scorch regardless of its native color.
+  const whiteFilter = new ColorMatrixFilter();
+  whiteFilter.matrix = [
+    0, 0, 0, 0, 1,
+    0, 0, 0, 0, 1,
+    0, 0, 0, 0, 1,
+    0, 0, 0, 1, 0,
+  ] as typeof whiteFilter.matrix;
+  whiteEffectsLayer.filters = [whiteFilter];
+  const lightningGfx = new Graphics();
 
   worldLayer.addChild(playBg);
   worldLayer.addChild(wallGfx);
@@ -283,7 +301,9 @@ export async function createRender(parent: HTMLElement, state: GameState): Promi
   worldLayer.addChild(minotaurLayer);
   worldLayer.addChild(holeRing);
   worldLayer.addChild(effectsLayer);
+  worldLayer.addChild(whiteEffectsLayer);
   worldLayer.addChild(floatersLayer);
+  worldLayer.addChild(lightningGfx);
   worldLayer.addChild(uiLayer);
   worldLayer.scale.set(RENDER_SCALE);
   app.stage.addChild(worldLayer);
@@ -308,6 +328,7 @@ export async function createRender(parent: HTMLElement, state: GameState): Promi
     floatersLayer, floaterViews: new Map(),
     effectsLayer, deathViews: new Map(),
     deathFrames: null,
+    whiteEffectsLayer, lightningGfx,
     walls, wallsVersion: -1, state, playBg, wallGfx, grid, goblinFilter, minotaurFilter, buildingFilter,
   };
 
@@ -730,10 +751,12 @@ function drawDeathEffects(ctx: RenderContext, state: GameState) {
       const sc = target / Math.max(frames.textures[0].width || target, 1);
       sprite.scale.set(sc);
       sprite.cullable = true;
-      ctx.effectsLayer.addChild(sprite);
+      // White splatters go in the force-white layer; the tint below is left
+      // alone for them so the color matrix has the raw alpha to work with.
+      (e.white ? ctx.whiteEffectsLayer : ctx.effectsLayer).addChild(sprite);
       ctx.deathViews.set(e.id, sprite);
     }
-    sprite.tint = getOptions().bloodColor;
+    if (!e.white) sprite.tint = getOptions().bloodColor;
     const elapsed = state.now - e.spawnAt;
     if (elapsed >= frames.duration) {
       sprite.visible = false;
@@ -781,6 +804,11 @@ function drawFloaters(ctx: RenderContext, state: GameState) {
     }
     const age = state.now - f.spawnAt;
     const k = Math.max(0, Math.min(1, age / f.lifetime));
+    // Power-surge floater: recompute the GW readout as it decays to 0.
+    if (f.powerCountdownWatts !== undefined) {
+      const remaining = f.powerCountdownWatts * (1 - k);
+      t.text = `+${(remaining / 1e9).toFixed(2)} GW`;
+    }
     t.position.set(f.x, f.y - 18 - k * 28);
     t.alpha = 1 - k;
   }
@@ -788,6 +816,26 @@ function drawFloaters(ctx: RenderContext, state: GameState) {
     if (!seen.has(id)) {
       t.destroy();
       ctx.floaterViews.delete(id);
+    }
+  }
+}
+
+function drawLightning(ctx: RenderContext, state: GameState) {
+  const g = ctx.lightningGfx;
+  g.clear();
+  for (const bolt of state.lightningBolts) {
+    if (bolt.points.length < 2) continue;
+    const age = state.now - bolt.spawnAt;
+    const alpha = Math.max(0, 1 - age / bolt.lifetime);
+    if (alpha <= 0) continue;
+    // Two passes over the same polyline: a wide soft glow, then a thin bright
+    // core on top.
+    for (const pass of [{ w: 7, a: alpha * 0.3 }, { w: 2.5, a: alpha }]) {
+      g.moveTo(bolt.points[0].x, bolt.points[0].y);
+      for (let i = 1; i < bolt.points.length; i++) {
+        g.lineTo(bolt.points[i].x, bolt.points[i].y);
+      }
+      g.stroke({ width: pass.w, color: 0xffffff, alpha: pass.a });
     }
   }
 }
@@ -885,6 +933,9 @@ export function render(state: GameState, ctx: RenderContext) {
   // entries after a couple seconds and we tear the sprite down with them.
   drawDeathEffects(ctx, state);
 
+  // Lightning bolts: redrawn each frame from the live (fading) bolt list.
+  drawLightning(ctx, state);
+
   // Goblins
   const seenG = new Set<number>();
   for (const g of state.goblins.values()) {
@@ -981,7 +1032,7 @@ export function render(state: GameState, ctx: RenderContext) {
       const sy = dispPx / 64;
       v.shadow.scale.set(sy * 0.75, sy);
     }
-    v.sprite.y = opts.minotaurSpriteYOffset * (t.tiny ? TINYTAUR.scale : 1);
+    v.sprite.y = t.tiny ? 0 : opts.minotaurSpriteYOffset;
     const winding =
       (t.state.kind === 'going_to_kill' || t.state.kind === 'going_to_kill_minotaur' || t.state.kind === 'going_to_destroy')
       && t.state.attackAt !== undefined;
