@@ -9,7 +9,7 @@ extensions.add(GifAsset);
 // game seconds. Used as a manual sprite-sheet — we pick the frame ourselves
 // each tick based on (state.now - spawnAt) so playback always starts at frame 0.
 type DeathFrames = { textures: Texture[]; ends: number[]; duration: number };
-import { BUILDING_DEFS, BuildingKind, CELL, COLS, GOBLIN, RENDER_SCALE, ROWS, MINOTAUR, WORLD } from './config';
+import { BUILDING_DEFS, BuildingKind, CELL, COLS, GOBLIN, RENDER_SCALE, ROWS, MINOTAUR, TINYTAUR, WORLD } from './config';
 import { ensureFontLoaded, fontFamilyById, getOptions, onOptionsChange, type FontConfig, type Options } from './options';
 import { Building, GameState, Goblin, HOLE_SIZE, Minotaur, WaterSource, buildingCenter, cellCenter, defOf, holeCenter, isInPlayCell, maintainerCount } from './state';
 
@@ -971,15 +971,17 @@ export function render(state: GameState, ctx: RenderContext) {
       ctx.minotaurLayer.addChild(v.container);
       ctx.minotaurViews.set(t.id, v);
     }
+    // Tinytaurs render at a fraction of a full Minotaur's size.
+    const dispPx = t.tiny ? minotaurDisplayPx * TINYTAUR.scale : minotaurDisplayPx;
     v.container.position.set(t.pos.x, t.pos.y);
     v.selectionRing.visible = t.selected;
     v.shadow.visible = opts.goblinShadow;
     if (opts.goblinShadow) {
-      v.shadow.position.set(0, minotaurDisplayPx * 0.32);
-      const sy = minotaurDisplayPx / 64;
+      v.shadow.position.set(0, dispPx * 0.32);
+      const sy = dispPx / 64;
       v.shadow.scale.set(sy * 0.75, sy);
     }
-    v.sprite.y = opts.minotaurSpriteYOffset;
+    v.sprite.y = opts.minotaurSpriteYOffset * (t.tiny ? TINYTAUR.scale : 1);
     const winding =
       (t.state.kind === 'going_to_kill' || t.state.kind === 'going_to_kill_minotaur' || t.state.kind === 'going_to_destroy')
       && t.state.attackAt !== undefined;
@@ -989,7 +991,7 @@ export function render(state: GameState, ctx: RenderContext) {
       const fpd = sheet.meta.framesPerDirection;
       const frame = Math.floor(state.now * sheet.fps) % fpd;
       v.sprite.texture = sheet.frames[dir][frame];
-      v.sprite.scale.set(minotaurDisplayPx / sheet.meta.spriteSize);
+      v.sprite.scale.set(dispPx / sheet.meta.spriteSize);
     }
   }
   for (const [id, v] of ctx.minotaurViews) {

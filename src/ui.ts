@@ -2,7 +2,7 @@ import { playSound } from './audio';
 import {
   AUTOSPAWN_TIERS, BUILDABLE_KINDS, BUILDING_DEFS, BuildingKind, DRAG_SELECT_HINT_DELAY_SEC,
   GOBLIN, SPAWN_HINT_NO_SPAWN_SEC,
-  SPAWN_HINT_NO_TASK_SEC, SUMMON_UPGRADES, WATER_HINT_DELAY_SEC, digBloodCost, MINOTAUR, formatPower,
+  SPAWN_HINT_NO_TASK_SEC, SUMMON_UPGRADES, WATER_HINT_DELAY_SEC, digBloodCost, MINOTAUR, TINYTAUR, formatPower,
 } from './config';
 import {
   Building, Cell, GameState, Goblin, GoblinState, WaterSource,
@@ -61,6 +61,58 @@ function applyFadeInOnFirstShow(btnId: string): void {
   if (!btn) return;
   btn.classList.add('fade-in');
   window.setTimeout(() => btn.classList.remove('fade-in'), 700);
+}
+
+// Income/blood rate readouts ("+X/s"). Sampled on a fixed cadence and shown as
+// a rolling average over the last few samples so the number doesn't jitter every
+// frame. Cash rate appears once a Phone Farm has been placed; blood rate once a
+// Minotaur has been summoned. Both render at 40% opacity (see .resource-rate).
+const RATE_SAMPLE_SEC = 2;
+const RATE_HIST_LEN = 5;
+let rateInit = false;
+let rateLastSampleAt = 0;
+let lastMoneySample = 0;
+let lastBloodSample = 0;
+const moneyRateHist: number[] = [];
+const bloodRateHist: number[] = [];
+
+function pushRate(hist: number[], v: number): void {
+  hist.push(v);
+  if (hist.length > RATE_HIST_LEN) hist.shift();
+}
+function avgRate(xs: number[]): number {
+  if (xs.length === 0) return 0;
+  let s = 0;
+  for (const x of xs) s += x;
+  return s / xs.length;
+}
+function formatRate(v: number): string {
+  const a = Math.abs(v);
+  const num = a < 10 ? a.toFixed(1) : Math.round(a).toLocaleString('en-US');
+  const sign = v > 0.05 ? '+' : v < -0.05 ? '-' : '';
+  return `${sign}${num}/s`;
+}
+function updateResourceRates(state: GameState): void {
+  if (!rateInit) {
+    rateInit = true;
+    rateLastSampleAt = state.now;
+    lastMoneySample = state.money;
+    lastBloodSample = state.blood;
+  }
+  const dt = state.now - rateLastSampleAt;
+  if (dt >= RATE_SAMPLE_SEC) {
+    pushRate(moneyRateHist, (state.money - lastMoneySample) / dt);
+    pushRate(bloodRateHist, (state.blood - lastBloodSample) / dt);
+    lastMoneySample = state.money;
+    lastBloodSample = state.blood;
+    rateLastSampleAt = state.now;
+    setText('money-rate', formatRate(avgRate(moneyRateHist)));
+    setText('blood-rate', formatRate(avgRate(bloodRateHist)));
+  }
+  const moneyRateEl = document.getElementById('money-rate');
+  if (moneyRateEl) moneyRateEl.style.display = everBuiltKinds.has('phone_farm') ? '' : 'none';
+  const bloodRateEl = document.getElementById('blood-rate');
+  if (bloodRateEl) bloodRateEl.style.display = minotaurEverSummoned ? '' : 'none';
 }
 
 // Brief blood-red flash on summon-button click. Reflow forces the animation
@@ -180,6 +232,7 @@ const TASKS: Task[] = [
 export type UICallbacks = {
   onSpawnGoblin: () => void;
   onSummonMinotaur: () => void;
+  onSummonTinytaur: () => void;
   onBuyAutoAssign: () => void;
   onBuyAutoWater: () => void;
   onBuyAutoSpawn: () => void;
@@ -226,6 +279,23 @@ export function setupUI(state: GameState, callbacks: UICallbacks) {
   `;
   minotaurBtn.addEventListener('click', (e) => { playSound('click', 1, 0.75); flashSummonClick(minotaurBtn); emanateAtCursor(e.clientX, e.clientY); callbacks.onSummonMinotaur(); });
   summonList.appendChild(minotaurBtn);
+
+  // Tinytaur — secret summon, hidden until the horde gets too packed to grow.
+  // Instant (no spawn track), so just a name + blood cost.
+  const tinytaurBtn = document.createElement('button');
+  tinytaurBtn.className = 'build-button build-button-compact';
+  tinytaurBtn.id = 'btn-summon-tinytaur';
+  tinytaurBtn.style.display = 'none';
+  tinytaurBtn.innerHTML = `
+    <div class="build-content">
+      <div class="build-text">
+        <div class="build-name">Tinytaur</div>
+      </div>
+      <div class="build-cost-side"><span class="build-cost" id="cost-summon-tinytaur">${TINYTAUR.bloodCost} blood</span></div>
+    </div>
+  `;
+  tinytaurBtn.addEventListener('click', (e) => { playSound('click', 1, 0.75); flashSummonClick(tinytaurBtn); emanateAtCursor(e.clientX, e.clientY); callbacks.onSummonTinytaur(); });
+  summonList.appendChild(tinytaurBtn);
 
   // Ritual upgrades — surfaced once a Phone Farm has finished building.
   // Bought ones stay visible but go disabled.
@@ -577,6 +647,16 @@ export function refreshUI(state: GameState) {
         revealedTaskIds.add(t.id);
       }
     }
+    // Hydrate persisted unlocks (sticky progress that may no longer be derivable
+    // from isDone — e.g. the building that completed a task was since destroyed).
+    const u = state.unlocks;
+    if (u) {
+      for (const id of u.completed) { completedTaskIds.add(id); previouslyCompletedTaskIds.add(id); }
+      for (const id of u.revealed) revealedTaskIds.add(id);
+      for (const k of u.obsoleted) obsoletedKinds.add(k);
+      for (const k of u.everBuilt) everBuiltKinds.add(k);
+      if (u.minotaurEverSummoned) minotaurEverSummoned = true;
+    }
   }
   const idle = countIdle(state);
 
@@ -584,6 +664,9 @@ export function refreshUI(state: GameState) {
 
   // Blood resource — hidden until the player kills their first goblin.
   setText('blood', state.blood.toString());
+
+  // Faint "+X/s" rate readouts beside cash + blood.
+  updateResourceRates(state);
 
   // Power: hide entirely until any production exists, then show consumed /
   // produced. Always blue — the deficit signal lives on individual buildings
@@ -642,6 +725,20 @@ export function refreshUI(state: GameState) {
     setFillWidth('fill-summon-minotaur-0', Math.max(0, Math.min(1, fill)));
   } else {
     minotaurBtn.style.display = 'none';
+  }
+
+  // Tinytaur button — secret summon, appears once the horde-packed unlock fires.
+  // Instant summon, so just toggle affordability.
+  const tinytaurBtn = document.getElementById('btn-summon-tinytaur') as HTMLButtonElement;
+  if (state.tinytaurUnlocked) {
+    tinytaurBtn.style.display = '';
+    applyFadeInOnFirstShow('btn-summon-tinytaur');
+    const canAffordTinytaur = state.blood >= TINYTAUR.bloodCost;
+    tinytaurBtn.disabled = !canAffordTinytaur;
+    const tinytaurCost = document.getElementById('cost-summon-tinytaur')!;
+    tinytaurCost.classList.toggle('met', canAffordTinytaur);
+  } else {
+    tinytaurBtn.style.display = 'none';
   }
 
   // Tutorial: build the completed set first, then collect any tasks whose
@@ -867,6 +964,17 @@ export function refreshUI(state: GameState) {
     && state.now >= DRAG_SELECT_HINT_DELAY_SEC;
   dragSelectHint.classList.toggle('visible', dragSelectTrip);
 
+  // Mirror the sticky unlock sets onto state so they're captured by the next
+  // save. Holds live references to the module sets (+ the current boolean), so
+  // this is a tiny per-frame object with no set copying.
+  state.unlocks = {
+    completed: completedTaskIds,
+    revealed: revealedTaskIds,
+    obsoleted: obsoletedKinds,
+    everBuilt: everBuiltKinds,
+    minotaurEverSummoned,
+  };
+
   refreshInfoPanel(state);
 }
 
@@ -905,8 +1013,10 @@ function refreshInfoPanel(state: GameState) {
     if (selectedMinotaurs.length === 1 && selectedGoblins.length === 0 && selectedBuildings.length === 0) {
       const m = selectedMinotaurs[0];
       panel.classList.add('visible');
-      portrait.innerHTML = `<div class="portrait-goblin" style="background:#6a1a1a;border-color:#a06aff;color:#ffe0a0">M</div>`;
-      name.textContent = `Minotaur #${m.id}`;
+      portrait.innerHTML = m.tiny
+        ? `<div class="portrait-goblin" style="background:#3a1a4a;border-color:#a06aff;color:#ffe0a0;font-size:0.7em">t</div>`
+        : `<div class="portrait-goblin" style="background:#6a1a1a;border-color:#a06aff;color:#ffe0a0">M</div>`;
+      name.textContent = m.tiny ? `Tinytaur #${m.id}` : `Minotaur #${m.id}`;
       stateEl.textContent = describeMinotaurState(m.state);
       extra.innerHTML = `<span style="color:#6a7080">Right click anywhere to command (or space)</span>`;
     } else if (selectedMinotaurs.length > 1) {

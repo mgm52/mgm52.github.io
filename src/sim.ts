@@ -1,5 +1,5 @@
 import { playDecayingGoblinDeath, playDecayingGoblinSpawn, playDecayingGoldKillCash, playSound } from './audio';
-import { BUILDING_DEFS, CELL, COLS, GOBLIN, GOLD_GOBLIN_CHANCE, GOLD_KILL_REWARD, KILL_REWARD, MINOTAUR_KILL_REWARD, SUMMON_UPGRADES, TICK_S, MINOTAUR, WATER_DEPLETION_PP_PER_SEC, WATER_METER_MAX, formatPower } from './config';
+import { BUILDING_DEFS, CELL, COLS, GOBLIN, GOLD_GOBLIN_CHANCE, GOLD_KILL_REWARD, KILL_REWARD, MINOTAUR_KILL_REWARD, SUMMON_UPGRADES, TICK_S, MINOTAUR, TINYTAUR, WATER_DEPLETION_PP_PER_SEC, WATER_METER_MAX, formatPower } from './config';
 import {
   ALL_DIRS, Building, Cell, DX, DY, Dir, GameState, Goblin, HOLE_SIZE, Minotaur, WaterSource,
   appendLog, buildingAtCell, buildingCenter, buildingFootprint, buildingPerimeter,
@@ -154,6 +154,12 @@ function spawnGoblin(state: GameState) {
     state.money += GOBLIN.spawnCost;
     appendLog(state, 'All Goblin Holes blocked; spawn refunded.');
     playSound('error');
+    // Secret unlock: a horde this dense (and unable to grow) reveals the Tinytaur.
+    if (!state.tinytaurUnlocked && state.goblins.size >= TINYTAUR.unlockGoblins) {
+      state.tinytaurUnlocked = true;
+      appendLog(state, 'The horde is packed shoulder to shoulder — a Tinytaur can now be summoned!');
+      playSound('ritual');
+    }
     return;
   }
   const id = state.nextId++;
@@ -307,7 +313,7 @@ export function autoAssignAllIdle(state: GameState) {
 // Pop a minotaur out of the goblin hole. Minotaurs don't queue/take spawn time —
 // summoning is instant; if the hole and its perimeter are fully blocked, the
 // summon refunds.
-export function spawnMinotaur(state: GameState): boolean {
+export function spawnMinotaur(state: GameState, tiny = false): boolean {
   const cell = pickMinotaurSpawnCell(state);
   if (!cell) return false;
   const id = state.nextId++;
@@ -323,10 +329,11 @@ export function spawnMinotaur(state: GameState): boolean {
     stuckSampleCell: null,
     stuckSampleAt: state.now,
     stuckStreak: 0,
+    tiny: tiny || undefined,
   };
   state.minotaurs.set(id, t);
-  appendLog(state, `Minotaur #${id} crawls out of the hole.`);
-  playSound('goblin_spawn', 1.4, 0.3);
+  appendLog(state, tiny ? `Tinytaur #${id} skitters out of the hole.` : `Minotaur #${id} crawls out of the hole.`);
+  playSound('goblin_spawn', tiny ? 2.2 : 1.4, 0.3);
   return true;
 }
 
@@ -487,13 +494,16 @@ function applyMinotaurStuckCheck(state: GameState, t: Minotaur): boolean {
 }
 
 function updateMinotaur(state: GameState, t: Minotaur, autoTargets: Map<number, number>) {
+  // Tinytaurs move and attack much faster; everything else is shared.
+  const speed = t.tiny ? TINYTAUR.speed : MINOTAUR.speed;
+  const windup = t.tiny ? TINYTAUR.attackWindup : MINOTAUR.attackWindup;
   // Mid-step pixel lerp (shared with goblin movement model).
   if (t.target) {
     const tc = cellCenter(t.target);
     const dx = tc.x - t.pos.x;
     const dy = tc.y - t.pos.y;
     const d = Math.hypot(dx, dy);
-    const step = MINOTAUR.speed * TICK_S;
+    const step = speed * TICK_S;
     if (d <= step + MINOTAUR.arriveDist) {
       t.cell = t.target;
       t.pos = tc;
@@ -539,7 +549,7 @@ function updateMinotaur(state: GameState, t: Minotaur, autoTargets: Map<number, 
     if (chebyshevToBuilding(t.cell, b) <= 1) {
       if (s.attackAt === undefined) {
         const c = buildingCenter(b);
-        s.attackAt = state.now + MINOTAUR.attackWindup;
+        s.attackAt = state.now + windup;
         t.facing = Math.atan2(c.y - t.pos.y, c.x - t.pos.x);
         return;
       }
@@ -574,7 +584,7 @@ function updateMinotaur(state: GameState, t: Minotaur, autoTargets: Map<number, 
     const cdy = Math.abs(target.cell.cy - t.cell.cy);
     if (Math.max(cdx, cdy) <= 1) {
       if (s.attackAt === undefined) {
-        s.attackAt = state.now + MINOTAUR.attackWindup;
+        s.attackAt = state.now + windup;
         t.facing = Math.atan2(target.pos.y - t.pos.y, target.pos.x - t.pos.x);
         return;
       }
@@ -613,7 +623,7 @@ function updateMinotaur(state: GameState, t: Minotaur, autoTargets: Map<number, 
     if (Math.max(cdx, cdy) <= 1) {
       // Windup → kill.
       if (s.attackAt === undefined) {
-        s.attackAt = state.now + MINOTAUR.attackWindup;
+        s.attackAt = state.now + windup;
         t.facing = Math.atan2(target.pos.y - t.pos.y, target.pos.x - t.pos.x);
         return;
       }
@@ -630,7 +640,7 @@ function updateMinotaur(state: GameState, t: Minotaur, autoTargets: Map<number, 
       pushDeathEffect(state, tx, ty);
       playDecayingGoblinDeath();
       if (wasGold) playDecayingGoldKillCash();
-      appendLog(state, `Goblin #${target.id} killed by Minotaur #${t.id}.`);
+      appendLog(state, `Goblin #${target.id} ${t.tiny ? 'gored by Tinytaur' : 'killed by Minotaur'} #${t.id}.`);
       t.state = { kind: 'wander' };
       t.nextWanderAt = state.now + MINOTAUR.wanderInterval;
       return;

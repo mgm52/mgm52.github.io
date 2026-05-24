@@ -64,6 +64,20 @@ export const MINOTAUR = {
   wanderInterval: 1.2,
 };
 
+// Tinytaur — a secret summon unlocked once the map is so crammed with goblins
+// (>= unlockGoblins) that the holes can't spit out any more. A Minotaur shrunk
+// to a fraction of the size and much faster (movement + attack), so it zips
+// through a packed-in horde culling goblins quickly. Summoned instantly (no
+// queue) and cheaply, so the player can field several. Reuses the Minotaur unit
+// internally (a Minotaur with `tiny: true`).
+export const TINYTAUR = {
+  bloodCost: 16,
+  speed: 170,       // vs MINOTAUR.speed 70
+  attackWindup: 0.2, // vs MINOTAUR.attackWindup 0.5
+  scale: 0.5,       // render size multiplier vs a full Minotaur
+  unlockGoblins: 200,
+};
+
 // One-shot Ritual upgrades. Autocommand + Goldblins unlock once a Phone
 // Farm has been built; Autospawn unlocks once a Gas Engine has been built.
 // "Autocommand": newly-hatched goblins route themselves to understaffed

@@ -1,7 +1,7 @@
 import { playSound, preloadSounds, setCrackleEnabled, setMasterVolume, setMusicVolume, startBackgroundCrackle, startBackgroundMusic } from './audio';
 import {
   AUTOSPAWN_TIERS, CAMERA_SPEED, CELL, GOBLIN, GOLD_KILL_REWARD, KILL_REWARD, RENDER_SCALE, START_CELL,
-  SUMMON_UPGRADES, TICK_MS, MINOTAUR, digBloodCost,
+  SUMMON_UPGRADES, TICK_MS, MINOTAUR, TINYTAUR, digBloodCost,
 } from './config';
 import { setupInput } from './input';
 import { runIntro, setIntroPaused } from './intro';
@@ -264,6 +264,14 @@ async function main() {
       state.minotaurSpawnQueue.push({ remaining: MINOTAUR.spawnTime });
       playSound('ritual');
       appendLog(state, 'Minotaur summon ritual begins...');
+    },
+    onSummonTinytaur: () => {
+      if (!state.tinytaurUnlocked) { playSound('error'); return; }
+      if (state.blood < TINYTAUR.bloodCost) { playSound('error'); return; }
+      // Instant, no queue — but only charge if one actually pops out.
+      if (!spawnMinotaur(state, true)) { playSound('error'); return; }
+      state.blood -= TINYTAUR.bloodCost;
+      playSound('ritual');
     },
     onBuyAutoAssign: () => {
       if (state.autoAssignEnabled) return;
