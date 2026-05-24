@@ -369,8 +369,14 @@ async function main() {
       if (g.gold) playSound('cash', 0.7);
       appendLog(state, `Goblin #${id} killed — +Ƶ${reward.money.toLocaleString('en-US')}, +${reward.blood} blood.`);
     },
+    onLightningStrike: () => {
+      // Toggle aim mode; entering it cancels any pending building placement.
+      state.pendingStrike = !state.pendingStrike;
+      if (state.pendingStrike) state.pendingBuild = null;
+    },
     onBuildBuilding: (kind) => {
       state.pendingBuild = state.pendingBuild?.kind === kind ? null : { kind };
+      if (state.pendingBuild) state.pendingStrike = false;
     },
     onDestroyBuilding: (id) => {
       destroyBuilding(state, id);
@@ -471,7 +477,7 @@ async function main() {
   window.addEventListener('keydown', (e) => {
     const k = e.key.toLowerCase();
     if (e.key === 'Escape') {
-      if (state.pendingBuild) return; // input.ts clears the ghost
+      if (state.pendingBuild || state.pendingStrike) return; // input.ts clears the ghost
       togglePause();
     } else if (k === 'p') {
       // Ignore P while typing in an input/select (options panel sliders, etc.)

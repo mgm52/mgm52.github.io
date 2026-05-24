@@ -1,10 +1,10 @@
 import { Application, Container, FederatedPointerEvent, Graphics } from 'pixi.js';
 import { playSound } from './audio';
 import { flashCursor } from './cursor-fx';
-import { BUILDABLE_KINDS, BUILDING_DEFS, BuildingKind, CELL, GOBLIN, MINOTAUR, RENDER_SCALE, WORLD, formatPower } from './config';
+import { BUILDABLE_KINDS, BUILDING_DEFS, BuildingKind, CELL, GOBLIN, LIGHTNING, MINOTAUR, RENDER_SCALE, WORLD, formatPower } from './config';
 import { unlockOptionsCog } from './options-ui';
 import { RenderContext, clampCamera } from './render';
-import { autoAssignAllIdle } from './sim';
+import { autoAssignAllIdle, lightningStrike } from './sim';
 import {
   Building, Cell, GameState, Goblin, Minotaur, WaterSource,
   appendLog, buildingAtCell, cellKey, defOf, findFreeCellNear,
@@ -89,7 +89,17 @@ export function setupInput(
 
     if (e.button === 2) {
       flashCursor(e.clientX, e.clientY);
+      // Right-click cancels a pending strike rather than issuing a unit order.
+      if (state.pendingStrike) { state.pendingStrike = false; input.placementGhost.clear(); return; }
       handleRightClick(state, local.x, local.y);
+      return;
+    }
+    if (state.pendingStrike) {
+      // Stays armed if the player can't afford it (lightningStrike beeps).
+      if (lightningStrike(state, local.x, local.y)) {
+        state.pendingStrike = false;
+        input.placementGhost.clear();
+      }
       return;
     }
     if (state.pendingBuild) {
@@ -138,7 +148,8 @@ export function setupInput(
     }
 
     const local = e.getLocalPosition(worldLayer);
-    if (state.pendingBuild) drawGhost(input, local.x, local.y, state);
+    if (state.pendingStrike) drawStrikeGhost(input, local.x, local.y);
+    else if (state.pendingBuild) drawGhost(input, local.x, local.y, state);
     else input.placementGhost.clear();
     // Drag-paint walls — pointer is held (still in input.pointers) and the
     // current pending kind is wall. Silently skips duplicate cells.
@@ -234,6 +245,7 @@ export function setupInput(
   window.addEventListener('keydown', (e) => {
     if (e.key === 'Escape') {
       state.pendingBuild = null;
+      state.pendingStrike = false;
       input.placementGhost.clear();
       return;
     }
@@ -748,6 +760,17 @@ function tryPlaceWallAt(state: GameState, cx: number, cy: number, silent: boolea
   };
   state.buildings.set(b.id, b);
   return true;
+}
+
+// Translucent blast-radius preview that follows the cursor while a Lightning
+// Strike is armed. Reuses the placement-ghost graphics layer.
+function drawStrikeGhost(input: InputState, x: number, y: number) {
+  const radius = (LIGHTNING.cellsWide / 2) * CELL;
+  input.placementGhost.clear();
+  input.placementGhost
+    .circle(x, y, radius)
+    .fill({ color: 0xcdeeff, alpha: 0.18 })
+    .stroke({ width: 2, color: 0xffffff, alpha: 0.9 });
 }
 
 function drawGhost(input: InputState, x: number, y: number, state: GameState) {

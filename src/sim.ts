@@ -1,12 +1,12 @@
 import { playDecayingGoblinDeath, playDecayingGoblinSpawn, playDecayingGoldKillCash, playSound } from './audio';
-import { BUILDING_DEFS, CELL, COLS, GOBLIN, GOLD_GOBLIN_CHANCE, GOLD_KILL_REWARD, KILL_REWARD, MINOTAUR_KILL_REWARD, SUMMON_UPGRADES, TICK_S, MINOTAUR, TINYTAUR, WATER_DEPLETION_PP_PER_SEC, WATER_METER_MAX, formatPower } from './config';
+import { BUILDING_DEFS, CELL, COLS, GOBLIN, GOLD_GOBLIN_CHANCE, GOLD_KILL_REWARD, KILL_REWARD, LIGHTNING, MINOTAUR_KILL_REWARD, SUMMON_UPGRADES, TICK_S, MINOTAUR, TINYTAUR, WATER_DEPLETION_PP_PER_SEC, WATER_METER_MAX, formatPower } from './config';
 import {
   ALL_DIRS, Building, Cell, DX, DY, Dir, GameState, Goblin, HOLE_SIZE, Minotaur, WaterSource,
   appendLog, buildingAtCell, buildingCenter, buildingFootprint, buildingPerimeter,
-  cellCenter, cellKey, defOf, destroyBuilding, findFreeCellNear,
+  cellCenter, cellKey, currentPowerBoost, defOf, destroyBuilding, findFreeCellNear,
   getSpawnCapacity, holeBlockedByBuilding, isCellBlocked, isCellInBuilding, isCellInWaterSource,
   isInBounds, maintainerCount, nearestCellInWaterSource, occupyCell, pushDeathEffect, pushFloater,
-  releaseCell, removeGoblin, waterCarrierCount,
+  pushLightningBolt, releaseCell, removeGoblin, waterCarrierCount,
 } from './state';
 
 // Auto-assign normally only runs on discrete events (a spawn, a manual command,
@@ -18,6 +18,10 @@ import {
 // first tick after load runs a sweep — harmless).
 let nextAutoAssignAt = 0;
 const AUTO_ASSIGN_INTERVAL = 2;
+
+// Vertical lift (world px) applied to building-center power floaters so the
+// blue "±W" text clears the gold "+Ƶ" income floater spawned at the same point.
+const POWER_FLOATER_Y_OFFSET = 26;
 
 export function tick(state: GameState) {
   state.now += TICK_S;
@@ -122,8 +126,75 @@ export function tick(state: GameState) {
   for (let i = state.deathEffects.length - 1; i >= 0; i--) {
     if (state.now - state.deathEffects[i].spawnAt >= 2) state.deathEffects.splice(i, 1);
   }
+  for (let i = state.lightningBolts.length - 1; i >= 0; i--) {
+    const lb = state.lightningBolts[i];
+    if (state.now - lb.spawnAt >= lb.lifetime) state.lightningBolts.splice(i, 1);
+  }
+  for (let i = state.powerBoosts.length - 1; i >= 0; i--) {
+    const pb = state.powerBoosts[i];
+    if (state.now - pb.startAt >= pb.duration) state.powerBoosts.splice(i, 1);
+  }
 }
 
+
+// Lightning Strike — fired by clicking the map while aiming the ability.
+// Spends LIGHTNING.bloodCost, kills every unit inside the blast, paints a
+// white splatter over every cell in range, drops a jagged bolt, and kicks off
+// the decaying power surge. Returns false (with an error beep) when the player
+// can't afford it, so the caller can leave aim mode untouched.
+export function lightningStrike(state: GameState, x: number, y: number): boolean {
+  if (state.blood < LIGHTNING.bloodCost) {
+    playSound('error');
+    return false;
+  }
+  state.blood -= LIGHTNING.bloodCost;
+
+  const radiusPx = (LIGHTNING.cellsWide / 2) * CELL;
+  const r2 = radiusPx * radiusPx;
+  const within = (px: number, py: number) => {
+    const dx = px - x, dy = py - y;
+    return dx * dx + dy * dy <= r2;
+  };
+
+  let killed = 0;
+  for (const g of [...state.goblins.values()]) {
+    if (within(g.pos.x, g.pos.y)) { removeGoblin(state, g.id); killed++; }
+  }
+  for (const m of [...state.minotaurs.values()]) {
+    if (within(m.pos.x, m.pos.y)) { state.minotaurs.delete(m.id); killed++; }
+  }
+
+  // White blood over every cell whose center falls inside the blast.
+  const span = Math.ceil(LIGHTNING.cellsWide / 2);
+  const ccx = Math.floor(x / CELL), ccy = Math.floor(y / CELL);
+  for (let cy = ccy - span; cy <= ccy + span; cy++) {
+    for (let cx = ccx - span; cx <= ccx + span; cx++) {
+      const c = cellCenter({ cx, cy });
+      if (within(c.x, c.y)) pushDeathEffect(state, c.x, c.y, true);
+    }
+  }
+
+  pushLightningBolt(state, x, y);
+
+  state.powerBoosts.push({
+    startAt: state.now,
+    peak: LIGHTNING.powerBoostWatts,
+    duration: LIGHTNING.powerBoostSeconds,
+  });
+  // Floating "+1.00 GW" that ticks down to 0.00 as the surge decays.
+  pushFloater(
+    state, x, y,
+    `+${(LIGHTNING.powerBoostWatts / 1e9).toFixed(2)} GW`,
+    0x8acfff,
+    LIGHTNING.powerBoostSeconds,
+    LIGHTNING.powerBoostWatts,
+  );
+
+  playSound('destroy', 0.7, 0.4);
+  if (killed > 0) playDecayingGoblinDeath(0.6);
+  appendLog(state, `Lightning strike! ${killed} unit${killed === 1 ? '' : 's'} vaporised.`);
+  return true;
+}
 
 function spawnGoblin(state: GameState) {
   // Round-robin between the main hole and every completed Goblin Hole. A
@@ -176,8 +247,9 @@ function spawnGoblin(state: GameState) {
   occupyCell(state, cell.cx, cell.cy, id);
   state.spawnsCompleted++;
   // Decaying-volume helper in audio.ts so a wall of late-game goblins
-  // doesn't drown the rest of the soundscape.
-  playDecayingGoblinSpawn();
+  // doesn't drown the rest of the soundscape. A slight random pitch wobble
+  // (±4%) stops a burst of spawns sounding like one machine-gun tone.
+  playDecayingGoblinSpawn(0.96 + Math.random() * 0.08);
   appendLog(state, isGold ? `Gold Goblin #${id} hatched!` : `Goblin #${id} hatched.`);
   if (state.autoAssignEnabled) autoAssignAllIdle(state);
 }
@@ -1433,6 +1505,11 @@ function resolvePowerAndState(state: GameState) {
     if (b.state === 'active') production += def.powerOutput;
   }
 
+  // Lightning Strike surges add to the grid on top of building output, so a
+  // strike can flick power-starved buildings online for the few seconds it
+  // takes the surge to decay back to nothing.
+  production += currentPowerBoost(state);
+
   let consumed = 0;
   for (const b of buildings) {
     if (b.state === 'constructing') continue;
@@ -1475,10 +1552,12 @@ function setActiveOrDormant(
       playSound('online');
       appendLog(state, `${def.name} #${b.id} online.`);
       const c = buildingCenter(b);
+      // Raise power floaters above the building center so they don't pile up
+      // under the gold "+Ƶ" income floater that spawns at the same point.
       if (def.powerOutput > 0) {
-        pushFloater(state, c.x, c.y, `+${formatPower(def.powerOutput)}`, 0x8acfff, 1.6);
+        pushFloater(state, c.x, c.y - POWER_FLOATER_Y_OFFSET, `+${formatPower(def.powerOutput)}`, 0x8acfff, 1.6);
       } else if (def.powerOutput < 0) {
-        pushFloater(state, c.x, c.y, `-${formatPower(-def.powerOutput)}`, 0x8acfff, 1.6);
+        pushFloater(state, c.x, c.y - POWER_FLOATER_Y_OFFSET, `-${formatPower(-def.powerOutput)}`, 0x8acfff, 1.6);
       }
     }
   } else {
@@ -1494,7 +1573,7 @@ function setActiveOrDormant(
       // online draw is shown by the activation floater above.
       if (reason === 'no_water' && def.powerOutput < 0) {
         const c = buildingCenter(b);
-        pushFloater(state, c.x, c.y, `+${formatPower(-def.powerOutput)}`, 0x8acfff, 1.6);
+        pushFloater(state, c.x, c.y - POWER_FLOATER_Y_OFFSET, `+${formatPower(-def.powerOutput)}`, 0x8acfff, 1.6);
       }
     }
   }

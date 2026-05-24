@@ -142,13 +142,37 @@ export type Floater = {
   color: number;
   spawnAt: number;
   lifetime: number;
+  // When set, the renderer ignores `text` and recomputes a GW readout each
+  // frame that ticks down from this peak to 0 across the floater's lifetime
+  // (the Lightning Strike power surge). In watts.
+  powerCountdownWatts?: number;
 };
 
-// One-shot blood-explosion GIF effect played at a world position.
+// One-shot blood-explosion GIF effect played at a world position. The Lightning
+// Strike marks its splatters `white` so the renderer draws them as a pale
+// silhouette instead of the usual blood color.
 export type DeathEffect = {
   id: number;
   x: number; y: number;
   spawnAt: number;
+  white?: boolean;
+};
+
+// One-shot jagged white bolt drawn from above down to a strike point. The
+// polyline is precomputed at spawn so it doesn't reshuffle every frame.
+export type LightningBolt = {
+  id: number;
+  points: Vec2[];
+  spawnAt: number;
+  lifetime: number;
+};
+
+// A decaying power surge (Lightning Strike). Contributes `peak` watts at
+// spawn, ramping linearly to 0 over `duration` seconds.
+export type PowerBoost = {
+  startAt: number;
+  peak: number;
+  duration: number;
 };
 
 // The Goblin Hole — a 1×1 spawn point. Goblins emerge from cells around it.
@@ -207,6 +231,12 @@ export type GameState = {
   playArea: { x0: number; y0: number; x1: number; y1: number };
   floaters: Floater[];
   deathEffects: DeathEffect[];
+  lightningBolts: LightningBolt[];
+  // Active Lightning Strike power surges, summed into production each tick.
+  powerBoosts: PowerBoost[];
+  // True while the player is aiming a Lightning Strike (next map click fires
+  // it). Ephemeral — never meaningfully persisted.
+  pendingStrike: boolean;
   spawnQueue: { remaining: number; slot: number }[];
   minotaurSpawnQueue: { remaining: number }[];
   pendingBuild: PendingBuild;
@@ -490,6 +520,9 @@ export function createInitialState(): GameState {
     playArea: initialPlayArea(),
     floaters: [],
     deathEffects: [],
+    lightningBolts: [],
+    powerBoosts: [],
+    pendingStrike: false,
     spawnQueue: [],
     minotaurSpawnQueue: [],
     pendingBuild: null,
@@ -553,11 +586,12 @@ export function totalIncome(state: GameState): number {
   return inc;
 }
 
-export function pushDeathEffect(state: GameState, x: number, y: number) {
+export function pushDeathEffect(state: GameState, x: number, y: number, white = false) {
   state.deathEffects.push({
     id: state.nextId++,
     x, y,
     spawnAt: state.now,
+    white: white || undefined,
   });
 }
 
@@ -567,13 +601,48 @@ export function pushFloater(
   text: string,
   color: number,
   lifetime = 1.4,
+  powerCountdownWatts?: number,
 ) {
   state.floaters.push({
     id: state.nextId++,
     x, y, text, color,
     spawnAt: state.now,
     lifetime,
+    powerCountdownWatts,
   });
+}
+
+// A jagged white bolt that lances down from well above the target to the
+// strike point. Horizontal jitter tapers to 0 at the bottom so the tip lands
+// exactly on (x, y).
+export function pushLightningBolt(state: GameState, x: number, y: number) {
+  const topY = Math.max(0, y - 14 * CELL);
+  const segs = 12;
+  const points: Vec2[] = [];
+  for (let i = 0; i <= segs; i++) {
+    const t = i / segs;
+    const py = topY + (y - topY) * t;
+    const jitter = (1 - t) * (Math.random() - 0.5) * CELL * 2.5;
+    points.push({ x: x + jitter, y: py });
+  }
+  points[points.length - 1] = { x, y };
+  state.lightningBolts.push({
+    id: state.nextId++,
+    points,
+    spawnAt: state.now,
+    lifetime: 0.45,
+  });
+}
+
+// Sum of every live power surge's current contribution (watts), each ramping
+// linearly from its peak down to 0 across its duration.
+export function currentPowerBoost(state: GameState): number {
+  let total = 0;
+  for (const b of state.powerBoosts) {
+    const k = (state.now - b.startAt) / b.duration;
+    if (k < 1) total += b.peak * (1 - k);
+  }
+  return total;
 }
 
 export function removeGoblin(state: GameState, goblinId: number) {

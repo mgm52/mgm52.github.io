@@ -1,7 +1,7 @@
 import { playSound } from './audio';
 import {
   AUTOSPAWN_TIERS, BUILDABLE_KINDS, BUILDING_DEFS, BuildingKind, DRAG_SELECT_HINT_DELAY_SEC,
-  GOBLIN, SPAWN_HINT_NO_SPAWN_SEC,
+  GOBLIN, LIGHTNING, SPAWN_HINT_NO_SPAWN_SEC,
   SPAWN_HINT_NO_TASK_SEC, SUMMON_UPGRADES, WATER_HINT_DELAY_SEC, digBloodCost, MINOTAUR, TINYTAUR, formatPower,
 } from './config';
 import {
@@ -234,6 +234,7 @@ export type UICallbacks = {
   onSpawnGoblin: () => void;
   onSummonMinotaur: () => void;
   onSummonTinytaur: () => void;
+  onLightningStrike: () => void;
   onBuyAutoAssign: () => void;
   onBuyAutoWater: () => void;
   onBuyAutoSpawn: () => void;
@@ -297,6 +298,23 @@ export function setupUI(state: GameState, callbacks: UICallbacks) {
   `;
   tinytaurBtn.addEventListener('click', (e) => { playSound('click', 1, 0.75); flashSummonClick(tinytaurBtn); emanateAtCursor(e.clientX, e.clientY); callbacks.onSummonTinytaur(); });
   summonList.appendChild(tinytaurBtn);
+
+  // Lightning Strike — an aimed ability unlocked once the Run-a-Phone-Farm
+  // task is done. Clicking arms it; the next map click calls the bolt down.
+  const lightningBtn = document.createElement('button');
+  lightningBtn.className = 'build-button build-button-compact';
+  lightningBtn.id = 'btn-lightning-strike';
+  lightningBtn.style.display = 'none';
+  lightningBtn.innerHTML = `
+    <div class="build-content">
+      <div class="build-text">
+        <div class="build-name">Lightning Strike</div>
+      </div>
+      <div class="build-cost-side"><span class="build-cost" id="cost-lightning-strike">${LIGHTNING.bloodCost} blood</span></div>
+    </div>
+  `;
+  lightningBtn.addEventListener('click', (e) => { playSound('click', 1, 0.75); flashSummonClick(lightningBtn); emanateAtCursor(e.clientX, e.clientY, 'white'); callbacks.onLightningStrike(); });
+  summonList.appendChild(lightningBtn);
 
   // Ritual upgrades — surfaced once a Phone Farm has finished building.
   // Bought ones stay visible but go disabled.
@@ -776,6 +794,20 @@ export function refreshUI(state: GameState) {
   const buildSection = document.getElementById('build-section')!;
   buildSection.style.display = firstTaskDone ? '' : 'none';
 
+  // Lightning Strike — unlocks (sticky) once the Run-a-Phone-Farm task is
+  // done. Disabled when the player can't cover the blood cost; lit while armed.
+  const lightningBtn = document.getElementById('btn-lightning-strike') as HTMLButtonElement;
+  if (completedTaskIds.has('run_phone_farm')) {
+    lightningBtn.style.display = '';
+    applyFadeInOnFirstShow('btn-lightning-strike');
+    const canAffordLightning = state.blood >= LIGHTNING.bloodCost;
+    lightningBtn.disabled = !canAffordLightning;
+    lightningBtn.classList.toggle('active', state.pendingStrike);
+    document.getElementById('cost-lightning-strike')!.classList.toggle('met', canAffordLightning);
+  } else {
+    lightningBtn.style.display = 'none';
+  }
+
   // Ritual upgrades — Autocommand and Goldblins appear once a Phone Farm is
   // built; Autospawn appears once a Gas Engine is built. Bought ones stay
   // visible but go disabled.
@@ -932,7 +964,10 @@ export function refreshUI(state: GameState) {
 
   // Placement hint
   const hint = document.getElementById('placement-hint')!;
-  if (state.pendingBuild) {
+  if (state.pendingStrike) {
+    hint.style.display = 'block';
+    hint.textContent = 'Tap to call down lightning · tap the button again or press ESC to cancel';
+  } else if (state.pendingBuild) {
     const name = BUILDING_DEFS[state.pendingBuild.kind].name;
     hint.style.display = 'block';
     hint.textContent = `Tap to place ${name} · tap the button again or press ESC to cancel`;

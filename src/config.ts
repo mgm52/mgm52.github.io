@@ -126,6 +126,16 @@ export const WATER_DEPLETION_PP_PER_SEC = 10;
 export const BASE_SPAWN_CAPACITY = 5;
 export const GOBLIN_HOLE_CAPACITY_PER_BUILDING = 5;
 
+// Lightning Strike — an ability unlocked once the Run-a-Phone-Farm task is
+// done. Aim it at the map: it kills every unit inside a circular blast and
+// grants a temporary power surge that decays linearly to zero.
+export const LIGHTNING = {
+  cellsWide: 9,                    // blast diameter, in cells
+  bloodCost: 8,                    // blood spent per strike
+  powerBoostWatts: 1_000_000_000,  // 1 GW peak surge
+  powerBoostSeconds: 5,            // surge decays to 0 over this many seconds
+};
+
 // Killing a goblin yields this much money + this much blood.
 export const KILL_REWARD = { money: 25, blood: 1 };
 // A gold-tinted goblin (rolled at spawn time when Goldgoblins is owned)
