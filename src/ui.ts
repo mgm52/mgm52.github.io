@@ -47,7 +47,7 @@ const obsoletedKinds = new Set<BuildingKind>();
 const everBuiltKinds = new Set<BuildingKind>();
 
 // Sticky: flips true the first time a Minotaur exists. Digging needs a Minotaur,
-// so the dig buttons show a "requires Minotaur" banner until this is set — and
+// so the dig buttons show a "needs Minotaur" banner until this is set — and
 // it stays unlocked afterwards even if every Minotaur later dies.
 let minotaurEverSummoned = false;
 
@@ -65,7 +65,9 @@ function applyFadeInOnFirstShow(btnId: string): void {
 
 // Income/blood rate readouts ("+X/s"). Sampled on a fixed cadence and shown as
 // a rolling average over the last few samples so the number doesn't jitter every
-// frame. Cash rate appears once the Phone Farm task is complete (a farm has gone
+// frame. Derived from cumulative *earned* totals (income + kill rewards) rather
+// than the balance, so spending on buildings/summons never drags the rate down.
+// Cash rate appears once the Phone Farm task is complete (a farm has gone
 // active), not merely placed; blood rate once a Minotaur has been summoned. Both
 // render at 40% opacity (see .resource-rate).
 const RATE_SAMPLE_SEC = 2;
@@ -97,15 +99,15 @@ function updateResourceRates(state: GameState): void {
   if (!rateInit) {
     rateInit = true;
     rateLastSampleAt = state.now;
-    lastMoneySample = state.money;
-    lastBloodSample = state.blood;
+    lastMoneySample = state.moneyEarned;
+    lastBloodSample = state.bloodEarned;
   }
   const dt = state.now - rateLastSampleAt;
   if (dt >= RATE_SAMPLE_SEC) {
-    pushRate(moneyRateHist, (state.money - lastMoneySample) / dt);
-    pushRate(bloodRateHist, (state.blood - lastBloodSample) / dt);
-    lastMoneySample = state.money;
-    lastBloodSample = state.blood;
+    pushRate(moneyRateHist, (state.moneyEarned - lastMoneySample) / dt);
+    pushRate(bloodRateHist, (state.bloodEarned - lastBloodSample) / dt);
+    lastMoneySample = state.moneyEarned;
+    lastBloodSample = state.bloodEarned;
     rateLastSampleAt = state.now;
     setText('money-rate', formatRate(avgRate(moneyRateHist)));
     setText('blood-rate', formatRate(avgRate(bloodRateHist)));
@@ -235,7 +237,7 @@ const TASKS: Task[] = [
     // Optional: surfaces alongside run_datacentre (shares its prereq). Rewards
     // the Goblin Hole plus the Goldblins and Autospawn rituals.
     id: 'strike_13',
-    text: `Lightning-strike ${LIGHTNING_TASK_KILL_GOAL} goblins at once`,
+    text: `Strike ${LIGHTNING_TASK_KILL_GOAL} goblins at once`,
     unlocks: ['goblin_hole'],
     isDone: (s) => s.struck13Goblins,
     prereq: ['build_gas_engine'],
@@ -425,7 +427,7 @@ export function setupUI(state: GameState, callbacks: UICallbacks) {
 
   // Dig row — four compact buttons (NESW) on a single line, unlocked alongside
   // the Datacentre. Each is one-shot and costs DIG.bloodCost blood. Digging
-  // still needs a Minotaur, so until one is summoned a "requires Minotaur"
+  // still needs a Minotaur, so until one is summoned a "needs Minotaur"
   // banner sits across the row and the buttons stay disabled.
   const digRow = document.createElement('div');
   digRow.id = 'dig-row';
@@ -448,12 +450,12 @@ export function setupUI(state: GameState, callbacks: UICallbacks) {
     b.addEventListener('click', () => { playSound('click', 1, 0.75); callbacks.onDig(dir); });
     digRow.appendChild(b);
   }
-  // "requires Minotaur" banner overlaid across the dig buttons; shown until a
+  // "needs Minotaur" banner overlaid across the dig buttons; shown until a
   // Minotaur has been summoned. pointer-events:none so it's purely cosmetic —
   // the buttons underneath are independently disabled in refreshUI.
   const digOverlay = document.createElement('div');
   digOverlay.id = 'dig-overlay';
-  digOverlay.textContent = 'requires Minotaur';
+  digOverlay.textContent = 'needs Minotaur';
   digOverlay.style.position = 'absolute';
   digOverlay.style.inset = '0';
   digOverlay.style.display = 'none';
@@ -463,7 +465,7 @@ export function setupUI(state: GameState, callbacks: UICallbacks) {
   digOverlay.style.fontSize = 'calc(12px * var(--font-display-scale))';
   digOverlay.style.fontWeight = 'bold';
   digOverlay.style.letterSpacing = '1px';
-  digOverlay.style.color = '#e0a0a0';
+  digOverlay.style.color = '#b8bec6';
   digOverlay.style.background = 'rgba(18,14,14,0.74)';
   digOverlay.style.borderRadius = '4px';
   digOverlay.style.zIndex = '2';
@@ -893,7 +895,7 @@ export function refreshUI(state: GameState) {
 
   // Dig row: visible once the Datacentre unlocks. Each direction is one-shot.
   // First time the row appears, each button fades in. Until a Minotaur has been
-  // summoned, a "requires Minotaur" banner covers the row and the buttons are
+  // summoned, a "needs Minotaur" banner covers the row and the buttons are
   // disabled.
   if (state.minotaurs.size > 0) minotaurEverSummoned = true;
   const needsMinotaur = !minotaurEverSummoned;

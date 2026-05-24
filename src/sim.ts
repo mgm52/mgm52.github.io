@@ -3,7 +3,7 @@ import { BUILDING_DEFS, CELL, COLS, GOBLIN, GOLD_GOBLIN_CHANCE, GOLD_KILL_REWARD
 import {
   ALL_DIRS, Building, Cell, DX, DY, Dir, GameState, Goblin, HOLE_SIZE, Minotaur, WaterSource,
   appendLog, buildingAtCell, buildingCenter, buildingFootprint, buildingPerimeter,
-  cellCenter, cellKey, currentPowerBoost, defOf, destroyBuilding, findFreeCellNear,
+  cellCenter, cellKey, currentPowerBoost, defOf, destroyBuilding, earnBlood, earnMoney, findFreeCellNear,
   getSpawnCapacity, holeBlockedByBuilding, isCellBlocked, isCellInBuilding, isCellInWaterSource,
   isInBounds, maintainerCount, nearestCellInWaterSource, occupyCell, pushDeathEffect, pushFloater,
   pushLightningBolt, releaseCell, removeGoblin, waterCarrierCount,
@@ -111,7 +111,7 @@ export function tick(state: GameState) {
     if (def.income <= 0) continue;
     if (b.nextIncomeAt === undefined) { b.nextIncomeAt = state.now + 1; continue; }
     if (state.now >= b.nextIncomeAt) {
-      state.money += def.income;
+      earnMoney(state, def.income);
       b.nextIncomeAt = state.now + 1;
       const c = buildingCenter(b);
       pushFloater(state, c.x, c.y, `+Ƶ${def.income.toLocaleString('en-US')}`, 0xffd96b);
@@ -189,8 +189,8 @@ export function lightningStrike(state: GameState, x: number, y: number): boolean
   if (killedMinotaurs >= LIGHTNING_TASK_KILL_GOAL) state.struck13Minotaurs = true;
 
   if (gainedMoney > 0 || gainedBlood > 0) {
-    state.money += gainedMoney;
-    state.blood += gainedBlood;
+    earnMoney(state, gainedMoney);
+    earnBlood(state, gainedBlood);
     state.bloodUnlocked = true;
   }
 
@@ -696,8 +696,8 @@ function updateMinotaur(state: GameState, t: Minotaur, autoTargets: Map<number, 
       if (state.now < s.attackAt) return;
       const tx = target.pos.x, ty = target.pos.y;
       state.minotaurs.delete(target.id);
-      state.money += MINOTAUR_KILL_REWARD.money;
-      state.blood += MINOTAUR_KILL_REWARD.blood;
+      earnMoney(state, MINOTAUR_KILL_REWARD.money);
+      earnBlood(state, MINOTAUR_KILL_REWARD.blood);
       state.bloodUnlocked = true;
       pushFloater(state, tx, ty, `+Ƶ${MINOTAUR_KILL_REWARD.money.toLocaleString('en-US')}`, 0xffd96b, 1.6);
       pushFloater(state, tx, ty - 14, `+${MINOTAUR_KILL_REWARD.blood} blood`, 0xff8a8a, 1.6);
@@ -737,8 +737,8 @@ function updateMinotaur(state: GameState, t: Minotaur, autoTargets: Map<number, 
       const reward = goblinKillReward(state, target);
       const wasGold = !!target.gold;
       removeGoblin(state, target.id);
-      state.money += reward.money;
-      state.blood += reward.blood;
+      earnMoney(state, reward.money);
+      earnBlood(state, reward.blood);
       state.bloodUnlocked = true;
       pushFloater(state, tx, ty, `+Ƶ${reward.money.toLocaleString('en-US')}`, 0xffd96b, 1.6);
       pushFloater(state, tx, ty - 14, `+${reward.blood} blood`, 0xff8a8a, 1.6);
@@ -1215,8 +1215,8 @@ function updateGoblin(state: GameState, g: Goblin) {
         const reward = goblinKillReward(state, target);
         const wasGold = !!target.gold;
         removeGoblin(state, target.id);
-        state.money += reward.money;
-        state.blood += reward.blood;
+        earnMoney(state, reward.money);
+        earnBlood(state, reward.blood);
         state.bloodUnlocked = true;
         pushFloater(state, tx, ty, `+Ƶ${reward.money.toLocaleString('en-US')}`, 0xffd96b, 1.6);
         pushFloater(state, tx, ty - 14, `+${reward.blood} blood`, 0xff8a8a, 1.6);
