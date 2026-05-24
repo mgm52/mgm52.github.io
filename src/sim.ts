@@ -9,8 +9,23 @@ import {
   releaseCell, removeGoblin, waterCarrierCount,
 } from './state';
 
+// Auto-assign normally only runs on discrete events (a spawn, a manual command,
+// an upgrade purchase). That leaves gaps: a carrier that gets stuck and drops
+// duty, or a maintainer that's killed, isn't backfilled until the next spawn —
+// so a Datacentre can silently go dry. This periodic sweep re-runs the
+// assignment on a steady cadence so understaffed buildings and thirsty drinkers
+// are topped back up. Module-scoped (resets to 0 on reload, which just means the
+// first tick after load runs a sweep — harmless).
+let nextAutoAssignAt = 0;
+const AUTO_ASSIGN_INTERVAL = 2;
+
 export function tick(state: GameState) {
   state.now += TICK_S;
+
+  if (state.autoAssignEnabled && state.now >= nextAutoAssignAt) {
+    autoAssignAllIdle(state);
+    nextAutoAssignAt = state.now + AUTO_ASSIGN_INTERVAL;
+  }
 
   // ── 1. Spawn queue ────────────────────────────────────────────────
   if (state.autoSpawnEnabled) {
@@ -161,6 +176,32 @@ function spawnGoblin(state: GameState) {
   if (state.autoAssignEnabled) autoAssignAllIdle(state);
 }
 
+// How many carriers Autowater should keep on a drinking building. Close to the
+// water a tiny crew keeps the meter full; the farther the round trip, the more
+// carriers it takes to refill faster than the meter drains. Floored at the def's
+// base target and capped at waterCarrierMax so one distant building can't
+// swallow the whole workforce.
+function waterCarrierTarget(state: GameState, b: Building): number {
+  const def = defOf(b);
+  const base = def.waterAutoAssignTarget ?? 0;
+  const delivery = def.waterDeliveryAmount ?? 0;
+  if (base === 0 || delivery <= 0) return base;
+  const src = nearestWaterSourceTo(state, b);
+  if (!src) return base;
+  const depletion = def.waterDepletionPerSec ?? WATER_DEPLETION_PP_PER_SEC;
+  const c = buildingCenter(b);
+  // Nearest point of the source region to the building, in pixels.
+  const sx = Math.min(Math.max(c.x, src.x0 * CELL), src.x1 * CELL);
+  const sy = Math.min(Math.max(c.y, src.y0 * CELL), src.y1 * CELL);
+  const oneWay = Math.hypot(c.x - sx, c.y - sy);
+  // There and back at goblin speed, plus the ~1s dip the carrier dwells in water.
+  const roundTrip = (2 * oneWay) / GOBLIN.speed + 1;
+  // Each carrier delivers `delivery` pp per round trip; size the crew to the drain.
+  const needed = Math.ceil((depletion * roundTrip) / delivery);
+  const cap = def.waterCarrierMax ?? base;
+  return Math.max(base, Math.min(cap, needed));
+}
+
 // Fill every understaffed building from the pool of idle goblins, picking the
 // closest idle goblin for each open slot. Tier order is constructing > dormant
 // > active-short-on-maintainers; within a tier, fewer-currently-assigned wins
@@ -180,31 +221,38 @@ export function autoAssignAllIdle(state: GameState) {
       b.state === 'dormant' ? 2 : 1;
     needs.push({ b, tier, slots, center: buildingCenter(b) });
   }
-  if (needs.length === 0) return;
-
   const idle: Goblin[] = [];
   for (const g of state.goblins.values()) {
     if (g.state.kind === 'idle') idle.push(g);
   }
+  if (idle.length === 0) return;
 
-  // First: keep every thirsty building staffed with its auto-assign target
-  // of carriers as long as a water source exists and idle goblins remain.
-  // (Manual right-click ignores this cap.) Gated on the Autowater ritual —
-  // plain Autocommand staffs maintainers/builders but never watering duty.
+  // Water duty runs independently of maintainer/builder needs — a fully-staffed
+  // map still has Datacentres to keep wet, so this must not be gated behind
+  // `needs` being non-empty (it used to be, which silently starved watering
+  // whenever everything was staffed). Keep every thirsty, fully-staffed drinker
+  // topped up to its (distance-scaled) carrier target, driest building first so
+  // scarce idle goblins shore up whichever is closest to running dry. Gated on
+  // the Autowater ritual; manual right-click ignores these caps.
   if (state.autoWaterEnabled && state.waterSources.size > 0) {
+    type Drinker = { b: Building; target: number; meter: number };
+    const drinkers: Drinker[] = [];
     for (const b of state.buildings.values()) {
       const def = defOf(b);
-      const target = def.waterAutoAssignTarget ?? 0;
-      if (target === 0) continue;
+      if ((def.waterAutoAssignTarget ?? 0) === 0) continue;
       if (b.state === 'constructing') continue;
-      // Don't pull goblins onto water duty until the building is fully
-      // staffed — maintainers are the more pressing need, and water
-      // delivery doesn't even land while understaffed.
+      // Maintainers are the more pressing need, and a delivery doesn't even
+      // land while understaffed — so don't water until fully staffed.
       if (maintainerCount(state, b) < def.maintainersRequired) continue;
-      const source = nearestWaterSourceTo(state, b);
-      if (!source) break;
-      while (waterCarrierCount(state, b) < target && idle.length > 0) {
-        const c = buildingCenter(b);
+      if (!nearestWaterSourceTo(state, b)) continue;
+      drinkers.push({ b, target: waterCarrierTarget(state, b), meter: b.waterMeter ?? 0 });
+    }
+    drinkers.sort((x, y) => x.meter - y.meter);
+    for (const dr of drinkers) {
+      if (idle.length === 0) break;
+      const source = nearestWaterSourceTo(state, dr.b)!;
+      while (waterCarrierCount(state, dr.b) < dr.target && idle.length > 0) {
+        const c = buildingCenter(dr.b);
         let pickI = 0;
         let pickD = Infinity;
         for (let i = 0; i < idle.length; i++) {
@@ -215,13 +263,12 @@ export function autoAssignAllIdle(state: GameState) {
           if (d < pickD) { pickD = d; pickI = i; }
         }
         const g = idle.splice(pickI, 1)[0];
-        b.assignedGoblins.push(g.id);
+        dr.b.assignedGoblins.push(g.id);
         g.goal = null;
         g.path = [];
-        g.state = { kind: 'fetching_water', buildingId: b.id, sourceId: source.id, phase: 'to_source' };
+        g.state = { kind: 'fetching_water', buildingId: dr.b.id, sourceId: source.id, phase: 'to_source' };
         g.lastCellChangedAt = state.now;
       }
-      if (idle.length === 0) break;
     }
   }
 

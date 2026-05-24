@@ -123,8 +123,8 @@ export const GOLD_GOBLIN_CHANCE = 0.20;
 
 // Killing a Minotaur (only possible by goring it with another Minotaur)
 // drops blood but no money — the player paid summoning blood, this returns
-// most of it via the kill but doesn't generate Ƶ.
-export const MINOTAUR_KILL_REWARD = { money: 0, blood: 10 };
+// it (and then some) via the kill but doesn't generate Ƶ.
+export const MINOTAUR_KILL_REWARD = { money: 0, blood: 128 };
 
 export type BuildingColors = {
   active: number; activeBorder: number;

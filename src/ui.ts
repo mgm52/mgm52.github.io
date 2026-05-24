@@ -392,7 +392,9 @@ export function setupUI(state: GameState, callbacks: UICallbacks) {
   // Destroy button on the info panel — instead of instantly tearing down the
   // building, allocate the nearest minotaur to smash it. Without one, flash
   // a "needs minotaur" warning under the button.
-  document.getElementById('info-destroy')!.addEventListener('click', () => {
+  const destroyBtn = document.getElementById('info-destroy')!;
+  let destroyDispatchTimer: number | undefined;
+  destroyBtn.addEventListener('click', () => {
     const target = [...state.buildings.values()].find(b => b.selected);
     if (!target) return;
     const minotaurs = [...state.minotaurs.values()];
@@ -416,6 +418,15 @@ export function setupUI(state: GameState, callbacks: UICallbacks) {
     best.target = null;
     best.state = { kind: 'going_to_destroy', buildingId: target.id };
     appendLog(state, `Minotaur #${best.id} ordered to smash ${defOf(target).name} #${target.id}.`);
+    // Brief confirmation: swap the label to "Minotaur dispatched…" for 2s.
+    // refreshInfoPanel only toggles this button's display, never its text, so
+    // the override survives the per-frame refresh until the timer restores it.
+    destroyBtn.textContent = 'Minotaur dispatched…';
+    if (destroyDispatchTimer !== undefined) window.clearTimeout(destroyDispatchTimer);
+    destroyDispatchTimer = window.setTimeout(() => {
+      destroyBtn.textContent = 'Destroy';
+      destroyDispatchTimer = undefined;
+    }, 2000);
   });
 
   // Kill button — kills every currently-selected goblin.
@@ -593,7 +604,10 @@ export function refreshUI(state: GameState) {
   // Goblin button's spawn track.
   const minotaurBtn = document.getElementById('btn-summon-minotaur') as HTMLButtonElement;
   const minotaurCost = document.getElementById('cost-summon-minotaur')!;
-  if (anyGasEngineBuilt(state)) {
+  // Sticky like the Datacentre unlock it ships with: once a Gas Engine has ever
+  // been built the button stays, even if that engine is later smashed. (Using
+  // the live `anyGasEngineBuilt` check alone made the button vanish mid-game.)
+  if (anyGasEngineBuilt(state) || completedTaskIds.has('build_gas_engine')) {
     minotaurBtn.style.display = '';
     const queued = state.minotaurSpawnQueue.length;
     const canAffordMinotaur = state.blood >= MINOTAUR.bloodCost;
