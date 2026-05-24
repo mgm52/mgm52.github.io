@@ -105,6 +105,9 @@ export type Minotaur = {
   stuckSampleCell: Cell | null;
   stuckSampleAt: number;
   stuckStreak: number;
+  // Tinytaur variant: a tiny, much faster Minotaur. Shares all Minotaur
+  // behaviour except movement/attack speed and render scale.
+  tiny?: boolean;
 };
 
 export type BuildingState = 'constructing' | 'active' | 'dormant';
@@ -186,6 +189,9 @@ export type GameState = {
   // watering duty for thirsty buildings. Requires autoAssignEnabled.
   autoWaterEnabled: boolean;
   goldgoblinsEnabled: boolean;
+  // Secret summon: flips true the first time the player tries to spawn a goblin
+  // but the holes are jammed (>= TINYTAUR.unlockGoblins already in play). Sticky.
+  tinytaurUnlocked: boolean;
   // Multiplier applied to a gold goblin's GOLD_KILL_REWARD.money on death.
   // 1 by default; 10 once Goldgoblins x10 is purchased.
   goldgoblinMultiplier: number;
@@ -230,6 +236,20 @@ export type GameState = {
   // Dragon Beacon — that's the demo-end gag, so the secret-settings reveal
   // gates on getting that far. Sticky once flipped.
   optionsUnlocked: boolean;
+  // Persisted UI unlock progress (the sticky sets that live in ui.ts). Saved so
+  // tutorial unlocks, the dig gate, and "outgrown" hides survive a reload even
+  // after the buildings that triggered them are gone. ui.ts hydrates its module
+  // sets from this on load and writes them back each refresh. Optional for
+  // back-compat with pre-existing saves.
+  unlocks?: UnlockState;
+};
+
+export type UnlockState = {
+  completed: Set<string>;       // completedTaskIds
+  revealed: Set<string>;        // revealedTaskIds
+  obsoleted: Set<BuildingKind>; // obsoletedKinds
+  everBuilt: Set<BuildingKind>; // everBuiltKinds
+  minotaurEverSummoned: boolean;
 };
 
 export function defOf(b: Building): BuildingDef { return BUILDING_DEFS[b.kind]; }
@@ -461,6 +481,7 @@ export function createInitialState(): GameState {
     autoSpawnEnabled: false,
     autoWaterEnabled: false,
     goldgoblinsEnabled: false,
+    tinytaurUnlocked: false,
     goldgoblinMultiplier: 1,
     autoSpawnTimer: 0,
     autoSpawnMultiplier: 0,
