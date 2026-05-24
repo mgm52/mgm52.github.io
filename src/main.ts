@@ -8,7 +8,7 @@ import { runIntro, setIntroPaused } from './intro';
 import { getOptions, onOptionsChange } from './options';
 import { relockOptionsCog, setupOptionsUI } from './options-ui';
 import { applyDomOptions, centerCameraOn, clampCamera, createRender, render } from './render';
-import { appendLog, cellCenter, createInitialState, destroyBuilding, digDirection, getSpawnCapacity, pushDeathEffect, pushFloater, removeGoblin, type GameState } from './state';
+import { appendLog, cellCenter, createInitialState, destroyBuilding, digDirection, earnBlood, earnMoney, getSpawnCapacity, pushDeathEffect, pushFloater, removeGoblin, type GameState } from './state';
 import { autoAssignAllIdle, spawnMinotaur, tick } from './sim';
 import { executeTaskSkip, refreshUI, setupUI } from './ui';
 import { clearSave, formatRelativeTime, loadGame, saveGame } from './save';
@@ -357,8 +357,8 @@ async function main() {
         ? { money: GOLD_KILL_REWARD.money * state.goldgoblinMultiplier, blood: GOLD_KILL_REWARD.blood }
         : KILL_REWARD;
       removeGoblin(state, id);
-      state.money += reward.money;
-      state.blood += reward.blood;
+      earnMoney(state, reward.money);
+      earnBlood(state, reward.blood);
       state.bloodUnlocked = true;
       // Two stacked floaters so each value gets its own color.
       pushFloater(state, x, y, `+Ƶ${reward.money.toLocaleString('en-US')}`, 0xffd96b, 1.6);

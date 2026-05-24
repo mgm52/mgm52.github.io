@@ -201,6 +201,11 @@ export type GameState = {
   // `bloodUnlocked` flips true and the resource row stays visible (sticky).
   blood: number;
   bloodUnlocked: boolean;
+  // Cumulative gains only (income + kill rewards), never decremented by
+  // spending. The per-second rate readouts derive from these so they reflect
+  // earning rate and ignore money/blood spent on buildings, summons, etc.
+  moneyEarned: number;
+  bloodEarned: number;
   goblins: Map<number, Goblin>;
   minotaurs: Map<number, Minotaur>;
   waterSources: Map<number, WaterSource>;
@@ -504,6 +509,8 @@ export function createInitialState(): GameState {
     money: START_MONEY,
     blood: 0,
     bloodUnlocked: false,
+    moneyEarned: 0,
+    bloodEarned: 0,
     goblins: new Map(),
     minotaurs: new Map(),
     waterSources: new Map(),
@@ -579,6 +586,19 @@ export function createInitialState(): GameState {
 export function appendLog(state: GameState, msg: string) {
   state.log.push({ time: state.now, msg });
   if (state.log.length > 60) state.log.shift();
+}
+
+// Credit a gain (income or kill reward) to a resource. Tracks the cumulative
+// earned total alongside the balance so per-second readouts measure earning
+// rate without spending dragging it down. Use plain `+=` for refunds, debug
+// grants, and other non-earnings that shouldn't show up in the rate.
+export function earnMoney(state: GameState, amount: number): void {
+  state.money += amount;
+  state.moneyEarned += amount;
+}
+export function earnBlood(state: GameState, amount: number): void {
+  state.blood += amount;
+  state.bloodEarned += amount;
 }
 
 export function countIdle(state: GameState): number {
