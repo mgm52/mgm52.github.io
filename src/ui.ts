@@ -1,7 +1,7 @@
 import { playSound } from './audio';
 import {
   AUTOSPAWN_TIERS, BUILDABLE_KINDS, BUILDING_DEFS, BuildingKind, DRAG_SELECT_HINT_DELAY_SEC,
-  GOBLIN, LIGHTNING, SPAWN_HINT_NO_SPAWN_SEC,
+  GOBLIN, LIGHTNING, LIGHTNING_TASK_KILL_GOAL, SPAWN_HINT_NO_SPAWN_SEC,
   SPAWN_HINT_NO_TASK_SEC, SUMMON_UPGRADES, WATER_HINT_DELAY_SEC, digBloodCost, MINOTAUR, TINYTAUR, formatPower,
 } from './config';
 import {
@@ -162,6 +162,8 @@ type Task = {
   unlocks: BuildingKind[];
   isDone: (s: GameState) => boolean;
   prereq?: string[];
+  // Optional side-tasks don't gate any other task and render as "Optional: …".
+  optional?: boolean;
 };
 // Tasks are sticky: once a task's isDone has ever returned true in this session,
 // we treat it as permanently complete. Stops unlocks/build buttons from
@@ -193,9 +195,10 @@ const TASKS: Task[] = [
   {
     id: 'build_gas_engine',
     text: 'Construct a Gas Turbine',
-    // Datacentre and Goblin Hole unlock here; digging (gated in refreshUI)
-    // unlocks alongside them.
-    unlocks: ['datacentre', 'goblin_hole'],
+    // Datacentre unlocks here. Lightning Strike (gated in refreshUI) unlocks
+    // alongside it; the Goblin Hole moved to the optional strike_13 task, and
+    // digging now unlocks back at run_phone_farm.
+    unlocks: ['datacentre'],
     isDone: (s) => {
       for (const b of s.buildings.values()) {
         if (b.kind === 'gas_engine' && b.state !== 'constructing') return true;
@@ -227,6 +230,26 @@ const TASKS: Task[] = [
       return false;
     },
     prereq: ['run_datacentre'],
+  },
+  {
+    // Optional: surfaces alongside run_datacentre (shares its prereq). Rewards
+    // the Goblin Hole plus the Goldblins and Autospawn rituals.
+    id: 'strike_13',
+    text: `Lightning-strike ${LIGHTNING_TASK_KILL_GOAL} goblins at once`,
+    unlocks: ['goblin_hole'],
+    isDone: (s) => s.struck13Goblins,
+    prereq: ['build_gas_engine'],
+    optional: true,
+  },
+  {
+    // Optional: surfaces once the datacentre is running. Unlocks the secret
+    // Tinytaur summon (handled in refreshUI, since it isn't a building kind).
+    id: 'strike_13_minotaurs',
+    text: `Kill ${LIGHTNING_TASK_KILL_GOAL} Minotaurs in one lightning strike`,
+    unlocks: [],
+    isDone: (s) => s.struck13Minotaurs,
+    prereq: ['run_datacentre'],
+    optional: true,
   },
 ];
 
@@ -609,12 +632,12 @@ function refreshRitualButton(
 // each purchase replacing the prior in the menu. Once the player owns x32,
 // the button is hidden. Shows "needs more holes" when the next-tier multiplier
 // would exceed total spawn capacity.
-function refreshAutospawnButton(state: GameState, gasEngineBuilt: boolean): void {
+function refreshAutospawnButton(state: GameState, unlocked: boolean): void {
   const btn = document.getElementById('btn-buy-autospawn') as HTMLButtonElement;
   const cost = document.getElementById('cost-summon-autospawn-cost')!;
   const label = document.getElementById('label-buy-autospawn')!;
   const warn = document.getElementById('warn-buy-autospawn')!;
-  if (!gasEngineBuilt) {
+  if (!unlocked) {
     btn.style.display = 'none';
     setBuyFlash('btn-buy-autospawn', false);
     return;
@@ -747,8 +770,10 @@ export function refreshUI(state: GameState) {
     minotaurBtn.style.display = 'none';
   }
 
-  // Tinytaur button — secret summon, appears once the horde-packed unlock fires.
-  // Instant summon, so just toggle affordability.
+  // Tinytaur button — secret summon, unlocked by completing the optional
+  // "kill 13 Minotaurs in one Lightning Strike" task. Mirror the sticky reveal
+  // onto the canonical flag so the summon guard in main.ts keeps working.
+  if (revealedTaskIds.has('strike_13_minotaurs')) state.tinytaurUnlocked = true;
   const tinytaurBtn = document.getElementById('btn-summon-tinytaur') as HTMLButtonElement;
   if (state.tinytaurUnlocked) {
     tinytaurBtn.style.display = '';
@@ -790,16 +815,18 @@ export function refreshUI(state: GameState) {
     const ready = !t.prereq || t.prereq.every(id => completedTaskIds.has(id));
     if (ready) activeTasks.push(t);
   }
+  // Mandatory tasks first, optional side-tasks after (stable within each group).
+  activeTasks.sort((a, b) => Number(a.optional ?? false) - Number(b.optional ?? false));
   const firstTaskDone = completedTaskIds.has('earn_100');
   currentTaskCached = activeTasks[0] ?? null;
   const buildSection = document.getElementById('build-section')!;
   buildSection.style.display = firstTaskDone ? '' : 'none';
 
-  // Lightning Strike — unlocks (sticky) once the Run-your-first-datacentre
-  // task is done. Disabled when the player can't cover the blood cost; lit
-  // while armed.
+  // Lightning Strike — unlocks (sticky) once the Construct-a-Gas-Turbine task
+  // is done. Disabled when the player can't cover the blood cost; lit while
+  // armed.
   const lightningBtn = document.getElementById('btn-lightning-strike') as HTMLButtonElement;
-  if (completedTaskIds.has('run_datacentre')) {
+  if (completedTaskIds.has('build_gas_engine')) {
     lightningBtn.style.display = '';
     applyFadeInOnFirstShow('btn-lightning-strike');
     const canAffordLightning = state.blood >= LIGHTNING.bloodCost;
@@ -810,17 +837,20 @@ export function refreshUI(state: GameState) {
     lightningBtn.style.display = 'none';
   }
 
-  // Ritual upgrades — Autocommand and Goldblins appear once a Phone Farm is
-  // built; Autospawn appears once a Gas Turbine is built. Bought ones stay
-  // visible but go disabled.
+  // Ritual upgrades — Autocommand appears once a Phone Farm is built; Goldblins
+  // and Autospawn reward the optional strike_13 task. Bought ones stay visible
+  // but go disabled.
   const phoneFarmBuilt = anyPhoneFarmBuilt(state);
-  const gasEngineBuilt = anyGasEngineBuilt(state);
-  // Dig unlocks alongside the Datacentre (the build_gas_engine task). Gated on
-  // revealedTaskIds (not completedTaskIds) so the buttons emerge AFTER the
+  // Goldblins + Autospawn now reward the optional "strike 13 goblins" task
+  // (strike_13) instead of firing on a Phone Farm / Gas Turbine being built.
+  const strike13Done = revealedTaskIds.has('strike_13');
+  // Dig unlocks alongside running a Phone Farm (the run_phone_farm task). Gated
+  // on revealedTaskIds (not completedTaskIds) so the buttons emerge AFTER the
   // TASK COMPLETE overlay fades, letting the fade-in animation play. Digging
-  // itself still needs a Minotaur (see the dig-overlay banner below).
-  const digUnlocked = revealedTaskIds.has('build_gas_engine');
-  const ritualVisible = phoneFarmBuilt || gasEngineBuilt || digUnlocked;
+  // itself still needs a Minotaur (unlocked at Task 3; see the dig-overlay
+  // banner below).
+  const digUnlocked = revealedTaskIds.has('run_phone_farm');
+  const ritualVisible = phoneFarmBuilt || strike13Done || digUnlocked;
   const ritualSection = document.getElementById('ritual-section')!;
   ritualSection.style.display = ritualVisible ? '' : 'none';
   // Now that the panel renders as a bordered card, an empty container shows
@@ -842,14 +872,14 @@ export function refreshUI(state: GameState) {
     state.autoWaterEnabled, state.blood >= SUMMON_UPGRADES.autoWater.bloodCost,
     `${SUMMON_UPGRADES.autoWater.bloodCost} blood`,
   );
-  refreshAutospawnButton(state, gasEngineBuilt);
+  refreshAutospawnButton(state, strike13Done);
   // Goldblins → Goldblins x10 form a replace chain (like Autospawn): base
   // button hides once owned, x10 takes its place; x10 hides once owned.
-  // Base Goldblins unlocks alongside Autocommand (once a Phone Farm is
-  // built); x10 follows once base Goldblins is owned.
+  // Base Goldblins unlocks by completing the optional strike_13 task; x10
+  // follows once base Goldblins is owned.
   refreshRitualButton(
     'btn-buy-goldgoblins', 'cost-buy-goldgoblins',
-    phoneFarmBuilt && !state.goldgoblinsEnabled, false,
+    strike13Done && !state.goldgoblinsEnabled, false,
     state.blood >= SUMMON_UPGRADES.goldgoblins.bloodCost,
     `${SUMMON_UPGRADES.goldgoblins.bloodCost} blood`,
   );
@@ -894,8 +924,8 @@ export function refreshUI(state: GameState) {
     taskEl.style.display = '';
     taskEl.innerHTML = activeTasks
       .map(t => {
-        let progress = '';
-        return `<div><strong>Work:</strong> ${t.text}${progress}</div>`;
+        const label = t.optional ? 'Optional' : 'Work';
+        return `<div><strong>${label}:</strong> ${t.text}</div>`;
       })
       .join('');
   } else {
