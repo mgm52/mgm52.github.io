@@ -79,7 +79,7 @@ export const TINYTAUR = {
 };
 
 // One-shot Ritual upgrades. Autocommand + Goldblins unlock once a Phone
-// Farm has been built; Autospawn unlocks once a Gas Engine has been built.
+// Farm has been built; Autospawn unlocks once a Gas Turbine has been built.
 // "Autocommand": newly-hatched goblins route themselves to understaffed
 // buildings. "Autospawn": queues a free spawn every 3 seconds. "Autowater":
 // extends Autocommand so idle goblins are also routed onto watering duty —
@@ -324,8 +324,8 @@ export const BUILDING_DEFS = {
     },
   }),
   gas_engine: def(4, {
-    name: 'Gas Engine',
-    short: 'GE',
+    name: 'Gas Turbine',
+    short: 'GT',
     cost: 1500,
     buildersRequired: 5,
     buildTime: 7.5,

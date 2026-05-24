@@ -12,7 +12,7 @@ import {
 import { spawnMinotaur } from './sim';
 
 // Build buttons appear in this fixed order. Mostly cheapest-first, with
-// goblin_hole slotted next to the gas_engine it now unlocks alongside (it's an
+// goblin_hole slotted next to the datacentre it now unlocks alongside (it's an
 // auxiliary capacity expander, not a late-game item).
 const SORTED_KINDS: BuildingKind[] = [
   // Wall sits at the top of the build list once unlocked — it's a quick
@@ -181,8 +181,7 @@ const TASKS: Task[] = [
   {
     id: 'run_phone_farm',
     text: 'Run a Phone Farm',
-    // Goblin Hole unlocks alongside the Gas Engine.
-    unlocks: ['gas_engine', 'goblin_hole'],
+    unlocks: ['gas_engine'],
     isDone: (s) => {
       for (const b of s.buildings.values()) {
         if (b.kind === 'phone_farm' && b.state === 'active') return true;
@@ -193,9 +192,10 @@ const TASKS: Task[] = [
   },
   {
     id: 'build_gas_engine',
-    text: 'Construct a Gas Engine',
-    // Datacentre unlocks here; digging (gated in refreshUI) unlocks alongside it.
-    unlocks: ['datacentre'],
+    text: 'Construct a Gas Turbine',
+    // Datacentre and Goblin Hole unlock here; digging (gated in refreshUI)
+    // unlocks alongside them.
+    unlocks: ['datacentre', 'goblin_hole'],
     isDone: (s) => {
       for (const b of s.buildings.values()) {
         if (b.kind === 'gas_engine' && b.state !== 'constructing') return true;
@@ -265,7 +265,7 @@ export function setupUI(state: GameState, callbacks: UICallbacks) {
   spawnBtn.addEventListener('click', (e) => { playSound('click', 1, 0.75); flashSummonClick(spawnBtn); emanateAtCursor(e.clientX, e.clientY, 'white'); callbacks.onSpawnGoblin(); });
   summonList.appendChild(spawnBtn);
 
-  // Minotaur — unlocks alongside the Datacentre (once a Gas Engine is built).
+  // Minotaur — unlocks alongside the Datacentre (once a Gas Turbine is built).
   const minotaurBtn = document.createElement('button');
   minotaurBtn.className = 'build-button build-button-compact';
   minotaurBtn.id = 'btn-summon-minotaur';
@@ -299,8 +299,9 @@ export function setupUI(state: GameState, callbacks: UICallbacks) {
   tinytaurBtn.addEventListener('click', (e) => { playSound('click', 1, 0.75); flashSummonClick(tinytaurBtn); emanateAtCursor(e.clientX, e.clientY); callbacks.onSummonTinytaur(); });
   summonList.appendChild(tinytaurBtn);
 
-  // Lightning Strike — an aimed ability unlocked once the Run-a-Phone-Farm
-  // task is done. Clicking arms it; the next map click calls the bolt down.
+  // Lightning Strike — an aimed ability unlocked once the Run-your-first-
+  // datacentre task is done. Clicking arms it; the next map click calls the
+  // bolt down.
   const lightningBtn = document.createElement('button');
   lightningBtn.className = 'build-button build-button-compact';
   lightningBtn.id = 'btn-lightning-strike';
@@ -475,7 +476,7 @@ export function setupUI(state: GameState, callbacks: UICallbacks) {
     const yieldBits: string[] = [];
     if (def.income) yieldBits.push(`<span class="yield-money">+Ƶ${def.income.toLocaleString('en-US')}/s</span>`);
     if (def.powerOutput > 0) {
-      // Gas Engine spells its gain out in plain watts rather than the
+      // Gas Turbine spells its gain out in plain watts rather than the
       // MW-rounded form, so its modest output reads precisely.
       const powerText = kind === 'gas_engine'
         ? `${def.powerOutput.toLocaleString('en-US')} W`
@@ -723,13 +724,13 @@ export function refreshUI(state: GameState) {
     setFillWidth(`fill-spawn-goblin-${i}`, spawnBySlot[i] ?? 0);
   }
 
-  // Minotaur button — unlocks alongside the Datacentre (once a Gas Engine is built).
+  // Minotaur button — unlocks alongside the Datacentre (once a Gas Turbine is built).
   // Disabled while a summon is in progress; the segment bar fills like the
   // Goblin button's spawn track.
   const minotaurBtn = document.getElementById('btn-summon-minotaur') as HTMLButtonElement;
   const minotaurCost = document.getElementById('cost-summon-minotaur')!;
-  // Sticky like the Datacentre unlock it ships with: once a Gas Engine has ever
-  // been built the button stays, even if that engine is later smashed. (Using
+  // Sticky like the Datacentre unlock it ships with: once a Gas Turbine has ever
+  // been built the button stays, even if that turbine is later smashed. (Using
   // the live `anyGasEngineBuilt` check alone made the button vanish mid-game.)
   if (anyGasEngineBuilt(state) || completedTaskIds.has('build_gas_engine')) {
     minotaurBtn.style.display = '';
@@ -794,10 +795,11 @@ export function refreshUI(state: GameState) {
   const buildSection = document.getElementById('build-section')!;
   buildSection.style.display = firstTaskDone ? '' : 'none';
 
-  // Lightning Strike — unlocks (sticky) once the Run-a-Phone-Farm task is
-  // done. Disabled when the player can't cover the blood cost; lit while armed.
+  // Lightning Strike — unlocks (sticky) once the Run-your-first-datacentre
+  // task is done. Disabled when the player can't cover the blood cost; lit
+  // while armed.
   const lightningBtn = document.getElementById('btn-lightning-strike') as HTMLButtonElement;
-  if (completedTaskIds.has('run_phone_farm')) {
+  if (completedTaskIds.has('run_datacentre')) {
     lightningBtn.style.display = '';
     applyFadeInOnFirstShow('btn-lightning-strike');
     const canAffordLightning = state.blood >= LIGHTNING.bloodCost;
@@ -809,7 +811,7 @@ export function refreshUI(state: GameState) {
   }
 
   // Ritual upgrades — Autocommand and Goldblins appear once a Phone Farm is
-  // built; Autospawn appears once a Gas Engine is built. Bought ones stay
+  // built; Autospawn appears once a Gas Turbine is built. Bought ones stay
   // visible but go disabled.
   const phoneFarmBuilt = anyPhoneFarmBuilt(state);
   const gasEngineBuilt = anyGasEngineBuilt(state);
@@ -900,7 +902,7 @@ export function refreshUI(state: GameState) {
     taskEl.style.display = 'none';
   }
 
-  // Buildings the player has outgrown — once a Gas Engine has gone active
+  // Buildings the player has outgrown — once a Gas Turbine has gone active
   // even once, the Goblin Wheel disappears for the rest of the session.
   // Sticky: destroying the upgrade later doesn't unhide the predecessor
   // (matches the sticky-task-progress philosophy).
@@ -1244,7 +1246,7 @@ export function executeTaskSkip(state: GameState): void {
       break;
     }
     case 'build_gas_engine': {
-      // GE produces 2.5 MW (covers PF). Keep the 2 wheels from before so the
+      // GT produces 2.5 MW (covers PF). Keep the 2 wheels from before so the
       // map looks "lived in" but they're optional for power.
       ensureGoblins(state, 14);
       ensureBuildingCount(state, 'goblin_wheel', 2);
@@ -1273,7 +1275,7 @@ export function executeTaskSkip(state: GameState): void {
     }
     case 'build_hypercentre': {
       // Hypercentre needs 1 GW + 30 maintainers + 4 carriers. The Reactor
-      // (1 GW) does the heavy lifting; the gas engines stay around for
+      // (1 GW) does the heavy lifting; the gas turbines stay around for
       // redundancy and to power the DC + PF independently. Reactor placed
       // before the bigger footprints so findFreeFootprint doesn't run out
       // of space for its 2×2.
