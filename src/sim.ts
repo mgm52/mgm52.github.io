@@ -1,5 +1,5 @@
 import { playDecayingGoblinDeath, playDecayingGoblinSpawn, playDecayingGoldKillCash, playSound } from './audio';
-import { BUILDING_DEFS, CELL, COLS, GOBLIN, GOLD_GOBLIN_CHANCE, GOLD_KILL_REWARD, KILL_REWARD, LIGHTNING, MINOTAUR_KILL_REWARD, SUMMON_UPGRADES, TICK_S, MINOTAUR, TINYTAUR, WATER_DEPLETION_PP_PER_SEC, WATER_METER_MAX, formatPower } from './config';
+import { BUILDING_DEFS, CELL, COLS, GOBLIN, GOLD_GOBLIN_CHANCE, GOLD_KILL_REWARD, KILL_REWARD, LIGHTNING, LIGHTNING_TASK_KILL_GOAL, MINOTAUR_KILL_REWARD, SUMMON_UPGRADES, TICK_S, MINOTAUR, TINYTAUR, WATER_DEPLETION_PP_PER_SEC, WATER_METER_MAX, formatPower } from './config';
 import {
   ALL_DIRS, Building, Cell, DX, DY, Dir, GameState, Goblin, HOLE_SIZE, Minotaur, WaterSource,
   appendLog, buildingAtCell, buildingCenter, buildingFootprint, buildingPerimeter,
@@ -157,6 +157,8 @@ export function lightningStrike(state: GameState, x: number, y: number): boolean
   };
 
   let killed = 0;
+  let killedGoblins = 0;
+  let killedMinotaurs = 0;
   let gainedMoney = 0;
   let gainedBlood = 0;
   let killedGold = false;
@@ -168,6 +170,7 @@ export function lightningStrike(state: GameState, x: number, y: number): boolean
       if (g.gold) killedGold = true;
       removeGoblin(state, g.id);
       killed++;
+      killedGoblins++;
     }
   }
   for (const m of [...state.minotaurs.values()]) {
@@ -176,8 +179,14 @@ export function lightningStrike(state: GameState, x: number, y: number): boolean
       gainedBlood += MINOTAUR_KILL_REWARD.blood;
       state.minotaurs.delete(m.id);
       killed++;
+      killedMinotaurs++;
     }
   }
+
+  // Optional-task triggers: one strike that vaporises enough of a single unit
+  // type completes the matching side-task (sticky).
+  if (killedGoblins >= LIGHTNING_TASK_KILL_GOAL) state.struck13Goblins = true;
+  if (killedMinotaurs >= LIGHTNING_TASK_KILL_GOAL) state.struck13Minotaurs = true;
 
   if (gainedMoney > 0 || gainedBlood > 0) {
     state.money += gainedMoney;
@@ -255,12 +264,6 @@ function spawnGoblin(state: GameState) {
     state.money += GOBLIN.spawnCost;
     appendLog(state, 'All Goblin Holes blocked; spawn refunded.');
     playSound('error');
-    // Secret unlock: a horde this dense (and unable to grow) reveals the Tinytaur.
-    if (!state.tinytaurUnlocked && state.goblins.size >= TINYTAUR.unlockGoblins) {
-      state.tinytaurUnlocked = true;
-      appendLog(state, 'The horde is packed shoulder to shoulder — a Tinytaur can now be summoned!');
-      playSound('ritual');
-    }
     return;
   }
   const id = state.nextId++;

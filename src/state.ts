@@ -213,9 +213,14 @@ export type GameState = {
   // watering duty for thirsty buildings. Requires autoAssignEnabled.
   autoWaterEnabled: boolean;
   goldgoblinsEnabled: boolean;
-  // Secret summon: flips true the first time the player tries to spawn a goblin
-  // but the holes are jammed (>= TINYTAUR.unlockGoblins already in play). Sticky.
+  // Secret summon: flips true once the optional "kill 13 Minotaurs in one
+  // Lightning Strike" task (strike_13_minotaurs) is completed. Sticky.
   tinytaurUnlocked: boolean;
+  // Optional-task progress: set the first time a single Lightning Strike kills
+  // >= LIGHTNING_TASK_KILL_GOAL goblins / Minotaurs at once. Drive the
+  // strike_13 / strike_13_minotaurs optional tasks. Sticky.
+  struck13Goblins: boolean;
+  struck13Minotaurs: boolean;
   // Multiplier applied to a gold goblin's GOLD_KILL_REWARD.money on death.
   // 1 by default; 10 once Goldgoblins x10 is purchased.
   goldgoblinMultiplier: number;
@@ -512,6 +517,8 @@ export function createInitialState(): GameState {
     autoWaterEnabled: false,
     goldgoblinsEnabled: false,
     tinytaurUnlocked: false,
+    struck13Goblins: false,
+    struck13Minotaurs: false,
     goldgoblinMultiplier: 1,
     autoSpawnTimer: 0,
     autoSpawnMultiplier: 0,

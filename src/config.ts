@@ -64,19 +64,22 @@ export const MINOTAUR = {
   wanderInterval: 1.2,
 };
 
-// Tinytaur — a secret summon unlocked once the map is so crammed with goblins
-// (>= unlockGoblins) that the holes can't spit out any more. A Minotaur shrunk
-// to a fraction of the size and much faster (movement + attack), so it zips
-// through a packed-in horde culling goblins quickly. Summoned instantly (no
-// queue) and cheaply, so the player can field several. Reuses the Minotaur unit
-// internally (a Minotaur with `tiny: true`).
+// Tinytaur — a secret summon unlocked by completing the optional "kill 13
+// Minotaurs in one Lightning Strike" task. A Minotaur shrunk to a fraction of
+// the size and much faster (movement + attack), so it zips through a packed-in
+// horde culling goblins quickly. Summoned instantly (no queue) and cheaply, so
+// the player can field several. Reuses the Minotaur unit internally (a Minotaur
+// with `tiny: true`).
 export const TINYTAUR = {
   bloodCost: 88,
   speed: 170,       // vs MINOTAUR.speed 70
   attackWindup: 0.2, // vs MINOTAUR.attackWindup 0.5
   scale: 0.5,       // render size multiplier vs a full Minotaur
-  unlockGoblins: 200,
 };
+
+// Both optional Lightning tasks (strike_13 / strike_13_minotaurs) require
+// vaporising this many units of one type in a single Lightning Strike.
+export const LIGHTNING_TASK_KILL_GOAL = 13;
 
 // One-shot Ritual upgrades. Autocommand + Goldblins unlock once a Phone
 // Farm has been built; Autospawn unlocks once a Gas Turbine has been built.
