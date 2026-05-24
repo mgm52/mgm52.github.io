@@ -130,7 +130,7 @@ export const GOBLIN_HOLE_CAPACITY_PER_BUILDING = 5;
 // done. Aim it at the map: it kills every unit inside a circular blast and
 // grants a temporary power surge that decays linearly to zero.
 export const LIGHTNING = {
-  cellsWide: 9,                    // blast diameter, in cells
+  cellsWide: 8,                    // blast diameter, in cells
   bloodCost: 8,                    // blood spent per strike
   powerBoostWatts: 1_000_000_000,  // 1 GW peak surge
   powerBoostSeconds: 5,            // surge decays to 0 over this many seconds
