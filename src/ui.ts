@@ -65,8 +65,9 @@ function applyFadeInOnFirstShow(btnId: string): void {
 
 // Income/blood rate readouts ("+X/s"). Sampled on a fixed cadence and shown as
 // a rolling average over the last few samples so the number doesn't jitter every
-// frame. Cash rate appears once a Phone Farm has been placed; blood rate once a
-// Minotaur has been summoned. Both render at 40% opacity (see .resource-rate).
+// frame. Cash rate appears once the Phone Farm task is complete (a farm has gone
+// active), not merely placed; blood rate once a Minotaur has been summoned. Both
+// render at 40% opacity (see .resource-rate).
 const RATE_SAMPLE_SEC = 2;
 const RATE_HIST_LEN = 5;
 let rateInit = false;
@@ -110,7 +111,7 @@ function updateResourceRates(state: GameState): void {
     setText('blood-rate', formatRate(avgRate(bloodRateHist)));
   }
   const moneyRateEl = document.getElementById('money-rate');
-  if (moneyRateEl) moneyRateEl.style.display = everBuiltKinds.has('phone_farm') ? '' : 'none';
+  if (moneyRateEl) moneyRateEl.style.display = completedTaskIds.has('run_phone_farm') ? '' : 'none';
   const bloodRateEl = document.getElementById('blood-rate');
   if (bloodRateEl) bloodRateEl.style.display = minotaurEverSummoned ? '' : 'none';
 }
