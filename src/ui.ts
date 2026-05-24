@@ -867,13 +867,13 @@ function refreshInfoPanel(state: GameState) {
       portrait.innerHTML = `<div class="portrait-goblin" style="background:#6a1a1a;border-color:#a06aff;color:#ffe0a0">M</div>`;
       name.textContent = `Minotaur #${m.id}`;
       stateEl.textContent = describeMinotaurState(m.state);
-      extra.innerHTML = `<span style="color:#6a7080">Right click or press Space to command</span>`;
+      extra.innerHTML = `<span style="color:#6a7080">Right click anywhere to command (or space)</span>`;
     } else if (selectedMinotaurs.length > 1) {
       panel.classList.add('visible');
       portrait.innerHTML = `<div class="portrait-goblin" style="background:#6a1a1a;border-color:#a06aff;color:#ffe0a0">M</div>`;
       name.textContent = `${selectedMinotaurs.length} minotaurs`;
       stateEl.textContent = '';
-      extra.innerHTML = `<span style="color:#6a7080">Right click or press Space to command</span>`;
+      extra.innerHTML = `<span style="color:#6a7080">Right click anywhere to command (or space)</span>`;
     } else {
       panel.classList.remove('visible');
     }
@@ -935,7 +935,7 @@ function setCommandHint(extra: HTMLElement, state: GameState): void {
     extra.textContent = '';
     span = document.createElement('span');
     span.className = 'command-hint';
-    span.textContent = 'Right click or press Space to command';
+    span.textContent = 'Right click anywhere to command (or space)';
     extra.appendChild(span);
   }
   span.classList.toggle('command-hint-pulse', !state.bloodUnlocked);
