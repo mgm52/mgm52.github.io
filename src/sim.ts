@@ -1,7 +1,7 @@
 import { playDecayingGoblinDeath, playDecayingGoblinSpawn, playDecayingGoldKillCash, playSound } from './audio';
 import { BUILDING_DEFS, CELL, COLS, GOBLIN, GOLD_GOBLIN_CHANCE, GOLD_KILL_REWARD, KILL_REWARD, MINOTAUR_KILL_REWARD, SUMMON_UPGRADES, TICK_S, MINOTAUR, WATER_DEPLETION_PP_PER_SEC, WATER_METER_MAX, formatPower } from './config';
 import {
-  ALL_DIRS, Building, Cell, DX, DY, Dir, GameState, Goblin, HOLE_SIZE, Minotaur,
+  ALL_DIRS, Building, Cell, DX, DY, Dir, GameState, Goblin, HOLE_SIZE, Minotaur, WaterSource,
   appendLog, buildingAtCell, buildingCenter, buildingFootprint, buildingPerimeter,
   cellCenter, cellKey, defOf, destroyBuilding, findFreeCellNear,
   getSpawnCapacity, holeBlockedByBuilding, isCellBlocked, isCellInBuilding, isCellInWaterSource,
@@ -58,7 +58,10 @@ export function tick(state: GameState) {
   for (const g of state.goblins.values()) updateGoblin(state, g);
 
   // ── 2b. Minotaur updates ─────────────────────────────────────────────
-  for (const t of state.minotaurs.values()) updateMinotaur(state, t);
+  // Resolve auto-targets up front so two minotaurs never hunt the same goblin
+  // unless the player explicitly ordered it. See assignMinotaurTargets.
+  const minoTargets = assignMinotaurTargets(state);
+  for (const t of state.minotaurs.values()) updateMinotaur(state, t, minoTargets);
 
   // ── 3. Construction progress ──────────────────────────────────────
   for (const b of state.buildings.values()) updateConstruction(state, b);
@@ -319,19 +322,52 @@ function minotaurWanderStep(state: GameState, t: Minotaur): Cell | null {
   return choices[Math.floor(Math.random() * choices.length)];
 }
 
-function nearestGoblin(state: GameState, t: Minotaur): Goblin | null {
-  let best: Goblin | null = null;
-  let bestD = Infinity;
+// Auto-target assignment for minotaurs. Each idle/hunting minotaur is matched to
+// at most one goblin, and no two minotaurs share a goblin: we greedily commit the
+// globally-closest (minotaur, goblin) pair, then the next-closest among what's
+// left, and so on. So when several minotaurs would otherwise pile onto the same
+// goblin, only the nearest keeps it and the rest peel off to other prey (or
+// wander if none remain). Player-issued orders (moving_to / going_to_destroy /
+// going_to_kill_minotaur) are excluded — explicit commands are never overridden,
+// so the player can still deliberately gang several minotaurs onto one target.
+function assignMinotaurTargets(state: GameState): Map<number, number> {
+  const result = new Map<number, number>();
+  const autos: Minotaur[] = [];
+  for (const m of state.minotaurs.values()) {
+    if (m.state.kind === 'wander' || m.state.kind === 'going_to_kill') autos.push(m);
+  }
+  if (autos.length === 0) return result;
+  const goblins: Goblin[] = [];
   for (const g of state.goblins.values()) {
     // Goblins inside building footprints (workers/maintainers, plus any idle
     // straggler on a footprint cell) are sheltered from minotaurs.
     if (buildingAtCell(state, g.cell.cx, g.cell.cy)) continue;
-    const dx = g.pos.x - t.pos.x;
-    const dy = g.pos.y - t.pos.y;
-    const d = dx * dx + dy * dy;
-    if (d < bestD) { bestD = d; best = g; }
+    goblins.push(g);
   }
-  return best;
+  if (goblins.length === 0) return result;
+  const assignedM = new Set<number>();
+  const takenG = new Set<number>();
+  const pairs = Math.min(autos.length, goblins.length);
+  for (let k = 0; k < pairs; k++) {
+    let bestM: Minotaur | null = null;
+    let bestG: Goblin | null = null;
+    let bestD = Infinity;
+    for (const m of autos) {
+      if (assignedM.has(m.id)) continue;
+      for (const g of goblins) {
+        if (takenG.has(g.id)) continue;
+        const dx = g.pos.x - m.pos.x;
+        const dy = g.pos.y - m.pos.y;
+        const d = dx * dx + dy * dy;
+        if (d < bestD) { bestD = d; bestM = m; bestG = g; }
+      }
+    }
+    if (!bestM || !bestG) break;
+    result.set(bestM.id, bestG.id);
+    assignedM.add(bestM.id);
+    takenG.add(bestG.id);
+  }
+  return result;
 }
 
 function chebyshevToBuilding(cell: Cell, b: Building): number {
@@ -403,7 +439,7 @@ function applyMinotaurStuckCheck(state: GameState, t: Minotaur): boolean {
   return false;
 }
 
-function updateMinotaur(state: GameState, t: Minotaur) {
+function updateMinotaur(state: GameState, t: Minotaur, autoTargets: Map<number, number>) {
   // Mid-step pixel lerp (shared with goblin movement model).
   if (t.target) {
     const tc = cellCenter(t.target);
@@ -518,7 +554,8 @@ function updateMinotaur(state: GameState, t: Minotaur) {
     return;
   }
 
-  const target = nearestGoblin(state, t);
+  const assignedId = autoTargets.get(t.id);
+  const target = assignedId !== undefined ? (state.goblins.get(assignedId) ?? null) : null;
   if (target) {
     if (t.state.kind !== 'going_to_kill' || t.state.targetId !== target.id) {
       t.state = { kind: 'going_to_kill', targetId: target.id };
@@ -597,6 +634,29 @@ function goblinKillReward(state: GameState, g: Goblin) {
     money: GOLD_KILL_REWARD.money * state.goldgoblinMultiplier,
     blood: GOLD_KILL_REWARD.blood,
   };
+}
+
+// Nearest cell inside the water region that `g` can actually stand in (not held
+// by another goblin or otherwise blocked). When a Datacentre is jammed up
+// against the water, several carriers compete for the same edge cell; aiming
+// each at the closest FREE cell spreads them along the standable line instead of
+// piling onto one square (whoever loses the race used to find their fixed goal
+// permanently blocked, fail to path, and drop water duty on the stuck timer).
+// Falls back to the geometric nearest cell when every cell is contended so the
+// carrier still has something to aim at.
+function nearestFreeWaterCell(state: GameState, src: WaterSource, g: Goblin): Cell {
+  let best: Cell | null = null;
+  let bestD = Infinity;
+  for (let cy = src.y0; cy < src.y1; cy++) {
+    for (let cx = src.x0; cx < src.x1; cx++) {
+      if (isCellBlocked(state, cx, cy, g.id)) continue;
+      const dx = cx - g.cell.cx;
+      const dy = cy - g.cell.cy;
+      const d = dx * dx + dy * dy;
+      if (d < bestD) { bestD = d; best = { cx, cy }; }
+    }
+  }
+  return best ?? nearestCellInWaterSource(src, g.cell);
 }
 
 // Closest unblocked perimeter cell of `b` to the goblin — used by water
@@ -915,19 +975,20 @@ function updateGoblin(state: GameState, g: Goblin) {
         }
         // Stepped back out (or never arrived) — reset the dwell timer.
         s.collectingSince = undefined;
-        // First trip aims at the click cell; later trips pick the closest
-        // reachable cell in the source region. If the click cell turns out to
-        // be unreachable, fall back to the closest in the same tick.
-        const desired = s.initialTarget ?? nearestCellInWaterSource(src, g.cell);
+        // First trip aims at the click cell; later trips pick the closest FREE
+        // cell in the source region (so multiple carriers spread along the
+        // standable line rather than fighting over one square). If the click
+        // cell turns out to be unreachable, fall back to a free cell same tick.
+        const desired = s.initialTarget ?? nearestFreeWaterCell(state, src, g);
         if (!g.goal || g.goal.cx !== desired.cx || g.goal.cy !== desired.cy) {
           g.goal = desired;
           g.path = [];
         }
         planStep(state, g);
         if (!g.target && s.initialTarget) {
-          // Couldn't path to the click cell — drop it and try the closest.
+          // Couldn't path to the click cell — drop it and try the closest free.
           s.initialTarget = undefined;
-          const fallback = nearestCellInWaterSource(src, g.cell);
+          const fallback = nearestFreeWaterCell(state, src, g);
           g.goal = fallback;
           g.path = [];
           planStep(state, g);
@@ -1371,6 +1432,13 @@ function setActiveOrDormant(
         reason === 'no_water' ? 'needs water' :
         `needs ${def.maintainersRequired} maintainer${def.maintainersRequired === 1 ? '' : 's'}`;
       appendLog(state, `${def.name} #${b.id} dormant — ${why}.`);
+      // A thirsty building (DC/HC) that just ran dry stops drawing its load —
+      // surface the power it freed back to the grid. The matching watered →
+      // online draw is shown by the activation floater above.
+      if (reason === 'no_water' && def.powerOutput < 0) {
+        const c = buildingCenter(b);
+        pushFloater(state, c.x, c.y, `+${formatPower(-def.powerOutput)}`, 0x8acfff, 1.6);
+      }
     }
   }
 }

@@ -7,7 +7,7 @@ import {
 import {
   Building, Cell, GameState, Goblin, GoblinState, WaterSource,
   appendLog, buildingCenter, cellCenter, cellKey, countIdle, defOf, digDirection, getSpawnCapacity,
-  holeBlockedByBuilding, isCellBlocked, isInBounds, maintainerCount, occupyCell,
+  holeBlockedByBuilding, isCellBlocked, isInBounds, maintainerCount, occupyCell, waterCarrierCount,
 } from './state';
 import { spawnMinotaur } from './sim';
 
@@ -980,6 +980,10 @@ function showBuilding(state: GameState, b: Building, panel: HTMLElement, portrai
       lines.push(def.powerOutput > 0
         ? `Power output: ${formatPower(def.powerOutput)}`
         : `Power draw: ${formatPower(-def.powerOutput)}`);
+    }
+    if (def.waterDeliveryAmount) {
+      const carriers = waterCarrierCount(state, b);
+      lines.push(`Watered by ${carriers} goblin${carriers === 1 ? '' : 's'}`);
     }
     extra.innerHTML = lines.join('<br>');
   }
