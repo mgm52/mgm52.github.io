@@ -157,11 +157,32 @@ export function lightningStrike(state: GameState, x: number, y: number): boolean
   };
 
   let killed = 0;
+  let gainedMoney = 0;
+  let gainedBlood = 0;
+  let killedGold = false;
   for (const g of [...state.goblins.values()]) {
-    if (within(g.pos.x, g.pos.y)) { removeGoblin(state, g.id); killed++; }
+    if (within(g.pos.x, g.pos.y)) {
+      const reward = goblinKillReward(state, g);
+      gainedMoney += reward.money;
+      gainedBlood += reward.blood;
+      if (g.gold) killedGold = true;
+      removeGoblin(state, g.id);
+      killed++;
+    }
   }
   for (const m of [...state.minotaurs.values()]) {
-    if (within(m.pos.x, m.pos.y)) { state.minotaurs.delete(m.id); killed++; }
+    if (within(m.pos.x, m.pos.y)) {
+      gainedMoney += MINOTAUR_KILL_REWARD.money;
+      gainedBlood += MINOTAUR_KILL_REWARD.blood;
+      state.minotaurs.delete(m.id);
+      killed++;
+    }
+  }
+
+  if (gainedMoney > 0 || gainedBlood > 0) {
+    state.money += gainedMoney;
+    state.blood += gainedBlood;
+    state.bloodUnlocked = true;
   }
 
   // White blood over every cell whose center falls inside the blast.
@@ -189,9 +210,18 @@ export function lightningStrike(state: GameState, x: number, y: number): boolean
     LIGHTNING.powerBoostSeconds,
     LIGHTNING.powerBoostWatts,
   );
+  // Aggregate kill payout, stacked above the GW surge so it stays readable
+  // even when a single strike vaporises a whole cluster.
+  if (gainedMoney > 0) {
+    pushFloater(state, x, y - 14, `+Ƶ${gainedMoney.toLocaleString('en-US')}`, 0xffd96b, 1.6);
+  }
+  if (gainedBlood > 0) {
+    pushFloater(state, x, y - 28, `+${gainedBlood} blood`, 0xff8a8a, 1.6);
+  }
 
   playSound('destroy', 0.7, 0.4);
   if (killed > 0) playDecayingGoblinDeath(0.6);
+  if (killedGold) playDecayingGoldKillCash();
   appendLog(state, `Lightning strike! ${killed} unit${killed === 1 ? '' : 's'} vaporised.`);
   return true;
 }

@@ -825,10 +825,10 @@
       }
       /* Goblin sprite — anchored to bottom-center, height = 75vh so the head
          reaches ~25% from the top. Starts off-screen (translateY 105%); JS
-         adds .up to slide them in, .down to slide back out. The PNG sheet is
-         8 cols × 8 rows of 64px frames; we show row 0 (compass N, facing the
-         camera) and step through its 8 columns at the same 5fps cadence the
-         in-game render uses for orc_idle. */
+         adds .up to slide them in, .exit to walk them off to the right. The PNG
+         sheet is 8 cols × 8 rows of 64px frames; we show row 0 (compass N,
+         facing the camera) and step through its 8 columns at the same 5fps
+         cadence the in-game render uses for orc_idle. */
       #intro-goblin {
         position: absolute;
         /* Slide-in resting position is intentionally lower (-22vh) than the
@@ -874,19 +874,22 @@
          original resting position. The bottom transition (1000ms) runs
          alongside the turn-around (5 frames × 220ms ≈ 1.1s). */
       #intro-overlay.faced #intro-goblin { bottom: -14vh; }
-      #intro-overlay.down #intro-goblin {
-        transform: translate(-50%, 110%);
+      /* On exit the goblin (now facing East — see the 'exit' step in intro.ts)
+         walks off to the right. 120vw guarantees the whole 90vh-wide sprite,
+         drop-shadow included, clears the viewport regardless of aspect ratio. */
+      #intro-overlay.exit #intro-goblin {
+        transform: translate(120vw, 0);
         animation:
           intro-goblin-idle 1.6s steps(8) infinite,
-          intro-goblin-slide-down 2200ms linear forwards;
+          intro-goblin-slide-right 2200ms linear forwards;
       }
       @keyframes intro-goblin-slide-up {
         from { transform: translate(-50%, 110%); }
         to   { transform: translate(-50%, 0); }
       }
-      @keyframes intro-goblin-slide-down {
+      @keyframes intro-goblin-slide-right {
         from { transform: translate(-50%, 0); }
-        to   { transform: translate(-50%, 110%); }
+        to   { transform: translate(120vw, 0); }
       }
       /* Global pause hook: intro.ts toggles body.intro-paused alongside the
          pause overlay so the goblin (slide + idle), turn-around -driven row

@@ -6,7 +6,8 @@
 // "(…)" inside speech text = mid-line 1.5s pause (the literal characters are
 // not rendered). A standalone pause step in the script is a pure between-line
 // pause. Choice steps surface a row of buttons (currently YES/NO) — each
-// option carries its own follow-up line. "down" is the slide-out cue.
+// option carries its own follow-up line. "exit" is the slide-out cue: the
+// goblin turns East and walks off to the right.
 //
 // runIntro() resolves once the goblin has slid back out, so the caller can
 // chain the panel/task fade-in onto the same promise.
@@ -19,7 +20,7 @@ type IntroStep =
   | { kind: 'pause'; ms: number }
   | { kind: 'choice'; choices: IntroChoice[] }
   | { kind: 'face'; row: number }
-  | { kind: 'down' };
+  | { kind: 'exit' };
 
 const SCRIPT: IntroStep[] = [
   { kind: 'speak', text: 'hello' },
@@ -36,7 +37,7 @@ const SCRIPT: IntroStep[] = [
   { kind: 'pause', ms: 3000 },
   { kind: 'face', row: 4 },
   { kind: 'speak', text: 'good luck' },
-  { kind: 'down' },
+  { kind: 'exit' },
 ];
 
 const TYPE_MS_PER_CHAR = 45;
@@ -45,9 +46,12 @@ const MID_LINE_PAUSE_MS = 1500;
 // arms — prevents an over-eager click from advancing the dialog the instant
 // the line completes.
 const POST_LINE_BUFFER_MS = 200;
-// Slow rise on the way in; quicker exit on the way out.
+// Slow rise on the way in; quicker walk-off on the way out.
 const SLIDE_UP_MS = 6000;
-const SLIDE_DOWN_MS = 2200;
+const SLIDE_OUT_MS = 2200;
+// East-facing sprite row, used to turn the goblin toward the right edge just
+// before it walks off.
+const EXIT_FACING_ROW = 2;
 // Beat between landing at the top and starting to turn around. Gives the
 // rise its own moment before the goblin pivots to address the player.
 const POST_SLIDE_BEAT_MS = 1200;
@@ -276,10 +280,13 @@ export async function runIntro(): Promise<void> {
       await runSpeak(overlay, speechEl, clickWall, step.choices[picked].nextLine);
     } else if (step.kind === 'face') {
       await faceRow(goblinEl, step.row);
-    } else if (step.kind === 'down') {
+    } else if (step.kind === 'exit') {
+      // Pivot to face East so the walk-off reads as the goblin leaving to the
+      // right rather than being dragged sideways while still facing camera.
+      await faceRow(goblinEl, EXIT_FACING_ROW);
       overlay.classList.remove('up');
-      overlay.classList.add('down');
-      await sleep(SLIDE_DOWN_MS + 100);
+      overlay.classList.add('exit');
+      await sleep(SLIDE_OUT_MS + 100);
       overlay.classList.remove('visible');
       await sleep(700);
     }
