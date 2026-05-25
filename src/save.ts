@@ -77,6 +77,9 @@ export function loadGame(): { state: GameState; savedAt: number } | null {
     // live-only animation).
     env.state.dragons ??= new Map();
     env.state.spaceBuildings ??= new Map();
+    // `selected` was added with space-building selection; default it so saves
+    // predating it don't leave the field undefined.
+    for (const sb of env.state.spaceBuildings.values()) sb.selected ??= false;
     env.state.dragonSummonUnlocked ??= false;
     env.state.spaceUnlocked ??= false;
     env.state.view = 'ground';

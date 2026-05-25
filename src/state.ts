@@ -146,6 +146,7 @@ export type SpaceBuilding = {
   vel: Vec2;
   spin: number;          // current render rotation (radians)
   spinRate: number;      // radians/sec
+  selected: boolean;
   nextIncomeAt?: number;
 };
 
@@ -806,6 +807,23 @@ export function dragonTargetBuilding(state: GameState): Building | null {
     if (b.state === 'constructing') continue;
     if (defOf(b).income <= 0) continue;
     if (best === null || defOf(b).cost > defOf(best).cost) best = b;
+  }
+  return best;
+}
+
+// Floating building whose (unrotated) footprint contains the given point, in
+// SPACE coordinates. On overlap, the one whose center is nearest wins. Used to
+// click-select buildings while looking at the void.
+export function spaceBuildingAt(state: GameState, x: number, y: number): SpaceBuilding | null {
+  let best: SpaceBuilding | null = null;
+  let bestD = Infinity;
+  for (const sb of state.spaceBuildings.values()) {
+    const half = BUILDING_DEFS[sb.building.kind].size / 2;
+    const dx = x - sb.pos.x, dy = y - sb.pos.y;
+    if (Math.abs(dx) <= half && Math.abs(dy) <= half) {
+      const d = dx * dx + dy * dy;
+      if (d < bestD) { bestD = d; best = sb; }
+    }
   }
   return best;
 }

@@ -222,6 +222,7 @@ type SpaceBuildingView = {
   glow: Sprite;
   sprite: Sprite;
   label: Text;
+  selectionRing: Graphics;
 };
 
 // A precomputed star for the climb-transition overlay (screen-space fractions).
@@ -1093,6 +1094,10 @@ function makeSpaceBuildingView(sb: SpaceBuilding): SpaceBuildingView {
   glow.scale.set(def.size * 1.7 / 128);
   glow.alpha = 0.28;
 
+  const selectionRing = new Graphics();
+  drawSelectionRing(selectionRing, def.size);
+  selectionRing.visible = false;
+
   const tex = buildingTextures[sb.building.kind] ?? Texture.EMPTY;
   const sprite = new Sprite(tex);
   sprite.anchor.set(0.5);
@@ -1111,9 +1116,10 @@ function makeSpaceBuildingView(sb: SpaceBuilding): SpaceBuildingView {
   label.anchor.set(0.5);
 
   container.addChild(glow);
+  container.addChild(selectionRing);
   container.addChild(sprite);
   container.addChild(label);
-  return { container, glow, sprite, label };
+  return { container, glow, sprite, label, selectionRing };
 }
 
 // ─── Space scene + climb transition ─────────────────────────────────
@@ -1544,6 +1550,8 @@ export function render(state: GameState, ctx: RenderContext) {
     v.container.position.set(sb.pos.x, sb.pos.y);
     v.sprite.rotation = sb.spin;
     v.label.rotation = sb.spin;
+    v.selectionRing.rotation = sb.spin;
+    v.selectionRing.visible = sb.selected;
     v.sprite.visible = opts.buildingSpriteEnabled;
     v.label.visible = opts.buildingLabelEnabled;
   }

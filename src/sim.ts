@@ -869,6 +869,7 @@ function dragonReachSpace(state: GameState, d: Dragon) {
       vel: { x: Math.cos(ang) * SPACE.driftSpeed, y: Math.sin(ang) * SPACE.driftSpeed },
       spin: Math.random() * Math.PI * 2,
       spinRate: (Math.random() - 0.5) * 0.25,
+      selected: false,
     });
     state.spaceUnlocked = true;
     appendLog(state, `${defOf(b).name} #${b.id} now drifts among the stars.`);

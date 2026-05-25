@@ -5,7 +5,7 @@ import {
   SPAWN_HINT_NO_TASK_SEC, SUMMON_UPGRADES, WATER_HINT_DELAY_SEC, digBloodCost, MINOTAUR, TINYTAUR, formatPower,
 } from './config';
 import {
-  Building, Cell, DragonState, GameState, Goblin, GoblinState, WaterSource,
+  Building, Cell, DragonState, GameState, Goblin, GoblinState, SpaceBuilding, WaterSource,
   appendLog, buildingCenter, cellCenter, cellKey, countIdle, defOf, digDirection, getSpawnCapacity,
   holeBlockedByBuilding, isCellBlocked, isInBounds, maintainerCount, occupyCell, waterCarrierCount,
 } from './state';
@@ -1084,12 +1084,21 @@ function refreshInfoPanel(state: GameState) {
   const selectedGoblins = [...state.goblins.values()].filter((g) => g.selected);
   const selectedBuildings = [...state.buildings.values()].filter((b) => b.selected);
   const selectedWater = [...state.waterSources.values()].find((w) => w.selected) ?? null;
+  const selectedSpace = [...state.spaceBuildings.values()].filter((sb) => sb.selected);
 
   const destroyBtn = document.getElementById('info-destroy')!;
   const killBtn = document.getElementById('info-kill')!;
   destroyBtn.style.display = 'none';
   killBtn.style.display = 'none';
-  if (selectedBuildings.length === 1 && selectedGoblins.length === 0) {
+  if (selectedSpace.length === 1) {
+    showSpaceBuilding(state, selectedSpace[0], panel, portrait, name, stateEl, extra);
+  } else if (selectedSpace.length > 1) {
+    panel.classList.add('visible');
+    portrait.innerHTML = `<div class="portrait-goblin" style="background:#101830;border-color:#9fd0ff;color:#dbecff">★</div>`;
+    name.textContent = `${selectedSpace.length} buildings in orbit`;
+    stateEl.textContent = '';
+    extra.innerHTML = `<span style="color:#6a7080">Adrift among the stars, earning freely</span>`;
+  } else if (selectedBuildings.length === 1 && selectedGoblins.length === 0) {
     showBuilding(state, selectedBuildings[0], panel, portrait, name, stateEl, extra);
     destroyBtn.style.display = '';
   } else if (selectedGoblins.length === 1 && selectedBuildings.length === 0) {
@@ -1259,6 +1268,28 @@ function showBuilding(state: GameState, b: Building, panel: HTMLElement, portrai
     }
     extra.innerHTML = lines.join('<br>');
   }
+}
+
+// Info panel for a building that's been hauled into space. Unlike its
+// ground self it has no maintainers, water, or power upkeep — it just floats
+// and keeps earning (and feeding any power generation back to the grid).
+function showSpaceBuilding(_state: GameState, sb: SpaceBuilding, panel: HTMLElement, portrait: HTMLElement,
+                           name: HTMLElement, stateEl: HTMLElement, extra: HTMLElement) {
+  panel.classList.add('visible');
+  const b = sb.building;
+  const def = defOf(b);
+  portrait.innerHTML = `<div class="portrait-building ${b.kind} active">${def.short}</div>`;
+  name.textContent = `${def.name} #${b.id}`;
+
+  const bits: string[] = [];
+  if (def.income) bits.push(`earning Ƶ${def.income.toLocaleString('en-US')}/s`);
+  if (def.powerOutput > 0) bits.push(`producing ${formatPower(def.powerOutput)}`);
+  stateEl.textContent = bits.length ? `Adrift in space — ${bits.join(', ')}` : 'Adrift in space';
+
+  const lines: string[] = ['Floating free — no upkeep'];
+  if (def.income) lines.push(`Income: Ƶ${def.income.toLocaleString('en-US')}/s`);
+  if (def.powerOutput > 0) lines.push(`Power output: ${formatPower(def.powerOutput)}`);
+  extra.innerHTML = lines.join('<br>');
 }
 
 function setText(id: string, t: string) {
