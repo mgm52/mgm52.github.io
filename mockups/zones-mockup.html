@@ -1,0 +1,520 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<title>Goblin Scaling — Zone Mockups</title>
+<style>
+  @font-face { font-family:"New Rocker"; src:url("fonts/newrocker.woff2") format("woff2"); font-display:swap; }
+  @font-face { font-family:"Cinzel"; font-weight:700; src:url("fonts/cinzel.woff2") format("woff2"); font-display:swap; }
+  @font-face { font-family:"VT323"; src:url("fonts/vt323.woff2") format("woff2"); font-display:swap; }
+  :root {
+    --sidebar-bg: #040404;
+    --sidebar-border: #2e3238;
+    --btn-bg: #151b1e;
+    --btn-border: #060606;
+    --accent: #ffd96b;
+    --title: #8a9099;
+    --font-display: "New Rocker", "Cinzel", serif;
+    --font-body: "New Rocker", "Cinzel", serif;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  html, body { width: 100%; height: 100%; background: #000; overflow: hidden; }
+  #app { display: flex; width: 100vw; height: 100vh; }
+
+  /* ── Sidebar (matches the game's gothic chrome) ───────────────── */
+  #sidebar {
+    width: 248px; flex: 0 0 248px; height: 100%;
+    background: var(--sidebar-bg);
+    border-right: 1px solid var(--sidebar-border);
+    color: #cfd3d8; font-family: var(--font-body);
+    display: flex; flex-direction: column;
+    padding: 14px 12px 10px 12px;
+  }
+  #brand { color: var(--accent); font-family: var(--font-display);
+    font-size: 26px; line-height: 1.05; letter-spacing: .5px;
+    text-shadow: 0 0 10px rgba(255,217,107,.25); }
+  #brand small { display:block; color: var(--title); font-size: 12px;
+    letter-spacing: 3px; margin-top: 2px; }
+  .rule { height:1px; background: var(--sidebar-border); margin: 12px 0; }
+
+  .res { display:flex; justify-content: space-between; align-items:baseline;
+    font-size: 17px; padding: 3px 4px; }
+  .res .k { color: var(--title); font-size: 13px; letter-spacing:1px; }
+  .res .v { color: #f1f2f4; font-variant-numeric: tabular-nums; }
+  .res .v.gold { color: var(--accent); }
+  .res .v.blood { color: #ff6a6a; }
+  .res .v.pow { color: #8af0a0; }
+
+  .sect { color: var(--title); font-size: 12px; letter-spacing: 3px;
+    margin: 12px 4px 6px; }
+  #builds { display:grid; grid-template-columns: 1fr 1fr; gap: 8px;
+    overflow:hidden; }
+  .btn {
+    position: relative; background: var(--btn-bg);
+    border: 1px solid #3a4048; color:#d8dade;
+    padding: 8px 8px 7px; cursor: default;
+    clip-path: polygon(0 8px, 8px 0, 100% 0, 100% calc(100% - 8px), calc(100% - 8px) 100%, 0 100%);
+    display:flex; flex-direction:column; gap:5px;
+  }
+  .btn .top { display:flex; align-items:center; gap:7px; }
+  .btn img { width: 26px; height: 26px; image-rendering: auto; filter: saturate(1.4) brightness(1.05); }
+  .btn .nm { font-family: var(--font-display); font-size: 14px; line-height:1; }
+  .btn .cost { font-size: 12px; color: var(--accent); letter-spacing:.5px; }
+  .btn.lit { border-color: var(--accent); box-shadow: 0 0 9px rgba(255,217,107,.18) inset; }
+  #foot { margin-top:auto; color: var(--title); font-size: 11px; letter-spacing:1px;
+    display:flex; justify-content:space-between; padding: 8px 4px 0; }
+
+  /* ── Stage ────────────────────────────────────────────────────── */
+  #stage { position: relative; flex: 1 1 auto; height:100%; overflow:hidden; }
+  #scene { display:block; width:100%; height:100%; }
+  #banner { position:absolute; top:18px; left:50%; transform:translateX(-50%);
+    text-align:center; pointer-events:none; }
+  #banner .ttl { font-family: var(--font-display); font-size: 40px; letter-spacing: 4px;
+    color:#fff; }
+  #banner .sub { font-family: var(--font-display); font-size: 15px; letter-spacing: 6px;
+    margin-top: 2px; color:#fff; opacity:.82; }
+  #toast { position:absolute; left:50%; bottom:26px; transform:translateX(-50%);
+    font-family: var(--font-body); font-size: 15px; letter-spacing:1px;
+    padding: 8px 18px; color:#fff; pointer-events:none;
+    clip-path: polygon(0 7px, 7px 0, 100% 0, 100% calc(100% - 7px), calc(100% - 7px) 100%, 0 100%); }
+</style>
+</head>
+<body>
+<div id="app">
+  <aside id="sidebar">
+    <div id="brand">Goblin Scaling<small>ZONE PROTOTYPE</small></div>
+    <div class="rule"></div>
+    <div class="res"><span class="k">CASH</span><span class="v gold" id="r-money">Ƶ0</span></div>
+    <div class="res"><span class="k">BLOOD</span><span class="v blood" id="r-blood">0</span></div>
+    <div class="res"><span class="k">POWER</span><span class="v pow" id="r-pow">0 W</span></div>
+    <div class="res"><span class="k">GOBLINS</span><span class="v" id="r-gobs">0</span></div>
+    <div class="sect" id="s-build">BUILD</div>
+    <div id="builds"></div>
+    <div id="foot"><span id="f-zone">ZONE</span><span>WASD ✦ pan</span></div>
+  </aside>
+  <div id="stage">
+    <canvas id="scene"></canvas>
+    <div id="banner"><div class="ttl" id="b-ttl"></div><div class="sub" id="b-sub"></div></div>
+    <div id="toast"></div>
+  </div>
+</div>
+
+<script>
+const CELL = 32;
+const ASSET = '/public/assets/';
+const BLD = ASSET + 'buildings/';
+
+// ── building defs (mirrors src/config.ts) ───────────────────────────
+const DEFS = {
+  phone_farm:     { cs:3, png:'phone_farm.png',     short:'PF', cost:'Ƶ150',  fill:0x8a7a3a, border:0xeada6a },
+  goblin_wheel:   { cs:2, png:'goblin_wheel.png',   short:'GW', cost:'Ƶ75',   fill:0x3a6a8a, border:0x8acfff },
+  datacentre:     { cs:5, png:'datacentre.png',     short:'DC', cost:'Ƶ10k',  fill:0x8a3a3a, border:0xff8080 },
+  nuclear_reactor:{ cs:2, png:'nuclear_reactor.png',short:'NR', cost:'Ƶ500k', fill:0x2a6a4a, border:0x6affb0 },
+  dragon_beacon:  { cs:3, png:'dragon_beacon.png',  short:'DB', cost:'Ƶ10M',  fill:0xffa800, border:0xffe080 },
+  hypercentre:    { cs:6, png:'hypercentre.png',    short:'HC', cost:'Ƶ500k', fill:0x6a2a8a, border:0xc080ff },
+  gas_engine:     { cs:4, png:'gas_engine.png',     short:'GT', cost:'Ƶ1.5k', fill:0x3a6aaa, border:0x9ac8ef },
+  goblin_hole:    { cs:1, png:'goblin_hole.png',    short:'GH', cost:'Ƶ1.3k', fill:0x2a1a2a, border:0xa06aff },
+};
+const SIDEBAR_BUILDS = ['goblin_wheel','gas_engine','datacentre','phone_farm','goblin_hole','nuclear_reactor','hypercentre','dragon_beacon'];
+
+const hex = n => '#' + n.toString(16).padStart(6,'0');
+
+// ── scene authoring helpers ─────────────────────────────────────────
+function rng(seed){ let s = seed>>>0; return ()=> (s = (s*1664525+1013904223)>>>0)/4294967296; }
+
+// Scatter goblins around a rectangle of cells.
+function swarm(out, rnd, cx, cy, w, h, n, opts={}){
+  for(let i=0;i<n;i++){
+    out.push({
+      x:(cx + rnd()*w)*CELL, y:(cy + rnd()*h)*CELL,
+      dir: Math.floor(rnd()*8), frame: Math.floor(rnd()*8),
+      sheet: rnd()<(opts.idle??0.4) ? 'idle' : 'walk',
+      water: rnd() < (opts.water??0),
+      gold: rnd() < (opts.gold??0.06),
+      s: 0.9 + rnd()*0.25,
+    });
+  }
+}
+
+// ── ZONE DEFINITIONS ────────────────────────────────────────────────
+function buildZones(){
+  const Z = {};
+
+  // ===== HELL — zoomed out, sprawling infernal megafactory ==========
+  {
+    const r = rng(7);
+    const blds = [
+      // a vast grid of datacentres + hypercentres fed by lava
+      {k:'hypercentre',cx:8, cy:6},  {k:'hypercentre',cx:16,cy:6},
+      {k:'datacentre', cx:24,cy:6},  {k:'datacentre', cx:30,cy:6},  {k:'datacentre',cx:36,cy:6},
+      {k:'datacentre', cx:24,cy:12}, {k:'datacentre', cx:30,cy:12}, {k:'datacentre',cx:36,cy:12},
+      {k:'hypercentre',cx:8, cy:14}, {k:'hypercentre',cx:16,cy:14},
+      {k:'datacentre', cx:43,cy:6},  {k:'datacentre', cx:43,cy:12},
+      {k:'datacentre', cx:24,cy:18}, {k:'datacentre', cx:30,cy:18}, {k:'datacentre',cx:36,cy:18},
+      {k:'hypercentre',cx:8, cy:22}, {k:'hypercentre',cx:16,cy:22},
+      // power row at the bottom: reactors, dragon beacons, turbines
+      {k:'dragon_beacon',cx:6, cy:31},{k:'dragon_beacon',cx:12,cy:31},{k:'dragon_beacon',cx:18,cy:31},
+      {k:'nuclear_reactor',cx:25,cy:32},{k:'nuclear_reactor',cx:28,cy:32},{k:'nuclear_reactor',cx:31,cy:32},
+      {k:'nuclear_reactor',cx:25,cy:35},{k:'nuclear_reactor',cx:28,cy:35},{k:'nuclear_reactor',cx:31,cy:35},
+      {k:'gas_engine',cx:36,cy:31},{k:'gas_engine',cx:41,cy:31},{k:'gas_engine',cx:46,cy:31},
+      {k:'phone_farm',cx:43,cy:18},{k:'phone_farm',cx:47,cy:18},
+      {k:'goblin_hole',cx:5,cy:5},{k:'goblin_hole',cx:50,cy:7},{k:'goblin_hole',cx:21,cy:27},{k:'goblin_hole',cx:48,cy:26},
+      {k:'goblin_wheel',cx:5,cy:18},{k:'goblin_wheel',cx:5,cy:21},
+      {k:'phone_farm',cx:50,cy:13},
+    ];
+    const lava = [
+      {x0:0,y0:9,x1:48,y1:11},    // horizontal lava river
+      {x0:21,y0:0,x1:23,y1:30},   // vertical lava river
+      {x0:0,y0:26,x1:20,y1:28},
+      {x0:40,y0:22,x1:54,y1:24},
+      {x0:37,y0:36,x1:53,y1:39},  // bottom-right lava lake
+      {x0:0,y0:35,x1:22,y1:37},   // bottom-left flow
+    ];
+    const gobs=[];
+    swarm(gobs,r,24,7,18,4,90,{water:0.5,idle:0.2});
+    swarm(gobs,r,8,7,12,8,60,{idle:0.3});
+    swarm(gobs,r,24,32,12,6,70,{idle:0.15});
+    swarm(gobs,r,4,30,16,6,40);
+    swarm(gobs,r,36,30,16,6,40);
+    swarm(gobs,r,42,6,12,14,55,{water:0.3});
+    swarm(gobs,r,36,36,17,3,55,{water:0.45});
+    swarm(gobs,r,2,34,20,3,40,{water:0.4});
+    Z.hell = {
+      title:'HELL', sub:'LAYER VII · THE FORGE PITS',
+      toast:'New zone unlocked — dig deeper to descend',
+      bg:0x1a0805, bg2:0x230a06, wall:0x2c0f08, oob:0x080201,
+      play:{x0:0,y0:0,x1:54,y1:39},
+      blds, pools:lava, poolStyle:'lava', floor:'cracks',
+      atmos:'hell',
+      money:'Ƶ4.91T', blood:'66.6k', pow:'1.31 TW', gobs:'2,431', mobs:gobs,
+    };
+  }
+
+  // ===== SPACE — focused orbital foundry on a station deck ==========
+  {
+    const r = rng(42);
+    const blds = [
+      {k:'hypercentre', cx:11,cy:5},
+      {k:'datacentre',  cx:18,cy:5},
+      {k:'datacentre',  cx:18,cy:11},
+      {k:'nuclear_reactor',cx:5,cy:6},{k:'nuclear_reactor',cx:5,cy:9},
+      {k:'gas_engine',  cx:24,cy:5},
+      {k:'dragon_beacon',cx:24,cy:11},
+      {k:'phone_farm',  cx:5,cy:13},
+      {k:'goblin_wheel',cx:9,cy:13},
+      {k:'goblin_hole', cx:3,cy:3},{k:'goblin_hole',cx:27,cy:3},{k:'goblin_hole',cx:13,cy:17},
+    ];
+    const pools = [
+      {x0:11,y0:13,x1:17,y1:17},   // coolant reservoir
+      {x0:21,y0:15,x1:27,y1:17},
+    ];
+    const gobs=[];
+    swarm(gobs,r,11,5,7,6,34,{water:0.5,idle:0.25});
+    swarm(gobs,r,18,5,5,11,30,{water:0.4});
+    swarm(gobs,r,3,5,7,12,26,{idle:0.3});
+    swarm(gobs,r,21,4,8,12,28,{idle:0.2});
+    Z.space = {
+      title:'SPACE', sub:'ORBITAL FOUNDRY · STATION KEPLER-9',
+      toast:'Launched to orbit — vacuum-rated goblins online',
+      bg:0x05060f, bg2:0x080a16, wall:0x1b2333, oob:0x000000,
+      play:{x0:0,y0:0,x1:31,y1:22},
+      blds, pools, poolStyle:'cryo', floor:'tech',
+      atmos:'space',
+      money:'Ƶ820T', blood:'412k', pow:'9.40 TW', gobs:'1,108', mobs:gobs,
+    };
+  }
+
+  // ===== OVERWORLD — current look, for comparison ==================
+  {
+    const r = rng(3);
+    const blds = [
+      {k:'datacentre', cx:14,cy:5},
+      {k:'phone_farm', cx:21,cy:6},
+      {k:'gas_engine', cx:21,cy:11},
+      {k:'goblin_wheel',cx:9,cy:6},{k:'goblin_wheel',cx:9,cy:9},
+      {k:'nuclear_reactor',cx:26,cy:6},
+      {k:'goblin_hole',cx:5,cy:9},{k:'goblin_hole',cx:30,cy:4},
+      {k:'phone_farm', cx:6,cy:13},
+    ];
+    const pools=[{x0:25,y0:13,x1:33,y1:18}];
+    const gobs=[];
+    swarm(gobs,r,9,5,14,8,40,{water:0.35,idle:0.3});
+    swarm(gobs,r,24,12,9,6,24,{water:0.5});
+    Z.overworld = {
+      title:'OVERWORLD', sub:'THE WARREN · SURFACE',
+      toast:'',
+      bg:0x060606, bg2:0x0a0a0a, wall:0x191919, oob:0x040404,
+      play:{x0:0,y0:0,x1:38,y1:24},
+      blds, pools, poolStyle:'water', floor:'none',
+      atmos:'none',
+      money:'Ƶ48.2k', blood:'1,204', pow:'2.50 MW', gobs:'214', mobs:gobs,
+    };
+  }
+  return Z;
+}
+
+// ── asset loading ───────────────────────────────────────────────────
+function loadImg(src){ return new Promise((res,rej)=>{ const i=new Image(); i.onload=()=>res(i); i.onerror=()=>rej(src); i.src=src; }); }
+
+async function loadAssets(){
+  const imgs = {};
+  const jobs = [];
+  for(const k in DEFS) jobs.push(loadImg(BLD+DEFS[k].png).then(im=>imgs[k]=im));
+  jobs.push(loadImg(ASSET+'rigged_goblin_dancing_aligol3dart_orc_idle.png').then(im=>imgs._idle=im));
+  jobs.push(loadImg(ASSET+'rigged_goblin_dancing_aligol3dart_orc_walk.png').then(im=>imgs._walk=im));
+  await Promise.all(jobs);
+  return imgs;
+}
+
+// ── drawing ─────────────────────────────────────────────────────────
+function drawGoblin(ctx, imgs, g){
+  const sheet = g.sheet==='idle' ? imgs._idle : imgs._walk;
+  const SS=64; const sx=(g.frame%8)*SS, sy=(g.dir%8)*SS;
+  const px=50*g.s;
+  // shadow
+  ctx.save();
+  ctx.globalAlpha=.32; ctx.fillStyle='#000';
+  ctx.beginPath(); ctx.ellipse(g.x, g.y+px*0.30, px*0.30, px*0.12, 0, 0, 7); ctx.fill();
+  ctx.restore();
+  // sprite (game boosts goblin brightness 1.8 / saturation 1.7)
+  ctx.save();
+  ctx.filter = g.gold ? 'brightness(1.7) saturate(2.2) sepia(0.5) hue-rotate(-18deg)'
+                      : 'brightness(1.8) saturate(1.7)';
+  ctx.drawImage(sheet, sx, sy, SS, SS, g.x-px/2, g.y-px/2-7, px, px);
+  ctx.restore();
+  if(g.water){ // cyan carry tint marker
+    ctx.save(); ctx.globalAlpha=.55; ctx.fillStyle='#7aa0ff';
+    ctx.beginPath(); ctx.arc(g.x, g.y-px*0.42, px*0.10, 0, 7); ctx.fill(); ctx.restore();
+  }
+}
+
+function drawPool(ctx, p, style, rnd){
+  const x=p.x0*CELL, y=p.y0*CELL, w=(p.x1-p.x0)*CELL, h=(p.y1-p.y0)*CELL;
+  let base, rip, hot, glow;
+  if(style==='lava'){ base='#2a0a03'; rip='#ff5a1e'; hot='#ffd23a'; glow='rgba(255,90,20,0.55)'; }
+  else if(style==='cryo'){ base='#06243c'; rip='#16b6ff'; hot='#bff0ff'; glow='rgba(40,200,255,0.45)'; }
+  else { base='#2a5aa8'; rip='#4a8acf'; hot='#ffffff'; glow='rgba(74,138,207,0.0)'; }
+  ctx.save();
+  ctx.shadowColor=glow; ctx.shadowBlur= style==='water'?0:26;
+  ctx.fillStyle=base; ctx.fillRect(x,y,w,h);
+  ctx.restore();
+  if(style==='lava'){ // molten body gradient
+    const grd=ctx.createLinearGradient(x,y,x,y+h);
+    grd.addColorStop(0,'#ff7a2a'); grd.addColorStop(0.5,'#e63c12'); grd.addColorStop(1,'#7a1a06');
+    ctx.fillStyle=grd; ctx.fillRect(x+1,y+1,w-2,h-2);
+  } else if(style==='cryo'){
+    const grd=ctx.createLinearGradient(x,y,x,y+h);
+    grd.addColorStop(0,'#3fdcff'); grd.addColorStop(1,'#0a6ad6');
+    ctx.fillStyle=grd; ctx.fillRect(x+1,y+1,w-2,h-2);
+  }
+  const n=Math.max(5, Math.floor(w*h/(CELL*CELL*3)));
+  for(let i=0;i<n;i++){
+    const rx=x+rnd()*w, ry=y+rnd()*h, rr=CELL*(0.16+rnd()*0.18);
+    ctx.globalAlpha=.7; ctx.fillStyle=rip;
+    ctx.beginPath(); ctx.arc(rx,ry,rr,0,7); ctx.fill();
+    ctx.globalAlpha=.4; ctx.fillStyle=hot;
+    ctx.beginPath(); ctx.arc(rx+rr*0.4, ry-rr*0.4, rr*0.32, 0, 7); ctx.fill();
+  }
+  ctx.globalAlpha=1;
+}
+
+function drawBuilding(ctx, imgs, b){
+  const d=DEFS[b.k]; const size=d.cs*CELL;
+  const x=b.cx*CELL, y=b.cy*CELL;
+  if(b.k==='goblin_hole'){
+    const r=CELL*0.42, cxp=x+CELL/2, cyp=y+CELL/2;
+    ctx.fillStyle='#000'; ctx.beginPath(); ctx.arc(cxp,cyp,r,0,7); ctx.fill();
+    ctx.lineWidth=1.5; ctx.strokeStyle='#fff'; ctx.stroke();
+    return;
+  }
+  // colored fill
+  ctx.fillStyle=hex(d.fill); ctx.fillRect(x,y,size,size);
+  // sprite on top (building brightness 1.05 / saturation 1.5)
+  ctx.save(); ctx.filter='brightness(1.05) saturate(1.5)';
+  ctx.drawImage(imgs[b.k], x, y, size, size); ctx.restore();
+  // bright colored border (signature look)
+  ctx.lineWidth=2; ctx.strokeStyle=hex(d.border); ctx.strokeRect(x+1,y+1,size-2,size-2);
+}
+
+function inPlay(z,cx,cy){ const p=z.play; return cx>=p.x0&&cx<p.x1&&cy>=p.y0&&cy<p.y1; }
+
+function render(z, imgs){
+  const cv=document.getElementById('scene');
+  const stage=document.getElementById('stage');
+  const dpr=window.devicePixelRatio||1;
+  const W=stage.clientWidth, H=stage.clientHeight;
+  cv.width=W*dpr; cv.height=H*dpr; cv.style.width=W+'px'; cv.style.height=H+'px';
+  const ctx=cv.getContext('2d');
+  ctx.setTransform(dpr,0,0,dpr,0,0);
+  ctx.imageSmoothingEnabled=true; ctx.imageSmoothingQuality='high';
+
+  // base / out-of-bounds
+  ctx.fillStyle=hex(z.oob); ctx.fillRect(0,0,W,H);
+
+  // screen-space backdrop (stars / nebula for space)
+  if(z.atmos==='space') drawSpaceBackdrop(ctx,W,H);
+
+  // world transform: fit play+wall band into stage with margin
+  const margin=42;
+  const wx0=(z.play.x0-2)*CELL, wy0=(z.play.y0-2)*CELL;
+  const wpw=(z.play.x1-z.play.x0+4)*CELL, wph=(z.play.y1-z.play.y0+4)*CELL;
+  const scale=Math.min((W-margin*2)/wpw, (H-margin*2-40)/wph);
+  const ox=(W-wpw*scale)/2 - wx0*scale;
+  const oy=(H-wph*scale)/2 - wy0*scale + 8;
+  ctx.save();
+  ctx.setTransform(dpr*scale,0,0,dpr*scale, dpr*ox, dpr*oy);
+
+  // wall band (2-cell ring) then floor checker
+  ctx.fillStyle=hex(z.wall);
+  ctx.fillRect((z.play.x0-2)*CELL,(z.play.y0-2)*CELL,(z.play.x1-z.play.x0+4)*CELL,(z.play.y1-z.play.y0+4)*CELL);
+  for(let cy=z.play.y0; cy<z.play.y1; cy++)
+    for(let cx=z.play.x0; cx<z.play.x1; cx++){
+      ctx.fillStyle=((cx+cy)&1)===0 ? hex(z.bg) : hex(z.bg2);
+      ctx.fillRect(cx*CELL,cy*CELL,CELL,CELL);
+    }
+
+  // floor detail overlay
+  const fr=rng(99);
+  if(z.floor==='cracks') drawLavaCracks(ctx,z,fr);
+  if(z.floor==='tech')  drawTechGrid(ctx,z);
+
+  // pools
+  const pr=rng(5);
+  for(const p of z.pools) drawPool(ctx,p,z.poolStyle,pr);
+
+  // buildings (draw large first so small sit on top visually fine)
+  for(const b of z.blds) drawBuilding(ctx,imgs,b);
+
+  // goblins, sorted by y for depth
+  z.mobs.slice().sort((a,b)=>a.y-b.y).forEach(g=>drawGoblin(ctx,imgs,g));
+
+  ctx.restore();
+  ctx.setTransform(dpr,0,0,dpr,0,0);
+
+  // screen-space atmosphere overlays
+  if(z.atmos==='hell') drawHellAtmos(ctx,W,H);
+  if(z.atmos==='space') drawSpaceVignette(ctx,W,H);
+  if(z.atmos==='none') drawSoftVignette(ctx,W,H,'rgba(0,0,0,0.45)');
+}
+
+// ── floor + atmosphere effects ──────────────────────────────────────
+function drawLavaCracks(ctx,z,rnd){
+  ctx.save(); ctx.lineCap='round';
+  const N=Math.floor((z.play.x1-z.play.x0)*(z.play.y1-z.play.y0)/18);
+  for(let i=0;i<N;i++){
+    const sx=(z.play.x0+rnd()*(z.play.x1-z.play.x0))*CELL;
+    const sy=(z.play.y0+rnd()*(z.play.y1-z.play.y0))*CELL;
+    let x=sx,y=sy; ctx.beginPath(); ctx.moveTo(x,y);
+    const seg=2+Math.floor(rnd()*3);
+    for(let s=0;s<seg;s++){ x+=(rnd()-0.5)*46; y+=(rnd()-0.5)*46; ctx.lineTo(x,y); }
+    ctx.shadowColor='rgba(255,90,20,0.8)'; ctx.shadowBlur=8;
+    ctx.strokeStyle='rgba(255,110,30,'+(0.25+rnd()*0.4)+')';
+    ctx.lineWidth=1+rnd()*1.6; ctx.stroke();
+  }
+  ctx.restore();
+}
+function drawTechGrid(ctx,z){
+  ctx.save(); ctx.strokeStyle='rgba(90,200,255,0.10)'; ctx.lineWidth=1;
+  for(let cx=z.play.x0; cx<=z.play.x1; cx+=2){ ctx.beginPath(); ctx.moveTo(cx*CELL,z.play.y0*CELL); ctx.lineTo(cx*CELL,z.play.y1*CELL); ctx.stroke(); }
+  for(let cy=z.play.y0; cy<=z.play.y1; cy+=2){ ctx.beginPath(); ctx.moveTo(z.play.x0*CELL,cy*CELL); ctx.lineTo(z.play.x1*CELL,cy*CELL); ctx.stroke(); }
+  ctx.restore();
+}
+function drawHellAtmos(ctx,W,H){
+  // warm color grade
+  ctx.save(); ctx.globalCompositeOperation='overlay'; ctx.fillStyle='rgba(120,20,0,0.30)'; ctx.fillRect(0,0,W,H); ctx.restore();
+  // bottom heat glow
+  const g=ctx.createLinearGradient(0,H,0,H*0.55);
+  g.addColorStop(0,'rgba(255,80,10,0.40)'); g.addColorStop(1,'rgba(255,80,10,0)');
+  ctx.fillStyle=g; ctx.fillRect(0,0,W,H);
+  // embers
+  const r=rng(123);
+  for(let i=0;i<140;i++){
+    const x=r()*W, y=r()*H, rr=0.6+r()*2.2;
+    ctx.globalAlpha=0.25+r()*0.6; ctx.fillStyle = r()<0.3?'#ffd27a':'#ff6a1e';
+    ctx.shadowColor='rgba(255,120,30,0.9)'; ctx.shadowBlur=6;
+    ctx.beginPath(); ctx.arc(x,y,rr,0,7); ctx.fill();
+  }
+  ctx.globalAlpha=1; ctx.shadowBlur=0;
+  drawSoftVignette(ctx,W,H,'rgba(30,0,0,0.62)');
+}
+function drawSpaceBackdrop(ctx,W,H){
+  // deep nebula
+  const g=ctx.createRadialGradient(W*0.72,H*0.30,40, W*0.72,H*0.30, Math.max(W,H)*0.7);
+  g.addColorStop(0,'rgba(90,40,160,0.45)'); g.addColorStop(0.4,'rgba(40,30,120,0.22)'); g.addColorStop(1,'rgba(0,0,0,0)');
+  ctx.fillStyle=g; ctx.fillRect(0,0,W,H);
+  const g2=ctx.createRadialGradient(W*0.22,H*0.78,30, W*0.22,H*0.78, Math.max(W,H)*0.6);
+  g2.addColorStop(0,'rgba(20,90,160,0.30)'); g2.addColorStop(1,'rgba(0,0,0,0)');
+  ctx.fillStyle=g2; ctx.fillRect(0,0,W,H);
+  // stars
+  const r=rng(2024);
+  for(let i=0;i<420;i++){
+    const x=r()*W, y=r()*H, rr=r()*1.5;
+    ctx.globalAlpha=0.3+r()*0.7; ctx.fillStyle = r()<0.15?'#bfe0ff':'#ffffff';
+    ctx.beginPath(); ctx.arc(x,y,rr,0,7); ctx.fill();
+  }
+  ctx.globalAlpha=1;
+  // ringed planet, top-right
+  const px=W-130, py=110, pr=66;
+  const pg=ctx.createRadialGradient(px-pr*0.35,py-pr*0.35,4, px,py,pr);
+  pg.addColorStop(0,'#ffd9a0'); pg.addColorStop(0.5,'#c87a3a'); pg.addColorStop(1,'#5a2e16');
+  ctx.fillStyle=pg; ctx.beginPath(); ctx.arc(px,py,pr,0,7); ctx.fill();
+  ctx.save(); ctx.translate(px,py); ctx.rotate(-0.5); ctx.scale(1,0.32);
+  ctx.lineWidth=7; ctx.strokeStyle='rgba(220,200,170,0.55)'; ctx.beginPath(); ctx.arc(0,0,pr*1.5,0,7); ctx.stroke();
+  ctx.lineWidth=3; ctx.strokeStyle='rgba(180,160,140,0.35)'; ctx.beginPath(); ctx.arc(0,0,pr*1.8,0,7); ctx.stroke();
+  ctx.restore();
+}
+function drawSpaceVignette(ctx,W,H){
+  ctx.save(); ctx.globalCompositeOperation='overlay'; ctx.fillStyle='rgba(0,20,60,0.25)'; ctx.fillRect(0,0,W,H); ctx.restore();
+  drawSoftVignette(ctx,W,H,'rgba(0,2,12,0.6)');
+}
+function drawSoftVignette(ctx,W,H,col){
+  const g=ctx.createRadialGradient(W/2,H/2,Math.min(W,H)*0.35, W/2,H/2,Math.max(W,H)*0.62);
+  g.addColorStop(0,'rgba(0,0,0,0)'); g.addColorStop(1,col);
+  ctx.fillStyle=g; ctx.fillRect(0,0,W,H);
+}
+
+// ── UI chrome ───────────────────────────────────────────────────────
+function fillSidebar(z){
+  document.getElementById('r-money').textContent=z.money;
+  document.getElementById('r-blood').textContent=z.blood;
+  document.getElementById('r-pow').textContent=z.pow;
+  document.getElementById('r-gobs').textContent=z.gobs;
+  document.getElementById('f-zone').textContent=z.title;
+  const wrap=document.getElementById('builds'); wrap.innerHTML='';
+  SIDEBAR_BUILDS.forEach((k,i)=>{
+    const d=DEFS[k];
+    const el=document.createElement('div'); el.className='btn'+(i<3?' lit':'');
+    el.innerHTML='<div class="top"><img src="'+BLD+d.png+'"><span class="nm">'+d.short+'</span></div><span class="cost">'+d.cost+'</span>';
+    wrap.appendChild(el);
+  });
+  document.getElementById('b-ttl').textContent=z.title;
+  document.getElementById('b-sub').textContent=z.sub;
+  const t=document.getElementById('toast');
+  if(z.toast){ t.style.display='block'; t.textContent=z.toast;
+    if(z.atmos==='hell'){ t.style.background='rgba(40,6,2,.82)'; t.style.border='1px solid #ff6a2e'; t.style.color='#ffd6b0'; }
+    else if(z.atmos==='space'){ t.style.background='rgba(6,14,30,.82)'; t.style.border='1px solid #5ac8ff'; t.style.color='#cfeaff'; }
+    else { t.style.background='rgba(8,8,8,.82)'; t.style.border='1px solid #2e3238'; }
+  } else t.style.display='none';
+  // banner glow per zone
+  const ttl=document.getElementById('b-ttl');
+  if(z.atmos==='hell'){ ttl.style.textShadow='0 0 18px rgba(255,90,20,.8),0 2px 4px #000'; ttl.style.color='#ffdcc0'; }
+  else if(z.atmos==='space'){ ttl.style.textShadow='0 0 18px rgba(90,200,255,.8),0 2px 4px #000'; ttl.style.color='#dff1ff'; }
+  else { ttl.style.textShadow='0 2px 6px #000'; ttl.style.color='#fff'; }
+}
+
+// ── boot ────────────────────────────────────────────────────────────
+(async function(){
+  const zones=buildZones();
+  const which=new URLSearchParams(location.search).get('zone')||'hell';
+  const z=zones[which]||zones.hell;
+  fillSidebar(z);
+  let imgs;
+  try { imgs=await loadAssets(); } catch(e){ console.error('asset fail',e); document.title='ASSET FAIL '+e; }
+  try { await Promise.race([document.fonts.ready, new Promise(r=>setTimeout(r,2500))]); } catch(e){}
+  render(z,imgs);
+  window.__ready=true;
+  window.addEventListener('resize',()=>render(z,imgs));
+})();
+</script>
+</body>
+</html>
