@@ -1,12 +1,12 @@
 import { Application, Container, FederatedPointerEvent, Graphics } from 'pixi.js';
 import { playSound } from './audio';
 import { flashCursor } from './cursor-fx';
-import { BUILDABLE_KINDS, BUILDING_DEFS, BuildingKind, CELL, GOBLIN, LIGHTNING, MINOTAUR, RENDER_SCALE, WORLD, formatPower } from './config';
+import { BUILDABLE_KINDS, BUILDING_DEFS, BuildingKind, CELL, DRAGON, GOBLIN, LIGHTNING, MINOTAUR, RENDER_SCALE, WORLD, formatPower } from './config';
 import { unlockOptionsCog } from './options-ui';
 import { RenderContext, clampCamera } from './render';
 import { autoAssignAllIdle, lightningStrike } from './sim';
 import {
-  Building, Cell, GameState, Goblin, Minotaur, WaterSource,
+  Building, Cell, Dragon, GameState, Goblin, Minotaur, WaterSource,
   appendLog, buildingAtCell, cellKey, defOf, findFreeCellNear,
   holeAtCell, isInBounds, pixelToCell, waterCarrierCount, waterSourceAtCell,
 } from './state';
@@ -76,6 +76,10 @@ export function setupInput(
       x: e.global.x, y: e.global.y,
       worldStartX: local.x, worldStartY: local.y,
     });
+
+    // No world interaction while looking at space — you can't build or command
+    // from orbit. The space scene is keyboard-panned (see main.ts).
+    if (state.view !== 'ground') { input.isDragging = false; input.selectionGfx.clear(); return; }
 
     // Two or more pointers → enter pan mode and abandon any single-pointer interaction.
     if (input.pointers.size >= 2) {
@@ -193,11 +197,12 @@ export function setupInput(
     const additive = e.shiftKey;
     if (dist < 4) {
       const g = goblinAt(state, local.x, local.y);
-      const m = g ? null : minotaurAt(state, local.x, local.y);
+      const d = g ? null : dragonAt(state, local.x, local.y);
+      const m = (g || d) ? null : minotaurAt(state, local.x, local.y);
       let b: Building | null = null;
       let onHole = false;
       let w: WaterSource | null = null;
-      if (!g && !m) {
+      if (!g && !d && !m) {
         const c = pixelToCell(local.x, local.y);
         b = buildingAtCell(state, c.cx, c.cy);
         if (!b) onHole = holeAtCell(state, c.cx, c.cy);
@@ -205,6 +210,7 @@ export function setupInput(
       }
       if (!additive) clearSelection(state);
       if (g) { g.selected = true; playSound('select', 0.33); }
+      else if (d) { d.selected = true; playSound('select', 0.33); }
       else if (m) { m.selected = true; playSound('select', 0.33); }
       else if (b) { b.selected = true; playSound('select', 0.33); }
       else if (onHole) { state.hole.selected = true; playSound('select', 0.33); }
@@ -227,6 +233,13 @@ export function setupInput(
       for (const m of state.minotaurs.values()) {
         if (m.pos.x >= x1 && m.pos.x <= x2 && m.pos.y >= y1 && m.pos.y <= y2) {
           m.selected = true;
+          any = true;
+          count++;
+        }
+      }
+      for (const d of state.dragons.values()) {
+        if (d.pos.x >= x1 && d.pos.x <= x2 && d.pos.y >= y1 && d.pos.y <= y2) {
+          d.selected = true;
           any = true;
           count++;
         }
@@ -427,9 +440,21 @@ function playMinotaurGruntBurst(count: number) {
   }
 }
 
+// A guttural roar per commanded dragon — the 'ritual' sample pitched right
+// down so it reads as a beastly bellow, staggered so several dragons chorus.
+function playDragonRoarBurst(count: number) {
+  for (let i = 0; i < count; i++) {
+    const delay = i * 160;
+    setTimeout(() => {
+      playSound('ritual', 0.6, 0.4 + Math.random() * 0.1);
+    }, delay);
+  }
+}
+
 function clearSelection(state: GameState) {
   for (const g of state.goblins.values()) g.selected = false;
   for (const m of state.minotaurs.values()) m.selected = false;
+  for (const d of state.dragons.values()) d.selected = false;
   for (const b of state.buildings.values()) b.selected = false;
   for (const w of state.waterSources.values()) w.selected = false;
   state.hole.selected = false;
@@ -438,6 +463,14 @@ function clearSelection(state: GameState) {
 function goblinAt(state: GameState, x: number, y: number): Goblin | null {
   for (const g of state.goblins.values()) {
     if (Math.hypot(g.pos.x - x, g.pos.y - y) <= GOBLIN.radius + 2) return g;
+  }
+  return null;
+}
+
+function dragonAt(state: GameState, x: number, y: number): Dragon | null {
+  // Generous hit radius — dragons are large and fly overhead.
+  for (const d of state.dragons.values()) {
+    if (Math.hypot(d.pos.x - x, d.pos.y - y) <= DRAGON.displayPx * 0.42) return d;
   }
   return null;
 }
@@ -482,11 +515,14 @@ function minotaurAt(state: GameState, x: number, y: number): Minotaur | null {
 }
 
 function handleRightClick(state: GameState, x: number, y: number) {
+  if (state.view !== 'ground') return; // no commanding from orbit
   const selectedGoblins = [...state.goblins.values()].filter((g) => g.selected);
   const selectedMinotaurs = [...state.minotaurs.values()].filter((m) => m.selected);
-  if (selectedGoblins.length === 0 && selectedMinotaurs.length === 0) return;
+  const selectedDragons = [...state.dragons.values()].filter((d) => d.selected);
+  if (selectedGoblins.length === 0 && selectedMinotaurs.length === 0 && selectedDragons.length === 0) return;
   if (selectedGoblins.length > 0) playGruntBurst(selectedGoblins.length);
   if (selectedMinotaurs.length > 0) playMinotaurGruntBurst(selectedMinotaurs.length);
+  if (selectedDragons.length > 0) playDragonRoarBurst(selectedDragons.length);
 
   const targetGoblin = goblinAt(state, x, y);
   const targetMinotaur = targetGoblin ? null : minotaurAt(state, x, y);
@@ -497,6 +533,33 @@ function handleRightClick(state: GameState, x: number, y: number) {
   const targetWater = (!targetGoblin && !targetMinotaur && !targetBuilding)
     ? waterSourceAt(state, targetCell)
     : null;
+
+  // Dragon commands. A dragon flies free of the grid: it can incinerate a unit,
+  // lift a specific building toward space, or fly to a point (then resume its
+  // default building-hauling behaviour).
+  if (selectedDragons.length > 0) {
+    if (targetGoblin) {
+      for (const d of selectedDragons) {
+        d.state = { kind: 'going_to_kill', targetKind: 'goblin', targetId: targetGoblin.id };
+      }
+      appendLog(state, `${selectedDragons.length} dragon(s) diving on goblin #${targetGoblin.id}.`);
+    } else if (targetMinotaur) {
+      for (const d of selectedDragons) {
+        d.state = { kind: 'going_to_kill', targetKind: 'minotaur', targetId: targetMinotaur.id };
+      }
+      appendLog(state, `${selectedDragons.length} dragon(s) diving on Minotaur #${targetMinotaur.id}.`);
+    } else if (targetBuilding) {
+      for (const d of selectedDragons) {
+        d.state = { kind: 'going_to_building', buildingId: targetBuilding.id };
+      }
+      appendLog(state, `${selectedDragons.length} dragon(s) sent to haul ${defOf(targetBuilding).name} #${targetBuilding.id} to space.`);
+    } else {
+      for (const d of selectedDragons) {
+        d.state = { kind: 'moving_to', goal: { x, y } };
+      }
+      appendLog(state, `${selectedDragons.length} dragon(s) on the wing.`);
+    }
+  }
 
   // Water duty: right-click a water source with goblins selected to put them
   // on the loop for the closest under-watered Datacentre.
@@ -672,6 +735,7 @@ function canPlaceBuilding(state: GameState, topLeft: Cell, kind: BuildingKind): 
 
 function placeBuilding(state: GameState, x: number, y: number) {
   if (!state.pendingBuild) return;
+  if (state.view !== 'ground') { playSound('error'); appendLog(state, 'You cannot build in space.'); return; }
   const kind = state.pendingBuild.kind;
   // Wall is a special case: no Building entity, just a wall cell. Stays in
   // pending mode after placement so the player can drag-paint more.
@@ -716,22 +780,19 @@ function placeBuilding(state: GameState, x: number, y: number) {
   appendLog(state, `${def.name} #${b.id} construction started — right-click goblins onto it to staff the build.`);
   autoAssignAllIdle(state);
 
-  // Demo-end gag: placing the Dragon Beacon pops a celebratory alert, then
-  // a second one revealing the secret options menu (hidden until now in
-  // production builds).
+  // Placing the Dragon Beacon also reveals the secret options menu (hidden
+  // until now in production builds). The beacon itself must finish constructing
+  // before dragons can be summoned from it — see the Summon panel.
   if (kind === 'dragon_beacon') {
-    window.alert(
-      "congratulations, you completed the demo! dragon lives in your imagination, "
-      + "heart, and soul. just imagine how cool it would be if a dragon was implemented. "
-      + "ahaha yeah, honestly its amazing. im so glad you grinded here for it. "
-      + "its not in the game at all LMAO. thanks! have a great day! "
-      + "i hope it doesnt 'drag on' ;)"
-    );
     state.optionsUnlocked = true;
     unlockOptionsCog();
     window.alert(
-      "BUT WAIT --- YOU HAVE UNLOCKED THE SECRET SETTINGS MENU OF JUSTICE!!!!!!!!!! "
-      + "FIND IT IN THE BOTTOM RIGHT OF THE PLAY AREA. ENJOY"
+      "The Dragon Beacon is rising! Once it finishes, summon dragons (64 blood each) "
+      + "from the Summon panel. By default a dragon hauls your most valuable building "
+      + "up to space — or command one onto a unit, a spot, or a specific building.\n\n"
+      + "Once a building reaches space, hold ↑ at the very top of the map to rise and "
+      + "behold the void.\n\n"
+      + "(You've also unlocked the SECRET SETTINGS MENU — bottom-right of the play area.)"
     );
   }
 }

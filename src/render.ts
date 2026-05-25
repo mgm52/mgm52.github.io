@@ -9,9 +9,9 @@ extensions.add(GifAsset);
 // game seconds. Used as a manual sprite-sheet — we pick the frame ourselves
 // each tick based on (state.now - spawnAt) so playback always starts at frame 0.
 type DeathFrames = { textures: Texture[]; ends: number[]; duration: number };
-import { BUILDING_DEFS, BuildingKind, CELL, COLS, GOBLIN, RENDER_SCALE, ROWS, MINOTAUR, TINYTAUR, WORLD } from './config';
+import { BUILDING_DEFS, BuildingKind, CELL, COLS, DRAGON, GOBLIN, RENDER_SCALE, ROWS, MINOTAUR, SPACE, TINYTAUR, WORLD } from './config';
 import { ensureFontLoaded, fontFamilyById, getOptions, onOptionsChange, type FontConfig, type Options } from './options';
-import { Building, GameState, Goblin, HOLE_SIZE, Minotaur, WaterSource, buildingCenter, cellCenter, defOf, holeCenter, isInPlayCell, maintainerCount } from './state';
+import { Building, Dragon, GameState, Goblin, HOLE_SIZE, Minotaur, SpaceBuilding, WaterSource, buildingCenter, cellCenter, defOf, holeCenter, isInPlayCell, maintainerCount } from './state';
 
 export type Camera = { x: number; y: number };
 
@@ -148,6 +148,52 @@ function getShadowTexture(): Texture {
   return shadowTexture;
 }
 
+// Soft radial white glow, generated lazily. Tinted per-use (orange behind a
+// dragon, pale behind a space building).
+let glowTexture: Texture | null = null;
+function getGlowTexture(): Texture {
+  if (glowTexture) return glowTexture;
+  const s = 128;
+  const canvas = document.createElement('canvas');
+  canvas.width = s; canvas.height = s;
+  const c = canvas.getContext('2d')!;
+  const grad = c.createRadialGradient(s / 2, s / 2, 0, s / 2, s / 2, s / 2);
+  grad.addColorStop(0, 'rgba(255,255,255,0.9)');
+  grad.addColorStop(0.4, 'rgba(255,255,255,0.35)');
+  grad.addColorStop(1, 'rgba(255,255,255,0)');
+  c.fillStyle = grad;
+  c.fillRect(0, 0, s, s);
+  glowTexture = Texture.from(canvas);
+  return glowTexture;
+}
+
+// One-time starfield + nebula for the space scene, painted across SPACE bounds.
+function drawSpaceBackground(g: Graphics): void {
+  g.clear();
+  // Deep base wash.
+  g.rect(0, 0, SPACE.width, SPACE.height).fill(0x05060f);
+  // A couple of soft nebula clouds.
+  const nebula: [number, number, number, number][] = [
+    [SPACE.width * 0.30, SPACE.height * 0.35, 360, 0x2a1850],
+    [SPACE.width * 0.70, SPACE.height * 0.62, 420, 0x10324a],
+    [SPACE.width * 0.55, SPACE.height * 0.22, 300, 0x3a1430],
+  ];
+  for (const [nx, ny, nr, col] of nebula) {
+    for (let i = 4; i >= 1; i--) {
+      g.circle(nx, ny, nr * (i / 4)).fill({ color: col, alpha: 0.06 });
+    }
+  }
+  // Stars — many faint, a few bright, a sprinkle of colour.
+  for (let i = 0; i < 900; i++) {
+    const x = Math.random() * SPACE.width;
+    const y = Math.random() * SPACE.height;
+    const r = Math.random() < 0.92 ? 0.6 + Math.random() * 1.0 : 1.6 + Math.random() * 1.4;
+    const tint = Math.random();
+    const col = tint < 0.8 ? 0xffffff : tint < 0.9 ? 0xbfd0ff : 0xffe0c0;
+    g.circle(x, y, r).fill({ color: col, alpha: 0.4 + Math.random() * 0.6 });
+  }
+}
+
 // Cardinal pixel offsets for the cheap "outline" trick. Four offset copies
 // of the sprite, all tinted black, drawn behind the main sprite. The tinted
 // copies bleed past the anti-aliased sprite edges, producing a thin outline.
@@ -161,6 +207,27 @@ type MinotaurView = {
   sprite: Sprite;
   selectionRing: Graphics;
 };
+
+type DragonView = {
+  container: Container;   // positioned at the dragon's world pos
+  glow: Sprite;           // soft radial behind the body
+  gfxWrap: Container;     // holds the body Graphics; flipped by facing
+  body: Graphics;         // redrawn each frame (wing flap, fire breath)
+  carried: Sprite;        // the building currently being hauled (hidden otherwise)
+  selectionRing: Graphics;
+};
+
+type SpaceBuildingView = {
+  container: Container;   // positioned at the space pos, in spaceLayer
+  glow: Sprite;
+  sprite: Sprite;
+  label: Text;
+};
+
+// A precomputed star for the climb-transition overlay (screen-space fractions).
+type TransStar = { fx: number; fy: number; r: number; phase: number };
+// A precomputed cloud band for the climb transition.
+type TransCloud = { h: number; fx: number; scale: number; puffs: [number, number, number][] };
 
 type WaterView = {
   container: Container;
@@ -197,11 +264,29 @@ export type RenderContext = {
   goblinViews: Map<number, GoblinView>;
   minotaurLayer: Container;
   minotaurViews: Map<number, MinotaurView>;
+  dragonLayer: Container;
+  dragonViews: Map<number, DragonView>;
   waterLayer: Container;
   waterViews: Map<number, WaterView>;
   buildingViews: Map<number, BuildingView>;
   camera: Camera;
   viewport: { width: number; height: number };
+  // ─── Space scene + climb transition ───
+  // Floating-building diorama. Scaled + camera-panned like worldLayer.
+  spaceLayer: Container;
+  spaceBg: Graphics;                 // starfield + nebula, drawn once
+  spaceBuildingViews: Map<number, SpaceBuildingView>;
+  spaceCamera: Camera;
+  // Full-screen overlay for the climb between ground and space.
+  skyLayer: Container;
+  skyGfx: Graphics;
+  cloudGfx: Graphics;
+  starGfx: Graphics;
+  transStars: TransStar[];
+  transClouds: TransCloud[];
+  // 0 = on the ground, 1 = in space. Animated by main.ts; the renderer reads it
+  // to cross-fade the scenes and drive the overlay.
+  altitude: number;
   // Goblin Hole: a fixed pit-graphic plus its selection ring. Drawn between
   // the grid and buildings so a building placed on top covers it.
   holeGfx: Graphics;
@@ -254,6 +339,7 @@ export async function createRender(parent: HTMLElement, state: GameState): Promi
   const buildingLayer = new Container();
   const goblinLayer = new Container();
   const minotaurLayer = new Container();
+  const dragonLayer = new Container();
   const waterLayer = new Container();
   const uiLayer = new Container();
 
@@ -299,6 +385,7 @@ export async function createRender(parent: HTMLElement, state: GameState): Promi
   worldLayer.addChild(buildingLayer);
   worldLayer.addChild(goblinLayer);
   worldLayer.addChild(minotaurLayer);
+  worldLayer.addChild(dragonLayer);
   worldLayer.addChild(holeRing);
   worldLayer.addChild(effectsLayer);
   worldLayer.addChild(whiteEffectsLayer);
@@ -307,6 +394,57 @@ export async function createRender(parent: HTMLElement, state: GameState): Promi
   worldLayer.addChild(uiLayer);
   worldLayer.scale.set(RENDER_SCALE);
   app.stage.addChild(worldLayer);
+  dragonLayer.cullableChildren = true;
+
+  // ─── Space scene ───
+  // Floating-building diorama, panned by spaceCamera and scaled like the world.
+  const spaceLayer = new Container();
+  const spaceBg = new Graphics();
+  drawSpaceBackground(spaceBg);
+  spaceLayer.addChild(spaceBg);
+  spaceLayer.scale.set(RENDER_SCALE);
+  spaceLayer.visible = false;
+  app.stage.addChild(spaceLayer);
+
+  // ─── Climb transition overlay (screen-space) ───
+  const skyLayer = new Container();
+  const skyGfx = new Graphics();
+  const cloudGfx = new Graphics();
+  const starGfx = new Graphics();
+  skyLayer.addChild(skyGfx);
+  skyLayer.addChild(starGfx);
+  skyLayer.addChild(cloudGfx);
+  skyLayer.visible = false;
+  app.stage.addChild(skyLayer);
+
+  // Precompute the overlay's stars and cloud bands once.
+  const transStars: TransStar[] = [];
+  for (let i = 0; i < 220; i++) {
+    transStars.push({
+      fx: Math.random(),
+      fy: Math.random(),
+      r: 0.5 + Math.random() * 1.6,
+      phase: Math.random() * Math.PI * 2,
+    });
+  }
+  const transClouds: TransCloud[] = [];
+  for (let i = 0; i < 9; i++) {
+    const puffs: [number, number, number][] = [];
+    const lobes = 4 + Math.floor(Math.random() * 4);
+    for (let p = 0; p < lobes; p++) {
+      puffs.push([
+        (Math.random() - 0.5) * 1.7,    // x offset (cloud-widths)
+        (Math.random() - 0.5) * 0.4,    // y offset
+        0.4 + Math.random() * 0.6,      // radius (cloud-heights)
+      ]);
+    }
+    transClouds.push({
+      h: 0.05 + Math.random() * 0.34,   // altitude band of the cloud
+      fx: Math.random(),
+      scale: 70 + Math.random() * 90,
+      puffs,
+    });
+  }
 
   // Color filters let the user dial sprite/building saturation+brightness live.
   // They're only attached when needed — applying a filter forces Pixi to
@@ -320,10 +458,16 @@ export async function createRender(parent: HTMLElement, state: GameState): Promi
     app, worldLayer, buildingLayer, goblinLayer, uiLayer,
     goblinViews: new Map(),
     minotaurLayer, minotaurViews: new Map(),
+    dragonLayer, dragonViews: new Map(),
     waterLayer, waterViews: new Map(),
     buildingViews: new Map(),
     camera: { x: 0, y: 0 },
     viewport: { width: initW, height: initH },
+    spaceLayer, spaceBg, spaceBuildingViews: new Map(),
+    spaceCamera: { x: 0, y: 0 },
+    skyLayer, skyGfx, cloudGfx, starGfx,
+    transStars, transClouds,
+    altitude: 0,
     holeGfx, holeRing,
     floatersLayer, floaterViews: new Map(),
     effectsLayer, deathViews: new Map(),
@@ -585,6 +729,83 @@ function makeMinotaurView(): MinotaurView {
   c.addChild(ring);
   c.addChild(sprite);
   return { container: c, shadow, sprite, selectionRing: ring };
+}
+
+// The dragon is drawn procedurally (no sprite sheet ships for it): a side-on
+// winged silhouette in a ~[-40,40] local box, flipped via gfxWrap.scale.x by
+// facing and scaled up to DRAGON.displayPx. drawDragonBody redraws it each
+// frame so the wings flap and the fire breath flickers.
+const DRAGON_BASE = 80;
+function makeDragonView(): DragonView {
+  const container = new Container();
+
+  const glow = new Sprite(getGlowTexture());
+  glow.anchor.set(0.5);
+  glow.tint = 0xff7a2a;
+  glow.scale.set(DRAGON.displayPx * 2.0 / 128);
+  glow.alpha = 0.5;
+
+  const gfxWrap = new Container();
+  const body = new Graphics();
+  gfxWrap.addChild(body);
+  const s = DRAGON.displayPx / DRAGON_BASE;
+  gfxWrap.scale.set(s);
+
+  const carried = new Sprite(Texture.EMPTY);
+  carried.anchor.set(0.5);
+  carried.visible = false;
+
+  const selectionRing = new Graphics();
+  selectionRing.circle(0, 0, DRAGON.displayPx * 0.42).stroke({ width: 2, color: 0xffd96b });
+  selectionRing.visible = false;
+
+  container.addChild(glow);
+  container.addChild(carried);
+  container.addChild(gfxWrap);
+  container.addChild(selectionRing);
+  return { container, glow, gfxWrap, body, carried, selectionRing };
+}
+
+// Redraw a dragon (facing right; the wrap handles the mirror). `flap` is a
+// -1..1 wing-beat value; `breathing` draws the fire cone toward the snout.
+function drawDragonBody(g: Graphics, flap: number, breathing: boolean): void {
+  g.clear();
+  const wingTipY = -30 + flap * 16;
+  // Far wing (behind body) — a touch smaller + darker for depth.
+  g.poly([-2, -6, -26, wingTipY * 0.85 + 4, 4, wingTipY * 0.6 + 6]).fill({ color: 0x6a1f12, alpha: 0.85 });
+  // Tail, sweeping back and curling, with a barbed tip.
+  const tailY = 4 - flap * 3;
+  g.poly([-10, 2, -34, tailY, -40, tailY - 5, -33, tailY + 3, -12, 8]).fill(0x7e2417);
+  // Body.
+  g.ellipse(0, 2, 17, 11).fill(0x962a18);
+  // Warm belly.
+  g.ellipse(2, 6, 11, 5).fill({ color: 0xe0863a, alpha: 0.9 });
+  // Neck + head.
+  g.poly([10, -1, 16, -10, 22, -10, 16, 4]).fill(0x962a18);
+  g.circle(23, -10, 6).fill(0x9e2e1a);
+  // Snout.
+  g.poly([27, -12, 35, -9, 27, -6]).fill(0x9e2e1a);
+  // Horns.
+  g.poly([20, -15, 23, -24, 25, -15]).fill(0xf0d8a0);
+  g.poly([24, -15, 28, -22, 28, -14]).fill({ color: 0xf0d8a0, alpha: 0.85 });
+  // Eye.
+  g.circle(24, -11, 1.6).fill(0xffe14a);
+  // Near wing (in front) — large membrane with ribs.
+  g.poly([0, -6, -22, wingTipY, 16, wingTipY - 8, 6, -3]).fill({ color: 0xc0392b, alpha: 0.95 });
+  for (const rx of [-14, -4, 6]) {
+    g.moveTo(2, -4).lineTo(rx, wingTipY + (rx + 14) * 0.3).stroke({ width: 1, color: 0x6a1f12, alpha: 0.7 });
+  }
+  // Legs.
+  g.poly([-2, 11, -5, 18, -1, 18, 1, 11]).fill(0x7e2417);
+  g.poly([7, 11, 5, 18, 9, 18, 10, 11]).fill(0x7e2417);
+  // Fire breath.
+  if (breathing) {
+    const len = 34 + Math.random() * 8;
+    g.poly([34, -10, 34, -7, 34 + len, -8.5 - 4, 34 + len + 6, -8.5, 34 + len, -8.5 + 4])
+      .fill({ color: 0xff9a2a, alpha: 0.9 });
+    g.poly([34, -9.5, 34, -7.5, 34 + len * 0.7, -8.5 - 2, 34 + len * 0.7, -8.5 + 2])
+      .fill({ color: 0xffe24a, alpha: 0.95 });
+  }
 }
 
 function makeWaterView(w: WaterSource): WaterView {
@@ -897,6 +1118,131 @@ function drawBuildingBody(g: Graphics, b: Building, o: Options) {
   }
 }
 
+function makeSpaceBuildingView(sb: SpaceBuilding): SpaceBuildingView {
+  const def = BUILDING_DEFS[sb.building.kind];
+  const container = new Container();
+  const o = getOptions();
+
+  const glow = new Sprite(getGlowTexture());
+  glow.anchor.set(0.5);
+  glow.tint = 0x9fd0ff;
+  glow.scale.set(def.size * 1.7 / 128);
+  glow.alpha = 0.28;
+
+  const tex = buildingTextures[sb.building.kind] ?? Texture.EMPTY;
+  const sprite = new Sprite(tex);
+  sprite.anchor.set(0.5);
+  sizeBuildingSprite(sprite, def.size);
+
+  const gs = o.globalFontScale;
+  const label = new Text({
+    text: def.short,
+    style: {
+      fontFamily: fontFamilyById(o.fonts.buildingLabel.family).css,
+      fontSize: buildingLabelSize(def.cellSize, o.fonts.buildingLabel.scale * gs),
+      fill: 0xffffff,
+      fontWeight: 'bold',
+    },
+  });
+  label.anchor.set(0.5);
+
+  container.addChild(glow);
+  container.addChild(sprite);
+  container.addChild(label);
+  return { container, glow, sprite, label };
+}
+
+// ─── Space scene + climb transition ─────────────────────────────────
+const SKY_STOPS: [number, number][] = [
+  [0.00, 0xbfe0ff], [0.18, 0x7fb5f0], [0.40, 0x3f7fd8],
+  [0.62, 0x1c3f86], [0.82, 0x0a1640], [1.00, 0x03040f], [1.30, 0x010109],
+];
+function lerpHex(a: number, b: number, t: number): number {
+  const ar = (a >> 16) & 255, ag = (a >> 8) & 255, ab = a & 255;
+  const br = (b >> 16) & 255, bg = (b >> 8) & 255, bb = b & 255;
+  const r = Math.round(ar + (br - ar) * t);
+  const g = Math.round(ag + (bg - ag) * t);
+  const bl = Math.round(ab + (bb - ab) * t);
+  return (r << 16) | (g << 8) | bl;
+}
+function skyColorAt(h: number): number {
+  if (h <= SKY_STOPS[0][0]) return SKY_STOPS[0][1];
+  for (let i = 1; i < SKY_STOPS.length; i++) {
+    if (h <= SKY_STOPS[i][0]) {
+      const [h0, c0] = SKY_STOPS[i - 1];
+      const [h1, c1] = SKY_STOPS[i];
+      return lerpHex(c0, c1, (h - h0) / (h1 - h0));
+    }
+  }
+  return SKY_STOPS[SKY_STOPS.length - 1][1];
+}
+function smoothstep(a: number, b: number, x: number): number {
+  const t = Math.max(0, Math.min(1, (x - a) / (b - a)));
+  return t * t * (3 - 2 * t);
+}
+
+// Clamp the space camera to the SPACE bounds (mirrors clampCamera for ground).
+export function clampSpaceCamera(ctx: RenderContext) {
+  const maxX = Math.max(0, SPACE.width - ctx.viewport.width / RENDER_SCALE);
+  const maxY = Math.max(0, SPACE.height - ctx.viewport.height / RENDER_SCALE);
+  ctx.spaceCamera.x = Math.max(0, Math.min(maxX, ctx.spaceCamera.x));
+  ctx.spaceCamera.y = Math.max(0, Math.min(maxY, ctx.spaceCamera.y));
+}
+export function centerSpaceCamera(ctx: RenderContext) {
+  ctx.spaceCamera.x = SPACE.width / 2 - ctx.viewport.width / (2 * RENDER_SCALE);
+  ctx.spaceCamera.y = SPACE.height / 2 - ctx.viewport.height / (2 * RENDER_SCALE);
+  clampSpaceCamera(ctx);
+}
+// True extent the space camera can pan (so main can detect "at the bottom").
+export function spaceCameraMaxY(ctx: RenderContext): number {
+  return Math.max(0, SPACE.height - ctx.viewport.height / RENDER_SCALE);
+}
+
+function drawTransition(ctx: RenderContext, a: number, now: number) {
+  const W = ctx.viewport.width;
+  const H = ctx.viewport.height;
+  const span = 0.55;                 // altitude covered by one screen height
+  const hBottom = a * 1.15 - 0.05;   // altitude at the bottom edge
+  const hTop = hBottom + span;       // altitude at the top edge
+
+  // Gradient bands, top→bottom.
+  const g = ctx.skyGfx;
+  g.clear();
+  const N = 18;
+  for (let i = 0; i < N; i++) {
+    const frac = i / N;
+    const h = hTop + (hBottom - hTop) * frac;
+    g.rect(0, Math.floor(frac * H), W, Math.ceil(H / N) + 1).fill(skyColorAt(h));
+  }
+
+  // Stars fade in over the back half of the climb, twinkling gently.
+  const sg = ctx.starGfx;
+  sg.clear();
+  const starA = smoothstep(0.45, 0.95, a);
+  if (starA > 0.01) {
+    for (const s of ctx.transStars) {
+      const tw = 0.55 + 0.45 * Math.sin(now * 2.5 + s.phase);
+      sg.circle(s.fx * W, s.fy * H, s.r).fill({ color: 0xffffff, alpha: starA * tw });
+    }
+  }
+
+  // Clouds drift past as we climb through their altitude band.
+  const cg = ctx.cloudGfx;
+  cg.clear();
+  for (const c of ctx.transClouds) {
+    const y = H * (hTop - c.h) / (hTop - hBottom);
+    if (y < -c.scale || y > H + c.scale) continue;
+    // Fade out once we've climbed well above the cloud.
+    const fade = 1 - smoothstep(c.h + 0.05, c.h + 0.22, a);
+    if (fade <= 0.01) continue;
+    const cx = c.fx * W;
+    for (const [px, py, pr] of c.puffs) {
+      cg.circle(cx + px * c.scale, y + py * c.scale, pr * c.scale * 0.6)
+        .fill({ color: 0xf2f6ff, alpha: 0.5 * fade });
+    }
+  }
+}
+
 export function render(state: GameState, ctx: RenderContext) {
   // Apply camera by translating the world layer (UI overlays in DOM stay fixed).
   // Camera is in world units; multiply by RENDER_SCALE to get screen pixels.
@@ -1052,6 +1398,45 @@ export function render(state: GameState, ctx: RenderContext) {
     }
   }
 
+  // Dragons — procedurally drawn flyers. Wings flap, the body bobs, and the
+  // fire breath flickers during a commanded kill. While carrying, the lifted
+  // building rides just beneath.
+  const seenD = new Set<number>();
+  for (const d of state.dragons.values()) {
+    seenD.add(d.id);
+    let v = ctx.dragonViews.get(d.id);
+    if (!v) {
+      v = makeDragonView();
+      v.container.cullable = true;
+      ctx.dragonLayer.addChild(v.container);
+      ctx.dragonViews.set(d.id, v);
+    }
+    v.container.position.set(d.pos.x, d.pos.y);
+    const sc = DRAGON.displayPx / DRAGON_BASE;
+    v.gfxWrap.scale.set(d.facing * sc, sc);
+    const phase = state.now - d.spawnAt;
+    const breathing = d.state.kind === 'going_to_kill' && d.state.attackAt !== undefined;
+    drawDragonBody(v.body, Math.sin(phase * 9), breathing);
+    v.gfxWrap.y = Math.sin(phase * 2.2) * 3;
+    v.glow.alpha = breathing ? 0.85 : 0.42 + 0.12 * Math.sin(state.now * 3);
+    v.selectionRing.visible = d.selected;
+    if (d.carrying) {
+      const def = defOf(d.carrying);
+      const tex = buildingTextures[d.carrying.kind];
+      if (tex && v.carried.texture !== tex) { v.carried.texture = tex; sizeBuildingSprite(v.carried, def.size * 0.8); }
+      v.carried.visible = opts.buildingSpriteEnabled;
+      v.carried.position.set(0, DRAGON.displayPx * 0.34);
+    } else if (v.carried.visible) {
+      v.carried.visible = false;
+    }
+  }
+  for (const [id, v] of ctx.dragonViews) {
+    if (!seenD.has(id)) {
+      v.container.destroy({ children: true });
+      ctx.dragonViews.delete(id);
+    }
+  }
+
   // Water sources — region rectangles with a few ripple highlights for life.
   const seenW = new Set<number>();
   for (const w of state.waterSources.values()) {
@@ -1170,4 +1555,47 @@ export function render(state: GameState, ctx: RenderContext) {
       ctx.buildingViews.delete(id);
     }
   }
+
+  // ─── Space scene ───
+  // Position spaceLayer exactly like the world layer, but panned by spaceCamera
+  // across the SPACE bounds.
+  {
+    const scaledW = SPACE.width * RENDER_SCALE;
+    const scaledH = SPACE.height * RENDER_SCALE;
+    const offX = Math.max(0, (ctx.viewport.width - scaledW) / 2);
+    const offY = Math.max(0, (ctx.viewport.height - scaledH) / 2);
+    ctx.spaceLayer.position.set(
+      Math.round(offX - ctx.spaceCamera.x * RENDER_SCALE),
+      Math.round(offY - ctx.spaceCamera.y * RENDER_SCALE),
+    );
+  }
+  const seenSB = new Set<number>();
+  for (const sb of state.spaceBuildings.values()) {
+    seenSB.add(sb.id);
+    let v = ctx.spaceBuildingViews.get(sb.id);
+    if (!v) {
+      v = makeSpaceBuildingView(sb);
+      ctx.spaceLayer.addChild(v.container);
+      ctx.spaceBuildingViews.set(sb.id, v);
+    }
+    v.container.position.set(sb.pos.x, sb.pos.y);
+    v.sprite.rotation = sb.spin;
+    v.label.rotation = sb.spin;
+    v.sprite.visible = opts.buildingSpriteEnabled;
+    v.label.visible = opts.buildingLabelEnabled;
+  }
+  for (const [id, v] of ctx.spaceBuildingViews) {
+    if (!seenSB.has(id)) {
+      v.container.destroy({ children: true });
+      ctx.spaceBuildingViews.delete(id);
+    }
+  }
+
+  // Scene visibility from altitude: ground only when fully grounded, space only
+  // when fully risen, and the animated climb overlay for everything in between.
+  const a = ctx.altitude;
+  ctx.worldLayer.visible = a <= 0.0001;
+  ctx.spaceLayer.visible = a >= 0.9999;
+  ctx.skyLayer.visible = a > 0.0001 && a < 0.9999;
+  if (ctx.skyLayer.visible) drawTransition(ctx, a, state.now);
 }

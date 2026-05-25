@@ -1,12 +1,13 @@
 import { playDecayingGoblinDeath, playDecayingGoblinSpawn, playDecayingGoldKillCash, playSound } from './audio';
-import { BUILDING_DEFS, CELL, COLS, GOBLIN, GOLD_GOBLIN_CHANCE, GOLD_KILL_REWARD, KILL_REWARD, LIGHTNING, LIGHTNING_TASK_KILL_GOAL, MINOTAUR_KILL_REWARD, SUMMON_UPGRADES, TICK_S, MINOTAUR, TINYTAUR, WATER_DEPLETION_PP_PER_SEC, WATER_METER_MAX, formatPower } from './config';
+import { BUILDING_DEFS, CELL, COLS, DRAGON, GOBLIN, GOLD_GOBLIN_CHANCE, GOLD_KILL_REWARD, KILL_REWARD, LIGHTNING, LIGHTNING_TASK_KILL_GOAL, MINOTAUR_KILL_REWARD, SPACE, SUMMON_UPGRADES, TICK_S, MINOTAUR, TINYTAUR, WATER_DEPLETION_PP_PER_SEC, WATER_METER_MAX, formatPower } from './config';
 import {
-  ALL_DIRS, Building, Cell, DX, DY, Dir, GameState, Goblin, HOLE_SIZE, Minotaur, WaterSource,
+  ALL_DIRS, Building, Cell, DX, DY, Dir, Dragon, GameState, Goblin, HOLE_SIZE, Minotaur, SpaceBuilding, WaterSource,
   appendLog, buildingAtCell, buildingCenter, buildingFootprint, buildingPerimeter,
-  cellCenter, cellKey, currentPowerBoost, defOf, destroyBuilding, earnBlood, earnMoney, findFreeCellNear,
-  getSpawnCapacity, holeBlockedByBuilding, isCellBlocked, isCellInBuilding, isCellInWaterSource,
+  cellCenter, cellKey, constructedDragonBeacon, currentPowerBoost, defOf, destroyBuilding, dragonTargetBuilding,
+  earnBlood, earnMoney, findFreeCellNear,
+  getSpawnCapacity, holeBlockedByBuilding, holeCenter, isCellBlocked, isCellInBuilding, isCellInWaterSource,
   isInBounds, maintainerCount, nearestCellInWaterSource, occupyCell, pushDeathEffect, pushFloater,
-  pushLightningBolt, releaseCell, removeGoblin, waterCarrierCount,
+  pushLightningBolt, releaseCell, removeDragon, removeGoblin, waterCarrierCount,
 } from './state';
 
 // Auto-assign normally only runs on discrete events (a spawn, a manual command,
@@ -82,6 +83,17 @@ export function tick(state: GameState) {
   const minoTargets = assignMinotaurTargets(state);
   for (const t of state.minotaurs.values()) updateMinotaur(state, t, minoTargets);
 
+  // ── 2c. Dragon updates ───────────────────────────────────────────────
+  // Copy first: a dragon that crosses into space removes itself mid-loop.
+  for (const d of [...state.dragons.values()]) updateDragon(state, d);
+  // Floating space buildings drift within their bounds.
+  for (const sb of state.spaceBuildings.values()) updateSpaceBuilding(sb);
+
+  // Sticky: once any Dragon Beacon has finished, the Dragon summon stays open.
+  if (!state.dragonSummonUnlocked && constructedDragonBeacon(state)) {
+    state.dragonSummonUnlocked = true;
+  }
+
   // ── 3. Construction progress ──────────────────────────────────────
   for (const b of state.buildings.values()) updateConstruction(state, b);
 
@@ -115,6 +127,18 @@ export function tick(state: GameState) {
       b.nextIncomeAt = state.now + 1;
       const c = buildingCenter(b);
       pushFloater(state, c.x, c.y, `+Ƶ${def.income.toLocaleString('en-US')}`, 0xffd96b);
+    }
+  }
+
+  // Space buildings keep paying their income with no upkeep — no maintainers,
+  // no water, no power grid. The same one-second cadence as ground income.
+  for (const sb of state.spaceBuildings.values()) {
+    const def = BUILDING_DEFS[sb.building.kind];
+    if (def.income <= 0) continue;
+    if (sb.nextIncomeAt === undefined) { sb.nextIncomeAt = state.now + 1; continue; }
+    if (state.now >= sb.nextIncomeAt) {
+      earnMoney(state, def.income);
+      sb.nextIncomeAt = state.now + 1;
     }
   }
 
@@ -768,6 +792,214 @@ function updateMinotaur(state: GameState, t: Minotaur, autoTargets: Map<number, 
       t.facing = Math.atan2(next.cy - t.cell.cy, next.cx - t.cell.cx);
     }
     t.nextWanderAt = state.now + MINOTAUR.wanderInterval;
+  }
+}
+
+// ─── Dragons ────────────────────────────────────────────────────────
+// Summon a dragon. Launches from the first finished Dragon Beacon (or the
+// hole, as a fallback) and starts in its default seeking behaviour. Instant —
+// no queue. Returns false only if there's nowhere sensible to launch from.
+export function spawnDragon(state: GameState): boolean {
+  const beacon = constructedDragonBeacon(state);
+  const origin = beacon ? buildingCenter(beacon) : holeCenter(state);
+  const id = state.nextId++;
+  const d: Dragon = {
+    id,
+    pos: { x: origin.x, y: origin.y - CELL * 2 },
+    facing: 1,
+    state: { kind: 'seeking' },
+    carrying: null,
+    selected: false,
+    spawnAt: state.now,
+  };
+  state.dragons.set(id, d);
+  appendLog(state, `Dragon #${id} unfurls its wings.`);
+  playSound('ritual');
+  playSound('online', 0.5, 0.35);
+  return true;
+}
+
+// Fly straight toward (tx,ty) at `speed`. Returns true on arrival (within
+// DRAGON.arriveDist). Updates facing from horizontal travel.
+function dragonFlyToward(d: Dragon, tx: number, ty: number, speed: number): boolean {
+  const dx = tx - d.pos.x;
+  const dy = ty - d.pos.y;
+  const dist = Math.hypot(dx, dy);
+  if (Math.abs(dx) > 0.5) d.facing = dx < 0 ? -1 : 1;
+  const step = speed * TICK_S;
+  if (dist <= Math.max(step, DRAGON.arriveDist)) {
+    d.pos.x = tx;
+    d.pos.y = ty;
+    return true;
+  }
+  d.pos.x += (dx / dist) * step;
+  d.pos.y += (dy / dist) * step;
+  return false;
+}
+
+// Lift a building off the grid onto a dragon. Maintainers/builders/carriers
+// fall back to idle; the building is removed from the world and rides the
+// dragon up. From here the dragon climbs and the load enters space.
+function dragonLift(state: GameState, d: Dragon, b: Building) {
+  for (const gid of b.assignedGoblins) {
+    const g = state.goblins.get(gid);
+    if (!g) continue;
+    g.state = { kind: 'idle' };
+    g.goal = null;
+    g.path = [];
+  }
+  b.assignedGoblins = [];
+  b.selected = false;
+  state.buildings.delete(b.id);
+  d.carrying = b;
+  d.state = { kind: 'carrying' };
+  appendLog(state, `Dragon #${d.id} hoists ${defOf(b).name} #${b.id} skyward.`);
+  playSound('online', 0.8, 0.45);
+}
+
+// The carried building crosses into space: it begins drifting in the void and
+// the dragon, its work done, vanishes.
+function dragonReachSpace(state: GameState, d: Dragon) {
+  const b = d.carrying;
+  if (b) {
+    const px = SPACE.width / 2 + (Math.random() - 0.5) * SPACE.width * 0.45;
+    const py = SPACE.height / 2 + (Math.random() - 0.5) * SPACE.height * 0.45;
+    const ang = Math.random() * Math.PI * 2;
+    state.spaceBuildings.set(b.id, {
+      id: b.id,
+      building: b,
+      pos: { x: px, y: py },
+      vel: { x: Math.cos(ang) * SPACE.driftSpeed, y: Math.sin(ang) * SPACE.driftSpeed },
+      spin: Math.random() * Math.PI * 2,
+      spinRate: (Math.random() - 0.5) * 0.25,
+    });
+    state.spaceUnlocked = true;
+    appendLog(state, `${defOf(b).name} #${b.id} now drifts among the stars.`);
+    playSound('task_complete', 0.6);
+  }
+  removeDragon(state, d.id);
+}
+
+function dragonKill(state: GameState, d: Dragon, kind: 'goblin' | 'minotaur', id: number) {
+  if (kind === 'goblin') {
+    const g = state.goblins.get(id);
+    if (!g) return;
+    const tx = g.pos.x, ty = g.pos.y;
+    const reward = goblinKillReward(state, g);
+    const wasGold = !!g.gold;
+    removeGoblin(state, id);
+    earnMoney(state, reward.money);
+    earnBlood(state, reward.blood);
+    state.bloodUnlocked = true;
+    pushFloater(state, tx, ty, `+Ƶ${reward.money.toLocaleString('en-US')}`, 0xffd96b, 1.6);
+    pushFloater(state, tx, ty - 14, `+${reward.blood} blood`, 0xff8a8a, 1.6);
+    pushDeathEffect(state, tx, ty);
+    playDecayingGoblinDeath();
+    if (wasGold) playDecayingGoldKillCash();
+    appendLog(state, `Goblin #${id} incinerated by Dragon #${d.id}.`);
+  } else {
+    const m = state.minotaurs.get(id);
+    if (!m) return;
+    const tx = m.pos.x, ty = m.pos.y;
+    state.minotaurs.delete(id);
+    earnMoney(state, MINOTAUR_KILL_REWARD.money);
+    earnBlood(state, MINOTAUR_KILL_REWARD.blood);
+    state.bloodUnlocked = true;
+    pushFloater(state, tx, ty, `+Ƶ${MINOTAUR_KILL_REWARD.money.toLocaleString('en-US')}`, 0xffd96b, 1.6);
+    pushFloater(state, tx, ty - 14, `+${MINOTAUR_KILL_REWARD.blood} blood`, 0xff8a8a, 1.6);
+    pushDeathEffect(state, tx, ty);
+    playSound('goblin_death', 0.6, 0.4);
+    appendLog(state, `Minotaur #${id} incinerated by Dragon #${d.id}.`);
+  }
+}
+
+function updateDragon(state: GameState, d: Dragon) {
+  const speed = DRAGON.speed;
+  switch (d.state.kind) {
+    case 'carrying': {
+      // Climb straight up; once high enough the load enters space.
+      dragonFlyToward(d, d.pos.x, DRAGON.spaceY, speed);
+      if (d.pos.y <= DRAGON.spaceY + 1) dragonReachSpace(state, d);
+      return;
+    }
+
+    case 'moving_to': {
+      if (dragonFlyToward(d, d.state.goal.x, d.state.goal.y, speed)) {
+        d.state = { kind: 'seeking' };
+      }
+      return;
+    }
+
+    case 'going_to_building': {
+      const b = state.buildings.get(d.state.buildingId);
+      if (!b) { d.state = { kind: 'seeking' }; return; }
+      const c = buildingCenter(b);
+      const reached = dragonFlyToward(d, c.x, c.y, speed);
+      if (reached || Math.hypot(c.x - d.pos.x, c.y - d.pos.y) <= DRAGON.pickupDist) {
+        dragonLift(state, d, b);
+      }
+      return;
+    }
+
+    case 'going_to_kill': {
+      const s = d.state;
+      const target = s.targetKind === 'goblin'
+        ? state.goblins.get(s.targetId)
+        : state.minotaurs.get(s.targetId);
+      if (!target) { d.state = { kind: 'seeking' }; return; }
+      const tx = target.pos.x, ty = target.pos.y;
+      const dist = Math.hypot(tx - d.pos.x, ty - d.pos.y);
+      if (dist <= DRAGON.arriveDist + DRAGON.killReach) {
+        if (s.attackAt === undefined) {
+          s.attackAt = state.now + DRAGON.attackWindup;
+          if (Math.abs(tx - d.pos.x) > 0.5) d.facing = tx < d.pos.x ? -1 : 1;
+          return;
+        }
+        if (state.now < s.attackAt) return;
+        dragonKill(state, d, s.targetKind, s.targetId);
+        d.state = { kind: 'seeking' };
+        return;
+      }
+      s.attackAt = undefined;
+      dragonFlyToward(d, tx, ty, speed);
+      return;
+    }
+
+    case 'seeking':
+    default: {
+      const b = dragonTargetBuilding(state);
+      if (!b) return; // nothing worth hauling — hover (renderer adds the bob)
+      const c = buildingCenter(b);
+      const reached = dragonFlyToward(d, c.x, c.y, speed);
+      if (reached || Math.hypot(c.x - d.pos.x, c.y - d.pos.y) <= DRAGON.pickupDist) {
+        dragonLift(state, d, b);
+      }
+      return;
+    }
+  }
+}
+
+// Gentle bounded drift for a floating space building. Bounces off the scene
+// margins so it never wanders out of view, with the occasional small course
+// nudge so the motion reads as organic rather than perfectly linear.
+function updateSpaceBuilding(sb: SpaceBuilding) {
+  const def = BUILDING_DEFS[sb.building.kind];
+  const halfPx = def.size / 2;
+  sb.pos.x += sb.vel.x * TICK_S;
+  sb.pos.y += sb.vel.y * TICK_S;
+  sb.spin += sb.spinRate * TICK_S;
+  const minX = SPACE.margin + halfPx, maxX = SPACE.width - SPACE.margin - halfPx;
+  const minY = SPACE.margin + halfPx, maxY = SPACE.height - SPACE.margin - halfPx;
+  if (sb.pos.x < minX) { sb.pos.x = minX; sb.vel.x = Math.abs(sb.vel.x); }
+  else if (sb.pos.x > maxX) { sb.pos.x = maxX; sb.vel.x = -Math.abs(sb.vel.x); }
+  if (sb.pos.y < minY) { sb.pos.y = minY; sb.vel.y = Math.abs(sb.vel.y); }
+  else if (sb.pos.y > maxY) { sb.pos.y = maxY; sb.vel.y = -Math.abs(sb.vel.y); }
+  if (Math.random() < 0.01) {
+    sb.vel.x += (Math.random() - 0.5) * 8;
+    sb.vel.y += (Math.random() - 0.5) * 8;
+    const sp = Math.hypot(sb.vel.x, sb.vel.y) || 1;
+    sb.vel.x = (sb.vel.x / sp) * SPACE.driftSpeed;
+    sb.vel.y = (sb.vel.y / sp) * SPACE.driftSpeed;
   }
 }
 

@@ -110,6 +110,45 @@ export type Minotaur = {
   tiny?: boolean;
 };
 
+// Dragon — a flying, grid-free creature summoned from a Dragon Beacon. See
+// updateDragon in sim.ts for the behaviour of each state.
+export type DragonState =
+  // Default: fly to the single most valuable building, hoist it, climb to space.
+  | { kind: 'seeking' }
+  // Carrying a lifted building straight up; once past DRAGON.spaceY it's gone.
+  | { kind: 'carrying' }
+  // Commanded: fly to a free-floating world point, then revert to seeking.
+  | { kind: 'moving_to'; goal: Vec2 }
+  // Commanded: fly up to a unit and incinerate it, then revert to seeking.
+  | { kind: 'going_to_kill'; targetKind: 'goblin' | 'minotaur'; targetId: number; attackAt?: number }
+  // Commanded: hoist one specific building (even the Beacon) up to space.
+  | { kind: 'going_to_building'; buildingId: number };
+
+export type Dragon = {
+  id: number;
+  pos: Vec2;
+  facing: number;        // -1 faces left, +1 faces right (sprite mirror)
+  state: DragonState;
+  // The building this dragon has lifted off the grid, en route to space.
+  // Held here (removed from state.buildings) until it crosses into space.
+  carrying: Building | null;
+  selected: boolean;
+  spawnAt: number;       // wing-flap phase offset / entry timing
+};
+
+// A building a dragon has hauled into space. No longer on the grid: it drifts
+// freely within the space scene and needs no water/maintainers/power — it just
+// keeps paying its income. pos/vel are in space-scene px.
+export type SpaceBuilding = {
+  id: number;            // reuses the lifted building's id
+  building: Building;    // original building data (kind, etc.)
+  pos: Vec2;
+  vel: Vec2;
+  spin: number;          // current render rotation (radians)
+  spinRate: number;      // radians/sec
+  nextIncomeAt?: number;
+};
+
 export type BuildingState = 'constructing' | 'active' | 'dormant';
 
 export type Building = {
@@ -208,8 +247,11 @@ export type GameState = {
   bloodEarned: number;
   goblins: Map<number, Goblin>;
   minotaurs: Map<number, Minotaur>;
+  dragons: Map<number, Dragon>;
   waterSources: Map<number, WaterSource>;
   buildings: Map<number, Building>;
+  // Buildings hauled into space by dragons — keyed by the original building id.
+  spaceBuildings: Map<number, SpaceBuilding>;
   hole: Hole;
   // Ritual upgrades — sticky once bought, apply game-wide.
   autoAssignEnabled: boolean;
@@ -276,6 +318,15 @@ export type GameState = {
   // Dragon Beacon — that's the demo-end gag, so the secret-settings reveal
   // gates on getting that far. Sticky once flipped.
   optionsUnlocked: boolean;
+  // Sticky: flips true once any Dragon Beacon has finished constructing, so the
+  // Dragon summon button survives even if every beacon is later hauled to space.
+  dragonSummonUnlocked: boolean;
+  // Sticky: flips true the first time a building reaches space. Gates the
+  // "hold ↑ at the top of the map to rise into space" affordance.
+  spaceUnlocked: boolean;
+  // Which scene the player is currently looking at. Ephemeral — always reset to
+  // 'ground' on load; the climb animation lives entirely in the renderer.
+  view: 'ground' | 'space';
   // Persisted UI unlock progress (the sticky sets that live in ui.ts). Saved so
   // tutorial unlocks, the dig gate, and "outgrown" hides survive a reload even
   // after the buildings that triggered them are gone. ui.ts hydrates its module
@@ -513,8 +564,10 @@ export function createInitialState(): GameState {
     bloodEarned: 0,
     goblins: new Map(),
     minotaurs: new Map(),
+    dragons: new Map(),
     waterSources: new Map(),
     buildings: new Map(),
+    spaceBuildings: new Map(),
     hole: {
       cell: { cx: START_CELL.cx, cy: START_CELL.cy },
       selected: false,
@@ -553,6 +606,9 @@ export function createInitialState(): GameState {
     waterSeen: false,
     multiSelectSeen: false,
     optionsUnlocked: false,
+    dragonSummonUnlocked: false,
+    spaceUnlocked: false,
+    view: 'ground',
   };
   state.walls = rebuildWalls(state);
   let placed = 0;
@@ -739,6 +795,32 @@ export function destroyBuilding(state: GameState, buildingId: number) {
     g.path = [];
   }
   state.buildings.delete(buildingId);
+}
+
+// The building a default (seeking) dragon will haul to space: the single most
+// valuable finished building, by Ƶ cost. Walls (trivially cheap) and Dragon
+// Beacons (lifting the beacon would cut off future summons) are excluded from
+// the auto-pick, though the player can still command a dragon onto either.
+export function dragonTargetBuilding(state: GameState): Building | null {
+  let best: Building | null = null;
+  for (const b of state.buildings.values()) {
+    if (b.kind === 'wall' || b.kind === 'dragon_beacon') continue;
+    if (b.state === 'constructing') continue;
+    if (best === null || defOf(b).cost > defOf(best).cost) best = b;
+  }
+  return best;
+}
+
+// The first finished Dragon Beacon, if any — used as a dragon's launch point.
+export function constructedDragonBeacon(state: GameState): Building | null {
+  for (const b of state.buildings.values()) {
+    if (b.kind === 'dragon_beacon' && b.state !== 'constructing') return b;
+  }
+  return null;
+}
+
+export function removeDragon(state: GameState, dragonId: number) {
+  state.dragons.delete(dragonId);
 }
 
 export function holeAtCell(state: GameState, cx: number, cy: number): boolean {
