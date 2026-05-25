@@ -243,16 +243,6 @@ const TASKS: Task[] = [
     prereq: ['build_gas_engine'],
     optional: true,
   },
-  {
-    // Optional: surfaces once the datacentre is running. Unlocks the secret
-    // Tinytaur summon (handled in refreshUI, since it isn't a building kind).
-    id: 'strike_13_minotaurs',
-    text: `Kill ${LIGHTNING_TASK_KILL_GOAL} Minotaurs in one lightning strike`,
-    unlocks: [],
-    isDone: (s) => s.struck13Minotaurs,
-    prereq: ['run_datacentre'],
-    optional: true,
-  },
 ];
 
 export type UICallbacks = {
@@ -337,7 +327,7 @@ export function setupUI(state: GameState, callbacks: UICallbacks) {
       <div class="build-text">
         <div class="build-name">Tinytaur</div>
       </div>
-      <div class="build-cost-side"><span class="build-cost" id="cost-summon-tinytaur">${TINYTAUR.bloodCost} blood</span></div>
+      <div class="build-cost-side"><span class="build-cost" id="cost-summon-tinytaur">${TINYTAUR.minotaurCost} minotaurs</span></div>
     </div>
   `;
   tinytaurBtn.addEventListener('click', (e) => { playSound('click', 1, 0.75); flashSummonClick(tinytaurBtn); emanateAtCursor(e.clientX, e.clientY); callbacks.onSummonTinytaur(); });
@@ -791,15 +781,16 @@ export function refreshUI(state: GameState) {
     minotaurBtn.style.display = 'none';
   }
 
-  // Tinytaur button — secret summon, unlocked by completing the optional
-  // "kill 13 Minotaurs in one Lightning Strike" task. Mirror the sticky reveal
-  // onto the canonical flag so the summon guard in main.ts keeps working.
-  if (revealedTaskIds.has('strike_13_minotaurs')) state.tinytaurUnlocked = true;
+  // Tinytaur button — secret summon, revealed (sticky, set in the sim tick)
+  // once the player has fielded enough Minotaurs to pay its sacrifice cost.
+  // Costs TINYTAUR.minotaurCost living Minotaurs, who die on spawn.
   const tinytaurBtn = document.getElementById('btn-summon-tinytaur') as HTMLButtonElement;
   if (state.tinytaurUnlocked) {
     tinytaurBtn.style.display = '';
     applyFadeInOnFirstShow('btn-summon-tinytaur');
-    const canAffordTinytaur = state.blood >= TINYTAUR.bloodCost;
+    let realMinotaurs = 0;
+    for (const m of state.minotaurs.values()) if (!m.tiny) realMinotaurs++;
+    const canAffordTinytaur = realMinotaurs >= TINYTAUR.minotaurCost;
     tinytaurBtn.disabled = !canAffordTinytaur;
     const tinytaurCost = document.getElementById('cost-summon-tinytaur')!;
     tinytaurCost.classList.toggle('met', canAffordTinytaur);

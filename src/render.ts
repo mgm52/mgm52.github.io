@@ -1554,11 +1554,22 @@ export function render(state: GameState, ctx: RenderContext) {
     }
   }
 
-  // Scene visibility from altitude: ground only when fully grounded, space only
-  // when fully risen, and the animated climb overlay for everything in between.
+  // Scene cross-fades driven by altitude (0 ground … 1 space). Rather than
+  // snapping each scene on/off, fade them so nothing pops:
+  //  • the ground recedes as the climb begins,
+  //  • the sky overlay blooms in over it, then dissolves near the top,
+  //  • the space diorama fades up underneath the dissolving sky.
+  // z-order is world < space < sky, so the late sky fade reveals space cleanly.
   const a = ctx.altitude;
-  ctx.worldLayer.visible = a <= 0.0001;
-  ctx.spaceLayer.visible = a >= 0.9999;
-  ctx.skyLayer.visible = a > 0.0001 && a < 0.9999;
+  const groundFade = 1 - smoothstep(0.02, 0.18, a);
+  const spaceFade = smoothstep(0.84, 1.0, a);
+  const skyFade = Math.min(smoothstep(0.0, 0.1, a), 1 - smoothstep(0.84, 1.0, a));
+
+  ctx.worldLayer.visible = groundFade > 0.001;
+  ctx.worldLayer.alpha = groundFade;
+  ctx.spaceLayer.visible = spaceFade > 0.001;
+  ctx.spaceLayer.alpha = spaceFade;
+  ctx.skyLayer.visible = skyFade > 0.001;
+  ctx.skyLayer.alpha = skyFade;
   if (ctx.skyLayer.visible) drawTransition(ctx, a, state.now);
 }
