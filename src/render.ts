@@ -222,6 +222,7 @@ type SpaceBuildingView = {
   glow: Sprite;
   sprite: Sprite;
   label: Text;
+  selectionRing: Graphics;
 };
 
 // A precomputed star for the climb-transition overlay (screen-space fractions).
@@ -1093,6 +1094,10 @@ function makeSpaceBuildingView(sb: SpaceBuilding): SpaceBuildingView {
   glow.scale.set(def.size * 1.7 / 128);
   glow.alpha = 0.28;
 
+  const selectionRing = new Graphics();
+  drawSelectionRing(selectionRing, def.size);
+  selectionRing.visible = false;
+
   const tex = buildingTextures[sb.building.kind] ?? Texture.EMPTY;
   const sprite = new Sprite(tex);
   sprite.anchor.set(0.5);
@@ -1111,9 +1116,10 @@ function makeSpaceBuildingView(sb: SpaceBuilding): SpaceBuildingView {
   label.anchor.set(0.5);
 
   container.addChild(glow);
+  container.addChild(selectionRing);
   container.addChild(sprite);
   container.addChild(label);
-  return { container, glow, sprite, label };
+  return { container, glow, sprite, label, selectionRing };
 }
 
 // ─── Space scene + climb transition ─────────────────────────────────
@@ -1544,6 +1550,8 @@ export function render(state: GameState, ctx: RenderContext) {
     v.container.position.set(sb.pos.x, sb.pos.y);
     v.sprite.rotation = sb.spin;
     v.label.rotation = sb.spin;
+    v.selectionRing.rotation = sb.spin;
+    v.selectionRing.visible = sb.selected;
     v.sprite.visible = opts.buildingSpriteEnabled;
     v.label.visible = opts.buildingLabelEnabled;
   }
@@ -1554,11 +1562,22 @@ export function render(state: GameState, ctx: RenderContext) {
     }
   }
 
-  // Scene visibility from altitude: ground only when fully grounded, space only
-  // when fully risen, and the animated climb overlay for everything in between.
+  // Scene cross-fades driven by altitude (0 ground … 1 space). Rather than
+  // snapping each scene on/off, fade them so nothing pops:
+  //  • the ground recedes as the climb begins,
+  //  • the sky overlay blooms in over it, then dissolves near the top,
+  //  • the space diorama fades up underneath the dissolving sky.
+  // z-order is world < space < sky, so the late sky fade reveals space cleanly.
   const a = ctx.altitude;
-  ctx.worldLayer.visible = a <= 0.0001;
-  ctx.spaceLayer.visible = a >= 0.9999;
-  ctx.skyLayer.visible = a > 0.0001 && a < 0.9999;
+  const groundFade = 1 - smoothstep(0.02, 0.18, a);
+  const spaceFade = smoothstep(0.84, 1.0, a);
+  const skyFade = Math.min(smoothstep(0.0, 0.1, a), 1 - smoothstep(0.84, 1.0, a));
+
+  ctx.worldLayer.visible = groundFade > 0.001;
+  ctx.worldLayer.alpha = groundFade;
+  ctx.spaceLayer.visible = spaceFade > 0.001;
+  ctx.spaceLayer.alpha = spaceFade;
+  ctx.skyLayer.visible = skyFade > 0.001;
+  ctx.skyLayer.alpha = skyFade;
   if (ctx.skyLayer.visible) drawTransition(ctx, a, state.now);
 }

@@ -8,7 +8,7 @@ import { autoAssignAllIdle, lightningStrike } from './sim';
 import {
   Building, Cell, Dragon, GameState, Goblin, Minotaur, WaterSource,
   appendLog, buildingAtCell, cellKey, defOf, findFreeCellNear,
-  holeAtCell, isInBounds, pixelToCell, waterCarrierCount, waterSourceAtCell,
+  holeAtCell, isInBounds, pixelToCell, spaceBuildingAt, waterCarrierCount, waterSourceAtCell,
 } from './state';
 
 type ActivePointer = {
@@ -31,6 +31,9 @@ type InputState = {
   // Latest pointer position, updated on every hover/move, so the keyboard
   // "command" shortcut (Space) can act at the cursor without a pointer event.
   lastPointer: { global: { x: number; y: number }; client: { x: number; y: number } } | null;
+  // Screen-space origin of a potential tap-to-select while in the space view.
+  // Set on pointerdown in orbit, consumed on pointerup. Null on the ground.
+  spaceTapStart: { x: number; y: number } | null;
 };
 
 const LONG_PRESS_MS = 450;
@@ -58,6 +61,7 @@ export function setupInput(
     longPressPointerId: null,
     longPressFired: false,
     lastPointer: null,
+    spaceTapStart: null,
   };
 
   app.stage.eventMode = 'static';
@@ -77,9 +81,19 @@ export function setupInput(
       worldStartX: local.x, worldStartY: local.y,
     });
 
-    // No world interaction while looking at space — you can't build or command
-    // from orbit. The space scene is keyboard-panned (see main.ts).
-    if (state.view !== 'ground') { input.isDragging = false; input.selectionGfx.clear(); return; }
+    // No world building/commanding while looking at space — but a single tap
+    // can still select a floating building. The scene is keyboard-panned
+    // (see main.ts); record the tap origin and resolve it on pointerup.
+    if (state.view !== 'ground') {
+      input.isDragging = false;
+      input.selectionGfx.clear();
+      cancelLongPress(input);
+      input.spaceTapStart = (e.button === 0 && input.pointers.size < 2)
+        ? { x: e.global.x, y: e.global.y }
+        : null;
+      return;
+    }
+    input.spaceTapStart = null;
 
     // Two or more pointers → enter pan mode and abandon any single-pointer interaction.
     if (input.pointers.size >= 2) {
@@ -181,6 +195,22 @@ export function setupInput(
       input.panLast = null;
       input.isDragging = false;
       input.selectionGfx.clear();
+      return;
+    }
+    // Space view: a short tap selects the floating building under it (shift to
+    // add to the selection); a tap on empty void clears.
+    if (state.view !== 'ground') {
+      const start = input.spaceTapStart;
+      input.spaceTapStart = null;
+      if (start) {
+        const moved = Math.hypot(e.global.x - start.x, e.global.y - start.y);
+        if (moved < 6) {
+          const lp = e.getLocalPosition(ctx.spaceLayer);
+          const sb = spaceBuildingAt(state, lp.x, lp.y);
+          if (!e.shiftKey) clearSelection(state);
+          if (sb) { sb.selected = true; playSound('select', 0.33); }
+        }
+      }
       return;
     }
     if (input.longPressPointerId === e.pointerId) cancelLongPress(input);
@@ -457,6 +487,7 @@ function clearSelection(state: GameState) {
   for (const d of state.dragons.values()) d.selected = false;
   for (const b of state.buildings.values()) b.selected = false;
   for (const w of state.waterSources.values()) w.selected = false;
+  for (const sb of state.spaceBuildings.values()) sb.selected = false;
   state.hole.selected = false;
 }
 

@@ -64,14 +64,14 @@ export const MINOTAUR = {
   wanderInterval: 1.2,
 };
 
-// Tinytaur — a secret summon unlocked by completing the optional "kill 13
-// Minotaurs in one Lightning Strike" task. A Minotaur shrunk to a fraction of
-// the size and much faster (movement + attack), so it zips through a packed-in
-// horde culling goblins quickly. Summoned instantly (no queue) and cheaply, so
-// the player can field several. Reuses the Minotaur unit internally (a Minotaur
-// with `tiny: true`).
+// Tinytaur — a secret summon unlocked once the player has fielded a few
+// Minotaurs at once. A Minotaur shrunk to a fraction of the size and much
+// faster (movement + attack), so it zips through a packed-in horde culling
+// goblins quickly. Summoned instantly (no queue) by sacrificing living
+// Minotaurs: `minotaurCost` of them die the instant the Tinytaur spawns.
+// Reuses the Minotaur unit internally (a Minotaur with `tiny: true`).
 export const TINYTAUR = {
-  bloodCost: 88,
+  minotaurCost: 4,  // living Minotaurs consumed (and killed) per summon
   speed: 170,       // vs MINOTAUR.speed 70
   attackWindup: 0.2, // vs MINOTAUR.attackWindup 0.5
   scale: 0.5,       // render size multiplier vs a full Minotaur
@@ -85,7 +85,10 @@ export const TINYTAUR = {
 // Dragons fly in straight lines, ignoring walls, buildings, and occupancy.
 export const DRAGON = {
   bloodCost: 64,
-  speed: 150,            // px/sec
+  speed: 90,             // px/sec
+  // A freshly-summoned dragon hovers this long before it starts auto-seeking a
+  // building to haul, giving the player a beat to issue a manual command first.
+  seekDelay: 2.5,        // seconds
   attackWindup: 0.6,     // seconds of fire-breath before a commanded kill lands
   pickupDist: 26,        // px from a building's center before it's hoisted
   arriveDist: 8,         // px from a move/kill target before it counts as reached
@@ -104,8 +107,8 @@ export const SPACE = {
   margin: 90,            // keep floating buildings this far inside the bounds
 };
 
-// Both optional Lightning tasks (strike_13 / strike_13_minotaurs) require
-// vaporising this many units of one type in a single Lightning Strike.
+// The optional strike_13 task requires vaporising this many goblins in a
+// single Lightning Strike.
 export const LIGHTNING_TASK_KILL_GOAL = 13;
 
 // One-shot Ritual upgrades. Autocommand + Goldblins unlock once a Phone

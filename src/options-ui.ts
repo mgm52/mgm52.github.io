@@ -71,15 +71,48 @@ export function setupOptionsUI(root: HTMLElement, callbacks: OptionsUICallbacks)
   root.appendChild(adminCog);
   root.appendChild(adminPanel);
 
-  // Secret unlock: shift-clicking the leading "R" of the sidebar's Resources
-  // title reveals the admin cog. Bare clicks do nothing so we don't tip our
-  // hand on accidental hits.
+  // Secret unlock: the leading "R" of the sidebar's Resources title reveals
+  // the admin cog. On desktop it's a shift-click; on mobile (no shift key)
+  // it's a long-press on the same letter. Bare taps/clicks do nothing so we
+  // don't tip our hand on accidental hits.
   const resourcesSecret = document.getElementById('resources-secret');
-  resourcesSecret?.addEventListener('click', (e) => {
-    if (!e.shiftKey) return;
-    e.stopPropagation();
-    unlockOptionsCog();
-  });
+  if (resourcesSecret) {
+    resourcesSecret.addEventListener('click', (e) => {
+      if (!e.shiftKey) return;
+      e.stopPropagation();
+      unlockOptionsCog();
+    });
+
+    // Long-press path (touch + mouse). A press held past LONG_PRESS_MS that
+    // hasn't drifted into a scroll/drag fires the unlock. Suppress the iOS
+    // text-selection callout on the held letter so the gesture reads cleanly.
+    const LONG_PRESS_MS = 600;
+    const DRAG_CANCEL_PX = 10;
+    resourcesSecret.style.userSelect = 'none';
+    resourcesSecret.style.webkitUserSelect = 'none';
+    resourcesSecret.style.touchAction = 'manipulation';
+    let pressTimer: number | null = null;
+    let startX = 0, startY = 0;
+    const cancelPress = () => {
+      if (pressTimer !== null) { window.clearTimeout(pressTimer); pressTimer = null; }
+    };
+    resourcesSecret.addEventListener('pointerdown', (e) => {
+      startX = e.clientX; startY = e.clientY;
+      cancelPress();
+      pressTimer = window.setTimeout(() => {
+        pressTimer = null;
+        unlockOptionsCog();
+      }, LONG_PRESS_MS);
+    });
+    resourcesSecret.addEventListener('pointermove', (e) => {
+      if (pressTimer === null) return;
+      if (Math.hypot(e.clientX - startX, e.clientY - startY) > DRAG_CANCEL_PX) cancelPress();
+    });
+    resourcesSecret.addEventListener('pointerup', cancelPress);
+    resourcesSecret.addEventListener('pointercancel', cancelPress);
+    resourcesSecret.addEventListener('pointerleave', cancelPress);
+    resourcesSecret.addEventListener('contextmenu', (e) => e.preventDefault());
+  }
 }
 
 // Compact panel for the always-visible public cog. The admin panel mirrors
@@ -197,7 +230,7 @@ function rebuildPanel(panel: HTMLElement, callbacks: OptionsUICallbacks, refresh
   const cheat = document.createElement('button');
   cheat.type = 'button';
   cheat.className = 'options-reset';
-  cheat.textContent = 'Cheat +Ƶ100,000';
+  cheat.textContent = 'Cheat +Ƶ1,000,000';
   cheat.addEventListener('click', () => callbacks.onCheatMoney());
   panel.appendChild(cheat);
 

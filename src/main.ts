@@ -1,7 +1,7 @@
 import { playSound, preloadSounds, setCrackleEnabled, setMasterVolume, setMusicVolume, startBackgroundCrackle, startBackgroundMusic } from './audio';
 import {
   AUTOSPAWN_TIERS, CAMERA_SPEED, CELL, DRAGON, GOBLIN, GOLD_KILL_REWARD, KILL_REWARD, RENDER_SCALE, START_CELL,
-  SUMMON_UPGRADES, TICK_MS, MINOTAUR, TINYTAUR, digBloodCost,
+  SUMMON_UPGRADES, TICK_MS, MINOTAUR, digBloodCost,
 } from './config';
 import { setupInput } from './input';
 import { runIntro, setIntroPaused } from './intro';
@@ -9,7 +9,7 @@ import { getOptions, onOptionsChange } from './options';
 import { relockOptionsCog, setupOptionsUI } from './options-ui';
 import { applyDomOptions, centerCameraOn, centerSpaceCamera, clampCamera, clampSpaceCamera, createRender, render, spaceCameraMaxY } from './render';
 import { appendLog, cellCenter, createInitialState, destroyBuilding, digDirection, earnBlood, earnMoney, getSpawnCapacity, pushDeathEffect, pushFloater, removeGoblin, type GameState } from './state';
-import { autoAssignAllIdle, spawnDragon, spawnMinotaur, tick } from './sim';
+import { autoAssignAllIdle, spawnDragon, spawnMinotaur, spawnTinytaur, tick } from './sim';
 import { executeTaskSkip, refreshUI, setupUI } from './ui';
 import { clearSave, formatRelativeTime, loadGame, saveGame } from './save';
 
@@ -236,8 +236,8 @@ async function main() {
   // continue in the background and only blocks canvas interaction.
   setupOptionsUI(document.getElementById('game')!, {
     onCheatMoney: () => {
-      state.money += 100_000;
-      appendLog(state, 'Cheat: +Ƶ100,000.');
+      state.money += 1_000_000;
+      appendLog(state, 'Cheat: +Ƶ1,000,000.');
     },
     onTaskSkip: () => executeTaskSkip(state),
     onShowTitleScreen: () => { void showTitleScreen(); },
@@ -267,11 +267,10 @@ async function main() {
     },
     onSummonTinytaur: () => {
       if (!state.tinytaurUnlocked) { playSound('error'); return; }
-      if (state.blood < TINYTAUR.bloodCost) { playSound('error'); return; }
-      // Instant, no queue — but only charge if one actually pops out.
-      if (!spawnMinotaur(state, true)) { playSound('error'); return; }
-      state.blood -= TINYTAUR.bloodCost;
-      playSound('ritual');
+      // Costs TINYTAUR.minotaurCost living Minotaurs, who die on spawn — the
+      // sacrifice, spawn, and ritual sound all happen inside spawnTinytaur,
+      // which no-ops (returning false) if there aren't enough Minotaurs.
+      if (!spawnTinytaur(state)) { playSound('error'); return; }
     },
     onSummonDragon: () => {
       if (!state.dragonSummonUnlocked) { playSound('error'); return; }

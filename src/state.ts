@@ -146,6 +146,7 @@ export type SpaceBuilding = {
   vel: Vec2;
   spin: number;          // current render rotation (radians)
   spinRate: number;      // radians/sec
+  selected: boolean;
   nextIncomeAt?: number;
 };
 
@@ -260,14 +261,13 @@ export type GameState = {
   // watering duty for thirsty buildings. Requires autoAssignEnabled.
   autoWaterEnabled: boolean;
   goldgoblinsEnabled: boolean;
-  // Secret summon: flips true once the optional "kill 13 Minotaurs in one
-  // Lightning Strike" task (strike_13_minotaurs) is completed. Sticky.
+  // Secret summon: flips true once the player has fielded TINYTAUR.minotaurCost
+  // Minotaurs at once (checked in the sim tick). Sticky.
   tinytaurUnlocked: boolean;
   // Optional-task progress: set the first time a single Lightning Strike kills
-  // >= LIGHTNING_TASK_KILL_GOAL goblins / Minotaurs at once. Drive the
-  // strike_13 / strike_13_minotaurs optional tasks. Sticky.
+  // >= LIGHTNING_TASK_KILL_GOAL goblins at once. Drives the strike_13 optional
+  // task. Sticky.
   struck13Goblins: boolean;
-  struck13Minotaurs: boolean;
   // Multiplier applied to a gold goblin's GOLD_KILL_REWARD.money on death.
   // 1 by default; 10 once Goldgoblins x10 is purchased.
   goldgoblinMultiplier: number;
@@ -578,7 +578,6 @@ export function createInitialState(): GameState {
     goldgoblinsEnabled: false,
     tinytaurUnlocked: false,
     struck13Goblins: false,
-    struck13Minotaurs: false,
     goldgoblinMultiplier: 1,
     autoSpawnTimer: 0,
     autoSpawnMultiplier: 0,
@@ -798,15 +797,33 @@ export function destroyBuilding(state: GameState, buildingId: number) {
 }
 
 // The building a default (seeking) dragon will haul to space: the single most
-// valuable finished building, by Ƶ cost. Walls (trivially cheap) and Dragon
-// Beacons (lifting the beacon would cut off future summons) are excluded from
-// the auto-pick, though the player can still command a dragon onto either.
+// valuable finished income-earner (Datacentre, Hypercentre, Phone Farm), by Ƶ
+// cost. Only money-generating towers are auto-picked — power plants, walls, the
+// Dragon Beacon, etc. are skipped (the player can still command a dragon onto
+// any of them manually).
 export function dragonTargetBuilding(state: GameState): Building | null {
   let best: Building | null = null;
   for (const b of state.buildings.values()) {
-    if (b.kind === 'wall' || b.kind === 'dragon_beacon') continue;
     if (b.state === 'constructing') continue;
+    if (defOf(b).income <= 0) continue;
     if (best === null || defOf(b).cost > defOf(best).cost) best = b;
+  }
+  return best;
+}
+
+// Floating building whose (unrotated) footprint contains the given point, in
+// SPACE coordinates. On overlap, the one whose center is nearest wins. Used to
+// click-select buildings while looking at the void.
+export function spaceBuildingAt(state: GameState, x: number, y: number): SpaceBuilding | null {
+  let best: SpaceBuilding | null = null;
+  let bestD = Infinity;
+  for (const sb of state.spaceBuildings.values()) {
+    const half = BUILDING_DEFS[sb.building.kind].size / 2;
+    const dx = x - sb.pos.x, dy = y - sb.pos.y;
+    if (Math.abs(dx) <= half && Math.abs(dy) <= half) {
+      const d = dx * dx + dy * dy;
+      if (d < bestD) { bestD = d; best = sb; }
+    }
   }
   return best;
 }

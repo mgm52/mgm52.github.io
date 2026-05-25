@@ -94,6 +94,12 @@ export function tick(state: GameState) {
     state.dragonSummonUnlocked = true;
   }
 
+  // Sticky: the Tinytaur summon reveals itself once the player has fielded
+  // enough Minotaurs at once to pay its sacrifice cost.
+  if (!state.tinytaurUnlocked && state.minotaurs.size >= TINYTAUR.minotaurCost) {
+    state.tinytaurUnlocked = true;
+  }
+
   // ── 3. Construction progress ──────────────────────────────────────
   for (const b of state.buildings.values()) updateConstruction(state, b);
 
@@ -180,43 +186,21 @@ export function lightningStrike(state: GameState, x: number, y: number): boolean
     return dx * dx + dy * dy <= r2;
   };
 
+  // Lightning vaporises goblins for free — no money, no blood from the kills.
+  // Minotaurs are immune; the bolt passes them by untouched.
   let killed = 0;
   let killedGoblins = 0;
-  let killedMinotaurs = 0;
-  let gainedMoney = 0;
-  let gainedBlood = 0;
-  let killedGold = false;
   for (const g of [...state.goblins.values()]) {
     if (within(g.pos.x, g.pos.y)) {
-      const reward = goblinKillReward(state, g);
-      gainedMoney += reward.money;
-      gainedBlood += reward.blood;
-      if (g.gold) killedGold = true;
       removeGoblin(state, g.id);
       killed++;
       killedGoblins++;
     }
   }
-  for (const m of [...state.minotaurs.values()]) {
-    if (within(m.pos.x, m.pos.y)) {
-      gainedMoney += MINOTAUR_KILL_REWARD.money;
-      gainedBlood += MINOTAUR_KILL_REWARD.blood;
-      state.minotaurs.delete(m.id);
-      killed++;
-      killedMinotaurs++;
-    }
-  }
 
-  // Optional-task triggers: one strike that vaporises enough of a single unit
-  // type completes the matching side-task (sticky).
+  // Optional-task trigger: one strike that vaporises enough goblins completes
+  // the matching side-task (sticky).
   if (killedGoblins >= LIGHTNING_TASK_KILL_GOAL) state.struck13Goblins = true;
-  if (killedMinotaurs >= LIGHTNING_TASK_KILL_GOAL) state.struck13Minotaurs = true;
-
-  if (gainedMoney > 0 || gainedBlood > 0) {
-    earnMoney(state, gainedMoney);
-    earnBlood(state, gainedBlood);
-    state.bloodUnlocked = true;
-  }
 
   // White blood over every cell whose center falls inside the blast.
   const span = Math.ceil(LIGHTNING.cellsWide / 2);
@@ -243,19 +227,9 @@ export function lightningStrike(state: GameState, x: number, y: number): boolean
     LIGHTNING.powerBoostSeconds,
     LIGHTNING.powerBoostWatts,
   );
-  // Aggregate kill payout, stacked above the GW surge so it stays readable
-  // even when a single strike vaporises a whole cluster.
-  if (gainedMoney > 0) {
-    pushFloater(state, x, y - 14, `+Ƶ${gainedMoney.toLocaleString('en-US')}`, 0xffd96b, 1.6);
-  }
-  if (gainedBlood > 0) {
-    pushFloater(state, x, y - 28, `+${gainedBlood} blood`, 0xff8a8a, 1.6);
-  }
-
   playSound('destroy', 0.7, 0.4);
   if (killed > 0) playDecayingGoblinDeath(0.6);
-  if (killedGold) playDecayingGoldKillCash();
-  appendLog(state, `Lightning strike! ${killed} unit${killed === 1 ? '' : 's'} vaporised.`);
+  appendLog(state, `Lightning strike! ${killed} goblin${killed === 1 ? '' : 's'} vaporised.`);
   return true;
 }
 
@@ -442,12 +416,9 @@ export function autoAssignAllIdle(state: GameState) {
 // Pop a minotaur out of the goblin hole. Minotaurs don't queue/take spawn time —
 // summoning is instant; if the hole and its perimeter are fully blocked, the
 // summon refunds.
-export function spawnMinotaur(state: GameState, tiny = false): boolean {
-  const cell = pickMinotaurSpawnCell(state);
-  if (!cell) return false;
-  const id = state.nextId++;
-  const t: Minotaur = {
-    id,
+function makeMinotaur(state: GameState, cell: Cell, tiny: boolean): Minotaur {
+  return {
+    id: state.nextId++,
     pos: cellCenter(cell),
     cell,
     target: null,
@@ -460,9 +431,35 @@ export function spawnMinotaur(state: GameState, tiny = false): boolean {
     stuckStreak: 0,
     tiny: tiny || undefined,
   };
-  state.minotaurs.set(id, t);
-  appendLog(state, tiny ? `Tinytaur #${id} skitters out of the hole.` : `Minotaur #${id} crawls out of the hole.`);
+}
+
+export function spawnMinotaur(state: GameState, tiny = false): boolean {
+  const cell = pickMinotaurSpawnCell(state);
+  if (!cell) return false;
+  const t = makeMinotaur(state, cell, tiny);
+  state.minotaurs.set(t.id, t);
+  appendLog(state, tiny ? `Tinytaur #${t.id} skitters out of the hole.` : `Minotaur #${t.id} crawls out of the hole.`);
   playSound('goblin_spawn', tiny ? 2.2 : 1.4, 0.3);
+  return true;
+}
+
+// Summon a Tinytaur by sacrificing TINYTAUR.minotaurCost living Minotaurs:
+// they die on the spot and the Tinytaur rises from where the first one fell.
+// Returns false (charging nothing) if there aren't enough Minotaurs.
+export function spawnTinytaur(state: GameState): boolean {
+  const fodder = [...state.minotaurs.values()].filter((m) => !m.tiny);
+  if (fodder.length < TINYTAUR.minotaurCost) return false;
+  const victims = fodder.slice(0, TINYTAUR.minotaurCost);
+  const birthCell = victims[0].cell;
+  for (const m of victims) {
+    pushDeathEffect(state, m.pos.x, m.pos.y);
+    state.minotaurs.delete(m.id);
+  }
+  const t = makeMinotaur(state, birthCell, true);
+  state.minotaurs.set(t.id, t);
+  appendLog(state, `Tinytaur #${t.id} rises from ${TINYTAUR.minotaurCost} sacrificed Minotaurs.`);
+  playSound('ritual');
+  playSound('goblin_spawn', 2.2, 0.3);
   return true;
 }
 
@@ -872,6 +869,7 @@ function dragonReachSpace(state: GameState, d: Dragon) {
       vel: { x: Math.cos(ang) * SPACE.driftSpeed, y: Math.sin(ang) * SPACE.driftSpeed },
       spin: Math.random() * Math.PI * 2,
       spinRate: (Math.random() - 0.5) * 0.25,
+      selected: false,
     });
     state.spaceUnlocked = true;
     appendLog(state, `${defOf(b).name} #${b.id} now drifts among the stars.`);
@@ -967,6 +965,9 @@ function updateDragon(state: GameState, d: Dragon) {
 
     case 'seeking':
     default: {
+      // Hover for a beat after summoning before chasing a building, so the
+      // player has a window to issue a manual command first.
+      if (state.now < d.spawnAt + DRAGON.seekDelay) return;
       const b = dragonTargetBuilding(state);
       if (!b) return; // nothing worth hauling — hover (renderer adds the bob)
       const c = buildingCenter(b);
@@ -1768,6 +1769,14 @@ function resolvePowerAndState(state: GameState) {
     const staffed = maintainerCount(state, b) >= def.maintainersRequired;
     setActiveOrDormant(state, b, staffed, undefined);
     if (b.state === 'active') production += def.powerOutput;
+  }
+
+  // Buildings hauled into space keep producing power for the grid below, free
+  // of any maintainer / water / power upkeep — the same hands-off deal they get
+  // on income. Only generators contribute; off-grid consumers draw nothing.
+  for (const sb of state.spaceBuildings.values()) {
+    const out = BUILDING_DEFS[sb.building.kind].powerOutput;
+    if (out > 0) production += out;
   }
 
   // Lightning Strike surges add to the grid on top of building output, so a
