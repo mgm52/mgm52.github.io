@@ -236,8 +236,8 @@ async function main() {
   // continue in the background and only blocks canvas interaction.
   setupOptionsUI(document.getElementById('game')!, {
     onCheatMoney: () => {
-      state.money += 100_000;
-      appendLog(state, 'Cheat: +Ƶ100,000.');
+      state.money += 1_000_000;
+      appendLog(state, 'Cheat: +Ƶ1,000,000.');
     },
     onTaskSkip: () => executeTaskSkip(state),
     onShowTitleScreen: () => { void showTitleScreen(); },

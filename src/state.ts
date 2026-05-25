@@ -796,14 +796,15 @@ export function destroyBuilding(state: GameState, buildingId: number) {
 }
 
 // The building a default (seeking) dragon will haul to space: the single most
-// valuable finished building, by Ƶ cost. Walls (trivially cheap) and Dragon
-// Beacons (lifting the beacon would cut off future summons) are excluded from
-// the auto-pick, though the player can still command a dragon onto either.
+// valuable finished income-earner (Datacentre, Hypercentre, Phone Farm), by Ƶ
+// cost. Only money-generating towers are auto-picked — power plants, walls, the
+// Dragon Beacon, etc. are skipped (the player can still command a dragon onto
+// any of them manually).
 export function dragonTargetBuilding(state: GameState): Building | null {
   let best: Building | null = null;
   for (const b of state.buildings.values()) {
-    if (b.kind === 'wall' || b.kind === 'dragon_beacon') continue;
     if (b.state === 'constructing') continue;
+    if (defOf(b).income <= 0) continue;
     if (best === null || defOf(b).cost > defOf(best).cost) best = b;
   }
   return best;
