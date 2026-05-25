@@ -210,9 +210,9 @@ type MinotaurView = {
 
 type DragonView = {
   container: Container;   // positioned at the dragon's world pos
-  glow: Sprite;           // soft radial behind the body
-  gfxWrap: Container;     // holds the body Graphics; flipped by facing
-  body: Graphics;         // redrawn each frame (wing flap, fire breath)
+  glow: Sprite;           // soft radial behind the block
+  block: Graphics;        // placeholder tile (drawn once)
+  label: Text;            // 🐉 glyph on the tile
   carried: Sprite;        // the building currently being hauled (hidden otherwise)
   selectionRing: Graphics;
 };
@@ -731,81 +731,45 @@ function makeMinotaurView(): MinotaurView {
   return { container: c, shadow, sprite, selectionRing: ring };
 }
 
-// The dragon is drawn procedurally (no sprite sheet ships for it): a side-on
-// winged silhouette in a ~[-40,40] local box, flipped via gfxWrap.scale.x by
-// facing and scaled up to DRAGON.displayPx. drawDragonBody redraws it each
-// frame so the wings flap and the fire breath flickers.
-const DRAGON_BASE = 80;
+// No dragon sprite sheet ships, so the dragon is a placeholder tile: an orange
+// rounded block with a 🐉 glyph, matching the building-placeholder look. A soft
+// glow sits behind it and the carried building rides just below.
+const DRAGON_BLOCK = Math.round(DRAGON.displayPx * 0.78);
 function makeDragonView(): DragonView {
   const container = new Container();
 
   const glow = new Sprite(getGlowTexture());
   glow.anchor.set(0.5);
-  glow.tint = 0xff7a2a;
-  glow.scale.set(DRAGON.displayPx * 2.0 / 128);
-  glow.alpha = 0.5;
+  glow.tint = 0xff8a3a;
+  glow.scale.set(DRAGON.displayPx * 1.7 / 128);
+  glow.alpha = 0.35;
 
-  const gfxWrap = new Container();
-  const body = new Graphics();
-  gfxWrap.addChild(body);
-  const s = DRAGON.displayPx / DRAGON_BASE;
-  gfxWrap.scale.set(s);
+  const block = new Graphics();
+  const half = DRAGON_BLOCK / 2;
+  block.roundRect(-half, -half, DRAGON_BLOCK, DRAGON_BLOCK, 8)
+    .fill(0xe07a2a)
+    .stroke({ width: 3, color: 0xffd24a });
+
+  const label = new Text({
+    text: '🐉',
+    style: { fontFamily: 'sans-serif', fontSize: Math.round(DRAGON_BLOCK * 0.62), fill: 0xffffff },
+  });
+  label.anchor.set(0.5);
 
   const carried = new Sprite(Texture.EMPTY);
   carried.anchor.set(0.5);
   carried.visible = false;
 
   const selectionRing = new Graphics();
-  selectionRing.circle(0, 0, DRAGON.displayPx * 0.42).stroke({ width: 2, color: 0xffd96b });
+  selectionRing.circle(0, 0, DRAGON.displayPx * 0.5).stroke({ width: 2, color: 0xffd96b });
   selectionRing.visible = false;
 
   container.addChild(glow);
   container.addChild(carried);
-  container.addChild(gfxWrap);
+  container.addChild(block);
+  container.addChild(label);
   container.addChild(selectionRing);
-  return { container, glow, gfxWrap, body, carried, selectionRing };
-}
-
-// Redraw a dragon (facing right; the wrap handles the mirror). `flap` is a
-// -1..1 wing-beat value; `breathing` draws the fire cone toward the snout.
-function drawDragonBody(g: Graphics, flap: number, breathing: boolean): void {
-  g.clear();
-  const wingTipY = -30 + flap * 16;
-  // Far wing (behind body) — a touch smaller + darker for depth.
-  g.poly([-2, -6, -26, wingTipY * 0.85 + 4, 4, wingTipY * 0.6 + 6]).fill({ color: 0x6a1f12, alpha: 0.85 });
-  // Tail, sweeping back and curling, with a barbed tip.
-  const tailY = 4 - flap * 3;
-  g.poly([-10, 2, -34, tailY, -40, tailY - 5, -33, tailY + 3, -12, 8]).fill(0x7e2417);
-  // Body.
-  g.ellipse(0, 2, 17, 11).fill(0x962a18);
-  // Warm belly.
-  g.ellipse(2, 6, 11, 5).fill({ color: 0xe0863a, alpha: 0.9 });
-  // Neck + head.
-  g.poly([10, -1, 16, -10, 22, -10, 16, 4]).fill(0x962a18);
-  g.circle(23, -10, 6).fill(0x9e2e1a);
-  // Snout.
-  g.poly([27, -12, 35, -9, 27, -6]).fill(0x9e2e1a);
-  // Horns.
-  g.poly([20, -15, 23, -24, 25, -15]).fill(0xf0d8a0);
-  g.poly([24, -15, 28, -22, 28, -14]).fill({ color: 0xf0d8a0, alpha: 0.85 });
-  // Eye.
-  g.circle(24, -11, 1.6).fill(0xffe14a);
-  // Near wing (in front) — large membrane with ribs.
-  g.poly([0, -6, -22, wingTipY, 16, wingTipY - 8, 6, -3]).fill({ color: 0xc0392b, alpha: 0.95 });
-  for (const rx of [-14, -4, 6]) {
-    g.moveTo(2, -4).lineTo(rx, wingTipY + (rx + 14) * 0.3).stroke({ width: 1, color: 0x6a1f12, alpha: 0.7 });
-  }
-  // Legs.
-  g.poly([-2, 11, -5, 18, -1, 18, 1, 11]).fill(0x7e2417);
-  g.poly([7, 11, 5, 18, 9, 18, 10, 11]).fill(0x7e2417);
-  // Fire breath.
-  if (breathing) {
-    const len = 34 + Math.random() * 8;
-    g.poly([34, -10, 34, -7, 34 + len, -8.5 - 4, 34 + len + 6, -8.5, 34 + len, -8.5 + 4])
-      .fill({ color: 0xff9a2a, alpha: 0.9 });
-    g.poly([34, -9.5, 34, -7.5, 34 + len * 0.7, -8.5 - 2, 34 + len * 0.7, -8.5 + 2])
-      .fill({ color: 0xffe24a, alpha: 0.95 });
-  }
+  return { container, glow, block, label, carried, selectionRing };
 }
 
 function makeWaterView(w: WaterSource): WaterView {
@@ -1398,9 +1362,8 @@ export function render(state: GameState, ctx: RenderContext) {
     }
   }
 
-  // Dragons — procedurally drawn flyers. Wings flap, the body bobs, and the
-  // fire breath flickers during a commanded kill. While carrying, the lifted
-  // building rides just beneath.
+  // Dragons — placeholder tiles that bob, glow, and brighten while breathing
+  // fire on a commanded kill. While carrying, the lifted building rides beneath.
   const seenD = new Set<number>();
   for (const d of state.dragons.values()) {
     seenD.add(d.id);
@@ -1412,20 +1375,20 @@ export function render(state: GameState, ctx: RenderContext) {
       ctx.dragonViews.set(d.id, v);
     }
     v.container.position.set(d.pos.x, d.pos.y);
-    const sc = DRAGON.displayPx / DRAGON_BASE;
-    v.gfxWrap.scale.set(d.facing * sc, sc);
     const phase = state.now - d.spawnAt;
     const breathing = d.state.kind === 'going_to_kill' && d.state.attackAt !== undefined;
-    drawDragonBody(v.body, Math.sin(phase * 9), breathing);
-    v.gfxWrap.y = Math.sin(phase * 2.2) * 3;
-    v.glow.alpha = breathing ? 0.85 : 0.42 + 0.12 * Math.sin(state.now * 3);
+    const bob = Math.sin(phase * 2.2) * 3;
+    v.block.y = bob;
+    v.label.y = bob;
+    v.block.tint = breathing ? 0xff5a2a : 0xffffff;
+    v.glow.alpha = breathing ? 0.85 : 0.35 + 0.12 * Math.sin(state.now * 3);
     v.selectionRing.visible = d.selected;
     if (d.carrying) {
       const def = defOf(d.carrying);
       const tex = buildingTextures[d.carrying.kind];
       if (tex && v.carried.texture !== tex) { v.carried.texture = tex; sizeBuildingSprite(v.carried, def.size * 0.8); }
       v.carried.visible = opts.buildingSpriteEnabled;
-      v.carried.position.set(0, DRAGON.displayPx * 0.34);
+      v.carried.position.set(0, DRAGON.displayPx * 0.38);
     } else if (v.carried.visible) {
       v.carried.visible = false;
     }
