@@ -1,15 +1,15 @@
 import { playSound, preloadSounds, setCrackleEnabled, setMasterVolume, setMusicVolume, startBackgroundCrackle, startBackgroundMusic } from './audio';
 import {
-  AUTOSPAWN_TIERS, CAMERA_SPEED, CELL, GOBLIN, GOLD_KILL_REWARD, KILL_REWARD, RENDER_SCALE, START_CELL,
+  AUTOSPAWN_TIERS, CAMERA_SPEED, CELL, DRAGON, GOBLIN, GOLD_KILL_REWARD, KILL_REWARD, RENDER_SCALE, START_CELL,
   SUMMON_UPGRADES, TICK_MS, MINOTAUR, TINYTAUR, digBloodCost,
 } from './config';
 import { setupInput } from './input';
 import { runIntro, setIntroPaused } from './intro';
 import { getOptions, onOptionsChange } from './options';
 import { relockOptionsCog, setupOptionsUI } from './options-ui';
-import { applyDomOptions, centerCameraOn, clampCamera, createRender, render } from './render';
+import { applyDomOptions, centerCameraOn, centerSpaceCamera, clampCamera, clampSpaceCamera, createRender, render, spaceCameraMaxY } from './render';
 import { appendLog, cellCenter, createInitialState, destroyBuilding, digDirection, earnBlood, earnMoney, getSpawnCapacity, pushDeathEffect, pushFloater, removeGoblin, type GameState } from './state';
-import { autoAssignAllIdle, spawnMinotaur, tick } from './sim';
+import { autoAssignAllIdle, spawnDragon, spawnMinotaur, tick } from './sim';
 import { executeTaskSkip, refreshUI, setupUI } from './ui';
 import { clearSave, formatRelativeTime, loadGame, saveGame } from './save';
 
@@ -273,6 +273,12 @@ async function main() {
       state.blood -= TINYTAUR.bloodCost;
       playSound('ritual');
     },
+    onSummonDragon: () => {
+      if (!state.dragonSummonUnlocked) { playSound('error'); return; }
+      if (state.blood < DRAGON.bloodCost) { playSound('error'); return; }
+      if (!spawnDragon(state)) { playSound('error'); return; }
+      state.blood -= DRAGON.bloodCost;
+    },
     onBuyAutoAssign: () => {
       if (state.autoAssignEnabled) return;
       const cost = SUMMON_UPGRADES.autoAssign.bloodCost;
@@ -395,6 +401,12 @@ async function main() {
   const ctx = await createRender(document.getElementById('game')!, state);
   setupInput(state, ctx.app, ctx.uiLayer, ctx.worldLayer, ctx);
 
+  // Dev-only debug handle for manual + automated testing. Stripped from
+  // production builds (import.meta.env.DEV is false there).
+  if (import.meta.env.DEV) {
+    (window as Window & { __game?: unknown }).__game = { state, ctx, spawnDragon, spawnMinotaur };
+  }
+
   // Center the camera on the middle of the initial play area, not on the
   // hole — the world is now much larger than the playable region.
   const pa = state.playArea;
@@ -418,6 +430,18 @@ async function main() {
   });
   // Drop held keys if the window loses focus (otherwise camera "drifts" forever).
   window.addEventListener('blur', () => held.clear());
+
+  // ─── Space-view climb state ─────────────────────────────────────────
+  // Hold ↑ at the very top of the map (once a building has reached space) to
+  // ascend; hold ↓ at the bottom of the space scene to return. The climb eases
+  // through ctx.altitude (0 ground … 1 space) over SPACE_TRANS_MS.
+  const SPACE_TRANS_MS = 2600;
+  const SPACE_HOLD_MS = 350;
+  let transitioning = false;
+  let transFrom = 0, transTo = 0, transStart = 0;
+  let ascendHold = 0, descendHold = 0;
+  const ascendHint = document.getElementById('ascend-hint');
+  const descendHint = document.getElementById('descend-hint');
 
   // Autosave to localStorage every SAVE_INTERVAL_MS, plus on visibilitychange
   // and pagehide so a closed tab loses at most this much progress.
@@ -508,33 +532,89 @@ async function main() {
       // doesn't dump a burst of ticks into the world.
       acc = 0;
     }
-    // Update camera based on held pan keys
+    // Held pan vector.
     let dx = 0, dy = 0;
     if (held.has('a') || held.has('arrowleft')) dx -= 1;
     if (held.has('d') || held.has('arrowright')) dx += 1;
     if (held.has('w') || held.has('arrowup')) dy -= 1;
     if (held.has('s') || held.has('arrowdown')) dy += 1;
-    if (dx !== 0 || dy !== 0) {
-      const len = Math.hypot(dx, dy);
-      const move = (CAMERA_SPEED * dt) / 1000;
-      ctx.camera.x += (dx / len) * move;
-      ctx.camera.y += (dy / len) * move;
-      clampCamera(ctx);
-    }
-    // Pan-hint trigger: once any water source intersects the camera's visible
-    // rect, mark `waterSeen` sticky-true. The hint flips off in refreshUI.
-    if (!state.waterSeen && state.waterSources.size > 0) {
-      const vx0 = ctx.camera.x;
-      const vy0 = ctx.camera.y;
-      const vx1 = vx0 + ctx.viewport.width / RENDER_SCALE;
-      const vy1 = vy0 + ctx.viewport.height / RENDER_SCALE;
-      for (const w of state.waterSources.values()) {
-        if (w.x1 * CELL > vx0 && w.x0 * CELL < vx1 && w.y1 * CELL > vy0 && w.y0 * CELL < vy1) {
-          state.waterSeen = true;
-          break;
+    const upHeld = held.has('w') || held.has('arrowup');
+    const downHeld = held.has('s') || held.has('arrowdown');
+    const panMove = (CAMERA_SPEED * dt) / 1000;
+
+    if (transitioning) {
+      // Mid-climb: drive altitude with an ease-in-out and ignore pan input.
+      const t = Math.min(1, (now - transStart) / SPACE_TRANS_MS);
+      const e = t * t * (3 - 2 * t);
+      ctx.altitude = transFrom + (transTo - transFrom) * e;
+      if (t >= 1) {
+        ctx.altitude = transTo;
+        transitioning = false;
+        state.view = transTo >= 0.5 ? 'space' : 'ground';
+      }
+      ascendHint?.classList.remove('visible');
+      descendHint?.classList.remove('visible');
+    } else if (ctx.altitude >= 0.9999) {
+      // ── Space view ── pan the space camera; hold ↓ at the bottom to descend.
+      state.view = 'space';
+      if (dx !== 0 || dy !== 0) {
+        const len = Math.hypot(dx, dy);
+        ctx.spaceCamera.x += (dx / len) * panMove;
+        ctx.spaceCamera.y += (dy / len) * panMove;
+        clampSpaceCamera(ctx);
+      }
+      const atBottom = ctx.spaceCamera.y >= spaceCameraMaxY(ctx) - 1;
+      if (downHeld && atBottom) {
+        descendHold += dt;
+        if (descendHold >= SPACE_HOLD_MS) {
+          transitioning = true; transFrom = 1; transTo = 0; transStart = now; descendHold = 0;
+          playSound('ritual', 0.6, 0.6);
+        }
+      } else { descendHold = 0; }
+      ascendHint?.classList.remove('visible');
+      descendHint?.classList.toggle('visible', atBottom && !transitioning);
+    } else {
+      // ── Ground view ── pan the world; hold ↑ at the top to rise into space.
+      state.view = 'ground';
+      if (dx !== 0 || dy !== 0) {
+        const len = Math.hypot(dx, dy);
+        ctx.camera.x += (dx / len) * panMove;
+        ctx.camera.y += (dy / len) * panMove;
+        clampCamera(ctx);
+      }
+      const atTop = ctx.camera.y <= 1;
+      if (state.spaceUnlocked && upHeld && atTop) {
+        ascendHold += dt;
+        if (ascendHold >= SPACE_HOLD_MS) {
+          centerSpaceCamera(ctx);
+          ctx.spaceCamera.y = 0; clampSpaceCamera(ctx);  // arrive looking down from the top
+          transitioning = true; transFrom = 0; transTo = 1; transStart = now; ascendHold = 0;
+          state.view = 'space';
+          state.pendingBuild = null; state.pendingStrike = false;
+          playSound('ritual', 0.7, 0.5);
+          playSound('online', 0.5, 0.3);
+        }
+      } else { ascendHold = 0; }
+      descendHint?.classList.remove('visible');
+      ascendHint?.classList.toggle('visible', state.spaceUnlocked && atTop && !transitioning);
+      // Pan-hint trigger: once any water source intersects the camera's visible
+      // rect, mark `waterSeen` sticky-true. The hint flips off in refreshUI.
+      if (!state.waterSeen && state.waterSources.size > 0) {
+        const vx0 = ctx.camera.x;
+        const vy0 = ctx.camera.y;
+        const vx1 = vx0 + ctx.viewport.width / RENDER_SCALE;
+        const vy1 = vy0 + ctx.viewport.height / RENDER_SCALE;
+        for (const w of state.waterSources.values()) {
+          if (w.x1 * CELL > vx0 && w.x0 * CELL < vx1 && w.y1 * CELL > vy0 && w.y0 * CELL < vy1) {
+            state.waterSeen = true;
+            break;
+          }
         }
       }
     }
+    // Dim + disable the summon/build panels while looking at space (you can't
+    // build or summon from orbit).
+    document.body.classList.toggle('space-view', state.view !== 'ground');
     render(state, ctx);
     refreshUI(state);
     requestAnimationFrame(frame);

@@ -77,6 +77,33 @@ export const TINYTAUR = {
   scale: 0.5,       // render size multiplier vs a full Minotaur
 };
 
+// Dragon — summoned from a constructed Dragon Beacon (64 blood each). A flying
+// creature that, by default, hauls the single most valuable building up to
+// space, where it floats free of the grid. It can also be commanded to
+// incinerate a unit, fly to a spot, or lift a specific building. Each dragon
+// makes one trip: the instant it carries a building across into space it's gone.
+// Dragons fly in straight lines, ignoring walls, buildings, and occupancy.
+export const DRAGON = {
+  bloodCost: 64,
+  speed: 150,            // px/sec
+  attackWindup: 0.6,     // seconds of fire-breath before a commanded kill lands
+  pickupDist: 26,        // px from a building's center before it's hoisted
+  arriveDist: 8,         // px from a move/kill target before it counts as reached
+  killReach: 22,         // px the fire-breath reaches past the target center
+  spaceY: -4 * CELL,     // world-y a carrier climbs to before its load enters space
+  displayPx: 132,        // on-screen sprite size of a full dragon
+};
+
+// The void the dragons haul buildings into. Its own little coordinate space
+// with a starfield; lifted buildings drift here within these bounds (px) and
+// never need water, maintainers, or power — they simply keep earning income.
+export const SPACE = {
+  width: 1800,
+  height: 1200,
+  driftSpeed: 16,        // baseline float speed, px/sec
+  margin: 90,            // keep floating buildings this far inside the bounds
+};
+
 // Both optional Lightning tasks (strike_13 / strike_13_minotaurs) require
 // vaporising this many units of one type in a single Lightning Strike.
 export const LIGHTNING_TASK_KILL_GOAL = 13;

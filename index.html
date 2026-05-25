@@ -472,6 +472,27 @@
         z-index: 5;
       }
       #drag-select-hint.visible { opacity: 1; }
+      /* Ascend / descend hints for the space view. Same fade pattern; the
+         ascend prompt sits just under the top edge, the descend prompt just
+         above the bottom edge. Toggled by main.ts. */
+      #ascend-hint, #descend-hint {
+        position: absolute; left: 50%; transform: translateX(-50%);
+        background: rgba(6, 8, 20, 0.72); padding: 9px 16px;
+        border: 1px solid rgba(150, 180, 255, 0.35);
+        border-radius: 4px; font-family: var(--font-body); font-size: calc(17px * var(--font-body-scale));
+        pointer-events: none; color: #e6eeff; letter-spacing: 1px;
+        text-shadow: 0 0 8px rgba(120, 160, 255, 0.6);
+        opacity: 0; transition: opacity 600ms ease; z-index: 6;
+      }
+      #ascend-hint { top: 14px; }
+      #descend-hint { bottom: 14px; }
+      #ascend-hint.visible, #descend-hint.visible { opacity: 1; }
+      /* From orbit you can't build or summon — dim those panels out. */
+      body.space-view #panel-summon,
+      body.space-view #panel-build {
+        opacity: 0.32; pointer-events: none; filter: grayscale(0.6);
+        transition: opacity 500ms ease;
+      }
 
       /* ───────── Bottom-left info panel ───────── */
       #info-panel {
@@ -1077,6 +1098,10 @@
         <!-- Drag-select onboarding nudge — surfaces after a long idle once
              past the first task and the player still hasn't multi-selected. -->
         <div id="drag-select-hint">Hint: drag to choose many creatures</div>
+        <!-- Space-view prompts — shown by main.ts at the top/bottom edges once
+             at least one building has been hauled into space. -->
+        <div id="ascend-hint">Hold ↑ to rise into space</div>
+        <div id="descend-hint">Hold ↓ to return to the surface</div>
         <button id="pause-btn" type="button" aria-label="Pause">⏸</button>
         <div id="pause-overlay">
           <div class="pause-title">PAUSED</div>

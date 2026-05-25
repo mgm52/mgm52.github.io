@@ -72,6 +72,14 @@ export function loadGame(): { state: GameState; savedAt: number } | null {
     env.state.moneyEarned ??= 0;
     env.state.bloodEarned ??= 0;
     env.state.pendingStrike = false;
+    // Dragons / space scene — added with the Dragon Beacon payoff. Default for
+    // saves predating them, and always resume on the ground (the climb is a
+    // live-only animation).
+    env.state.dragons ??= new Map();
+    env.state.spaceBuildings ??= new Map();
+    env.state.dragonSummonUnlocked ??= false;
+    env.state.spaceUnlocked ??= false;
+    env.state.view = 'ground';
     // Walls are deterministic from playArea; rebuild after load so any future
     // schema drift in the persisted Set doesn't desync rendering / pathing.
     env.state.walls = rebuildWalls(env.state);

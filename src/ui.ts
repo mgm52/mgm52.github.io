@@ -1,11 +1,11 @@
 import { playSound } from './audio';
 import {
   AUTOSPAWN_TIERS, BUILDABLE_KINDS, BUILDING_DEFS, BuildingKind, DRAG_SELECT_HINT_DELAY_SEC,
-  GOBLIN, LIGHTNING, LIGHTNING_TASK_KILL_GOAL, SPAWN_HINT_NO_SPAWN_SEC,
+  DRAGON, GOBLIN, LIGHTNING, LIGHTNING_TASK_KILL_GOAL, SPAWN_HINT_NO_SPAWN_SEC,
   SPAWN_HINT_NO_TASK_SEC, SUMMON_UPGRADES, WATER_HINT_DELAY_SEC, digBloodCost, MINOTAUR, TINYTAUR, formatPower,
 } from './config';
 import {
-  Building, Cell, GameState, Goblin, GoblinState, WaterSource,
+  Building, Cell, DragonState, GameState, Goblin, GoblinState, WaterSource,
   appendLog, buildingCenter, cellCenter, cellKey, countIdle, defOf, digDirection, getSpawnCapacity,
   holeBlockedByBuilding, isCellBlocked, isInBounds, maintainerCount, occupyCell, waterCarrierCount,
 } from './state';
@@ -259,6 +259,7 @@ export type UICallbacks = {
   onSpawnGoblin: () => void;
   onSummonMinotaur: () => void;
   onSummonTinytaur: () => void;
+  onSummonDragon: () => void;
   onLightningStrike: () => void;
   onBuyAutoAssign: () => void;
   onBuyAutoWater: () => void;
@@ -341,6 +342,24 @@ export function setupUI(state: GameState, callbacks: UICallbacks) {
   `;
   tinytaurBtn.addEventListener('click', (e) => { playSound('click', 1, 0.75); flashSummonClick(tinytaurBtn); emanateAtCursor(e.clientX, e.clientY); callbacks.onSummonTinytaur(); });
   summonList.appendChild(tinytaurBtn);
+
+  // Dragon — unlocked once a Dragon Beacon has finished constructing. Instant
+  // summon (no track), 64 blood. By default it hauls the priciest building to
+  // space; can also be commanded onto units, spots, or specific buildings.
+  const dragonBtn = document.createElement('button');
+  dragonBtn.className = 'build-button build-button-compact';
+  dragonBtn.id = 'btn-summon-dragon';
+  dragonBtn.style.display = 'none';
+  dragonBtn.innerHTML = `
+    <div class="build-content">
+      <div class="build-text">
+        <div class="build-name">Dragon</div>
+      </div>
+      <div class="build-cost-side"><span class="build-cost" id="cost-summon-dragon">${DRAGON.bloodCost} blood</span></div>
+    </div>
+  `;
+  dragonBtn.addEventListener('click', (e) => { playSound('click', 1, 0.75); flashSummonClick(dragonBtn); emanateAtCursor(e.clientX, e.clientY); callbacks.onSummonDragon(); });
+  summonList.appendChild(dragonBtn);
 
   // Ritual upgrades — surfaced once a Phone Farm has finished building.
   // Bought ones stay visible but go disabled.
@@ -788,6 +807,22 @@ export function refreshUI(state: GameState) {
     tinytaurBtn.style.display = 'none';
   }
 
+  // Dragon button — appears once a Dragon Beacon has finished (sticky via
+  // dragonSummonUnlocked, set in the sim tick).
+  const dragonBtn = document.getElementById('btn-summon-dragon') as HTMLButtonElement;
+  if (state.dragonSummonUnlocked) {
+    dragonBtn.style.display = '';
+    applyFadeInOnFirstShow('btn-summon-dragon');
+    const canAffordDragon = state.blood >= DRAGON.bloodCost;
+    dragonBtn.disabled = !canAffordDragon;
+    const dragonCost = document.getElementById('cost-summon-dragon')!;
+    dragonCost.classList.toggle('met', canAffordDragon);
+    setBuyFlash('btn-summon-dragon', canAffordDragon && state.dragons.size === 0 && state.spaceBuildings.size === 0);
+  } else {
+    dragonBtn.style.display = 'none';
+    setBuyFlash('btn-summon-dragon', false);
+  }
+
   // Tutorial: build the completed set first, then collect any tasks whose
   // prereqs are all done but which are themselves not done yet — those are
   // the *active* tasks (multiple can be active at once). A completed task's
@@ -1078,6 +1113,18 @@ function refreshInfoPanel(state: GameState) {
     showHole(state, panel, portrait, name, stateEl, extra);
   } else if (selectedWater) {
     showWaterSource(state, selectedWater, panel, portrait, name, stateEl, extra);
+  } else if ([...state.dragons.values()].some((d) => d.selected)) {
+    const selectedDragons = [...state.dragons.values()].filter((d) => d.selected);
+    panel.classList.add('visible');
+    portrait.innerHTML = `<div class="portrait-goblin" style="background:#5a1d10;border-color:#ffb24a;color:#ffe0a0">D</div>`;
+    if (selectedDragons.length === 1) {
+      name.textContent = `Dragon #${selectedDragons[0].id}`;
+      stateEl.textContent = describeDragonState(selectedDragons[0].state);
+    } else {
+      name.textContent = `${selectedDragons.length} dragons`;
+      stateEl.textContent = '';
+    }
+    extra.innerHTML = `<span style="color:#6a7080">Right click a building, unit, or spot to command (or space)</span>`;
   } else {
     const selectedMinotaurs = [...state.minotaurs.values()].filter((m) => m.selected);
     if (selectedMinotaurs.length === 1 && selectedGoblins.length === 0 && selectedBuildings.length === 0) {
@@ -1098,6 +1145,19 @@ function refreshInfoPanel(state: GameState) {
     } else {
       panel.classList.remove('visible');
     }
+  }
+}
+
+function describeDragonState(s: DragonState): string {
+  switch (s.kind) {
+    case 'seeking': return 'Seeking the choicest building';
+    case 'carrying': return 'Hauling a building to space';
+    case 'moving_to': return 'On the wing';
+    case 'going_to_building': return `Going to lift building #${s.buildingId}`;
+    case 'going_to_kill':
+      return s.targetKind === 'goblin'
+        ? `Diving on goblin #${s.targetId}`
+        : `Diving on Minotaur #${s.targetId}`;
   }
 }
 
