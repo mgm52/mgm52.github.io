@@ -331,9 +331,9 @@ export type GameState = {
   // performs a drag-rectangle that picks up 2+ creatures; used to gate the
   // "Hint: drag to choose many creatures" nudge in refreshUI.
   multiSelectSeen: boolean;
-  // In production builds the options cog is hidden until the player places a
-  // Dragon Beacon — that's the demo-end gag, so the secret-settings reveal
-  // gates on getting that far. Sticky once flipped.
+  // In production builds the options cog is hidden until the player completes
+  // the final task (collect_dragon_bone) — that's the demo-end gag, so the
+  // secret-settings reveal gates on getting that far. Sticky once flipped.
   optionsUnlocked: boolean;
   // Sticky: flips true once any Dragon Beacon has finished constructing, so the
   // Dragon summon button survives even if every beacon is later hauled to space.

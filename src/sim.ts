@@ -256,10 +256,17 @@ export function lightningStrike(state: GameState, x: number, y: number): boolean
 
   // One decaying +1 GW surge per building caught in the blast — the floater
   // rides over each struck building, and a strike that hits no buildings
-  // produces no power gain at all.
+  // produces no power gain at all. "Caught" means any of the building's
+  // footprint cell centers lands in the blast — same test the splatter loop
+  // above uses — so a large building visibly painted by the strike always
+  // counts, even when its own center sits just outside the blast radius.
   for (const b of state.buildings.values()) {
+    const struck = buildingFootprint(b).some((cell) => {
+      const cc = cellCenter(cell);
+      return within(cc.x, cc.y);
+    });
+    if (!struck) continue;
     const c = buildingCenter(b);
-    if (!within(c.x, c.y)) continue;
     state.powerBoosts.push({
       startAt: state.now,
       peak: LIGHTNING.powerBoostWatts,

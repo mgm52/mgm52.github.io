@@ -204,7 +204,7 @@ let currentTaskCached: Task | null = null;
 //   build_gas_engine     → Minotaur, Autospawn
 //   earn_30_blood        → Goldblins
 //   finish_dragon_beacon → Dragon
-//   collect_dragon_bone  → Lightning Strike
+//   collect_dragon_bone  → Lightning Strike + demo-end alerts + secret options cog
 const TASKS: Task[] = [
   {
     id: 'earn_100',
