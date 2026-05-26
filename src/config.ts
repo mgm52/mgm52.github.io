@@ -56,13 +56,20 @@ export const GOBLIN = {
 export const MINOTAUR = {
   speed: 70,
   radius: 22,
-  bloodCost: 8,
+  bloodCost: 8,        // base cost; doubles per purchase up to bloodCostCap
+  bloodCostCap: 64,
   spawnTime: 2,
   spawnCapacity: 1,
   arriveDist: 2,
   attackWindup: 0.5,
   wanderInterval: 1.2,
 };
+
+// Minotaur summoning gets pricier the more you've bought: 8 → 16 → 32 → 64,
+// then flat at the cap. `bought` is the number summoned so far this run.
+export function minotaurBloodCost(bought: number): number {
+  return Math.min(MINOTAUR.bloodCostCap, MINOTAUR.bloodCost * (2 ** bought));
+}
 
 // Tinytaur — a secret summon unlocked once the player has fielded a few
 // Minotaurs at once. A Minotaur shrunk to a fraction of the size and much
@@ -135,12 +142,6 @@ export const SPACE = {
   margin: 90,            // keep floating buildings this far inside the bounds
 };
 
-// The two optional strike side-tasks each require vaporising this many goblins
-// in a single Lightning Strike. Side 1 (5) rewards the Minotaur + Autospawn;
-// Side 2 (15) rewards Goldblins + Dig.
-export const STRIKE_TASK_GOAL_1 = 5;
-export const STRIKE_TASK_GOAL_2 = 15;
-
 // One-shot Ritual upgrades. Autocommand + Goldblins unlock once a Phone
 // Farm has been built; Autospawn unlocks once a Gas Turbine has been built.
 // "Autocommand": newly-hatched goblins route themselves to understaffed
@@ -189,12 +190,13 @@ export const WATER_DEPLETION_PP_PER_SEC = 10;
 export const BASE_SPAWN_CAPACITY = 5;
 export const GOBLIN_HOLE_CAPACITY_PER_BUILDING = 5;
 
-// Lightning Strike — an ability unlocked once the Run-a-Phone-Farm task is
-// done. Aim it at the map: it kills every unit inside a circular blast and
-// grants a temporary power surge that decays linearly to zero.
+// Lightning Strike — a ritual unlocked once the Collect-a-Dragon-Bone task is
+// done. Aim it at the map: it kills every ground unit (goblins + minotaurs)
+// inside a circular blast — granting their usual kill rewards — and grants a
+// temporary power surge that decays linearly to zero.
 export const LIGHTNING = {
   cellsWide: 8,                    // blast diameter, in cells
-  bloodCost: 8,                    // blood spent per strike
+  bloodCost: 256,                  // blood spent per strike
   powerBoostWatts: 1_000_000_000,  // 1 GW peak surge
   powerBoostSeconds: 5,            // surge decays to 0 over this many seconds
 };

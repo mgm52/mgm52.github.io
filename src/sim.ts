@@ -198,21 +198,36 @@ export function lightningStrike(state: GameState, x: number, y: number): boolean
     return dx * dx + dy * dy <= r2;
   };
 
-  // Lightning vaporises goblins for free — no money, no blood from the kills.
-  // Minotaurs are immune; the bolt passes them by untouched.
+  // Lightning vaporises every ground unit in the blast — goblins and minotaurs
+  // alike — and pays out their usual kill rewards, summed into one floater pair
+  // at the strike's centre so a big cull doesn't spray dozens of numbers.
   let killed = 0;
-  let killedGoblins = 0;
+  let totalMoney = 0;
+  let totalBlood = 0;
   for (const g of [...state.goblins.values()]) {
     if (within(g.pos.x, g.pos.y)) {
+      const r = goblinKillReward(state, g);
+      totalMoney += r.money;
+      totalBlood += r.blood;
       removeGoblin(state, g.id);
       killed++;
-      killedGoblins++;
     }
   }
+  for (const m of [...state.minotaurs.values()]) {
+    if (within(m.pos.x, m.pos.y)) {
+      totalMoney += MINOTAUR_KILL_REWARD.money;
+      totalBlood += MINOTAUR_KILL_REWARD.blood;
+      state.minotaurs.delete(m.id);
+      killed++;
+    }
+  }
+  if (totalMoney > 0) earnMoney(state, totalMoney);
+  if (totalBlood > 0) { earnBlood(state, totalBlood); state.bloodUnlocked = true; }
+  if (totalMoney > 0) pushFloater(state, x, y - 28, `+Ƶ${totalMoney.toLocaleString('en-US')}`, 0xffd96b, 1.6);
+  if (totalBlood > 0) pushFloater(state, x, y - 42, `+${totalBlood} blood`, 0xff8a8a, 1.6);
 
-  // Optional-task progress: remember the biggest single-strike goblin cull so
-  // the strike_5 / strike_15 side-tasks can fire at their thresholds (sticky).
-  if (killedGoblins > state.maxStruckAtOnce) state.maxStruckAtOnce = killedGoblins;
+  // Stat: remember the biggest single-strike cull (sticky).
+  if (killed > state.maxStruckAtOnce) state.maxStruckAtOnce = killed;
 
   // White blood over every cell whose center falls inside the blast.
   const span = Math.ceil(LIGHTNING.cellsWide / 2);
@@ -241,7 +256,7 @@ export function lightningStrike(state: GameState, x: number, y: number): boolean
   );
   playSound('destroy', 0.7, 0.4);
   if (killed > 0) playDecayingGoblinDeath(0.6);
-  appendLog(state, `Lightning strike! ${killed} goblin${killed === 1 ? '' : 's'} vaporised.`);
+  appendLog(state, `Lightning strike! ${killed} unit${killed === 1 ? '' : 's'} vaporised.`);
   return true;
 }
 

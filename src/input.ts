@@ -917,19 +917,22 @@ function placeBuilding(state: GameState, x: number, y: number) {
   appendLog(state, `${def.name} #${b.id} construction started — right-click goblins onto it to staff the build.`);
   autoAssignAllIdle(state);
 
-  // Placing the Dragon Beacon also reveals the secret options menu (hidden
-  // until now in production builds). The beacon itself must finish constructing
-  // before dragons can be summoned from it — see the Summon panel.
+  // Demo-end gag: placing the Dragon Beacon pops a celebratory alert, then
+  // a second one revealing the secret options menu (hidden until now in
+  // production builds).
   if (kind === 'dragon_beacon') {
+    window.alert(
+      "congratulations, you completed the demo! dragon lives in your imagination, "
+      + "heart, and soul. just imagine how cool it would be if a dragon was implemented. "
+      + "ahaha yeah, honestly its amazing. im so glad you grinded here for it. "
+      + "its not in the game at all LMAO. thanks! have a great day! "
+      + "i hope it doesnt 'drag on' ;)"
+    );
     state.optionsUnlocked = true;
     unlockOptionsCog();
     window.alert(
-      "The Dragon Beacon is rising! Once it finishes, summon dragons (64 blood each) "
-      + "from the Summon panel. By default a dragon hauls your most valuable building "
-      + "up to space — or command one onto a unit, a spot, or a specific building.\n\n"
-      + "Once a building reaches space, hold ↑ at the very top of the map to rise and "
-      + "behold the void.\n\n"
-      + "(You've also unlocked the SECRET SETTINGS MENU — bottom-right of the play area.)"
+      "BUT WAIT --- YOU HAVE UNLOCKED THE SECRET SETTINGS MENU OF JUSTICE!!!!!!!!!! "
+      + "FIND IT IN THE BOTTOM RIGHT OF THE PLAY AREA. ENJOY"
     );
   }
 }
