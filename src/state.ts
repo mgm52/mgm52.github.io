@@ -279,10 +279,10 @@ export type GameState = {
   // Secret summon: flips true once the player has fielded TINYTAUR.minotaurCost
   // Minotaurs at once (checked in the sim tick). Sticky.
   tinytaurUnlocked: boolean;
-  // Optional-task progress: set the first time a single Lightning Strike kills
-  // >= LIGHTNING_TASK_KILL_GOAL goblins at once. Drives the strike_13 optional
-  // task. Sticky.
-  struck13Goblins: boolean;
+  // Optional-task progress: the most goblins ever killed by a single Lightning
+  // Strike. Drives the strike_5 / strike_15 optional side-tasks. Sticky (only
+  // ever increases).
+  maxStruckAtOnce: number;
   // Multiplier applied to a gold goblin's GOLD_KILL_REWARD.money on death.
   // 1 by default; 10 once Goldgoblins x10 is purchased.
   goldgoblinMultiplier: number;
@@ -596,7 +596,7 @@ export function createInitialState(): GameState {
     autoWaterEnabled: false,
     goldgoblinsEnabled: false,
     tinytaurUnlocked: false,
-    struck13Goblins: false,
+    maxStruckAtOnce: 0,
     goldgoblinMultiplier: 1,
     autoSpawnTimer: 0,
     autoSpawnMultiplier: 0,

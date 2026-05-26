@@ -85,6 +85,10 @@ export function loadGame(): { state: GameState; savedAt: number } | null {
     // predating it don't leave the field undefined.
     for (const sb of env.state.spaceBuildings.values()) sb.selected ??= false;
     env.state.dragonSummonUnlocked ??= false;
+    // Strike side-tasks switched from a single struck13Goblins boolean to a
+    // maxStruckAtOnce counter. Carry old progress forward (a true flag meant
+    // the player had struck 13 at once, which clears the new 5-goblin tier).
+    env.state.maxStruckAtOnce ??= (env.state as { struck13Goblins?: boolean }).struck13Goblins ? 13 : 0;
     env.state.spaceUnlocked ??= false;
     env.state.view = 'ground';
     // Walls are deterministic from playArea; rebuild after load so any future
