@@ -31,16 +31,19 @@ type InputState = {
   // Latest pointer position, updated on every hover/move, so the keyboard
   // "command" shortcut (Space) can act at the cursor without a pointer event.
   lastPointer: { global: { x: number; y: number }; client: { x: number; y: number } } | null;
-  // Screen-space origin of a potential tap-to-select while in the space view.
-  // Set on pointerdown in orbit, consumed on pointerup. Null on the ground.
+  // Screen-space origin of a potential tap-or-drag-select while in the space
+  // view. Set on pointerdown in orbit, consumed on pointerup. Null on the ground.
   spaceTapStart: { x: number; y: number } | null;
-  // Last pointer position for a single-pointer drag-pan of the orbit camera.
-  // Tracked separately from the ground's two-finger panLast. Null on the ground.
-  spacePanLast: { x: number; y: number } | null;
+  // Rubber-band selection rectangle for the space view, drawn in screen space
+  // (a direct child of the stage, so it stays on top and ignores camera pans).
+  spaceSelectionGfx: Graphics;
 };
 
 const LONG_PRESS_MS = 450;
 const LONG_PRESS_MOVE_TOL = 10; // screen-space px
+// Screen-space px a space-view pointer must travel before a tap becomes a
+// rubber-band drag-select (also the tap-vs-drag cutoff resolved on pointerup).
+const SPACE_DRAG_TOL = 6;
 
 export function setupInput(
   state: GameState,
@@ -53,6 +56,10 @@ export function setupInput(
   const placementGhost = new Graphics();
   uiLayer.addChild(selectionGfx);
   uiLayer.addChild(placementGhost);
+  // Lives on the stage (not the space layer) so it renders in screen space and
+  // always sits above the floating buildings during a drag-select.
+  const spaceSelectionGfx = new Graphics();
+  app.stage.addChild(spaceSelectionGfx);
 
   const input: InputState = {
     isDragging: false,
@@ -65,7 +72,7 @@ export function setupInput(
     longPressFired: false,
     lastPointer: null,
     spaceTapStart: null,
-    spacePanLast: null,
+    spaceSelectionGfx,
   };
 
   app.stage.eventMode = 'static';
@@ -85,21 +92,31 @@ export function setupInput(
       worldStartX: local.x, worldStartY: local.y,
     });
 
-    // No world building/commanding while looking at space — but a single tap
-    // can still select a floating building, and a single-pointer drag pans the
-    // orbit camera (on top of the keyboard panning from main.ts). Record the
-    // origin and resolve tap-vs-drag on pointerup.
+    // No world building/commanding while looking at space — but a single
+    // pointer can tap to select a floating building or drag a rubber-band box
+    // to select several, mirroring the ground view. Two pointers pan the orbit
+    // camera (on top of the keyboard panning from main.ts). Record the origin
+    // and resolve tap-vs-drag on pointerup.
     if (state.view !== 'ground') {
       input.isDragging = false;
       input.selectionGfx.clear();
       cancelLongPress(input);
       const singlePrimary = e.button === 0 && input.pointers.size < 2;
-      input.spaceTapStart = singlePrimary ? { x: e.global.x, y: e.global.y } : null;
-      input.spacePanLast = singlePrimary ? { x: e.global.x, y: e.global.y } : null;
+      if (singlePrimary) {
+        input.spaceTapStart = { x: e.global.x, y: e.global.y };
+      } else {
+        // A non-primary press (right-click) or a second finger cancels any
+        // pending select; a genuine second finger also starts a two-finger pan.
+        input.spaceTapStart = null;
+        input.spaceSelectionGfx.clear();
+        if (input.pointers.size >= 2) {
+          const pts = [...input.pointers.values()];
+          input.panLast = { x: (pts[0].x + pts[1].x) / 2, y: (pts[0].y + pts[1].y) / 2 };
+        }
+      }
       return;
     }
     input.spaceTapStart = null;
-    input.spacePanLast = null;
 
     // Two or more pointers → enter pan mode and abandon any single-pointer interaction.
     if (input.pointers.size >= 2) {
@@ -151,28 +168,36 @@ export function setupInput(
       tracked.y = e.global.y;
     }
 
-    // Two-finger pan: compute midpoint delta in screen-space, apply to camera in world units.
+    // Two-finger pan: compute midpoint delta in screen-space, apply to whichever
+    // camera the current view uses, in world units.
     if (input.pointers.size >= 2 && input.panLast) {
       const pts = [...input.pointers.values()];
       const midX = (pts[0].x + pts[1].x) / 2;
       const midY = (pts[0].y + pts[1].y) / 2;
       const dx = midX - input.panLast.x;
       const dy = midY - input.panLast.y;
-      ctx.camera.x -= dx / RENDER_SCALE;
-      ctx.camera.y -= dy / RENDER_SCALE;
-      clampCamera(ctx);
+      if (state.view === 'ground') {
+        ctx.camera.x -= dx / RENDER_SCALE;
+        ctx.camera.y -= dy / RENDER_SCALE;
+        clampCamera(ctx);
+      } else {
+        ctx.spaceCamera.x -= dx / RENDER_SCALE;
+        ctx.spaceCamera.y -= dy / RENDER_SCALE;
+        clampSpaceCamera(ctx);
+      }
       input.panLast = { x: midX, y: midY };
       return;
     }
 
-    // Space view: a single-pointer drag pans the orbit camera.
-    if (state.view !== 'ground' && input.spacePanLast && input.pointers.has(e.pointerId)) {
-      const dx = e.global.x - input.spacePanLast.x;
-      const dy = e.global.y - input.spacePanLast.y;
-      ctx.spaceCamera.x -= dx / RENDER_SCALE;
-      ctx.spaceCamera.y -= dy / RENDER_SCALE;
-      clampSpaceCamera(ctx);
-      input.spacePanLast = { x: e.global.x, y: e.global.y };
+    // Space view: a single-pointer drag draws a rubber-band selection box once
+    // it travels past the tap threshold. Resolved into a selection on pointerup.
+    if (state.view !== 'ground') {
+      if (input.spaceTapStart && input.pointers.has(e.pointerId)) {
+        const moved = Math.hypot(e.global.x - input.spaceTapStart.x, e.global.y - input.spaceTapStart.y);
+        if (moved >= SPACE_DRAG_TOL) {
+          drawSpaceSelectionRect(input, input.spaceTapStart.x, input.spaceTapStart.y, e.global.x, e.global.y);
+        }
+      }
       return;
     }
 
@@ -212,21 +237,40 @@ export function setupInput(
       input.panLast = null;
       input.isDragging = false;
       input.selectionGfx.clear();
+      input.spaceSelectionGfx.clear();
       return;
     }
-    // Space view: a short tap selects the floating building under it (shift to
-    // add to the selection); a tap on empty void clears.
+    // Space view: a short tap selects the floating building under it; a longer
+    // drag rubber-band selects every building inside the box. Shift adds to the
+    // current selection; otherwise a tap/drag on empty void clears it.
     if (state.view !== 'ground') {
       const start = input.spaceTapStart;
       input.spaceTapStart = null;
-      input.spacePanLast = null;
+      input.spaceSelectionGfx.clear();
       if (start) {
         const moved = Math.hypot(e.global.x - start.x, e.global.y - start.y);
-        if (moved < 6) {
+        if (moved < SPACE_DRAG_TOL) {
           const lp = e.getLocalPosition(ctx.spaceLayer);
           const sb = spaceBuildingAt(state, lp.x, lp.y);
           if (!e.shiftKey) clearSelection(state);
           if (sb) { sb.selected = true; playSound('select', 0.33); }
+        } else {
+          // Box corners: drag origin + release point, both mapped to space-layer
+          // coords (where the floating buildings live).
+          const a = e.getLocalPosition(ctx.spaceLayer);
+          const b = ctx.spaceLayer.toLocal({ x: start.x, y: start.y });
+          const x1 = Math.min(a.x, b.x), y1 = Math.min(a.y, b.y);
+          const x2 = Math.max(a.x, b.x), y2 = Math.max(a.y, b.y);
+          if (!e.shiftKey) clearSelection(state);
+          let count = 0;
+          for (const sb of state.spaceBuildings.values()) {
+            if (sb.pos.x >= x1 && sb.pos.x <= x2 && sb.pos.y >= y1 && sb.pos.y <= y2) {
+              sb.selected = true;
+              count++;
+            }
+          }
+          if (count > 0) playSound('select', 0.33);
+          if (count >= 2) state.multiSelectSeen = true;
         }
       }
       return;
@@ -497,6 +541,18 @@ function playDragonRoarBurst(count: number) {
       playSound('ritual', 0.6, 0.4 + Math.random() * 0.1);
     }, delay);
   }
+}
+
+// Draw the space-view rubber-band box. Coords are screen-space (the graphic is
+// a direct child of the stage), so x0/y0/x1/y1 are raw pointer globals.
+function drawSpaceSelectionRect(input: InputState, x0: number, y0: number, x1: number, y1: number) {
+  const x = Math.min(x0, x1), y = Math.min(y0, y1);
+  const w = Math.abs(x1 - x0), h = Math.abs(y1 - y0);
+  input.spaceSelectionGfx
+    .clear()
+    .rect(x, y, w, h)
+    .fill({ color: 0xffd96b, alpha: 0.1 })
+    .stroke({ width: 1, color: 0xffd96b });
 }
 
 function clearSelection(state: GameState) {
