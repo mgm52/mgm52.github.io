@@ -1,10 +1,10 @@
 import { playDecayingGoblinDeath, playDecayingGoblinSpawn, playDecayingGoldKillCash, playSound } from './audio';
-import { BUILDING_DEFS, CELL, COLS, DRAGON, GOBLIN, GOLD_GOBLIN_CHANCE, GOLD_KILL_REWARD, KILL_REWARD, LIGHTNING, LIGHTNING_TASK_KILL_GOAL, MINOTAUR_KILL_REWARD, SPACE, SUMMON_UPGRADES, TICK_S, MINOTAUR, TINYTAUR, WATER_DEPLETION_PP_PER_SEC, WATER_METER_MAX, formatPower } from './config';
+import { BUILDING_DEFS, CELL, COLS, DRAGON, DRAGON_KILL_REWARD, GOBLIN, GOLD_GOBLIN_CHANCE, GOLD_KILL_REWARD, KILL_REWARD, LIGHTNING, LIGHTNING_TASK_KILL_GOAL, MINOTAUR_KILL_REWARD, SPACE, SUMMON_UPGRADES, TICK_S, MINOTAUR, TINYTAUR, WATER_DEPLETION_PP_PER_SEC, WATER_METER_MAX, formatPower } from './config';
 import {
   ALL_DIRS, Building, Cell, DX, DY, Dir, Dragon, GameState, Goblin, HOLE_SIZE, Minotaur, SpaceBuilding, WaterSource,
   appendLog, buildingAtCell, buildingCenter, buildingFootprint, buildingPerimeter,
   cellCenter, cellKey, constructedDragonBeacon, currentPowerBoost, defOf, destroyBuilding, dragonTargetBuilding,
-  earnBlood, earnMoney, findFreeCellNear,
+  earnBlood, earnDragonBone, earnMoney, findFreeCellNear,
   getSpawnCapacity, holeBlockedByBuilding, holeCenter, isCellBlocked, isCellInBuilding, isCellInWaterSource,
   isInBounds, maintainerCount, nearestCellInWaterSource, occupyCell, pushDeathEffect, pushFloater,
   pushLightningBolt, releaseCell, removeDragon, removeGoblin, waterCarrierCount,
@@ -946,7 +946,21 @@ function footprintClear(state: GameState, tl: Cell, n: number): boolean {
   return true;
 }
 
-function dragonKill(state: GameState, d: Dragon, kind: 'goblin' | 'minotaur', id: number) {
+function dragonKill(state: GameState, d: Dragon, kind: 'goblin' | 'minotaur' | 'dragon', id: number) {
+  if (kind === 'dragon') {
+    const victim = state.dragons.get(id);
+    if (!victim || victim.id === d.id) return;
+    const tx = victim.pos.x, ty = victim.pos.y;
+    const bones = DRAGON_KILL_REWARD.dragonBone;
+    removeDragon(state, id);
+    earnDragonBone(state, bones);
+    state.dragonBoneUnlocked = true;
+    pushFloater(state, tx, ty, `+${bones} dragon bone${bones === 1 ? '' : 's'}`, 0xeae0c0, 1.8);
+    pushDeathEffect(state, tx, ty);
+    playSound('goblin_death', 0.85, 0.22);
+    appendLog(state, `Dragon #${id} struck down by Dragon #${d.id} — a bone clatters to earth.`);
+    return;
+  }
   if (kind === 'goblin') {
     const g = state.goblins.get(id);
     if (!g) return;
@@ -1003,8 +1017,14 @@ function updateDragon(state: GameState, d: Dragon) {
     }
 
     case 'moving_to': {
+      // Fly to the spot, then loiter there for moveLingerTime before reverting
+      // to the default seeking behaviour.
       if (dragonFlyToward(d, d.state.goal.x, d.state.goal.y, speed)) {
-        d.state = { kind: 'seeking' };
+        if (d.state.lingerUntil === undefined) {
+          d.state.lingerUntil = state.now + DRAGON.moveLingerTime;
+        } else if (state.now >= d.state.lingerUntil) {
+          d.state = { kind: 'seeking' };
+        }
       }
       return;
     }
@@ -1034,8 +1054,14 @@ function updateDragon(state: GameState, d: Dragon) {
       const s = d.state;
       const target = s.targetKind === 'goblin'
         ? state.goblins.get(s.targetId)
-        : state.minotaurs.get(s.targetId);
-      if (!target) { d.state = { kind: 'seeking' }; return; }
+        : s.targetKind === 'minotaur'
+          ? state.minotaurs.get(s.targetId)
+          : state.dragons.get(s.targetId);
+      // Bail if the target is gone, or if it somehow resolved to this dragon.
+      if (!target || (s.targetKind === 'dragon' && s.targetId === d.id)) {
+        d.state = { kind: 'seeking' };
+        return;
+      }
       const tx = target.pos.x, ty = target.pos.y;
       const dist = Math.hypot(tx - d.pos.x, ty - d.pos.y);
       if (dist <= DRAGON.arriveDist + DRAGON.killReach) {

@@ -575,11 +575,21 @@ function handleRightClick(state: GameState, x: number, y: number) {
 
   const targetGoblin = goblinAt(state, x, y);
   const targetMinotaur = targetGoblin ? null : minotaurAt(state, x, y);
+  // A dragon target for fratricide: any non-selected dragon under the cursor.
+  // Only meaningful when dragons are selected; skip the scan otherwise.
+  let targetDragon: Dragon | null = null;
+  if (!targetGoblin && !targetMinotaur && selectedDragons.length > 0) {
+    const selIds = new Set(selectedDragons.map((d) => d.id));
+    for (const d of state.dragons.values()) {
+      if (selIds.has(d.id)) continue;
+      if (Math.hypot(d.pos.x - x, d.pos.y - y) <= DRAGON.displayPx * 0.42) { targetDragon = d; break; }
+    }
+  }
   const targetCell = pixelToCell(x, y);
-  const targetBuilding = (targetGoblin || targetMinotaur)
+  const targetBuilding = (targetGoblin || targetMinotaur || targetDragon)
     ? null
     : buildingAtCell(state, targetCell.cx, targetCell.cy);
-  const targetWater = (!targetGoblin && !targetMinotaur && !targetBuilding)
+  const targetWater = (!targetGoblin && !targetMinotaur && !targetDragon && !targetBuilding)
     ? waterSourceAt(state, targetCell)
     : null;
 
@@ -612,6 +622,12 @@ function handleRightClick(state: GameState, x: number, y: number) {
           d.state = { kind: 'going_to_kill', targetKind: 'minotaur', targetId: targetMinotaur.id };
         }
         appendLog(state, `${freeDragons.length} dragon(s) diving on Minotaur #${targetMinotaur.id}.`);
+      } else if (targetDragon) {
+        for (const d of freeDragons) {
+          if (d.id === targetDragon.id) continue;
+          d.state = { kind: 'going_to_kill', targetKind: 'dragon', targetId: targetDragon.id };
+        }
+        appendLog(state, `${freeDragons.length} dragon(s) turning on Dragon #${targetDragon.id}.`);
       } else if (targetBuilding) {
         for (const d of freeDragons) {
           d.state = { kind: 'going_to_building', buildingId: targetBuilding.id };

@@ -720,6 +720,14 @@ export function refreshUI(state: GameState) {
   // Blood resource — hidden until the player kills their first goblin.
   setText('blood', state.blood.toString());
 
+  // Dragon Bones — row stays hidden until the first one is collected, then
+  // sticks around (the unlock flag persists even if the count returns to 0).
+  const dragonBoneRow = document.getElementById('row-dragonbone');
+  if (dragonBoneRow) {
+    dragonBoneRow.style.display = state.dragonBoneUnlocked ? '' : 'none';
+    if (state.dragonBoneUnlocked) setText('dragonbone', state.dragonBone.toString());
+  }
+
   // Faint "+X/s" rate readouts beside cash + blood.
   updateResourceRates(state);
 
@@ -1165,7 +1173,9 @@ function describeDragonState(s: DragonState): string {
     case 'going_to_kill':
       return s.targetKind === 'goblin'
         ? `Diving on goblin #${s.targetId}`
-        : `Diving on Minotaur #${s.targetId}`;
+        : s.targetKind === 'minotaur'
+          ? `Diving on Minotaur #${s.targetId}`
+          : `Diving on Dragon #${s.targetId}`;
   }
 }
 

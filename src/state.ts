@@ -122,10 +122,12 @@ export type DragonState =
   // Carrying a building to a ground drop-off: fly to the goal and set it back
   // down if there's room (otherwise haul it on up to space).
   | { kind: 'delivering'; goal: Vec2 }
-  // Commanded: fly to a free-floating world point, then revert to seeking.
-  | { kind: 'moving_to'; goal: Vec2 }
+  // Commanded: fly to a free-floating world point, loiter there for
+  // DRAGON.moveLingerTime once arrived (lingerUntil), then revert to seeking.
+  | { kind: 'moving_to'; goal: Vec2; lingerUntil?: number }
   // Commanded: fly up to a unit and incinerate it, then revert to seeking.
-  | { kind: 'going_to_kill'; targetKind: 'goblin' | 'minotaur'; targetId: number; attackAt?: number }
+  // A dragon target is fratricide — the victim drops a Dragon Bone.
+  | { kind: 'going_to_kill'; targetKind: 'goblin' | 'minotaur' | 'dragon'; targetId: number; attackAt?: number }
   // Commanded: hoist one specific building (even the Beacon) up to space.
   | { kind: 'going_to_building'; buildingId: number };
 
@@ -249,11 +251,16 @@ export type GameState = {
   // `bloodUnlocked` flips true and the resource row stays visible (sticky).
   blood: number;
   bloodUnlocked: boolean;
+  // Dragon Bones — dropped when one dragon incinerates another. Rare; the
+  // resource row stays hidden until the first bone is collected (sticky).
+  dragonBone: number;
+  dragonBoneUnlocked: boolean;
   // Cumulative gains only (income + kill rewards), never decremented by
   // spending. The per-second rate readouts derive from these so they reflect
   // earning rate and ignore money/blood spent on buildings, summons, etc.
   moneyEarned: number;
   bloodEarned: number;
+  dragonBoneEarned: number;
   goblins: Map<number, Goblin>;
   minotaurs: Map<number, Minotaur>;
   dragons: Map<number, Dragon>;
@@ -569,8 +576,11 @@ export function createInitialState(): GameState {
     money: START_MONEY,
     blood: 0,
     bloodUnlocked: false,
+    dragonBone: 0,
+    dragonBoneUnlocked: false,
     moneyEarned: 0,
     bloodEarned: 0,
+    dragonBoneEarned: 0,
     goblins: new Map(),
     minotaurs: new Map(),
     dragons: new Map(),
@@ -664,6 +674,10 @@ export function earnMoney(state: GameState, amount: number): void {
 export function earnBlood(state: GameState, amount: number): void {
   state.blood += amount;
   state.bloodEarned += amount;
+}
+export function earnDragonBone(state: GameState, amount: number): void {
+  state.dragonBone += amount;
+  state.dragonBoneEarned += amount;
 }
 
 export function countIdle(state: GameState): number {

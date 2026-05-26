@@ -9,7 +9,7 @@ extensions.add(GifAsset);
 // game seconds. Used as a manual sprite-sheet — we pick the frame ourselves
 // each tick based on (state.now - spawnAt) so playback always starts at frame 0.
 type DeathFrames = { textures: Texture[]; ends: number[]; duration: number };
-import { BUILDING_DEFS, BuildingKind, CELL, COLS, DRAGON, GOBLIN, RENDER_SCALE, ROWS, MINOTAUR, SPACE, TINYTAUR, WORLD } from './config';
+import { AMBIENT_DRAGON, BUILDING_DEFS, BuildingKind, CELL, COLS, DRAGON, GOBLIN, RENDER_SCALE, ROWS, MINOTAUR, SPACE, TINYTAUR, WORLD } from './config';
 import { ensureFontLoaded, fontFamilyById, getOptions, onOptionsChange, type FontConfig, type Options } from './options';
 import { Building, Dragon, GameState, Goblin, HOLE_SIZE, Minotaur, SpaceBuilding, WaterSource, buildingCenter, cellCenter, defOf, holeCenter, isInPlayCell, maintainerCount } from './state';
 
@@ -225,6 +225,22 @@ type SpaceBuildingView = {
   selectionRing: Graphics;
 };
 
+// A decorative dragon drifting across the space scene. Renderer-owned: not in
+// game state, never saved, never hit-tested. Position is derived each frame from
+// (x0 + dir·speed·elapsed), so there's no per-tick physics to keep in sync.
+type AmbientDragon = {
+  id: number;
+  x0: number;            // space-x at spawnAt
+  y: number;             // fixed space-y the dragon cruises along
+  dir: 1 | -1;           // travel direction (and sprite mirror)
+  speed: number;         // space-px/sec
+  scale: number;         // size multiplier vs a full dragon
+  bobPhase: number;
+  bobAmp: number;
+  spawnAt: number;       // state.now when it entered
+  container: Container;  // lives in spaceAmbientLayer
+};
+
 // A precomputed star for the climb-transition overlay (screen-space fractions).
 type TransStar = { fx: number; fy: number; r: number; phase: number };
 // A precomputed cloud band for the climb transition.
@@ -278,6 +294,12 @@ export type RenderContext = {
   spaceBg: Graphics;                 // starfield + nebula, drawn once
   spaceBuildingViews: Map<number, SpaceBuildingView>;
   spaceCamera: Camera;
+  // Decorative dragons drifting across the void, behind the floating buildings.
+  // Renderer-owned and ephemeral — spawned while in space, cleared when not.
+  spaceAmbientLayer: Container;
+  ambientDragons: AmbientDragon[];
+  nextAmbientSpawnAt: number;
+  ambientIdSeq: number;
   // Full-screen overlay for the climb between ground and space.
   skyLayer: Container;
   skyGfx: Graphics;
@@ -403,6 +425,10 @@ export async function createRender(parent: HTMLElement, state: GameState): Promi
   const spaceBg = new Graphics();
   drawSpaceBackground(spaceBg);
   spaceLayer.addChild(spaceBg);
+  // Ambient dragons sit above the starfield but below the floating buildings,
+  // which are added to spaceLayer later (during render) and so stack on top.
+  const spaceAmbientLayer = new Container();
+  spaceLayer.addChild(spaceAmbientLayer);
   spaceLayer.scale.set(RENDER_SCALE);
   spaceLayer.visible = false;
   app.stage.addChild(spaceLayer);
@@ -466,6 +492,7 @@ export async function createRender(parent: HTMLElement, state: GameState): Promi
     viewport: { width: initW, height: initH },
     spaceLayer, spaceBg, spaceBuildingViews: new Map(),
     spaceCamera: { x: 0, y: 0 },
+    spaceAmbientLayer, ambientDragons: [], nextAmbientSpawnAt: 0, ambientIdSeq: 1,
     skyLayer, skyGfx, cloudGfx, starGfx,
     transStars, transClouds,
     altitude: 0,
@@ -771,6 +798,94 @@ function makeDragonView(): DragonView {
   container.addChild(label);
   container.addChild(selectionRing);
   return { container, glow, block, label, carried, selectionRing };
+}
+
+// Ambient dragons reuse the placeholder-tile look but darkened: a dim block, a
+// faint glow, and the whole thing held at reduced alpha so it reads as a distant
+// silhouette against the stars rather than a summonable dragon.
+const AMBIENT_DRAGON_FILL = 0x53300f;
+const AMBIENT_DRAGON_BORDER = 0x7a4a22;
+function spawnAmbientDragon(ctx: RenderContext, midScene: boolean): void {
+  const cfg = AMBIENT_DRAGON;
+  const dir: 1 | -1 = Math.random() < 0.5 ? 1 : -1;
+  const scale = cfg.scaleMin + Math.random() * (cfg.scaleMax - cfg.scaleMin);
+  const speed = cfg.speedMin + Math.random() * (cfg.speedMax - cfg.speedMin);
+
+  const container = new Container();
+  container.alpha = 0.72;
+
+  const glow = new Sprite(getGlowTexture());
+  glow.anchor.set(0.5);
+  glow.tint = 0xff8a3a;
+  glow.scale.set(DRAGON.displayPx * 1.4 / 128);
+  glow.alpha = 0.16;
+
+  const block = new Graphics();
+  const half = DRAGON_BLOCK / 2;
+  block.roundRect(-half, -half, DRAGON_BLOCK, DRAGON_BLOCK, 8)
+    .fill(AMBIENT_DRAGON_FILL)
+    .stroke({ width: 3, color: AMBIENT_DRAGON_BORDER });
+
+  const label = new Text({
+    text: '🐉',
+    style: { fontFamily: 'sans-serif', fontSize: Math.round(DRAGON_BLOCK * 0.62), fill: 0xffffff },
+  });
+  label.anchor.set(0.5);
+  label.alpha = 0.82;
+
+  container.addChild(glow);
+  container.addChild(block);
+  container.addChild(label);
+  ctx.spaceAmbientLayer.addChild(container);
+
+  ctx.ambientDragons.push({
+    id: ctx.ambientIdSeq++,
+    // When pre-filling an empty scene, start somewhere on-screen so arriving in
+    // space isn't a beat of emptiness; otherwise enter from just off the edge.
+    x0: midScene
+      ? SPACE.width * (0.15 + Math.random() * 0.70)
+      : (dir > 0 ? -cfg.margin : SPACE.width + cfg.margin),
+    y: SPACE.height * (0.12 + Math.random() * 0.76),
+    dir, speed, scale,
+    bobPhase: Math.random() * Math.PI * 2,
+    bobAmp: cfg.bobAmpMin + Math.random() * (cfg.bobAmpMax - cfg.bobAmpMin),
+    spawnAt: ctx.state.now,
+    container,
+  });
+}
+
+// Advance the decorative space dragons: top up to the cap on a relaxed cadence,
+// slide each across the void, and retire any that have left the far edge. Only
+// runs while space is on screen; everything is torn down when it isn't.
+function updateAmbientDragons(ctx: RenderContext): void {
+  const cfg = AMBIENT_DRAGON;
+  if (ctx.altitude <= 0.5) {
+    if (ctx.ambientDragons.length > 0) {
+      for (const a of ctx.ambientDragons) a.container.destroy({ children: true });
+      ctx.ambientDragons.length = 0;
+    }
+    ctx.nextAmbientSpawnAt = 0;
+    return;
+  }
+  const now = ctx.state.now;
+  if (ctx.ambientDragons.length < cfg.maxOnScreen && now >= ctx.nextAmbientSpawnAt) {
+    spawnAmbientDragon(ctx, ctx.ambientDragons.length === 0);
+    ctx.nextAmbientSpawnAt = now + cfg.spawnDelayMin + Math.random() * (cfg.spawnDelayMax - cfg.spawnDelayMin);
+  }
+  for (let i = ctx.ambientDragons.length - 1; i >= 0; i--) {
+    const a = ctx.ambientDragons[i];
+    const x = a.x0 + a.dir * a.speed * (now - a.spawnAt);
+    const gone = a.dir > 0 ? x > SPACE.width + cfg.margin : x < -cfg.margin;
+    if (gone) {
+      a.container.destroy({ children: true });
+      ctx.ambientDragons.splice(i, 1);
+      continue;
+    }
+    const bob = Math.sin((now + a.bobPhase) * 2.2) * a.bobAmp;
+    a.container.position.set(x, a.y + bob);
+    // The 🐉 glyph faces left; mirror on x when travelling right.
+    a.container.scale.set(a.dir > 0 ? -a.scale : a.scale, a.scale);
+  }
 }
 
 function makeWaterView(w: WaterSource): WaterView {
@@ -1539,11 +1654,17 @@ export function render(state: GameState, ctx: RenderContext) {
     const scaledH = SPACE.height * RENDER_SCALE;
     const offX = Math.max(0, (ctx.viewport.width - scaledW) / 2);
     const offY = Math.max(0, (ctx.viewport.height - scaledH) / 2);
+    // Mirror the ground's climb-slide: as the ground drops away beneath you on
+    // ascent, the whole space scene (stars, buildings, ambient dragons) drops
+    // into place from above rather than just fading in. Settles to 0 once you're
+    // fully in orbit; lifts back up off the top on descent.
+    const spaceSlide = -(1 - smoothstep(0.84, 1.0, ctx.altitude)) * ctx.viewport.height * 0.6;
     ctx.spaceLayer.position.set(
       Math.round(offX - ctx.spaceCamera.x * RENDER_SCALE),
-      Math.round(offY - ctx.spaceCamera.y * RENDER_SCALE),
+      Math.round(offY - ctx.spaceCamera.y * RENDER_SCALE + spaceSlide),
     );
   }
+  updateAmbientDragons(ctx);
   const seenSB = new Set<number>();
   for (const sb of state.spaceBuildings.values()) {
     seenSB.add(sb.id);
