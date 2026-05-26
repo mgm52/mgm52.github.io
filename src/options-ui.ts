@@ -28,9 +28,10 @@ export function setupOptionsUI(root: HTMLElement, callbacks: OptionsUICallbacks)
   publicPanel.id = 'options-panel-public';
   publicPanel.hidden = true;
 
-  // Admin cog — full options. In prod hidden until the player places a Dragon
-  // Beacon (unlockOptionsCog() flips it visible and persists the flag in
-  // localStorage so the unlock survives reloads). Dev keeps it always-on.
+  // Admin cog — full options. In prod hidden until the player completes the
+  // final task (collect_dragon_bone) — unlockOptionsCog() flips it visible
+  // and persists the flag in localStorage so the unlock survives reloads.
+  // Dev keeps it always-on.
   const adminCog = document.createElement('button');
   adminCog.id = 'options-cog';
   adminCog.type = 'button';
@@ -137,8 +138,8 @@ function rebuildPublicPanel(panel: HTMLElement): void {
 
 const SECRET_UNLOCK_KEY = 'gs.optionsCog.secretUnlocked';
 
-// Reveals the options cog. Used in prod once the player places a Dragon
-// Beacon — see the second alert in input.ts placeBuilding. Persists in
+// Reveals the options cog. Used in prod once the player completes the final
+// task (collect_dragon_bone) — see triggerFinalGameAlerts in ui.ts. Persists in
 // localStorage so the unlock survives reloads.
 export function unlockOptionsCog(): void {
   try { localStorage.setItem(SECRET_UNLOCK_KEY, '1'); } catch { /* no-op */ }

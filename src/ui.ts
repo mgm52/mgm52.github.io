@@ -6,10 +6,12 @@ import {
 } from './config';
 import {
   Building, Cell, DragonState, GameState, Goblin, GoblinState, SpaceBuilding, WaterSource,
-  appendLog, buildingCenter, cellCenter, cellKey, countIdle, defOf, digDirection, getSpawnCapacity,
-  holeBlockedByBuilding, isCellBlocked, isInBounds, maintainerCount, occupyCell, waterCarrierCount,
+  appendLog, buildingCenter, cellCenter, cellKey, countIdle, defOf, digDirection, earnDragonBone,
+  getSpawnCapacity, holeBlockedByBuilding, isCellBlocked, isInBounds, maintainerCount, occupyCell,
+  waterCarrierCount,
 } from './state';
 import { spawnMinotaur } from './sim';
+import { unlockOptionsCog } from './options-ui';
 
 // Build buttons appear in this fixed order. Mostly cheapest-first, with
 // goblin_hole slotted next to the datacentre it now unlocks alongside (it's an
@@ -137,6 +139,26 @@ function emanateAtCursor(x: number, y: number, variant?: 'white'): void {
   el.addEventListener('animationend', () => el.remove(), { once: true });
 }
 
+// Demo-end gag: once the final task (collect_dragon_bone) is completed, pop a
+// pair of "the game just stops here" alerts and unlock the secret options cog.
+// Guarded against double-firing so re-triggers (e.g. refreshUI re-entries) stay
+// idempotent.
+let finalGameAlertsFired = false;
+function triggerFinalGameAlerts(state: GameState): void {
+  if (finalGameAlertsFired) return;
+  finalGameAlertsFired = true;
+  window.alert(
+    "congrats the game is incomplete!!!!! It's unfinished!!!! "
+    + "There should be something here next happening but it's not!!!!"
+  );
+  state.optionsUnlocked = true;
+  unlockOptionsCog();
+  window.alert(
+    "BUT WAIT --- YOU HAVE UNLOCKED THE SECRET SETTINGS MENU OF JUSTICE!!!!!!!!!! "
+    + "FIND IT IN THE BOTTOM RIGHT OF THE PLAY AREA. ENJOY"
+  );
+}
+
 // Plays the "TASK COMPLETE" overlay + a short Skyrim-ish drum-then-fanfare
 // tap. Idempotent in the sense that re-triggers stack the timer; the overlay
 // just stays "shown" longer if multiple tasks complete in quick succession.
@@ -182,7 +204,7 @@ let currentTaskCached: Task | null = null;
 //   build_gas_engine     → Minotaur, Autospawn
 //   earn_30_blood        → Goldblins
 //   finish_dragon_beacon → Dragon
-//   collect_dragon_bone  → Lightning Strike
+//   collect_dragon_bone  → Lightning Strike + demo-end alerts + secret options cog
 const TASKS: Task[] = [
   {
     id: 'earn_100',
@@ -856,6 +878,11 @@ export function refreshUI(state: GameState) {
     if (!previouslyCompletedTaskIds.has(id)) {
       previouslyCompletedTaskIds.add(id);
       playTaskCompleteAnimation(id);
+      // Final task: hold for the celebration overlay (~2.8s), then pop the
+      // demo-end alerts and unlock the secret options cog.
+      if (id === 'collect_dragon_bone') {
+        window.setTimeout(() => triggerFinalGameAlerts(state), 2800);
+      }
     }
   }
   const activeTasks: Task[] = [];
@@ -1437,14 +1464,32 @@ export function executeTaskSkip(state: GameState): void {
       state.bloodUnlocked = true;
       break;
     }
+    case 'finish_dragon_beacon': {
+      // Build the Beacon outright; sim's per-tick check flips
+      // dragonSummonUnlocked, but set it here too so isDone trips immediately.
+      ensureBuildingCount(state, 'dragon_beacon', 1);
+      state.dragonSummonUnlocked = true;
+      break;
+    }
+    case 'collect_dragon_bone': {
+      // Hand the player a bone outright so dragonBoneEarned satisfies isDone
+      // and the unlock side-effects (Lightning Strike + final-game gag) fire.
+      earnDragonBone(state, 1);
+      state.dragonBoneUnlocked = true;
+      break;
+    }
   }
 
-  completedTaskIds.add(next.id);
+  const skipped = next;
+  completedTaskIds.add(skipped.id);
   // Task-skip is a debug shortcut — don't fire the celebration animation
   // and reveal the unlocks immediately rather than waiting on the overlay.
-  previouslyCompletedTaskIds.add(next.id);
-  revealedTaskIds.add(next.id);
-  appendLog(state, `Work skip: "${next.text}" marked complete.`);
+  previouslyCompletedTaskIds.add(skipped.id);
+  revealedTaskIds.add(skipped.id);
+  appendLog(state, `Work skip: "${skipped.text}" marked complete.`);
+  // Final task carries the demo-end gag; fire the alerts immediately on skip
+  // (no celebration overlay was played, so no need to wait).
+  if (skipped.id === 'collect_dragon_bone') triggerFinalGameAlerts(state);
 }
 
 function ensureGoblins(state: GameState, count: number): void {
