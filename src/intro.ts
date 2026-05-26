@@ -77,8 +77,22 @@ type PendingSleep = {
 };
 const pendingSleeps = new Set<PendingSleep>();
 
+// True while the whole new-game intro sequence (free-click preamble →
+// cutscene → staggered reveals) is running. skipIntro() is a no-op outside
+// this window so a stray click on the dev button does nothing on resumed
+// games.
+let introActive = false;
+// Flipped by skipIntro() (the dev "Work skip" button). Every pausable sleep
+// and the click/choice waits resolve immediately, the cutscene tears down,
+// and playIntroSequence() jumps straight to the panel reveals.
+let introAborted = false;
+// Resolvers parked on a user click/choice — fired by skipIntro() so the
+// dialog doesn't stay stuck waiting for input that's being skipped past.
+const abortListeners = new Set<() => void>();
+
 const sleep = (ms: number): Promise<void> =>
   new Promise<void>((resolve) => {
+    if (introAborted) { resolve(); return; }
     const entry: PendingSleep = {
       remaining: ms,
       startedAt: 0,
@@ -115,13 +129,45 @@ export function setIntroPaused(paused: boolean): void {
   document.body.classList.toggle('intro-paused', paused);
 }
 
+// Cut the intro short. Wired to the dev "Work skip" button so skipping the
+// first task also skips the goblin cutscene rather than leaving the player
+// stuck behind it. No-op unless the sequence is mid-flight.
+export function skipIntro(): void {
+  if (!introActive || introAborted) return;
+  introAborted = true;
+  // Resolve every outstanding pausable sleep now (typing, between-line waits,
+  // the slide-up / turn animations).
+  for (const entry of [...pendingSleeps]) {
+    if (entry.timerId !== null) { window.clearTimeout(entry.timerId); entry.timerId = null; }
+    entry.resolve();
+  }
+  // Release any click/choice wait the dialog is parked on.
+  for (const cb of [...abortListeners]) cb();
+}
+
+// Instant, animation-free dismissal used when the intro is skipped mid-run —
+// strips every overlay state class so the cutscene vanishes immediately.
+function teardownIntro(
+  overlay: HTMLElement, speechEl: HTMLElement,
+  yesBtn: HTMLButtonElement, noBtn: HTMLButtonElement,
+): void {
+  overlay.classList.remove('visible', 'up', 'exit', 'faced', 'speaking', 'click-armed', 'show-buttons');
+  speechEl.textContent = '';
+  speechEl.classList.remove('done');
+  yesBtn.hidden = true;
+  noBtn.hidden = true;
+}
+
 function waitForClick(target: HTMLElement): Promise<void> {
   return new Promise((resolve) => {
-    const handler = () => {
-      target.removeEventListener('click', handler);
+    if (introAborted) { resolve(); return; }
+    const finish = () => {
+      target.removeEventListener('click', finish);
+      abortListeners.delete(finish);
       resolve();
     };
-    target.addEventListener('click', handler, { once: true });
+    abortListeners.add(finish);
+    target.addEventListener('click', finish, { once: true });
   });
 }
 
@@ -130,17 +176,21 @@ function waitForClick(target: HTMLElement): Promise<void> {
 // button can't fire after the row has been dismissed.
 function waitForChoice(buttons: HTMLButtonElement[]): Promise<number> {
   return new Promise((resolve) => {
+    if (introAborted) { resolve(0); return; }
     const handlers: Array<() => void> = [];
+    const cleanup = () => {
+      for (let j = 0; j < buttons.length; j++) {
+        buttons[j].removeEventListener('click', handlers[j]);
+      }
+      abortListeners.delete(onAbort);
+    };
+    const onAbort = () => { cleanup(); resolve(0); };
     buttons.forEach((btn, i) => {
-      const handler = () => {
-        for (let j = 0; j < buttons.length; j++) {
-          buttons[j].removeEventListener('click', handlers[j]);
-        }
-        resolve(i);
-      };
+      const handler = () => { cleanup(); resolve(i); };
       handlers.push(handler);
       btn.addEventListener('click', handler);
     });
+    abortListeners.add(onAbort);
   });
 }
 
@@ -247,10 +297,12 @@ export async function runIntro(): Promise<void> {
   // post-turn-around position (-14vh) — see #intro-goblin CSS for the
   // motivation (row 0 vs row 4 sprite geometry).
   await sleep(POST_SLIDE_BEAT_MS);
+  if (introAborted) { teardownIntro(overlay, speechEl, yesBtn, noBtn); return; }
   overlay.classList.add('faced');
   await turnGoblinAround(goblinEl);
 
   for (const step of SCRIPT) {
+    if (introAborted) break;
     if (step.kind === 'speak') {
       await runSpeak(overlay, speechEl, clickWall, step.text);
     } else if (step.kind === 'pause') {
@@ -290,5 +342,46 @@ export async function runIntro(): Promise<void> {
       overlay.classList.remove('visible');
       await sleep(700);
     }
+  }
+  if (introAborted) teardownIntro(overlay, speechEl, yesBtn, noBtn);
+}
+
+// For new games only: how long the player gets to wander and click the empty
+// world before the goblin slides up and starts talking.
+const PRE_INTRO_FREE_CLICK_MS = 7_000;
+// Staggered fade-in after the cutscene resolves: the summon panel comes in
+// first, then the task line trails behind so the eye doesn't see both reveal
+// at once.
+const POST_INTRO_SUMMON_DELAY_MS = 1_000;
+const POST_INTRO_TASK_DELAY_MS = 2_000;
+
+export type IntroReveal = {
+  // Drop the intro-hold so the summon panel fades in.
+  onSummonReveal: () => void;
+  // Reveal the first task line.
+  onTaskReveal: () => void;
+};
+
+// Drives the full new-game intro: the free-click preamble, the goblin
+// cutscene, then the staggered panel/task reveals. skipIntro() can cut it
+// short at any point — when skipped, the cutscene tears down and both reveals
+// fire immediately so the player lands straight in the game.
+export async function playIntroSequence(reveal: IntroReveal): Promise<void> {
+  introActive = true;
+  introAborted = false;
+  try {
+    await sleep(PRE_INTRO_FREE_CLICK_MS);
+    if (!introAborted) await runIntro();
+    if (introAborted) {
+      reveal.onSummonReveal();
+      reveal.onTaskReveal();
+      return;
+    }
+    await sleep(POST_INTRO_SUMMON_DELAY_MS);
+    reveal.onSummonReveal();
+    await sleep(POST_INTRO_TASK_DELAY_MS - POST_INTRO_SUMMON_DELAY_MS);
+    reveal.onTaskReveal();
+  } finally {
+    introActive = false;
   }
 }

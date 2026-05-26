@@ -3,7 +3,7 @@ import { playSound } from './audio';
 import { flashCursor } from './cursor-fx';
 import { BUILDABLE_KINDS, BUILDING_DEFS, BuildingKind, CELL, DRAGON, GOBLIN, LIGHTNING, MINOTAUR, RENDER_SCALE, WORLD, formatPower } from './config';
 import { unlockOptionsCog } from './options-ui';
-import { RenderContext, clampCamera } from './render';
+import { RenderContext, clampCamera, clampSpaceCamera } from './render';
 import { autoAssignAllIdle, lightningStrike } from './sim';
 import {
   Building, Cell, Dragon, GameState, Goblin, Minotaur, WaterSource,
@@ -34,6 +34,9 @@ type InputState = {
   // Screen-space origin of a potential tap-to-select while in the space view.
   // Set on pointerdown in orbit, consumed on pointerup. Null on the ground.
   spaceTapStart: { x: number; y: number } | null;
+  // Last pointer position for a single-pointer drag-pan of the orbit camera.
+  // Tracked separately from the ground's two-finger panLast. Null on the ground.
+  spacePanLast: { x: number; y: number } | null;
 };
 
 const LONG_PRESS_MS = 450;
@@ -62,6 +65,7 @@ export function setupInput(
     longPressFired: false,
     lastPointer: null,
     spaceTapStart: null,
+    spacePanLast: null,
   };
 
   app.stage.eventMode = 'static';
@@ -82,18 +86,20 @@ export function setupInput(
     });
 
     // No world building/commanding while looking at space — but a single tap
-    // can still select a floating building. The scene is keyboard-panned
-    // (see main.ts); record the tap origin and resolve it on pointerup.
+    // can still select a floating building, and a single-pointer drag pans the
+    // orbit camera (on top of the keyboard panning from main.ts). Record the
+    // origin and resolve tap-vs-drag on pointerup.
     if (state.view !== 'ground') {
       input.isDragging = false;
       input.selectionGfx.clear();
       cancelLongPress(input);
-      input.spaceTapStart = (e.button === 0 && input.pointers.size < 2)
-        ? { x: e.global.x, y: e.global.y }
-        : null;
+      const singlePrimary = e.button === 0 && input.pointers.size < 2;
+      input.spaceTapStart = singlePrimary ? { x: e.global.x, y: e.global.y } : null;
+      input.spacePanLast = singlePrimary ? { x: e.global.x, y: e.global.y } : null;
       return;
     }
     input.spaceTapStart = null;
+    input.spacePanLast = null;
 
     // Two or more pointers → enter pan mode and abandon any single-pointer interaction.
     if (input.pointers.size >= 2) {
@@ -159,6 +165,17 @@ export function setupInput(
       return;
     }
 
+    // Space view: a single-pointer drag pans the orbit camera.
+    if (state.view !== 'ground' && input.spacePanLast && input.pointers.has(e.pointerId)) {
+      const dx = e.global.x - input.spacePanLast.x;
+      const dy = e.global.y - input.spacePanLast.y;
+      ctx.spaceCamera.x -= dx / RENDER_SCALE;
+      ctx.spaceCamera.y -= dy / RENDER_SCALE;
+      clampSpaceCamera(ctx);
+      input.spacePanLast = { x: e.global.x, y: e.global.y };
+      return;
+    }
+
     // Cancel long-press if the finger moved too far.
     if (input.longPressPointerId === e.pointerId && tracked) {
       const moved = Math.hypot(tracked.x - tracked.startX, tracked.y - tracked.startY);
@@ -202,6 +219,7 @@ export function setupInput(
     if (state.view !== 'ground') {
       const start = input.spaceTapStart;
       input.spaceTapStart = null;
+      input.spacePanLast = null;
       if (start) {
         const moved = Math.hypot(e.global.x - start.x, e.global.y - start.y);
         if (moved < 6) {
@@ -569,26 +587,42 @@ function handleRightClick(state: GameState, x: number, y: number) {
   // lift a specific building toward space, or fly to a point (then resume its
   // default building-hauling behaviour).
   if (selectedDragons.length > 0) {
-    if (targetGoblin) {
-      for (const d of selectedDragons) {
-        d.state = { kind: 'going_to_kill', targetKind: 'goblin', targetId: targetGoblin.id };
+    // A dragon already hauling a building can't pick up or attack anything —
+    // any command instead tells it where to set its load back down (it drops
+    // there if there's room, else carries on up to space). Dragons with empty
+    // claws take the usual kill / lift / move orders.
+    const carryingDragons = selectedDragons.filter((d) => d.carrying);
+    const freeDragons = selectedDragons.filter((d) => !d.carrying);
+
+    for (const d of carryingDragons) {
+      d.state = { kind: 'delivering', goal: { x, y } };
+    }
+    if (carryingDragons.length > 0) {
+      appendLog(state, `${carryingDragons.length} dragon(s) hauling a building to a drop-off.`);
+    }
+
+    if (freeDragons.length > 0) {
+      if (targetGoblin) {
+        for (const d of freeDragons) {
+          d.state = { kind: 'going_to_kill', targetKind: 'goblin', targetId: targetGoblin.id };
+        }
+        appendLog(state, `${freeDragons.length} dragon(s) diving on goblin #${targetGoblin.id}.`);
+      } else if (targetMinotaur) {
+        for (const d of freeDragons) {
+          d.state = { kind: 'going_to_kill', targetKind: 'minotaur', targetId: targetMinotaur.id };
+        }
+        appendLog(state, `${freeDragons.length} dragon(s) diving on Minotaur #${targetMinotaur.id}.`);
+      } else if (targetBuilding) {
+        for (const d of freeDragons) {
+          d.state = { kind: 'going_to_building', buildingId: targetBuilding.id };
+        }
+        appendLog(state, `${freeDragons.length} dragon(s) sent to haul ${defOf(targetBuilding).name} #${targetBuilding.id} to space.`);
+      } else {
+        for (const d of freeDragons) {
+          d.state = { kind: 'moving_to', goal: { x, y } };
+        }
+        appendLog(state, `${freeDragons.length} dragon(s) on the wing.`);
       }
-      appendLog(state, `${selectedDragons.length} dragon(s) diving on goblin #${targetGoblin.id}.`);
-    } else if (targetMinotaur) {
-      for (const d of selectedDragons) {
-        d.state = { kind: 'going_to_kill', targetKind: 'minotaur', targetId: targetMinotaur.id };
-      }
-      appendLog(state, `${selectedDragons.length} dragon(s) diving on Minotaur #${targetMinotaur.id}.`);
-    } else if (targetBuilding) {
-      for (const d of selectedDragons) {
-        d.state = { kind: 'going_to_building', buildingId: targetBuilding.id };
-      }
-      appendLog(state, `${selectedDragons.length} dragon(s) sent to haul ${defOf(targetBuilding).name} #${targetBuilding.id} to space.`);
-    } else {
-      for (const d of selectedDragons) {
-        d.state = { kind: 'moving_to', goal: { x, y } };
-      }
-      appendLog(state, `${selectedDragons.length} dragon(s) on the wing.`);
     }
   }
 

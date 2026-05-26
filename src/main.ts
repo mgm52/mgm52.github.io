@@ -4,7 +4,7 @@ import {
   SUMMON_UPGRADES, TICK_MS, MINOTAUR, digBloodCost,
 } from './config';
 import { setupInput } from './input';
-import { runIntro, setIntroPaused } from './intro';
+import { playIntroSequence, setIntroPaused, skipIntro } from './intro';
 import { getOptions, onOptionsChange } from './options';
 import { relockOptionsCog, setupOptionsUI } from './options-ui';
 import { applyDomOptions, centerCameraOn, centerSpaceCamera, clampCamera, clampSpaceCamera, createRender, render, spaceCameraMaxY } from './render';
@@ -124,16 +124,10 @@ const MUSIC_LEAD_IN_MS = 2000;
 const TITLE_FADE_OUT_TOTAL_MS = 2000 + 1500 + 1400;
 // Extra beat after the game appears before the first task fades in.
 const TASK_REVEAL_AFTER_GAME_VISIBLE_MS = 1000;
-// For new games only: how long the player gets to wander and click the empty
-// world before the goblin slides up and starts talking.
-const PRE_INTRO_FREE_CLICK_MS = 7_000;
-// Staggered fade-in after the intro resolves: the summon panel comes in
-// first, then the task line trails behind so the eye doesn't see both
-// reveal at once.
-const POST_INTRO_SUMMON_DELAY_MS = 1_000;
-const POST_INTRO_TASK_DELAY_MS   = 2_000;
-
-const sleep = (ms: number) => new Promise<void>((r) => window.setTimeout(r, ms));
+// Cheat power surge: a 1 GW boost with an effectively unbounded duration so it
+// reads as a permanent grid bump rather than the Lightning Strike's 5s decay.
+const CHEAT_POWER_WATTS = 1_000_000_000;
+const CHEAT_POWER_SECONDS = 1e9;
 
 async function main() {
   // Apply the DOM-only options (sidebar CSS vars, cut-corner button class)
@@ -201,17 +195,14 @@ async function main() {
     document.getElementById('task-text')?.classList.add('revealed');
   };
   if (introWillPlay) {
-    // Wait for the game to be fully visible, then PRE_INTRO_FREE_CLICK_MS of
-    // free-click time before the goblin emerges. Once the intro resolves we
-    // stagger the reveals: summon panel after POST_INTRO_SUMMON_DELAY_MS,
-    // task line after POST_INTRO_TASK_DELAY_MS.
-    window.setTimeout(async () => {
-      await sleep(PRE_INTRO_FREE_CLICK_MS);
-      await runIntro();
-      await sleep(POST_INTRO_SUMMON_DELAY_MS);
-      document.body.classList.remove('intro-hold');
-      await sleep(POST_INTRO_TASK_DELAY_MS - POST_INTRO_SUMMON_DELAY_MS);
-      document.getElementById('task-text')?.classList.add('revealed');
+    // Once the game is fully visible, hand off to the intro sequence: a
+    // free-click preamble, the goblin cutscene, then the staggered panel/task
+    // reveals. The dev "Work skip" button can skip the whole thing.
+    window.setTimeout(() => {
+      void playIntroSequence({
+        onSummonReveal: () => document.body.classList.remove('intro-hold'),
+        onTaskReveal: () => document.getElementById('task-text')?.classList.add('revealed'),
+      });
     }, gameVisibleDelayMs);
   } else {
     window.setTimeout(revealPanelsAndTask, gameVisibleDelayMs + TASK_REVEAL_AFTER_GAME_VISIBLE_MS);
@@ -239,7 +230,16 @@ async function main() {
       state.money += 1_000_000;
       appendLog(state, 'Cheat: +Ƶ1,000,000.');
     },
-    onTaskSkip: () => executeTaskSkip(state),
+    onCheatBlood: () => {
+      state.blood += 1000;
+      state.bloodUnlocked = true;
+      appendLog(state, 'Cheat: +1,000 blood.');
+    },
+    onCheatPower: () => {
+      state.powerBoosts.push({ startAt: state.now, peak: CHEAT_POWER_WATTS, duration: CHEAT_POWER_SECONDS });
+      appendLog(state, 'Cheat: +1 GW power.');
+    },
+    onTaskSkip: () => { skipIntro(); executeTaskSkip(state); },
     onShowTitleScreen: () => { void showTitleScreen(); },
   });
   setupUI(state, {
@@ -275,8 +275,11 @@ async function main() {
     onSummonDragon: () => {
       if (!state.dragonSummonUnlocked) { playSound('error'); return; }
       if (state.blood < DRAGON.bloodCost) { playSound('error'); return; }
-      if (!spawnDragon(state)) { playSound('error'); return; }
+      if (state.dragonSpawnQueue.length >= DRAGON.spawnCapacity) { playSound('error'); return; }
       state.blood -= DRAGON.bloodCost;
+      state.dragonSpawnQueue.push({ remaining: DRAGON.spawnTime });
+      playSound('ritual');
+      appendLog(state, 'Dragon summon ritual begins...');
     },
     onBuyAutoAssign: () => {
       if (state.autoAssignEnabled) return;

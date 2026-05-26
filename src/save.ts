@@ -76,6 +76,7 @@ export function loadGame(): { state: GameState; savedAt: number } | null {
     // saves predating them, and always resume on the ground (the climb is a
     // live-only animation).
     env.state.dragons ??= new Map();
+    env.state.dragonSpawnQueue ??= [];
     env.state.spaceBuildings ??= new Map();
     // `selected` was added with space-building selection; default it so saves
     // predating it don't leave the field undefined.

@@ -74,6 +74,15 @@ export function tick(state: GameState) {
     }
   }
 
+  // ── 1c. Dragon spawn queue ───────────────────────────────────────
+  for (let i = state.dragonSpawnQueue.length - 1; i >= 0; i--) {
+    state.dragonSpawnQueue[i].remaining -= TICK_S;
+    if (state.dragonSpawnQueue[i].remaining <= 0) {
+      spawnDragon(state);
+      state.dragonSpawnQueue.splice(i, 1);
+    }
+  }
+
   // ── 2. Goblin updates ─────────────────────────────────────────────
   for (const g of state.goblins.values()) updateGoblin(state, g);
 
@@ -145,6 +154,9 @@ export function tick(state: GameState) {
     if (state.now >= sb.nextIncomeAt) {
       earnMoney(state, def.income);
       sb.nextIncomeAt = state.now + 1;
+      // Same gold income floater as a ground building, but flagged `space` so
+      // it renders in the orbit scene at the floating building's position.
+      pushFloater(state, sb.pos.x, sb.pos.y, `+Ƶ${def.income.toLocaleString('en-US')}`, 0xffd96b, 1.4, undefined, true);
     }
   }
 
@@ -811,7 +823,8 @@ export function spawnDragon(state: GameState): boolean {
   };
   state.dragons.set(id, d);
   appendLog(state, `Dragon #${id} unfurls its wings.`);
-  playSound('ritual');
+  // The summon ritual sound fires when the player queues the summon (main.ts);
+  // this is the dragon actually arriving.
   playSound('online', 0.5, 0.35);
   return true;
 }
@@ -838,6 +851,8 @@ function dragonFlyToward(d: Dragon, tx: number, ty: number, speed: number): bool
 // fall back to idle; the building is removed from the world and rides the
 // dragon up. From here the dragon climbs and the load enters space.
 function dragonLift(state: GameState, d: Dragon, b: Building) {
+  // A dragon already hauling a building can't pick up a second one.
+  if (d.carrying) return;
   for (const gid of b.assignedGoblins) {
     const g = state.goblins.get(gid);
     if (!g) continue;
@@ -876,6 +891,59 @@ function dragonReachSpace(state: GameState, d: Dragon) {
     playSound('task_complete', 0.6);
   }
   removeDragon(state, d.id);
+}
+
+// Set a carried building back down on the grid near `goal`. Searches outward
+// from the goal cell for a free footprint; returns false if there's no room
+// anywhere nearby (the caller then falls back to hauling it to space).
+function dragonDropAt(state: GameState, d: Dragon, goal: { x: number; y: number }): boolean {
+  const b = d.carrying;
+  if (!b) return false;
+  const def = defOf(b);
+  const center: Cell = { cx: Math.floor(goal.x / CELL), cy: Math.floor(goal.y / CELL) };
+  const tl = findFreeFootprintNear(state, center, def.cellSize);
+  if (!tl) return false;
+  b.cell = tl;
+  b.state = 'dormant';            // resolvePowerAndState re-evaluates next tick
+  b.assignedGoblins = [];
+  b.buildProgress = 1;
+  b.selected = false;
+  b.nextIncomeAt = undefined;     // re-anchor income cadence
+  b.waterMeter = 0;
+  state.buildings.set(b.id, b);
+  d.carrying = null;
+  d.state = { kind: 'seeking' };
+  appendLog(state, `Dragon #${d.id} sets ${def.name} #${b.id} back down.`);
+  playSound('place', 1.2);
+  autoAssignAllIdle(state);
+  return true;
+}
+
+// Spiral outward from `center` for a top-left where the whole footprint is
+// unblocked, preferring a placement centered on the requested cell.
+function findFreeFootprintNear(state: GameState, center: Cell, n: number): Cell | null {
+  const half = Math.floor((n - 1) / 2);
+  for (let r = 0; r < 30; r++) {
+    for (let dx = -r; dx <= r; dx++) {
+      for (let dy = -r; dy <= r; dy++) {
+        if (Math.max(Math.abs(dx), Math.abs(dy)) !== r) continue;
+        const tl: Cell = { cx: center.cx - half + dx, cy: center.cy - half + dy };
+        if (footprintClear(state, tl, n)) return tl;
+      }
+    }
+  }
+  return null;
+}
+
+function footprintClear(state: GameState, tl: Cell, n: number): boolean {
+  for (let dx = 0; dx < n; dx++) {
+    for (let dy = 0; dy < n; dy++) {
+      const cx = tl.cx + dx, cy = tl.cy + dy;
+      if (!isInBounds(cx, cy)) return false;
+      if (isCellBlocked(state, cx, cy)) return false;
+    }
+  }
+  return true;
 }
 
 function dragonKill(state: GameState, d: Dragon, kind: 'goblin' | 'minotaur', id: number) {
@@ -921,6 +989,19 @@ function updateDragon(state: GameState, d: Dragon) {
       return;
     }
 
+    case 'delivering': {
+      // Carrying a building to a ground drop-off. Fly to the goal, then set it
+      // back down if there's room — otherwise haul it on up to space.
+      if (!d.carrying) { d.state = { kind: 'seeking' }; return; }
+      if (dragonFlyToward(d, d.state.goal.x, d.state.goal.y, speed)) {
+        if (!dragonDropAt(state, d, d.state.goal)) {
+          appendLog(state, `Dragon #${d.id} finds no room below — climbing to space.`);
+          d.state = { kind: 'carrying' };
+        }
+      }
+      return;
+    }
+
     case 'moving_to': {
       if (dragonFlyToward(d, d.state.goal.x, d.state.goal.y, speed)) {
         d.state = { kind: 'seeking' };
@@ -928,13 +1009,23 @@ function updateDragon(state: GameState, d: Dragon) {
       return;
     }
 
+    case 'hovering_to_lift': {
+      const b = state.buildings.get(d.state.buildingId);
+      if (!b || d.carrying) { d.state = { kind: 'seeking' }; return; }
+      // Park over the building while the lift timer runs down, then hoist.
+      const c = buildingCenter(b);
+      dragonFlyToward(d, c.x, c.y, speed);
+      if (state.now >= d.state.liftAt) dragonLift(state, d, b);
+      return;
+    }
+
     case 'going_to_building': {
       const b = state.buildings.get(d.state.buildingId);
-      if (!b) { d.state = { kind: 'seeking' }; return; }
+      if (!b || d.carrying) { d.state = { kind: 'seeking' }; return; }
       const c = buildingCenter(b);
       const reached = dragonFlyToward(d, c.x, c.y, speed);
       if (reached || Math.hypot(c.x - d.pos.x, c.y - d.pos.y) <= DRAGON.pickupDist) {
-        dragonLift(state, d, b);
+        d.state = { kind: 'hovering_to_lift', buildingId: b.id, liftAt: state.now + DRAGON.liftHover };
       }
       return;
     }
@@ -968,12 +1059,13 @@ function updateDragon(state: GameState, d: Dragon) {
       // Hover for a beat after summoning before chasing a building, so the
       // player has a window to issue a manual command first.
       if (state.now < d.spawnAt + DRAGON.seekDelay) return;
+      if (d.carrying) { d.state = { kind: 'carrying' }; return; }
       const b = dragonTargetBuilding(state);
       if (!b) return; // nothing worth hauling — hover (renderer adds the bob)
       const c = buildingCenter(b);
       const reached = dragonFlyToward(d, c.x, c.y, speed);
       if (reached || Math.hypot(c.x - d.pos.x, c.y - d.pos.y) <= DRAGON.pickupDist) {
-        dragonLift(state, d, b);
+        d.state = { kind: 'hovering_to_lift', buildingId: b.id, liftAt: state.now + DRAGON.liftHover };
       }
       return;
     }

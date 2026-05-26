@@ -985,7 +985,9 @@ function drawFloaters(ctx: RenderContext, state: GameState) {
       });
       t.anchor.set(0.5, 1);
       t.cullable = true;
-      ctx.floatersLayer.addChild(t);
+      // Space-building floaters live in the orbit scene (panned by the space
+      // camera); everything else rides the ground world layer.
+      (f.space ? ctx.spaceLayer : ctx.floatersLayer).addChild(t);
       ctx.floaterViews.set(f.id, t);
     }
     const age = state.now - f.spawnAt;
@@ -1221,9 +1223,13 @@ export function render(state: GameState, ctx: RenderContext) {
   const scaledH = WORLD.height * RENDER_SCALE;
   const offsetX = Math.max(0, (ctx.viewport.width - scaledW) / 2);
   const offsetY = Math.max(0, (ctx.viewport.height - scaledH) / 2);
+  // As the climb begins, slide the whole ground scene downward (and back up on
+  // descent) so the play area visibly drops away beneath you rather than just
+  // fading in place under the sky. Synced to the ground's fade-out range.
+  const climbDrop = smoothstep(0.02, 0.18, ctx.altitude) * ctx.viewport.height * 0.6;
   ctx.worldLayer.position.set(
     Math.round(offsetX - ctx.camera.x * RENDER_SCALE),
-    Math.round(offsetY - ctx.camera.y * RENDER_SCALE),
+    Math.round(offsetY - ctx.camera.y * RENDER_SCALE + climbDrop),
   );
 
   const opts = getOptions();
