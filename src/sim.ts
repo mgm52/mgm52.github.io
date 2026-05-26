@@ -198,12 +198,16 @@ export function lightningStrike(state: GameState, x: number, y: number): boolean
     return dx * dx + dy * dy <= r2;
   };
 
-  // Lightning vaporises every ground unit in the blast — goblins and minotaurs
-  // alike — and pays out their usual kill rewards, summed into one floater pair
-  // at the strike's centre so a big cull doesn't spray dozens of numbers.
+  // Lightning vaporises every unit in the blast — goblins, minotaurs, and
+  // dragons — and pays out their usual kill rewards. Dragons grant their
+  // dragon-on-dragon bone drop; any building a struck dragon was carrying is
+  // lost with it, matching dragonKill's semantics. Rewards are summed into one
+  // floater per resource at the strike's centre so a big cull doesn't spray
+  // dozens of numbers.
   let killed = 0;
   let totalMoney = 0;
   let totalBlood = 0;
+  let totalBones = 0;
   for (const g of [...state.goblins.values()]) {
     if (within(g.pos.x, g.pos.y)) {
       const r = goblinKillReward(state, g);
@@ -221,10 +225,19 @@ export function lightningStrike(state: GameState, x: number, y: number): boolean
       killed++;
     }
   }
+  for (const d of [...state.dragons.values()]) {
+    if (within(d.pos.x, d.pos.y)) {
+      totalBones += DRAGON_KILL_REWARD.dragonBone;
+      removeDragon(state, d.id);
+      killed++;
+    }
+  }
   if (totalMoney > 0) earnMoney(state, totalMoney);
   if (totalBlood > 0) { earnBlood(state, totalBlood); state.bloodUnlocked = true; }
+  if (totalBones > 0) { earnDragonBone(state, totalBones); state.dragonBoneUnlocked = true; }
   if (totalMoney > 0) pushFloater(state, x, y - 28, `+Ƶ${totalMoney.toLocaleString('en-US')}`, 0xffd96b, 1.6);
   if (totalBlood > 0) pushFloater(state, x, y - 42, `+${totalBlood} blood`, 0xff8a8a, 1.6);
+  if (totalBones > 0) pushFloater(state, x, y - 56, `+${totalBones} dragon bone${totalBones === 1 ? '' : 's'}`, 0xeae0c0, 1.8);
 
   // Stat: remember the biggest single-strike cull (sticky).
   if (killed > state.maxStruckAtOnce) state.maxStruckAtOnce = killed;

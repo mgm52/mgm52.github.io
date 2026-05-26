@@ -191,9 +191,9 @@ export const BASE_SPAWN_CAPACITY = 5;
 export const GOBLIN_HOLE_CAPACITY_PER_BUILDING = 5;
 
 // Lightning Strike — a ritual unlocked once the Collect-a-Dragon-Bone task is
-// done. Aim it at the map: it kills every ground unit (goblins + minotaurs)
-// inside a circular blast — granting their usual kill rewards — and grants a
-// temporary power surge that decays linearly to zero.
+// done. Aim it at the map: it kills every unit inside a circular blast —
+// goblins, minotaurs, and dragons — granting their usual kill rewards, and
+// powers a temporary surge that decays linearly to zero.
 export const LIGHTNING = {
   cellsWide: 8,                    // blast diameter, in cells
   bloodCost: 256,                  // blood spent per strike

@@ -486,8 +486,8 @@ export function setupUI(state: GameState, callbacks: UICallbacks) {
 
   // Lightning Strike — an aimed ritual unlocked once the Collect-a-Dragon-Bone
   // task is done. Sits at the bottom of the Ritual list. Clicking arms it; the
-  // next map click calls the bolt down, killing every ground unit in the blast
-  // for their kill rewards.
+  // next map click calls the bolt down, killing every unit in the blast
+  // (goblins, minotaurs, dragons) for their kill rewards.
   const lightningBtn = document.createElement('button');
   lightningBtn.className = 'build-button build-button-compact';
   lightningBtn.id = 'btn-lightning-strike';
