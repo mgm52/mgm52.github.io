@@ -6,6 +6,8 @@ import {
 
 export type OptionsUICallbacks = {
   onCheatMoney: () => void;
+  onCheatBlood: () => void;
+  onCheatPower: () => void;
   onTaskSkip: () => void;
   onShowTitleScreen: () => void;
 };
@@ -233,6 +235,20 @@ function rebuildPanel(panel: HTMLElement, callbacks: OptionsUICallbacks, refresh
   cheat.textContent = 'Cheat +Ƶ1,000,000';
   cheat.addEventListener('click', () => callbacks.onCheatMoney());
   panel.appendChild(cheat);
+
+  const cheatBlood = document.createElement('button');
+  cheatBlood.type = 'button';
+  cheatBlood.className = 'options-reset';
+  cheatBlood.textContent = 'Cheat +1,000 blood';
+  cheatBlood.addEventListener('click', () => callbacks.onCheatBlood());
+  panel.appendChild(cheatBlood);
+
+  const cheatPower = document.createElement('button');
+  cheatPower.type = 'button';
+  cheatPower.className = 'options-reset';
+  cheatPower.textContent = 'Cheat +1 GW power';
+  cheatPower.addEventListener('click', () => callbacks.onCheatPower());
+  panel.appendChild(cheatPower);
 
   const taskSkip = document.createElement('button');
   taskSkip.type = 'button';
