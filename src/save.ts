@@ -71,6 +71,9 @@ export function loadGame(): { state: GameState; savedAt: number } | null {
     env.state.powerBoosts ??= [];
     env.state.moneyEarned ??= 0;
     env.state.bloodEarned ??= 0;
+    env.state.dragonBone ??= 0;
+    env.state.dragonBoneEarned ??= 0;
+    env.state.dragonBoneUnlocked ??= false;
     env.state.pendingStrike = false;
     // Dragons / space scene — added with the Dragon Beacon payoff. Default for
     // saves predating them, and always resume on the ground (the climb is a

@@ -93,6 +93,9 @@ export const DRAGON = {
   // A freshly-summoned dragon hovers this long before it starts auto-seeking a
   // building to haul, giving the player a beat to issue a manual command first.
   seekDelay: 2.5,        // seconds
+  // After a player-commanded move reaches its destination, the dragon loiters
+  // here this long before reverting to its default building-hauling behaviour.
+  moveLingerTime: 3,     // seconds
   // Once over a target building, the dragon hovers this long before hoisting it
   // — a beat of menace before the lift.
   liftHover: 2,          // seconds
@@ -207,6 +210,10 @@ export const GOLD_GOBLIN_CHANCE = 0.20;
 // drops blood but no money — the player paid summoning blood, this returns
 // it (and then some) via the kill but doesn't generate Ƶ.
 export const MINOTAUR_KILL_REWARD = { money: 0, blood: 128 };
+
+// A dragon can be commanded to incinerate another dragon. The victim drops a
+// Dragon Bone — a rare currency, since each dragon costs 64 blood to summon.
+export const DRAGON_KILL_REWARD = { dragonBone: 1 };
 
 export type BuildingColors = {
   active: number; activeBorder: number;
