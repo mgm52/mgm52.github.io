@@ -1,7 +1,7 @@
 import { playSound } from './audio';
 import {
   AUTOSPAWN_TIERS, BUILDABLE_KINDS, BUILDING_DEFS, BuildingKind, DRAG_SELECT_HINT_DELAY_SEC,
-  DRAGON, GOBLIN, LIGHTNING, LIGHTNING_TASK_KILL_GOAL, SPAWN_HINT_NO_SPAWN_SEC,
+  DRAGON, GOBLIN, LIGHTNING, STRIKE_TASK_GOAL_1, STRIKE_TASK_GOAL_2, SPAWN_HINT_NO_SPAWN_SEC,
   SPAWN_HINT_NO_TASK_SEC, SUMMON_UPGRADES, WATER_HINT_DELAY_SEC, digBloodCost, MINOTAUR, TINYTAUR, formatPower,
 } from './config';
 import {
@@ -197,10 +197,10 @@ const TASKS: Task[] = [
   {
     id: 'build_gas_engine',
     text: 'Construct a Gas Turbine',
-    // Datacentre unlocks here. Lightning Strike (gated in refreshUI) unlocks
-    // alongside it; the Goblin Hole moved to the optional strike_13 task, and
-    // digging now unlocks back at run_phone_farm.
-    unlocks: ['datacentre'],
+    // Datacentre + Goblin Hole unlock here (Phase 3). Lightning Strike now
+    // unlocks back at run_phone_farm; the Minotaur + Autospawn reward the
+    // optional strike_5 side-task, and Goldblins + Dig reward strike_15.
+    unlocks: ['datacentre', 'goblin_hole'],
     isDone: (s) => {
       for (const b of s.buildings.values()) {
         if (b.kind === 'gas_engine' && b.state !== 'constructing') return true;
@@ -234,12 +234,23 @@ const TASKS: Task[] = [
     prereq: ['run_datacentre'],
   },
   {
-    // Optional: surfaces alongside run_datacentre (shares its prereq). Rewards
-    // the Goblin Hole plus the Goldblins and Autospawn rituals.
-    id: 'strike_13',
-    text: `Strike ${LIGHTNING_TASK_KILL_GOAL} goblins at once`,
-    unlocks: ['goblin_hole'],
-    isDone: (s) => s.struck13Goblins,
+    // Side 1 (optional): unlocks after Phase 2 (run_phone_farm). Rewards the
+    // Minotaur summon + Autospawn ritual (both gated in refreshUI on this
+    // task's reveal). No buildable unlock of its own.
+    id: 'strike_5',
+    text: `Strike ${STRIKE_TASK_GOAL_1} goblins at once`,
+    unlocks: [],
+    isDone: (s) => s.maxStruckAtOnce >= STRIKE_TASK_GOAL_1,
+    prereq: ['run_phone_farm'],
+    optional: true,
+  },
+  {
+    // Side 2 (optional): unlocks after Phase 3 (build_gas_engine). Rewards the
+    // Goldblins (+x10) and Dig (gated in refreshUI on this task's reveal).
+    id: 'strike_15',
+    text: `Strike ${STRIKE_TASK_GOAL_2} goblins at once`,
+    unlocks: [],
+    isDone: (s) => s.maxStruckAtOnce >= STRIKE_TASK_GOAL_2,
     prereq: ['build_gas_engine'],
     optional: true,
   },
@@ -435,10 +446,10 @@ export function setupUI(state: GameState, callbacks: UICallbacks) {
   goldX10Btn.addEventListener('click', () => { playSound('click', 1, 0.75); callbacks.onBuyGoldgoblinsX10(); });
   ritualList.appendChild(goldX10Btn);
 
-  // Dig row — four compact buttons (NESW) on a single line, unlocked alongside
-  // the Datacentre. Each is one-shot and costs DIG.bloodCost blood. Digging
-  // still needs a Minotaur, so until one is summoned a "needs Minotaur"
-  // banner sits across the row and the buttons stay disabled.
+  // Dig row — four compact buttons (NESW) on a single line, unlocked by the
+  // optional strike_15 side-task. Each is one-shot and costs DIG.bloodCost
+  // blood. Digging still needs a Minotaur, so until one is summoned a "needs
+  // Minotaur" banner sits across the row and the buttons stay disabled.
   const digRow = document.createElement('div');
   digRow.id = 'dig-row';
   digRow.style.display = 'none';
@@ -588,13 +599,6 @@ function btnId(kind: BuildingKind): string { return `btn-build-${kind}`; }
 function anyPhoneFarmBuilt(state: GameState): boolean {
   for (const b of state.buildings.values()) {
     if (b.kind === 'phone_farm' && b.state !== 'constructing') return true;
-  }
-  return false;
-}
-
-function anyGasEngineBuilt(state: GameState): boolean {
-  for (const b of state.buildings.values()) {
-    if (b.kind === 'gas_engine' && b.state !== 'constructing') return true;
   }
   return false;
 }
@@ -767,16 +771,15 @@ export function refreshUI(state: GameState) {
     setFillWidth(`fill-spawn-goblin-${i}`, spawnBySlot[i] ?? 0);
   }
 
-  // Minotaur button — unlocks alongside the Datacentre (once a Gas Turbine is built).
+  // Minotaur button — rewards the optional strike_5 side-task (Side 1). Gated
+  // on revealedTaskIds so it fades in after the TASK COMPLETE overlay clears.
   // Disabled while a summon is in progress; the segment bar fills like the
   // Goblin button's spawn track.
   const minotaurBtn = document.getElementById('btn-summon-minotaur') as HTMLButtonElement;
   const minotaurCost = document.getElementById('cost-summon-minotaur')!;
-  // Sticky like the Datacentre unlock it ships with: once a Gas Turbine has ever
-  // been built the button stays, even if that turbine is later smashed. (Using
-  // the live `anyGasEngineBuilt` check alone made the button vanish mid-game.)
-  if (anyGasEngineBuilt(state) || completedTaskIds.has('build_gas_engine')) {
+  if (revealedTaskIds.has('strike_5')) {
     minotaurBtn.style.display = '';
+    applyFadeInOnFirstShow('btn-summon-minotaur');
     const queued = state.minotaurSpawnQueue.length;
     const canAffordMinotaur = state.blood >= MINOTAUR.bloodCost;
     minotaurBtn.disabled = queued > 0 || !canAffordMinotaur;
@@ -864,11 +867,11 @@ export function refreshUI(state: GameState) {
   const buildSection = document.getElementById('build-section')!;
   buildSection.style.display = firstTaskDone ? '' : 'none';
 
-  // Lightning Strike — unlocks (sticky) once the Construct-a-Gas-Turbine task
-  // is done. Disabled when the player can't cover the blood cost; lit while
-  // armed.
+  // Lightning Strike — unlocks (sticky) once the Run-a-Phone-Farm task (Phase
+  // 2) is done. Disabled when the player can't cover the blood cost; lit while
+  // armed. Striking goblins with it drives the strike_5 / strike_15 side-tasks.
   const lightningBtn = document.getElementById('btn-lightning-strike') as HTMLButtonElement;
-  if (completedTaskIds.has('build_gas_engine')) {
+  if (completedTaskIds.has('run_phone_farm')) {
     lightningBtn.style.display = '';
     applyFadeInOnFirstShow('btn-lightning-strike');
     const canAffordLightning = state.blood >= LIGHTNING.bloodCost;
@@ -879,20 +882,19 @@ export function refreshUI(state: GameState) {
     lightningBtn.style.display = 'none';
   }
 
-  // Ritual upgrades — Autocommand appears once a Phone Farm is built; Goldblins
-  // and Autospawn reward the optional strike_13 task. Bought ones stay visible
-  // but go disabled.
+  // Ritual upgrades — Autocommand appears once a Phone Farm is built (Phase 2);
+  // Autospawn rewards the optional strike_5 side-task; Goldblins + Dig reward
+  // strike_15. Bought ones stay visible but go disabled.
   const phoneFarmBuilt = anyPhoneFarmBuilt(state);
-  // Goldblins + Autospawn now reward the optional "strike 13 goblins" task
-  // (strike_13) instead of firing on a Phone Farm / Gas Turbine being built.
-  const strike13Done = revealedTaskIds.has('strike_13');
-  // Dig unlocks alongside running a Phone Farm (the run_phone_farm task). Gated
-  // on revealedTaskIds (not completedTaskIds) so the buttons emerge AFTER the
-  // TASK COMPLETE overlay fades, letting the fade-in animation play. Digging
-  // itself still needs a Minotaur (unlocked at Task 3; see the dig-overlay
-  // banner below).
-  const digUnlocked = revealedTaskIds.has('run_phone_farm');
-  const ritualVisible = phoneFarmBuilt || strike13Done || digUnlocked;
+  // Side-task rewards. Gated on revealedTaskIds (not completedTaskIds) so the
+  // buttons emerge AFTER the TASK COMPLETE overlay fades, letting the fade-in
+  // animation play.
+  const strike5Done = revealedTaskIds.has('strike_5');
+  const strike15Done = revealedTaskIds.has('strike_15');
+  // Dig rewards strike_15 (Side 2). Digging itself still needs a Minotaur
+  // (rewarded by strike_5); see the dig-overlay banner below.
+  const digUnlocked = strike15Done;
+  const ritualVisible = phoneFarmBuilt || strike5Done || strike15Done;
   const ritualSection = document.getElementById('ritual-section')!;
   ritualSection.style.display = ritualVisible ? '' : 'none';
   // Now that the panel renders as a bordered card, an empty container shows
@@ -914,14 +916,14 @@ export function refreshUI(state: GameState) {
     state.autoWaterEnabled, state.blood >= SUMMON_UPGRADES.autoWater.bloodCost,
     `${SUMMON_UPGRADES.autoWater.bloodCost} blood`,
   );
-  refreshAutospawnButton(state, strike13Done);
+  refreshAutospawnButton(state, strike5Done);
   // Goldblins → Goldblins x10 form a replace chain (like Autospawn): base
   // button hides once owned, x10 takes its place; x10 hides once owned.
-  // Base Goldblins unlocks by completing the optional strike_13 task; x10
+  // Base Goldblins unlocks by completing the optional strike_15 task; x10
   // follows once base Goldblins is owned.
   refreshRitualButton(
     'btn-buy-goldgoblins', 'cost-buy-goldgoblins',
-    strike13Done && !state.goldgoblinsEnabled, false,
+    strike15Done && !state.goldgoblinsEnabled, false,
     state.blood >= SUMMON_UPGRADES.goldgoblins.bloodCost,
     `${SUMMON_UPGRADES.goldgoblins.bloodCost} blood`,
   );
@@ -933,10 +935,10 @@ export function refreshUI(state: GameState) {
     `${SUMMON_UPGRADES.goldgoblinsX10.bloodCost} blood`,
   );
 
-  // Dig row: visible once the Datacentre unlocks. Each direction is one-shot.
-  // First time the row appears, each button fades in. Until a Minotaur has been
-  // summoned, a "needs Minotaur" banner covers the row and the buttons are
-  // disabled.
+  // Dig row: rewards the optional strike_15 side-task (Side 2). Each direction
+  // is one-shot. First time the row appears, each button fades in. Until a
+  // Minotaur has been summoned (itself a strike_5 reward), a "needs Minotaur"
+  // banner covers the row and the buttons are disabled.
   if (state.minotaurs.size > 0) minotaurEverSummoned = true;
   const needsMinotaur = !minotaurEverSummoned;
   const digRow = document.getElementById('dig-row')!;

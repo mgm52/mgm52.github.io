@@ -135,9 +135,11 @@ export const SPACE = {
   margin: 90,            // keep floating buildings this far inside the bounds
 };
 
-// The optional strike_13 task requires vaporising this many goblins in a
-// single Lightning Strike.
-export const LIGHTNING_TASK_KILL_GOAL = 13;
+// The two optional strike side-tasks each require vaporising this many goblins
+// in a single Lightning Strike. Side 1 (5) rewards the Minotaur + Autospawn;
+// Side 2 (15) rewards Goldblins + Dig.
+export const STRIKE_TASK_GOAL_1 = 5;
+export const STRIKE_TASK_GOAL_2 = 15;
 
 // One-shot Ritual upgrades. Autocommand + Goldblins unlock once a Phone
 // Farm has been built; Autospawn unlocks once a Gas Turbine has been built.
