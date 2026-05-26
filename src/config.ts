@@ -86,9 +86,16 @@ export const TINYTAUR = {
 export const DRAGON = {
   bloodCost: 64,
   speed: 90,             // px/sec
+  // Ritual delay between summoning a dragon and it appearing, mirroring the
+  // Minotaur's summon-in time. Only one dragon can be in the ritual at once.
+  spawnTime: 2,          // seconds
+  spawnCapacity: 1,
   // A freshly-summoned dragon hovers this long before it starts auto-seeking a
   // building to haul, giving the player a beat to issue a manual command first.
   seekDelay: 2.5,        // seconds
+  // Once over a target building, the dragon hovers this long before hoisting it
+  // — a beat of menace before the lift.
+  liftHover: 2,          // seconds
   attackWindup: 0.6,     // seconds of fire-breath before a commanded kill lands
   pickupDist: 26,        // px from a building's center before it's hoisted
   arriveDist: 8,         // px from a move/kill target before it counts as reached

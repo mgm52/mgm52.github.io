@@ -341,6 +341,7 @@ export function setupUI(state: GameState, callbacks: UICallbacks) {
   dragonBtn.id = 'btn-summon-dragon';
   dragonBtn.style.display = 'none';
   dragonBtn.innerHTML = `
+    ${progressTrack('summon-dragon', DRAGON.spawnCapacity)}
     <div class="build-content">
       <div class="build-text">
         <div class="build-name">Dragon</div>
@@ -804,11 +805,16 @@ export function refreshUI(state: GameState) {
   if (state.dragonSummonUnlocked) {
     dragonBtn.style.display = '';
     applyFadeInOnFirstShow('btn-summon-dragon');
+    const queued = state.dragonSpawnQueue.length;
     const canAffordDragon = state.blood >= DRAGON.bloodCost;
-    dragonBtn.disabled = !canAffordDragon;
+    dragonBtn.disabled = queued > 0 || !canAffordDragon;
     const dragonCost = document.getElementById('cost-summon-dragon')!;
-    dragonCost.classList.toggle('met', canAffordDragon);
-    setBuyFlash('btn-summon-dragon', canAffordDragon && state.dragons.size === 0 && state.spaceBuildings.size === 0);
+    dragonCost.classList.toggle('met', canAffordDragon && queued === 0);
+    dragonBtn.classList.toggle('in-progress', queued > 0);
+    const dragonRemaining = queued > 0 ? state.dragonSpawnQueue[0].remaining : DRAGON.spawnTime;
+    const dragonFill = queued > 0 ? 1 - dragonRemaining / DRAGON.spawnTime : 0;
+    setFillWidth('fill-summon-dragon-0', Math.max(0, Math.min(1, dragonFill)));
+    setBuyFlash('btn-summon-dragon', canAffordDragon && queued === 0 && state.dragons.size === 0 && state.spaceBuildings.size === 0 && state.dragonSpawnQueue.length === 0);
   } else {
     dragonBtn.style.display = 'none';
     setBuyFlash('btn-summon-dragon', false);
@@ -1151,7 +1157,9 @@ function refreshInfoPanel(state: GameState) {
 function describeDragonState(s: DragonState): string {
   switch (s.kind) {
     case 'seeking': return 'Seeking the choicest building';
+    case 'hovering_to_lift': return `Looming over building #${s.buildingId}`;
     case 'carrying': return 'Hauling a building to space';
+    case 'delivering': return 'Carrying a building to a drop-off';
     case 'moving_to': return 'On the wing';
     case 'going_to_building': return `Going to lift building #${s.buildingId}`;
     case 'going_to_kill':
@@ -1281,13 +1289,15 @@ function showSpaceBuilding(_state: GameState, sb: SpaceBuilding, panel: HTMLElem
   portrait.innerHTML = `<div class="portrait-building ${b.kind} active">${def.short}</div>`;
   name.textContent = `${def.name} #${b.id}`;
 
+  // Mirror the ground building's "Active — ..." readout. A space building runs
+  // identically to its ground self, just with no maintainer / water / power
+  // upkeep and no grid placement.
   const bits: string[] = [];
   if (def.income) bits.push(`earning Ƶ${def.income.toLocaleString('en-US')}/s`);
   if (def.powerOutput > 0) bits.push(`producing ${formatPower(def.powerOutput)}`);
-  stateEl.textContent = bits.length ? `Adrift in space — ${bits.join(', ')}` : 'Adrift in space';
+  stateEl.textContent = bits.length ? `Active — ${bits.join(', ')}` : 'Active';
 
-  const lines: string[] = ['Floating free — no upkeep'];
-  if (def.income) lines.push(`Income: Ƶ${def.income.toLocaleString('en-US')}/s`);
+  const lines: string[] = ['Floating free in orbit — no upkeep'];
   if (def.powerOutput > 0) lines.push(`Power output: ${formatPower(def.powerOutput)}`);
   extra.innerHTML = lines.join('<br>');
 }

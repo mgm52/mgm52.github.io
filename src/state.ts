@@ -115,8 +115,13 @@ export type Minotaur = {
 export type DragonState =
   // Default: fly to the single most valuable building, hoist it, climb to space.
   | { kind: 'seeking' }
+  // Parked over a target building, counting down DRAGON.liftHover before the lift.
+  | { kind: 'hovering_to_lift'; buildingId: number; liftAt: number }
   // Carrying a lifted building straight up; once past DRAGON.spaceY it's gone.
   | { kind: 'carrying' }
+  // Carrying a building to a ground drop-off: fly to the goal and set it back
+  // down if there's room (otherwise haul it on up to space).
+  | { kind: 'delivering'; goal: Vec2 }
   // Commanded: fly to a free-floating world point, then revert to seeking.
   | { kind: 'moving_to'; goal: Vec2 }
   // Commanded: fly up to a unit and incinerate it, then revert to seeking.
@@ -186,6 +191,9 @@ export type Floater = {
   // frame that ticks down from this peak to 0 across the floater's lifetime
   // (the Lightning Strike power surge). In watts.
   powerCountdownWatts?: number;
+  // Floaters over space buildings live in the space scene (panned by the space
+  // camera) rather than the ground world layer.
+  space?: boolean;
 };
 
 // One-shot blood-explosion GIF effect played at a world position. The Lightning
@@ -291,6 +299,7 @@ export type GameState = {
   pendingStrike: boolean;
   spawnQueue: { remaining: number; slot: number }[];
   minotaurSpawnQueue: { remaining: number }[];
+  dragonSpawnQueue: { remaining: number }[];
   pendingBuild: PendingBuild;
   log: { time: number; msg: string }[];
   occupancy: Map<string, number>;
@@ -591,6 +600,7 @@ export function createInitialState(): GameState {
     pendingStrike: false,
     spawnQueue: [],
     minotaurSpawnQueue: [],
+    dragonSpawnQueue: [],
     pendingBuild: null,
     log: [],
     occupancy: new Map(),
@@ -684,6 +694,7 @@ export function pushFloater(
   color: number,
   lifetime = 1.4,
   powerCountdownWatts?: number,
+  space = false,
 ) {
   state.floaters.push({
     id: state.nextId++,
@@ -691,6 +702,7 @@ export function pushFloater(
     spawnAt: state.now,
     lifetime,
     powerCountdownWatts,
+    space,
   });
 }
 

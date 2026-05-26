@@ -275,8 +275,11 @@ async function main() {
     onSummonDragon: () => {
       if (!state.dragonSummonUnlocked) { playSound('error'); return; }
       if (state.blood < DRAGON.bloodCost) { playSound('error'); return; }
-      if (!spawnDragon(state)) { playSound('error'); return; }
+      if (state.dragonSpawnQueue.length >= DRAGON.spawnCapacity) { playSound('error'); return; }
       state.blood -= DRAGON.bloodCost;
+      state.dragonSpawnQueue.push({ remaining: DRAGON.spawnTime });
+      playSound('ritual');
+      appendLog(state, 'Dragon summon ritual begins...');
     },
     onBuyAutoAssign: () => {
       if (state.autoAssignEnabled) return;
