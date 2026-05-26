@@ -104,6 +104,24 @@ export const DRAGON = {
   displayPx: 132,        // on-screen sprite size of a full dragon
 };
 
+// Ambient dragons — purely decorative silhouettes that drift across the space
+// scene's starfield. They can't be selected or commanded and never interact
+// with anything; they live only in the renderer (not in game state or saves).
+// Smaller and darker than a summoned dragon so they read as distant background.
+// Each one enters off one edge, crosses the void, and despawns off the far edge.
+export const AMBIENT_DRAGON = {
+  maxOnScreen: 2,        // never more than a couple drifting at once
+  speedMin: 26,          // space-px/sec
+  speedMax: 52,
+  scaleMin: 0.34,        // fraction of a full dragon's display size
+  scaleMax: 0.55,
+  spawnDelayMin: 2.5,    // seconds between spawns once below the cap
+  spawnDelayMax: 8,
+  bobAmpMin: 4,          // gentle vertical bob amplitude (px)
+  bobAmpMax: 9,
+  margin: 220,           // off-screen spawn/despawn padding (space-px)
+};
+
 // The void the dragons haul buildings into. Its own little coordinate space
 // with a starfield; lifted buildings drift here within these bounds (px) and
 // never need water, maintainers, or power — they simply keep earning income.
