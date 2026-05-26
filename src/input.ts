@@ -2,7 +2,6 @@ import { Application, Container, FederatedPointerEvent, Graphics } from 'pixi.js
 import { playSound } from './audio';
 import { flashCursor } from './cursor-fx';
 import { BUILDABLE_KINDS, BUILDING_DEFS, BuildingKind, CELL, DRAGON, GOBLIN, LIGHTNING, MINOTAUR, RENDER_SCALE, WORLD, formatPower } from './config';
-import { unlockOptionsCog } from './options-ui';
 import { RenderContext, clampCamera, clampSpaceCamera } from './render';
 import { autoAssignAllIdle, lightningStrike } from './sim';
 import {
@@ -916,25 +915,6 @@ function placeBuilding(state: GameState, x: number, y: number) {
   playSound('place', 1.6);
   appendLog(state, `${def.name} #${b.id} construction started — right-click goblins onto it to staff the build.`);
   autoAssignAllIdle(state);
-
-  // Demo-end gag: placing the Dragon Beacon pops a celebratory alert, then
-  // a second one revealing the secret options menu (hidden until now in
-  // production builds).
-  if (kind === 'dragon_beacon') {
-    window.alert(
-      "congratulations, you completed the demo! dragon lives in your imagination, "
-      + "heart, and soul. just imagine how cool it would be if a dragon was implemented. "
-      + "ahaha yeah, honestly its amazing. im so glad you grinded here for it. "
-      + "its not in the game at all LMAO. thanks! have a great day! "
-      + "i hope it doesnt 'drag on' ;)"
-    );
-    state.optionsUnlocked = true;
-    unlockOptionsCog();
-    window.alert(
-      "BUT WAIT --- YOU HAVE UNLOCKED THE SECRET SETTINGS MENU OF JUSTICE!!!!!!!!!! "
-      + "FIND IT IN THE BOTTOM RIGHT OF THE PLAY AREA. ENJOY"
-    );
-  }
 }
 
 // Wall placement — Ƶ1 per cell, 1×1 Building entity that goes straight to
