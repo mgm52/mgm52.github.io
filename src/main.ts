@@ -1,7 +1,7 @@
 import { playSound, preloadSounds, setCrackleEnabled, setMasterVolume, setMusicVolume, startBackgroundCrackle, startBackgroundMusic } from './audio';
 import {
   AUTOSPAWN_TIERS, CAMERA_SPEED, CELL, DRAGON, GOBLIN, GOLD_KILL_REWARD, KILL_REWARD, RENDER_SCALE, START_CELL,
-  SUMMON_UPGRADES, TICK_MS, MINOTAUR, digBloodCost,
+  SUMMON_UPGRADES, TICK_MS, MINOTAUR, digBloodCost, minotaurBloodCost,
 } from './config';
 import { setupInput } from './input';
 import { playIntroSequence, setIntroPaused, skipIntro } from './intro';
@@ -258,9 +258,11 @@ async function main() {
       appendLog(state, 'Hatching a goblin...');
     },
     onSummonMinotaur: () => {
-      if (state.blood < MINOTAUR.bloodCost) { playSound('error'); return; }
+      const cost = minotaurBloodCost(state.minotaursBought);
+      if (state.blood < cost) { playSound('error'); return; }
       if (state.minotaurSpawnQueue.length >= MINOTAUR.spawnCapacity) { playSound('error'); return; }
-      state.blood -= MINOTAUR.bloodCost;
+      state.blood -= cost;
+      state.minotaursBought++;
       state.minotaurSpawnQueue.push({ remaining: MINOTAUR.spawnTime });
       playSound('ritual');
       appendLog(state, 'Minotaur summon ritual begins...');

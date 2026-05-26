@@ -1,8 +1,8 @@
 import { playSound } from './audio';
 import {
   AUTOSPAWN_TIERS, BUILDABLE_KINDS, BUILDING_DEFS, BuildingKind, DRAG_SELECT_HINT_DELAY_SEC,
-  DRAGON, GOBLIN, LIGHTNING, STRIKE_TASK_GOAL_1, STRIKE_TASK_GOAL_2, SPAWN_HINT_NO_SPAWN_SEC,
-  SPAWN_HINT_NO_TASK_SEC, SUMMON_UPGRADES, WATER_HINT_DELAY_SEC, digBloodCost, MINOTAUR, TINYTAUR, formatPower,
+  DRAGON, GOBLIN, LIGHTNING, SPAWN_HINT_NO_SPAWN_SEC,
+  SPAWN_HINT_NO_TASK_SEC, SUMMON_UPGRADES, WATER_HINT_DELAY_SEC, digBloodCost, MINOTAUR, minotaurBloodCost, TINYTAUR, formatPower,
 } from './config';
 import {
   Building, Cell, DragonState, GameState, Goblin, GoblinState, SpaceBuilding, WaterSource,
@@ -175,6 +175,14 @@ const completedTaskIds = new Set<string>();
 // re-running the whole task evaluation.
 let currentTaskCached: Task | null = null;
 
+// Abilities (summons + rituals) aren't buildings, so they aren't listed in a
+// task's `unlocks` (which only takes BuildingKind). Instead each is gated in
+// refreshUI on the reveal of the task that grants it:
+//   run_phone_farm       → Autocommand, Dig
+//   build_gas_engine     → Minotaur, Autospawn
+//   earn_30_blood        → Goldblins
+//   finish_dragon_beacon → Dragon
+//   collect_dragon_bone  → Lightning Strike
 const TASKS: Task[] = [
   {
     id: 'earn_100',
@@ -197,10 +205,7 @@ const TASKS: Task[] = [
   {
     id: 'build_gas_engine',
     text: 'Construct a Gas Turbine',
-    // Datacentre + Goblin Hole unlock here (Phase 3). Lightning Strike now
-    // unlocks back at run_phone_farm; the Minotaur + Autospawn reward the
-    // optional strike_5 side-task, and Goldblins + Dig reward strike_15.
-    unlocks: ['datacentre', 'goblin_hole'],
+    unlocks: ['datacentre'],
     isDone: (s) => {
       for (const b of s.buildings.values()) {
         if (b.kind === 'gas_engine' && b.state !== 'constructing') return true;
@@ -234,23 +239,27 @@ const TASKS: Task[] = [
     prereq: ['run_datacentre'],
   },
   {
-    // Side 1 (optional): unlocks after Phase 2 (run_phone_farm). Rewards the
-    // Minotaur summon + Autospawn ritual (both gated in refreshUI on this
-    // task's reveal). No buildable unlock of its own.
-    id: 'strike_5',
-    text: `Strike ${STRIKE_TASK_GOAL_1} goblins at once`,
+    id: 'finish_dragon_beacon',
+    text: 'Finish a Dragon Beacon',
     unlocks: [],
-    isDone: (s) => s.maxStruckAtOnce >= STRIKE_TASK_GOAL_1,
-    prereq: ['run_phone_farm'],
-    optional: true,
+    // dragonSummonUnlocked flips (sticky) the moment a beacon finishes.
+    isDone: (s) => s.dragonSummonUnlocked,
+    prereq: ['build_hypercentre'],
   },
   {
-    // Side 2 (optional): unlocks after Phase 3 (build_gas_engine). Rewards the
-    // Goldblins (+x10) and Dig (gated in refreshUI on this task's reveal).
-    id: 'strike_15',
-    text: `Strike ${STRIKE_TASK_GOAL_2} goblins at once`,
+    id: 'collect_dragon_bone',
+    text: 'Collect a dragon bone',
     unlocks: [],
-    isDone: (s) => s.maxStruckAtOnce >= STRIKE_TASK_GOAL_2,
+    isDone: (s) => s.dragonBoneEarned >= 1,
+    prereq: ['finish_dragon_beacon'],
+  },
+  {
+    // Optional side-task: unlocks after Phase 3 (build_gas_engine). Grants the
+    // Goblin Hole (buildable) plus the Goldblins ritual (gated in refreshUI).
+    id: 'earn_30_blood',
+    text: 'Earn 30 blood',
+    unlocks: ['goblin_hole'],
+    isDone: (s) => s.bloodEarned >= 30,
     prereq: ['build_gas_engine'],
     optional: true,
   },
@@ -308,24 +317,6 @@ export function setupUI(state: GameState, callbacks: UICallbacks) {
   `;
   minotaurBtn.addEventListener('click', (e) => { playSound('click', 1, 0.75); flashSummonClick(minotaurBtn); emanateAtCursor(e.clientX, e.clientY); callbacks.onSummonMinotaur(); });
   summonList.appendChild(minotaurBtn);
-
-  // Lightning Strike — an aimed ability unlocked once the Run-your-first-
-  // datacentre task is done. Clicking arms it; the next map click calls the
-  // bolt down.
-  const lightningBtn = document.createElement('button');
-  lightningBtn.className = 'build-button build-button-compact';
-  lightningBtn.id = 'btn-lightning-strike';
-  lightningBtn.style.display = 'none';
-  lightningBtn.innerHTML = `
-    <div class="build-content">
-      <div class="build-text">
-        <div class="build-name">Lightning Strike</div>
-      </div>
-      <div class="build-cost-side"><span class="build-cost" id="cost-lightning-strike">${LIGHTNING.bloodCost} blood</span></div>
-    </div>
-  `;
-  lightningBtn.addEventListener('click', (e) => { playSound('click', 1, 0.75); flashSummonClick(lightningBtn); emanateAtCursor(e.clientX, e.clientY, 'white'); callbacks.onLightningStrike(); });
-  summonList.appendChild(lightningBtn);
 
   // Tinytaur — secret summon, hidden until the horde gets too packed to grow.
   // Instant (no spawn track), so just a name + blood cost.
@@ -447,7 +438,7 @@ export function setupUI(state: GameState, callbacks: UICallbacks) {
   ritualList.appendChild(goldX10Btn);
 
   // Dig row — four compact buttons (NESW) on a single line, unlocked by the
-  // optional strike_15 side-task. Each is one-shot and costs DIG.bloodCost
+  // Run-a-Phone-Farm task (Phase 2). Each is one-shot and costs DIG.bloodCost
   // blood. Digging still needs a Minotaur, so until one is summoned a "needs
   // Minotaur" banner sits across the row and the buttons stay disabled.
   const digRow = document.createElement('div');
@@ -492,6 +483,25 @@ export function setupUI(state: GameState, callbacks: UICallbacks) {
   digOverlay.style.zIndex = '2';
   digRow.appendChild(digOverlay);
   ritualList.appendChild(digRow);
+
+  // Lightning Strike — an aimed ritual unlocked once the Collect-a-Dragon-Bone
+  // task is done. Sits at the bottom of the Ritual list. Clicking arms it; the
+  // next map click calls the bolt down, killing every unit in the blast
+  // (goblins, minotaurs, dragons) for their kill rewards.
+  const lightningBtn = document.createElement('button');
+  lightningBtn.className = 'build-button build-button-compact';
+  lightningBtn.id = 'btn-lightning-strike';
+  lightningBtn.style.display = 'none';
+  lightningBtn.innerHTML = `
+    <div class="build-content">
+      <div class="build-text">
+        <div class="build-name">Lightning Strike</div>
+      </div>
+      <div class="build-cost-side"><span class="build-cost" id="cost-lightning-strike">${LIGHTNING.bloodCost} blood</span></div>
+    </div>
+  `;
+  lightningBtn.addEventListener('click', (e) => { playSound('click', 1, 0.75); flashSummonClick(lightningBtn); emanateAtCursor(e.clientX, e.clientY, 'white'); callbacks.onLightningStrike(); });
+  ritualList.appendChild(lightningBtn);
 
   // Map each buildable kind back to the task that unlocks it. Used both for
   // gating and for placing visual separators between task-unlock groups.
@@ -595,13 +605,6 @@ export function setupUI(state: GameState, callbacks: UICallbacks) {
 }
 
 function btnId(kind: BuildingKind): string { return `btn-build-${kind}`; }
-
-function anyPhoneFarmBuilt(state: GameState): boolean {
-  for (const b of state.buildings.values()) {
-    if (b.kind === 'phone_farm' && b.state !== 'constructing') return true;
-  }
-  return false;
-}
 
 function anyDatacentreBuilt(state: GameState): boolean {
   for (const b of state.buildings.values()) {
@@ -771,20 +774,21 @@ export function refreshUI(state: GameState) {
     setFillWidth(`fill-spawn-goblin-${i}`, spawnBySlot[i] ?? 0);
   }
 
-  // Minotaur button — rewards the optional strike_5 side-task (Side 1). Gated
-  // on revealedTaskIds so it fades in after the TASK COMPLETE overlay clears.
-  // Disabled while a summon is in progress; the segment bar fills like the
-  // Goblin button's spawn track.
+  // Minotaur button — unlocked by the Construct-a-Gas-Turbine task (Phase 3).
+  // Gated on revealedTaskIds so it fades in after the TASK COMPLETE overlay
+  // clears. Cost doubles per summon (8→16→32→64). Disabled while a summon is in
+  // progress; the segment bar fills like the Goblin button's spawn track.
   const minotaurBtn = document.getElementById('btn-summon-minotaur') as HTMLButtonElement;
-  const minotaurCost = document.getElementById('cost-summon-minotaur')!;
-  if (revealedTaskIds.has('strike_5')) {
+  const minotaurCostEl = document.getElementById('cost-summon-minotaur')!;
+  if (revealedTaskIds.has('build_gas_engine')) {
     minotaurBtn.style.display = '';
     applyFadeInOnFirstShow('btn-summon-minotaur');
     const queued = state.minotaurSpawnQueue.length;
-    const canAffordMinotaur = state.blood >= MINOTAUR.bloodCost;
+    const minoCost = minotaurBloodCost(state.minotaursBought);
+    const canAffordMinotaur = state.blood >= minoCost;
     minotaurBtn.disabled = queued > 0 || !canAffordMinotaur;
-    minotaurCost.textContent = `${MINOTAUR.bloodCost} blood`;
-    minotaurCost.classList.toggle('met', canAffordMinotaur && queued === 0);
+    minotaurCostEl.textContent = `${minoCost} blood`;
+    minotaurCostEl.classList.toggle('met', canAffordMinotaur && queued === 0);
     minotaurBtn.classList.toggle('in-progress', queued > 0);
     const remaining = queued > 0 ? state.minotaurSpawnQueue[0].remaining : MINOTAUR.spawnTime;
     const fill = queued > 0 ? 1 - remaining / MINOTAUR.spawnTime : 0;
@@ -810,10 +814,10 @@ export function refreshUI(state: GameState) {
     tinytaurBtn.style.display = 'none';
   }
 
-  // Dragon button — appears once a Dragon Beacon has finished (sticky via
-  // dragonSummonUnlocked, set in the sim tick).
+  // Dragon button — unlocked by the Finish-a-Dragon-Beacon task. Gated on the
+  // task reveal so it fades in after the TASK COMPLETE overlay clears.
   const dragonBtn = document.getElementById('btn-summon-dragon') as HTMLButtonElement;
-  if (state.dragonSummonUnlocked) {
+  if (revealedTaskIds.has('finish_dragon_beacon')) {
     dragonBtn.style.display = '';
     applyFadeInOnFirstShow('btn-summon-dragon');
     const queued = state.dragonSpawnQueue.length;
@@ -867,11 +871,22 @@ export function refreshUI(state: GameState) {
   const buildSection = document.getElementById('build-section')!;
   buildSection.style.display = firstTaskDone ? '' : 'none';
 
-  // Lightning Strike — unlocks (sticky) once the Run-a-Phone-Farm task (Phase
-  // 2) is done. Disabled when the player can't cover the blood cost; lit while
-  // armed. Striking goblins with it drives the strike_5 / strike_15 side-tasks.
+  // Reveal flags for the task-gated abilities. Gated on revealedTaskIds (not
+  // completedTaskIds) so each button emerges AFTER its TASK COMPLETE overlay
+  // fades, letting the fade-in animation play.
+  //   run_phone_farm       → Autocommand, Dig
+  //   build_gas_engine     → Autospawn (+ Minotaur, handled above)
+  //   earn_30_blood        → Goldblins
+  //   collect_dragon_bone  → Lightning Strike
+  const phaseRunPhoneFarm = revealedTaskIds.has('run_phone_farm');
+  const phaseGasTurbine = revealedTaskIds.has('build_gas_engine');
+  const blood30Done = revealedTaskIds.has('earn_30_blood');
+  const dragonBoneDone = revealedTaskIds.has('collect_dragon_bone');
+
+  // Lightning Strike — a ritual unlocked once the Collect-a-Dragon-Bone task is
+  // done. Disabled when the player can't cover the blood cost; lit while armed.
   const lightningBtn = document.getElementById('btn-lightning-strike') as HTMLButtonElement;
-  if (completedTaskIds.has('run_phone_farm')) {
+  if (dragonBoneDone) {
     lightningBtn.style.display = '';
     applyFadeInOnFirstShow('btn-lightning-strike');
     const canAffordLightning = state.blood >= LIGHTNING.bloodCost;
@@ -882,19 +897,11 @@ export function refreshUI(state: GameState) {
     lightningBtn.style.display = 'none';
   }
 
-  // Ritual upgrades — Autocommand appears once a Phone Farm is built (Phase 2);
-  // Autospawn rewards the optional strike_5 side-task; Goldblins + Dig reward
-  // strike_15. Bought ones stay visible but go disabled.
-  const phoneFarmBuilt = anyPhoneFarmBuilt(state);
-  // Side-task rewards. Gated on revealedTaskIds (not completedTaskIds) so the
-  // buttons emerge AFTER the TASK COMPLETE overlay fades, letting the fade-in
-  // animation play.
-  const strike5Done = revealedTaskIds.has('strike_5');
-  const strike15Done = revealedTaskIds.has('strike_15');
-  // Dig rewards strike_15 (Side 2). Digging itself still needs a Minotaur
-  // (rewarded by strike_5); see the dig-overlay banner below.
-  const digUnlocked = strike15Done;
-  const ritualVisible = phoneFarmBuilt || strike5Done || strike15Done;
+  // Dig rewards run_phone_farm (Phase 2). Digging itself still needs a Minotaur
+  // (rewarded later, at Phase 3), so a "needs Minotaur" banner covers the row
+  // until one is summoned; see the dig-overlay below.
+  const digUnlocked = phaseRunPhoneFarm;
+  const ritualVisible = phaseRunPhoneFarm || phaseGasTurbine || blood30Done || dragonBoneDone;
   const ritualSection = document.getElementById('ritual-section')!;
   ritualSection.style.display = ritualVisible ? '' : 'none';
   // Now that the panel renders as a bordered card, an empty container shows
@@ -903,9 +910,10 @@ export function refreshUI(state: GameState) {
   const panelBuild = document.getElementById('panel-build')!;
   panelBuild.style.display = (firstTaskDone || ritualVisible) ? '' : 'none';
 
+  // Autocommand — unlocked by the Run-a-Phone-Farm task (Phase 2).
   refreshRitualButton(
     'btn-buy-autoassign', 'cost-buy-autoassign',
-    phoneFarmBuilt, state.autoAssignEnabled, state.blood >= SUMMON_UPGRADES.autoAssign.bloodCost,
+    phaseRunPhoneFarm, state.autoAssignEnabled, state.blood >= SUMMON_UPGRADES.autoAssign.bloodCost,
     `${SUMMON_UPGRADES.autoAssign.bloodCost} blood`,
   );
   // Autowater — appears once Autocommand is owned and a water source has
@@ -916,14 +924,15 @@ export function refreshUI(state: GameState) {
     state.autoWaterEnabled, state.blood >= SUMMON_UPGRADES.autoWater.bloodCost,
     `${SUMMON_UPGRADES.autoWater.bloodCost} blood`,
   );
-  refreshAutospawnButton(state, strike5Done);
+  // Autospawn — unlocked by the Construct-a-Gas-Turbine task (Phase 3).
+  refreshAutospawnButton(state, phaseGasTurbine);
   // Goldblins → Goldblins x10 form a replace chain (like Autospawn): base
   // button hides once owned, x10 takes its place; x10 hides once owned.
-  // Base Goldblins unlocks by completing the optional strike_15 task; x10
+  // Base Goldblins unlocks via the optional Earn-30-blood side-task; x10
   // follows once base Goldblins is owned.
   refreshRitualButton(
     'btn-buy-goldgoblins', 'cost-buy-goldgoblins',
-    strike15Done && !state.goldgoblinsEnabled, false,
+    blood30Done && !state.goldgoblinsEnabled, false,
     state.blood >= SUMMON_UPGRADES.goldgoblins.bloodCost,
     `${SUMMON_UPGRADES.goldgoblins.bloodCost} blood`,
   );
@@ -935,10 +944,10 @@ export function refreshUI(state: GameState) {
     `${SUMMON_UPGRADES.goldgoblinsX10.bloodCost} blood`,
   );
 
-  // Dig row: rewards the optional strike_15 side-task (Side 2). Each direction
+  // Dig row: unlocked by the Run-a-Phone-Farm task (Phase 2). Each direction
   // is one-shot. First time the row appears, each button fades in. Until a
-  // Minotaur has been summoned (itself a strike_5 reward), a "needs Minotaur"
-  // banner covers the row and the buttons are disabled.
+  // Minotaur has been summoned (Phase 3 reward), a "needs Minotaur" banner
+  // covers the row and the buttons are disabled.
   if (state.minotaurs.size > 0) minotaurEverSummoned = true;
   const needsMinotaur = !minotaurEverSummoned;
   const digRow = document.getElementById('dig-row')!;
