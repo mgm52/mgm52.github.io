@@ -118,6 +118,12 @@ export const DRAGON = {
   killReach: 22,         // px the fire-breath reaches past the target center
   spaceY: -4 * CELL,     // world-y a carrier climbs to before its load enters space
   displayPx: 132,        // on-screen sprite size of a full dragon
+  // Entrance swoop: a freshly-summoned dragon spawns this many px above its
+  // landing point and flies down at swoopSpeed. The offset is well past the
+  // top of the viewport at any reasonable zoom, so it reads as arriving from
+  // off-screen rather than popping into existence at the beacon.
+  swoopFromOffset: 1200, // px above target on summon
+  swoopSpeed: 1500,      // px/sec entry speed
 };
 
 // Ambient dragons — purely decorative silhouettes that drift across the space

@@ -85,7 +85,6 @@ export function loadGame(): { state: GameState; savedAt: number } | null {
     // `selected` was added with space-building selection; default it so saves
     // predating it don't leave the field undefined.
     for (const sb of env.state.spaceBuildings.values()) sb.selected ??= false;
-    env.state.dragonSummonUnlocked ??= false;
     // Strike side-tasks switched from a single struck13Goblins boolean to a
     // maxStruckAtOnce counter. Carry old progress forward (a true flag meant
     // the player had struck 13 at once, which clears the new 5-goblin tier).

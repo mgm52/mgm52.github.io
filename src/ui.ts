@@ -203,8 +203,10 @@ let currentTaskCached: Task | null = null;
 //   run_phone_farm       → Autocommand, Dig
 //   build_gas_engine     → Minotaur, Autospawn
 //   earn_30_blood        → Goldblins
-//   finish_dragon_beacon → Dragon
 //   collect_dragon_bone  → Lightning Strike + demo-end alerts + secret options cog
+// The Dragon summon is special-cased: it has no gating task. Its button shows
+// whenever at least one Dragon Beacon is `active`, and the simultaneous-dragon
+// cap (live + queued) equals the active-beacon count.
 const TASKS: Task[] = [
   {
     id: 'earn_100',
@@ -261,19 +263,11 @@ const TASKS: Task[] = [
     prereq: ['run_datacentre'],
   },
   {
-    id: 'finish_dragon_beacon',
-    text: 'Finish a Dragon Beacon',
-    unlocks: [],
-    // dragonSummonUnlocked flips (sticky) the moment a beacon finishes.
-    isDone: (s) => s.dragonSummonUnlocked,
-    prereq: ['build_hypercentre'],
-  },
-  {
     id: 'collect_dragon_bone',
     text: 'Collect a dragon bone',
     unlocks: [],
     isDone: (s) => s.dragonBoneEarned >= 1,
-    prereq: ['finish_dragon_beacon'],
+    prereq: ['build_hypercentre'],
   },
   {
     // Optional side-task: unlocks after Phase 3 (build_gas_engine). Grants the
@@ -836,22 +830,28 @@ export function refreshUI(state: GameState) {
     tinytaurBtn.style.display = 'none';
   }
 
-  // Dragon button — unlocked by the Finish-a-Dragon-Beacon task. Gated on the
-  // task reveal so it fades in after the TASK COMPLETE overlay clears.
+  // Dragon button — shows whenever at least one Dragon Beacon is `active`, and
+  // the simultaneous-dragon cap (live + queued) equals the active-beacon count.
   const dragonBtn = document.getElementById('btn-summon-dragon') as HTMLButtonElement;
-  if (revealedTaskIds.has('finish_dragon_beacon')) {
+  let activeBeaconCount = 0;
+  for (const b of state.buildings.values()) {
+    if (b.kind === 'dragon_beacon' && b.state === 'active') activeBeaconCount++;
+  }
+  if (activeBeaconCount > 0) {
     dragonBtn.style.display = '';
     applyFadeInOnFirstShow('btn-summon-dragon');
     const queued = state.dragonSpawnQueue.length;
+    const live = state.dragons.size;
+    const atCap = live + queued >= activeBeaconCount;
     const canAffordDragon = state.blood >= DRAGON.bloodCost;
-    dragonBtn.disabled = queued > 0 || !canAffordDragon;
+    dragonBtn.disabled = atCap || !canAffordDragon;
     const dragonCost = document.getElementById('cost-summon-dragon')!;
-    dragonCost.classList.toggle('met', canAffordDragon && queued === 0);
+    dragonCost.classList.toggle('met', canAffordDragon && !atCap);
     dragonBtn.classList.toggle('in-progress', queued > 0);
     const dragonRemaining = queued > 0 ? state.dragonSpawnQueue[0].remaining : DRAGON.spawnTime;
     const dragonFill = queued > 0 ? 1 - dragonRemaining / DRAGON.spawnTime : 0;
     setFillWidth('fill-summon-dragon-0', Math.max(0, Math.min(1, dragonFill)));
-    setBuyFlash('btn-summon-dragon', canAffordDragon && queued === 0 && state.dragons.size === 0 && state.spaceBuildings.size === 0 && state.dragonSpawnQueue.length === 0);
+    setBuyFlash('btn-summon-dragon', canAffordDragon && !atCap && live === 0 && state.spaceBuildings.size === 0 && queued === 0);
   } else {
     dragonBtn.style.display = 'none';
     setBuyFlash('btn-summon-dragon', false);
@@ -1202,6 +1202,7 @@ function refreshInfoPanel(state: GameState) {
 
 function describeDragonState(s: DragonState): string {
   switch (s.kind) {
+    case 'swooping_in': return 'Swooping in from above';
     case 'seeking': return 'Seeking the choicest building';
     case 'hovering_to_lift': return `Looming over building #${s.buildingId}`;
     case 'carrying': return 'Hauling a building to space';
@@ -1464,16 +1465,14 @@ export function executeTaskSkip(state: GameState): void {
       state.bloodUnlocked = true;
       break;
     }
-    case 'finish_dragon_beacon': {
-      // Build the Beacon outright; sim's per-tick check flips
-      // dragonSummonUnlocked, but set it here too so isDone trips immediately.
-      ensureBuildingCount(state, 'dragon_beacon', 1);
-      state.dragonSummonUnlocked = true;
-      break;
-    }
     case 'collect_dragon_bone': {
-      // Hand the player a bone outright so dragonBoneEarned satisfies isDone
-      // and the unlock side-effects (Lightning Strike + final-game gag) fire.
+      // A real player would have built a Beacon to get here, so place one too
+      // — the Dragon summon button surfaces the moment any beacon goes active,
+      // which makes the post-skip world look like a normal playthrough rather
+      // than just handing over the bone. Then hand the bone outright so
+      // dragonBoneEarned satisfies isDone and the unlock side-effects
+      // (Lightning Strike + final-game gag) fire.
+      ensureBuildingCount(state, 'dragon_beacon', 1);
       earnDragonBone(state, 1);
       state.dragonBoneUnlocked = true;
       break;

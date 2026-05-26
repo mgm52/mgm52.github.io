@@ -98,11 +98,6 @@ export function tick(state: GameState) {
   // Floating space buildings drift within their bounds.
   for (const sb of state.spaceBuildings.values()) updateSpaceBuilding(sb);
 
-  // Sticky: once any Dragon Beacon has finished, the Dragon summon stays open.
-  if (!state.dragonSummonUnlocked && constructedDragonBeacon(state)) {
-    state.dragonSummonUnlocked = true;
-  }
-
   // Sticky: the Tinytaur summon reveals itself once the player has fielded
   // enough Minotaurs at once to pay its sacrifice cost.
   if (!state.tinytaurUnlocked && state.minotaurs.size >= TINYTAUR.minotaurCost) {
@@ -846,24 +841,25 @@ function updateMinotaur(state: GameState, t: Minotaur, autoTargets: Map<number, 
 }
 
 // ─── Dragons ────────────────────────────────────────────────────────
-// Summon a dragon. Launches from the first finished Dragon Beacon (or the
-// hole, as a fallback) and starts in its default seeking behaviour. Instant —
-// no queue. Returns false only if there's nowhere sensible to launch from.
+// Summon a dragon. Targets the first finished Dragon Beacon (or the hole, as
+// a fallback) but spawns far above and swoops down so the entrance reads as
+// arriving from off-screen rather than popping into existence at the beacon.
 export function spawnDragon(state: GameState): boolean {
   const beacon = constructedDragonBeacon(state);
   const origin = beacon ? buildingCenter(beacon) : holeCenter(state);
   const id = state.nextId++;
+  const goal = { x: origin.x, y: origin.y - CELL * 2 };
   const d: Dragon = {
     id,
-    pos: { x: origin.x, y: origin.y - CELL * 2 },
+    pos: { x: goal.x, y: goal.y - DRAGON.swoopFromOffset },
     facing: 1,
-    state: { kind: 'seeking' },
+    state: { kind: 'swooping_in', goal },
     carrying: null,
     selected: false,
     spawnAt: state.now,
   };
   state.dragons.set(id, d);
-  appendLog(state, `Dragon #${id} unfurls its wings.`);
+  appendLog(state, `Dragon #${id} swoops down from above.`);
   // The summon ritual sound fires when the player queues the summon (main.ts);
   // this is the dragon actually arriving.
   playSound('online', 0.5, 0.35);
@@ -1130,6 +1126,17 @@ function updateDragon(state: GameState, d: Dragon) {
       }
       s.attackAt = undefined;
       dragonFlyToward(d, tx, ty, speed);
+      return;
+    }
+
+    case 'swooping_in': {
+      // Fast entrance from above. On arrival, hand off to seeking and reset
+      // the spawn clock so the usual seek-delay hover beat starts from the
+      // landing (giving the player a window to issue a manual command).
+      if (dragonFlyToward(d, d.state.goal.x, d.state.goal.y, DRAGON.swoopSpeed)) {
+        d.state = { kind: 'seeking' };
+        d.spawnAt = state.now;
+      }
       return;
     }
 

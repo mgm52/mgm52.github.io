@@ -129,7 +129,11 @@ export type DragonState =
   // A dragon target is fratricide — the victim drops a Dragon Bone.
   | { kind: 'going_to_kill'; targetKind: 'goblin' | 'minotaur' | 'dragon'; targetId: number; attackAt?: number }
   // Commanded: hoist one specific building (even the Beacon) up to space.
-  | { kind: 'going_to_building'; buildingId: number };
+  | { kind: 'going_to_building'; buildingId: number }
+  // Entrance animation: spawned far above the goal and flies down fast. On
+  // arrival flips to `seeking` with spawnAt reset, so the usual seek-delay
+  // hover beat starts from the landing rather than from the summon click.
+  | { kind: 'swooping_in'; goal: Vec2 };
 
 export type Dragon = {
   id: number;
@@ -335,9 +339,6 @@ export type GameState = {
   // the final task (collect_dragon_bone) — that's the demo-end gag, so the
   // secret-settings reveal gates on getting that far. Sticky once flipped.
   optionsUnlocked: boolean;
-  // Sticky: flips true once any Dragon Beacon has finished constructing, so the
-  // Dragon summon button survives even if every beacon is later hauled to space.
-  dragonSummonUnlocked: boolean;
   // Sticky: flips true the first time a building reaches space. Gates the
   // "hold ↑ at the top of the map to rise into space" affordance.
   spaceUnlocked: boolean;
@@ -627,7 +628,6 @@ export function createInitialState(): GameState {
     waterSeen: false,
     multiSelectSeen: false,
     optionsUnlocked: false,
-    dragonSummonUnlocked: false,
     spaceUnlocked: false,
     view: 'ground',
   };
