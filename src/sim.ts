@@ -254,19 +254,25 @@ export function lightningStrike(state: GameState, x: number, y: number): boolean
 
   pushLightningBolt(state, x, y);
 
-  state.powerBoosts.push({
-    startAt: state.now,
-    peak: LIGHTNING.powerBoostWatts,
-    duration: LIGHTNING.powerBoostSeconds,
-  });
-  // Floating "+1.00 GW" that ticks down to 0.00 as the surge decays.
-  pushFloater(
-    state, x, y,
-    `+${(LIGHTNING.powerBoostWatts / 1e9).toFixed(2)} GW`,
-    0x8acfff,
-    LIGHTNING.powerBoostSeconds,
-    LIGHTNING.powerBoostWatts,
-  );
+  // One decaying +1 GW surge per building caught in the blast — the floater
+  // rides over each struck building, and a strike that hits no buildings
+  // produces no power gain at all.
+  for (const b of state.buildings.values()) {
+    const c = buildingCenter(b);
+    if (!within(c.x, c.y)) continue;
+    state.powerBoosts.push({
+      startAt: state.now,
+      peak: LIGHTNING.powerBoostWatts,
+      duration: LIGHTNING.powerBoostSeconds,
+    });
+    pushFloater(
+      state, c.x, c.y,
+      `+${(LIGHTNING.powerBoostWatts / 1e9).toFixed(2)} GW`,
+      0x8acfff,
+      LIGHTNING.powerBoostSeconds,
+      LIGHTNING.powerBoostWatts,
+    );
+  }
   playSound('destroy', 0.7, 0.4);
   if (killed > 0) playDecayingGoblinDeath(0.6);
   appendLog(state, `Lightning strike! ${killed} unit${killed === 1 ? '' : 's'} vaporised.`);
@@ -1022,7 +1028,12 @@ function dragonKill(state: GameState, d: Dragon, kind: 'goblin' | 'minotaur' | '
 }
 
 function updateDragon(state: GameState, d: Dragon) {
-  const speed = DRAGON.speed;
+  // Player-issued orders fly at the snappier manualSpeed so commands feel
+  // responsive; the default auto-collecting path stays at the calmer speed.
+  const k = d.state.kind;
+  const isManualOrder = k === 'moving_to' || k === 'going_to_kill'
+    || k === 'going_to_building' || k === 'delivering';
+  const speed = isManualOrder ? DRAGON.manualSpeed : DRAGON.speed;
   switch (d.state.kind) {
     case 'carrying': {
       // Climb straight up; once high enough the load enters space.
@@ -1100,7 +1111,14 @@ function updateDragon(state: GameState, d: Dragon) {
         }
         if (state.now < s.attackAt) return;
         dragonKill(state, d, s.targetKind, s.targetId);
-        d.state = { kind: 'seeking' };
+        // Hover in place for postKillPause before drifting back to default
+        // seeking — reuses moving_to's linger machinery with the current
+        // position as the goal so the dragon won't actually travel.
+        d.state = {
+          kind: 'moving_to',
+          goal: { x: d.pos.x, y: d.pos.y },
+          lingerUntil: state.now + DRAGON.postKillPause,
+        };
         return;
       }
       s.attackAt = undefined;

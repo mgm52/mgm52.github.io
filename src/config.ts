@@ -92,7 +92,10 @@ export const TINYTAUR = {
 // Dragons fly in straight lines, ignoring walls, buildings, and occupancy.
 export const DRAGON = {
   bloodCost: 64,
-  speed: 90,             // px/sec
+  speed: 90,             // px/sec, default auto-seek / carry speed
+  // Snappier travel speed used while obeying a player command (moving_to,
+  // going_to_kill, going_to_building, delivering). Auto-collecting stays calm.
+  manualSpeed: 160,      // px/sec
   // Ritual delay between summoning a dragon and it appearing, mirroring the
   // Minotaur's summon-in time. Only one dragon can be in the ritual at once.
   spawnTime: 2,          // seconds
@@ -103,6 +106,9 @@ export const DRAGON = {
   // After a player-commanded move reaches its destination, the dragon loiters
   // here this long before reverting to its default building-hauling behaviour.
   moveLingerTime: 3,     // seconds
+  // After landing a commanded kill, the dragon hovers in place this long
+  // before reverting to its default building-hauling behaviour.
+  postKillPause: 3,      // seconds
   // Once over a target building, the dragon hovers this long before hoisting it
   // — a beat of menace before the lift.
   liftHover: 2,          // seconds
