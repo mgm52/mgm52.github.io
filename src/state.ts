@@ -181,6 +181,10 @@ export type Building = {
   // when the building first became active, so buildings placed at different
   // times pay on different ticks. Undefined until the first active tick.
   nextIncomeAt?: number;
+  // state.now when this building first finished constructing — used by the
+  // Hell Portal beam (overworld + hell side) to time its draw-in animation.
+  // Undefined until construction completes.
+  activatedAt?: number;
   // 0..100 percent. For buildings with `waterDeliveryAmount`, depletes at
   // WATER_DEPLETION_PP_PER_SEC; each carrier delivery bumps it by the def's
   // delivery amount. The building counts as "watered" while > 0.
@@ -209,12 +213,15 @@ export type Floater = {
 
 // One-shot blood-explosion GIF effect played at a world position. The Lightning
 // Strike marks its splatters `white` so the renderer draws them as a pale
-// silhouette instead of the usual blood color.
+// silhouette instead of the usual blood color. Splatters flagged `hell` ride
+// in the hell scene at the world→hell-mapped position — the "born in blood"
+// counterpart to dying in the overworld.
 export type DeathEffect = {
   id: number;
   x: number; y: number;
   spawnAt: number;
   white?: boolean;
+  hell?: boolean;
 };
 
 // A ghost of a unit the player has killed — surfaced in Hell as a static
@@ -375,9 +382,6 @@ export type GameState = {
   // Sticky: flips true the first time a Hell Portal is placed. Gates the
   // "hold ↓ at the bottom of the map to descend into hell" affordance.
   hellUnlocked: boolean;
-  // state.now when the first Hell Portal was placed — drives the red beam's
-  // draw-in animation. Null until the player places one.
-  hellPortalPlacedAt: number | null;
   // Ghosts of every unit the player has killed (goblin, minotaur, dragon),
   // displayed in Hell as static silhouettes at the world-x/y where they died.
   ghosts: Ghost[];
@@ -697,7 +701,6 @@ export function createInitialState(): GameState {
     optionsUnlocked: false,
     spaceUnlocked: false,
     hellUnlocked: false,
-    hellPortalPlacedAt: null,
     ghosts: [],
     view: 'ground',
   };
@@ -766,7 +769,9 @@ export function totalIncome(state: GameState): number {
 
 // Stamp a permanent ghost at the world-x/y where a unit died. Called from
 // every kill site (lightning, dragon, minotaur, goblin, tinytaur sacrifice,
-// player kill button). The ghosts list is rendered in Hell.
+// player kill button). The ghosts list is rendered in Hell. A matching
+// hell-flagged death effect is also spawned so the ghost manifests with a
+// blood splatter — "dying in reverse" as the unit enters the underworld.
 export function recordGhost(
   state: GameState,
   kind: Ghost['kind'],
@@ -780,14 +785,16 @@ export function recordGhost(
     gold: opts.gold || undefined,
     tiny: opts.tiny || undefined,
   });
+  pushDeathEffect(state, x, y, false, true);
 }
 
-export function pushDeathEffect(state: GameState, x: number, y: number, white = false) {
+export function pushDeathEffect(state: GameState, x: number, y: number, white = false, hell = false) {
   state.deathEffects.push({
     id: state.nextId++,
     x, y,
     spawnAt: state.now,
     white: white || undefined,
+    hell: hell || undefined,
   });
 }
 

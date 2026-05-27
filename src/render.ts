@@ -167,42 +167,46 @@ function getGlowTexture(): Texture {
   return glowTexture;
 }
 
-// Dim infernal wash + drifting fog rings for the hell scene. Painted once
-// across HELL bounds; the ghosts ride on top.
+// Infernal wash + drifting fog rings for the hell scene. Painted once across
+// HELL bounds; the ghosts ride on top. Tuned so the world reads clearly — a
+// warm dark-maroon base with bright red blooms rather than near-black.
 function drawHellBackground(g: Graphics): void {
   g.clear();
-  // Deep base wash with a slow vertical gradient toward black at the bottom.
-  const stripes = 32;
+  // Base wash with a vertical gradient from a warm maroon at the top to a
+  // hotter red-orange near the bottom (deeper hell = more fire).
+  const stripes = 48;
   for (let i = 0; i < stripes; i++) {
     const t = i / stripes;
-    const r = Math.round(0x0a + (0x1a - 0x0a) * (1 - t));
-    const gr = Math.round(0x02 + (0x06 - 0x02) * (1 - t));
-    const b = Math.round(0x03 + (0x08 - 0x03) * (1 - t));
+    const r = Math.round(0x42 + (0x82 - 0x42) * t);
+    const gr = Math.round(0x10 + (0x1c - 0x10) * t);
+    const b = Math.round(0x12 + (0x14 - 0x12) * t);
     const col = (r << 16) | (gr << 8) | b;
     g.rect(0, Math.floor(t * HELL.height), HELL.width, Math.ceil(HELL.height / stripes) + 1).fill(col);
   }
-  // Sparse blood-mist rings — soft red blooms scattered across the bounds.
-  const mist: [number, number, number, number][] = [
-    [HELL.width * 0.18, HELL.height * 0.22, 380, HELL.fogColor],
-    [HELL.width * 0.74, HELL.height * 0.32, 450, 0x3a0612],
-    [HELL.width * 0.52, HELL.height * 0.58, 520, 0x4a0a14],
-    [HELL.width * 0.28, HELL.height * 0.78, 360, 0x3a0612],
-    [HELL.width * 0.82, HELL.height * 0.86, 410, HELL.fogColor],
+  // Big soft blood-glow blooms — substantial fill alpha so the field reads
+  // as glowing rather than flat. A few orange-tinted ones lift the contrast.
+  const mist: [number, number, number, number, number][] = [
+    [HELL.width * 0.18, HELL.height * 0.22, 520, 0xb22030, 0.10],
+    [HELL.width * 0.74, HELL.height * 0.32, 600, 0xc04830, 0.09],
+    [HELL.width * 0.52, HELL.height * 0.58, 720, 0xff5a2a, 0.07],
+    [HELL.width * 0.28, HELL.height * 0.78, 540, 0xff8030, 0.09],
+    [HELL.width * 0.82, HELL.height * 0.86, 560, 0xb22030, 0.10],
+    [HELL.width * 0.10, HELL.height * 0.55, 420, 0xff5a2a, 0.07],
+    [HELL.width * 0.92, HELL.height * 0.50, 430, 0xff5a2a, 0.07],
   ];
-  for (const [nx, ny, nr, col] of mist) {
-    for (let i = 5; i >= 1; i--) {
-      g.circle(nx, ny, nr * (i / 5)).fill({ color: col, alpha: 0.05 });
+  for (const [nx, ny, nr, col, a] of mist) {
+    for (let i = 6; i >= 1; i--) {
+      g.circle(nx, ny, nr * (i / 6)).fill({ color: col, alpha: a });
     }
   }
-  // Faint ember specks — a hellish equivalent of the starfield. Mostly red,
-  // a sprinkle of orange.
-  for (let i = 0; i < 700; i++) {
+  // Brighter, more numerous ember specks — feels like a sky of burning coals.
+  for (let i = 0; i < 1100; i++) {
     const x = Math.random() * HELL.width;
     const y = Math.random() * HELL.height;
-    const r = 0.4 + Math.random() * 1.3;
+    const r = 0.6 + Math.random() * 1.8;
     const tint = Math.random();
-    const col = tint < 0.7 ? 0x8a1818 : tint < 0.9 ? 0xb83820 : 0xff6a3a;
-    g.circle(x, y, r).fill({ color: col, alpha: 0.25 + Math.random() * 0.55 });
+    const col = tint < 0.55 ? 0xffb060 : tint < 0.85 ? 0xff7030 : 0xfff0c0;
+    g.circle(x, y, r).fill({ color: col, alpha: 0.5 + Math.random() * 0.5 });
   }
 }
 
@@ -380,8 +384,20 @@ export type RenderContext = {
   hellZoom: number;
   // The portal-to-abyss beam: a red line drawn from each hell_portal's
   // bottom-center straight down toward the world's edge. Animates in over
-  // HELL.lineDrawMs ms after a portal is placed.
+  // HELL.lineDrawMs ms after a portal finishes constructing.
   hellBeamGfx: Graphics;
+  // The matching beam on the hell side — drawn upward from each mirror
+  // portal's top toward the top of HELL bounds, so the two shafts read as a
+  // single pillar connecting the worlds.
+  hellSideBeamGfx: Graphics;
+  // Mirror buildings rendered in hellLayer at the world-coord of every
+  // overworld hell_portal. Built/destroyed in lockstep with their counterpart.
+  hellPortalMirrorLayer: Container;
+  hellPortalMirrors: Map<number, Container>;
+  // Death-effect splatters that ride in the hell scene (the "born in blood"
+  // appearance of a ghost). Drawn from the same DeathEffect entries flagged
+  // hell:true; the renderer maps their world coords into hell coords.
+  hellEffectsLayer: Container;
   // Goblin Hole: a fixed pit-graphic plus its selection ring. Drawn between
   // the grid and buildings so a building placed on top covers it.
   holeGfx: Graphics;
@@ -523,6 +539,14 @@ export async function createRender(parent: HTMLElement, state: GameState): Promi
   const hellGhostLayer = new Container();
   hellGhostLayer.cullableChildren = true;
   hellLayer.addChild(hellGhostLayer);
+  // Mirror portals + their upward beams ride on top of the ghosts.
+  const hellPortalMirrorLayer = new Container();
+  hellLayer.addChild(hellPortalMirrorLayer);
+  const hellEffectsLayer = new Container();
+  hellEffectsLayer.cullableChildren = true;
+  hellLayer.addChild(hellEffectsLayer);
+  const hellSideBeamGfx = new Graphics();
+  hellLayer.addChild(hellSideBeamGfx);
   hellLayer.scale.set(RENDER_SCALE);
   hellLayer.visible = false;
   // Hell sits between the ground and the sky/space stack so the descent's
@@ -610,6 +634,10 @@ export async function createRender(parent: HTMLElement, state: GameState): Promi
     depth: 0,
     hellZoom: 0,
     hellBeamGfx,
+    hellSideBeamGfx,
+    hellPortalMirrorLayer,
+    hellPortalMirrors: new Map(),
+    hellEffectsLayer,
     holeGfx, holeRing,
     floatersLayer, floaterViews: new Map(),
     effectsLayer, deathViews: new Map(),
@@ -1042,7 +1070,7 @@ export function ambientDragonAt(ctx: RenderContext, x: number, y: number): { id:
 function makeGhostView(g: Ghost): GhostView | null {
   const container = new Container();
   container.position.set(worldToHellX(g.x), worldToHellY(g.y));
-  container.alpha = 0.62;
+  container.alpha = 0.88;
 
   if (g.kind === 'goblin') {
     const sheet = goblinIdleSheet ?? goblinWalkSheet;
@@ -1053,7 +1081,7 @@ function makeGhostView(g: Ghost): GhostView | null {
     sprite.anchor.set(0.5);
     const px = getOptions().goblinDisplayPx;
     sprite.scale.set(px / sheet.meta.spriteSize);
-    sprite.tint = g.gold ? 0xb88a3a : 0xd06868;
+    sprite.tint = g.gold ? 0xffd060 : 0xff8888;
     container.addChild(sprite);
     return { container, sprite };
   }
@@ -1066,22 +1094,22 @@ function makeGhostView(g: Ghost): GhostView | null {
     sprite.anchor.set(0.5);
     const px = getOptions().minotaurDisplayPx * (g.tiny ? TINYTAUR.scale : 1);
     sprite.scale.set(px / sheet.meta.spriteSize);
-    sprite.tint = 0xb84848;
+    sprite.tint = 0xff6868;
     container.addChild(sprite);
     return { container, sprite };
   }
-  // Dragon ghost: reuse the placeholder block + glyph but dim it.
+  // Dragon ghost: reuse the placeholder block + glyph but in deep red.
   const half = DRAGON_BLOCK / 2;
   const block = new Graphics();
   block.roundRect(-half, -half, DRAGON_BLOCK, DRAGON_BLOCK, 8)
-    .fill(0x4a0a14)
-    .stroke({ width: 3, color: 0x8a2030 });
+    .fill(0x8a1828)
+    .stroke({ width: 3, color: 0xff5a4a });
   const label = new Text({
     text: '🐉',
     style: { fontFamily: 'sans-serif', fontSize: Math.round(DRAGON_BLOCK * 0.62), fill: 0xffffff },
   });
   label.anchor.set(0.5);
-  label.alpha = 0.7;
+  label.alpha = 0.9;
   container.addChild(block);
   container.addChild(label);
   // Dragon facing is -1 (left) / +1 (right); the glyph faces left, mirror on +1.
@@ -1089,6 +1117,41 @@ function makeGhostView(g: Ghost): GhostView | null {
   // Cast block as the "sprite" for the view interface; we never touch it after
   // creation here, so any Container child works.
   return { container, sprite: block as unknown as Sprite };
+}
+
+// Build the hell-side mirror of an overworld hell_portal — a darker copy of
+// the building's footprint with a pulsing red interior, positioned at the
+// portal's world coord mapped into hell space. Used once at creation;
+// container is destroyed when the source portal is destroyed.
+function makeHellPortalMirror(b: Building): Container {
+  const c = new Container();
+  const def = defOf(b);
+  const ctr = buildingCenter(b);
+  c.position.set(worldToHellX(ctr.x), worldToHellY(ctr.y));
+  const half = def.size / 2;
+  const body = new Graphics();
+  body.rect(-half, -half, def.size, def.size).fill({ color: 0x2a0610, alpha: 0.95 });
+  body.rect(-half, -half, def.size, def.size).stroke({ width: 3, color: 0xff2030 });
+  // Glowing core square pulses with state.now via container.alpha tweak in
+  // the render loop; we keep the geometry static.
+  const core = new Graphics();
+  const inner = def.size * 0.55;
+  core.rect(-inner / 2, -inner / 2, inner, inner).fill({ color: 0xff5a2a, alpha: 0.75 });
+  const label = new Text({
+    text: '???',
+    style: {
+      fontFamily: fontFamilyById(getOptions().fonts.buildingLabel.family).css,
+      fontSize: buildingLabelSize(def.cellSize, getOptions().fonts.buildingLabel.scale * getOptions().globalFontScale),
+      fill: 0xffd8d0,
+      fontWeight: 'bold',
+      stroke: { color: 0x2a0610, width: 2 },
+    },
+  });
+  label.anchor.set(0.5);
+  c.addChild(body);
+  c.addChild(core);
+  c.addChild(label);
+  return c;
 }
 
 function makeWaterView(w: WaterSource): WaterView {
@@ -1249,7 +1312,14 @@ function drawDeathEffects(ctx: RenderContext, state: GameState) {
     if (!sprite) {
       sprite = new Sprite(frames.textures[0]);
       sprite.anchor.set(0.5);
-      sprite.position.set(e.x, e.y);
+      // Hell-flagged splatters spawn in the underworld at the world→hell
+      // mapped coordinate. The default white/normal splatters stay in the
+      // overworld effect layers at their raw world coordinate.
+      if (e.hell) {
+        sprite.position.set(worldToHellX(e.x), worldToHellY(e.y));
+      } else {
+        sprite.position.set(e.x, e.y);
+      }
       // Scale once on creation to ~one cell wide.
       const target = 40;
       const sc = target / Math.max(frames.textures[0].width || target, 1);
@@ -1257,7 +1327,10 @@ function drawDeathEffects(ctx: RenderContext, state: GameState) {
       sprite.cullable = true;
       // White splatters go in the force-white layer; the tint below is left
       // alone for them so the color matrix has the raw alpha to work with.
-      (e.white ? ctx.whiteEffectsLayer : ctx.effectsLayer).addChild(sprite);
+      const layer = e.hell ? ctx.hellEffectsLayer
+                  : e.white ? ctx.whiteEffectsLayer
+                  : ctx.effectsLayer;
+      layer.addChild(sprite);
       ctx.deathViews.set(e.id, sprite);
     }
     if (!e.white) sprite.tint = getOptions().bloodColor;
@@ -1983,6 +2056,32 @@ export function render(state: GameState, ctx: RenderContext) {
     }
   }
 
+  // Sync the hell-side portal mirrors with every overworld hell_portal.
+  // Each mirror lives at the same world coord (mapped into hell space) as
+  // its source. Pulse the core's alpha so the portal reads as alive.
+  const seenMir = new Set<number>();
+  for (const b of state.buildings.values()) {
+    if (b.kind !== 'hell_portal') continue;
+    seenMir.add(b.id);
+    let m = ctx.hellPortalMirrors.get(b.id);
+    if (!m) {
+      m = makeHellPortalMirror(b);
+      m.cullable = true;
+      ctx.hellPortalMirrorLayer.addChild(m);
+      ctx.hellPortalMirrors.set(b.id, m);
+    }
+    // Gentle red pulse on the core; whole mirror dimmer while still building.
+    const core = m.children[1] as Graphics;
+    if (core) core.alpha = b.state === 'constructing' ? 0.25 : (0.55 + 0.25 * Math.sin(state.now * 2.4));
+    m.alpha = b.state === 'constructing' ? 0.5 : 1;
+  }
+  for (const [id, m] of ctx.hellPortalMirrors) {
+    if (!seenMir.has(id)) {
+      m.destroy({ children: true });
+      ctx.hellPortalMirrors.delete(id);
+    }
+  }
+
   // Scene cross-fades driven by altitude (0 ground … 1 space) and depth
   // (0 ground … 1 hell). The climb runs in three overlapping phases so
   // nothing pops:
@@ -2033,39 +2132,50 @@ export function render(state: GameState, ctx: RenderContext) {
   if (ctx.skyLayer.visible) drawTransition(ctx, a, state.now);
 }
 
-// Paint the red beam(s) from every Hell Portal building down to the world's
-// bottom edge. Length grows from 0 to full over HELL.lineDrawMs once
-// state.hellPortalPlacedAt is set. Drawn each frame in world coordinates so
-// the line stays glued to its portal under camera pan.
+// Paint the red beam(s) from every built Hell Portal: a downward shaft on
+// the overworld (top of worldLayer) and a matching upward shaft on the
+// hell-side mirror portal (top of hellLayer). Each portal's beam draws in
+// over HELL.lineDrawMs starting at its construction completion. Portals
+// still under construction don't show a beam yet.
 function drawHellBeams(ctx: RenderContext, state: GameState): void {
-  const g = ctx.hellBeamGfx;
-  g.clear();
-  // Cheap early-out if there's no portal yet.
-  if (state.hellPortalPlacedAt === null) return;
-  const elapsedMs = (state.now - state.hellPortalPlacedAt) * 1000;
-  const drawFrac = Math.max(0, Math.min(1, elapsedMs / HELL.lineDrawMs));
-  if (drawFrac <= 0) return;
-  let any = false;
+  const ground = ctx.hellBeamGfx;
+  const hell = ctx.hellSideBeamGfx;
+  ground.clear();
+  hell.clear();
   for (const b of state.buildings.values()) {
     if (b.kind !== 'hell_portal') continue;
-    any = true;
+    if (b.state === 'constructing') continue;
+    if (b.activatedAt === undefined) continue;
+    const elapsedMs = (state.now - b.activatedAt) * 1000;
+    const drawFrac = Math.max(0, Math.min(1, elapsedMs / HELL.lineDrawMs));
+    if (drawFrac <= 0) continue;
     const c = buildingCenter(b);
     const def = defOf(b);
-    const startY = c.y + def.size / 2;
-    const endY = WORLD.height;
-    const span = endY - startY;
-    if (span <= 0) continue;
-    const y2 = startY + span * drawFrac;
-    // Outer halo + bright core, like the lightning bolt's two-pass look.
-    g.moveTo(c.x, startY).lineTo(c.x, y2)
-      .stroke({ width: 14, color: HELL.lineColor, alpha: 0.22 });
-    g.moveTo(c.x, startY).lineTo(c.x, y2)
-      .stroke({ width: 6, color: HELL.lineColor, alpha: 0.55 });
-    g.moveTo(c.x, startY).lineTo(c.x, y2)
-      .stroke({ width: 2, color: 0xffd0d0, alpha: 0.95 });
+    // Downward beam on the overworld — portal-bottom → world bottom edge.
+    const downStartY = c.y + def.size / 2;
+    const downSpan = WORLD.height - downStartY;
+    if (downSpan > 0) {
+      const y2 = downStartY + downSpan * drawFrac;
+      strokeBeam(ground, c.x, downStartY, c.x, y2);
+    }
+    // Upward beam on the hell side — mirror portal's top → top of HELL bounds.
+    const hx = worldToHellX(c.x);
+    const hyBottom = worldToHellY(c.y - def.size / 2);
+    const upSpan = hyBottom;
+    if (upSpan > 0) {
+      const y2 = hyBottom - upSpan * drawFrac;
+      strokeBeam(hell, hx, hyBottom, hx, y2);
+    }
   }
-  if (!any) {
-    // Portal was destroyed before its beam finished animating. Stop drawing.
-    g.clear();
-  }
+}
+
+// Three-pass stroke (halo + glow + bright core) used by both the downward
+// and upward beams. Shared so the two pillars read as one continuous shaft.
+function strokeBeam(g: Graphics, x1: number, y1: number, x2: number, y2: number): void {
+  g.moveTo(x1, y1).lineTo(x2, y2)
+    .stroke({ width: 14, color: HELL.lineColor, alpha: 0.22 });
+  g.moveTo(x1, y1).lineTo(x2, y2)
+    .stroke({ width: 6, color: HELL.lineColor, alpha: 0.55 });
+  g.moveTo(x1, y1).lineTo(x2, y2)
+    .stroke({ width: 2, color: 0xffd0d0, alpha: 0.95 });
 }

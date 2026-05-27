@@ -932,12 +932,11 @@ function placeBuilding(state: GameState, x: number, y: number) {
   };
   state.buildings.set(b.id, b);
   state.pendingBuild = null;
-  // Hell Portal: placing one (sticky) unlocks the descent affordance and
-  // anchors the red beam's draw-in animation.
-  if (kind === 'hell_portal' && !state.hellUnlocked) {
-    state.hellUnlocked = true;
-    state.hellPortalPlacedAt = state.now;
-  }
+  // Hell Portal: placing one (sticky) unlocks the descent affordance. The
+  // red beam is drawn per-portal and gated on the building actually finishing
+  // construction (see render.ts:drawHellBeams), so it appears together with
+  // the active portal rather than the moment the placement is paid for.
+  if (kind === 'hell_portal') state.hellUnlocked = true;
   playSound('place', 1.6);
   appendLog(state, `${def.name} #${b.displayNum} construction started — right-click goblins onto it to staff the build.`);
   autoAssignAllIdle(state);

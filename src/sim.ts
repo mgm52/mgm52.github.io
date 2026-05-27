@@ -1966,6 +1966,7 @@ function updateConstruction(state: GameState, b: Building) {
     // skip resolvePowerAndState and stay where we put them, so finish them
     // straight to active.
     b.state = (def.maintainersRequired === 0 && def.powerOutput === 0) ? 'active' : 'dormant';
+    b.activatedAt = state.now;
     playSound('build_done');
     appendLog(state, `${def.name} #${b.displayNum} construction complete.`);
   }
