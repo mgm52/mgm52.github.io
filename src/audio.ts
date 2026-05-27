@@ -29,9 +29,10 @@ export type SoundName = keyof typeof REGISTRY;
 let masterVolume = 0.7;
 let musicVolume = 0.7;
 let muted = false;
-// Per-frame multiplier on the music + crackle layers. Used by the hell
-// transition to fade the vinyl quartet out as the player descends and back
-// in on the return. 1 = full, 0 = silent. Other scenes leave it at 1.
+// Per-frame multiplier on the music layer only. Used by the hell transition
+// to fade the quartet out as the player descends and back in on the return.
+// 1 = full, 0 = silent. Crackle is independent so the vinyl hiss persists
+// down in the underworld.
 let musicAttenuation = 1;
 
 export function preloadSounds() {
@@ -117,15 +118,14 @@ function effectiveMusicVolume(): number {
   return Math.max(0, Math.min(1, masterVolume * musicVolume * musicAttenuation));
 }
 
-// Live multiplier on the music + crackle layers. Pass 1 for full volume,
-// 0 to silence everything music-related. Applies to the current playback in
-// place and is also used by future sound-volume recomputes.
+// Live multiplier on the music layer (NOT the crackle, which is ambient and
+// stays present). Pass 1 for full volume, 0 to silence the music. Applies
+// to the current playback in place.
 export function setMusicAttenuation(factor: number): void {
   const clamped = Math.max(0, Math.min(1, factor));
   if (clamped === musicAttenuation) return;
   musicAttenuation = clamped;
   if (musicEl) musicEl.volume = effectiveMusicVolume();
-  if (crackleEl) crackleEl.volume = effectiveCrackleVolume();
 }
 export function startBackgroundMusic(url: string): void {
   if (musicEl) return;
@@ -164,7 +164,9 @@ function currentCrackleGain(): number {
 }
 function effectiveCrackleVolume(): number {
   if (!crackleEnabled) return 0;
-  return Math.max(0, Math.min(1, masterVolume * musicVolume * musicAttenuation * currentCrackleGain()));
+  // Deliberately NOT multiplied by musicAttenuation — the vinyl crackle is
+  // ambient and stays present as the music quartet fades out for hell.
+  return Math.max(0, Math.min(1, masterVolume * musicVolume * currentCrackleGain()));
 }
 function tickCrackleRamp(): void {
   if (crackleEl) crackleEl.volume = effectiveCrackleVolume();
