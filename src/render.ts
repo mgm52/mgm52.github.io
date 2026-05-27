@@ -2335,13 +2335,15 @@ function drawHellBeams(ctx: RenderContext, state: GameState): void {
       const y2 = drawFrac >= 1 ? animEnd + overshoot : animEnd;
       strokeBeam(ground, c.x, downStartY, c.x, y2);
     }
-    // Upward beam on the hell side — mirror portal's top → top of HELL bounds.
+    // Upward beam on the hell side — terminates at the mirror portal's
+    // CENTER (not its top edge) so the line reads as plunging into the
+    // beacon rather than capping above it.
     const hx = worldToHellX(c.x);
-    const hyBottom = worldToHellY(c.y - def.size / 2);
-    const upSpan = hyBottom;
+    const hyEnd = worldToHellY(c.y);
+    const upSpan = hyEnd;
     if (upSpan > 0) {
-      const y2 = hyBottom - upSpan * drawFrac;
-      strokeBeam(hell, hx, hyBottom, hx, y2);
+      const y2 = hyEnd - upSpan * drawFrac;
+      strokeBeam(hell, hx, hyEnd, hx, y2);
     }
   }
 }
