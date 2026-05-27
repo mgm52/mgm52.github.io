@@ -347,7 +347,7 @@ export async function runIntro(): Promise<void> {
 }
 
 // Mid-game cutscene: same goblin, slides back up after the player places their
-// 30th building. Reuses the entire intro DOM and animation, but with a Bob-
+// 15th building. Reuses the entire intro DOM and animation, but with a Bob-
 // specific script that names the building ordinal/type and surfaces an
 // Okay/No choice. Returns 'yes' when the player accepts (caller seats Bob via
 // the hole picker), 'no' when they decline. Designed to be called outside of

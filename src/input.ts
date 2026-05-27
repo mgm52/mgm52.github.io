@@ -1061,12 +1061,16 @@ function tryPlaceWallAt(state: GameState, cx: number, cy: number, silent: boolea
   return true;
 }
 
-// Trigger the Bob cutscene if the player just placed their 30th-or-later
+// Trigger the Bob cutscene if the player just placed their 15th-or-later
 // building and Bob hasn't been spawned yet. Walls count. The cutscene fires
 // async (no await) — paused-mode is enforced by the bob-cutscene-hold body
 // class — and on "yes" the picker takes over the next ground click.
 function maybeTriggerBobCutscene(state: GameState, b: Building, kindName: string) {
   if (state.bobPickingHole) return;
+  // Goblin Holes are the seat target for Bob, so it would be confusing to
+  // have the cutscene fire on top of one — defer until the next non-hole
+  // placement. The cheat (if armed) stays pending.
+  if (b.kind === 'goblin_hole') return;
   // The cheat overrides every gate (threshold + bobSpawned) so a dev can
   // re-trigger the cutscene at will. It stays pending across "no" answers
   // so the offer persists until the player actually accepts; cleared once
@@ -1075,7 +1079,7 @@ function maybeTriggerBobCutscene(state: GameState, b: Building, kindName: string
     if (state.bobSpawned) return;
     let total = 0;
     for (const k in state.buildingCounts) total += state.buildingCounts[k as BuildingKind];
-    if (total < 30) return;
+    if (total < 15) return;
   }
   const ord = ordinalWord(b.displayNum);
   // Bail out of any pending build/strike — both surface a cursor ghost that
