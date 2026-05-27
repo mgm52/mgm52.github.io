@@ -1,11 +1,12 @@
 import { Application, Container, FederatedPointerEvent, Graphics } from 'pixi.js';
 import { playSound } from './audio';
 import { flashCursor } from './cursor-fx';
-import { BUILDABLE_KINDS, BUILDING_DEFS, BuildingKind, CELL, DRAGON, GOBLIN, LIGHTNING, MINOTAUR, RENDER_SCALE, WORLD, formatPower } from './config';
-import { RenderContext, ambientDragonAt, clampCamera, clampHellCamera, clampSpaceCamera, currentHellScale } from './render';
-import { autoAssignAllIdle, lightningStrike } from './sim';
+import { BUILDABLE_KINDS, BUILDING_DEFS, BuildingKind, CELL, DRAGON, GOBLIN, HELL, LIGHTNING, MINOTAUR, RENDER_SCALE, WORLD, formatPower } from './config';
+import { runBobCutscene } from './intro';
+import { RenderContext, ambientDragonAt, clampCamera, clampHellCamera, clampSpaceCamera, currentHellScale, ghostAtHell, ghostHellPos } from './render';
+import { autoAssignAllIdle, lightningStrike, spawnBob } from './sim';
 import {
-  Building, Cell, Dragon, GameState, Goblin, Minotaur, WaterSource,
+  Building, Cell, Dragon, GameState, Ghost, Goblin, Minotaur, WaterSource,
   appendLog, buildingAtCell, cellKey, defOf, findFreeCellNear,
   holeAtCell, isInBounds, nextBuildingDisplayNum, pixelToCell, spaceBuildingAt,
   waterCarrierCount, waterSourceAtCell,
@@ -113,6 +114,13 @@ export function setupInput(
           const pts = [...input.pointers.values()];
           input.panLast = { x: (pts[0].x + pts[1].x) / 2, y: (pts[0].y + pts[1].y) / 2 };
         }
+        // Hell view: right-click is a "walk here" command for any selected ghosts.
+        // (Space view has no analogous command; ignored there.)
+        if (e.button === 2 && state.view === 'hell' && input.pointers.size < 2) {
+          flashCursor(e.clientX, e.clientY);
+          const hp = e.getLocalPosition(ctx.hellLayer);
+          handleHellRightClick(state, hp.x, hp.y);
+        }
       }
       return;
     }
@@ -127,6 +135,32 @@ export function setupInput(
       input.panLast = { x: (pts[0].x + pts[1].x) / 2, y: (pts[0].y + pts[1].y) / 2 };
       return;
     }
+
+    // Bob picker: after the cutscene accepts, the next ground tap must land on
+    // a Goblin Hole (main hole or any completed goblin_hole building). A click
+    // anywhere else just beeps; right-click does nothing. No selection, no
+    // build, no strike fires while the picker is active.
+    if (state.bobPickingHole && e.button === 0) {
+      input.isDragging = false;
+      input.selectionGfx.clear();
+      const c = pixelToCell(local.x, local.y);
+      const onMain = holeAtCell(state, c.cx, c.cy);
+      const b = onMain ? null : buildingAtCell(state, c.cx, c.cy);
+      const onBuildingHole = b !== null && b.kind === 'goblin_hole' && b.state !== 'constructing';
+      const target: Cell | null = onMain
+        ? state.hole.cell
+        : (onBuildingHole && b ? b.cell : null);
+      if (target) {
+        if (spawnBob(state, target)) {
+          state.bobPickingHole = false;
+          state.bobSpawned = true;
+        }
+      } else {
+        playSound('error');
+      }
+      return;
+    }
+    if (state.bobPickingHole) return;
 
     if (e.button === 2) {
       flashCursor(e.clientX, e.clientY);
@@ -254,7 +288,30 @@ export function setupInput(
       input.spaceSelectionGfx.clear();
       if (start) {
         const moved = Math.hypot(e.global.x - start.x, e.global.y - start.y);
-        if (moved < SPACE_DRAG_TOL) {
+        if (state.view === 'hell') {
+          if (moved < SPACE_DRAG_TOL) {
+            const hp = e.getLocalPosition(ctx.hellLayer);
+            const gh = ghostAtHell(state, hp.x, hp.y);
+            if (!e.shiftKey) clearSelection(state);
+            if (gh) { selectGhost(state, gh); playSound('select', 0.33); }
+          } else {
+            const a = e.getLocalPosition(ctx.hellLayer);
+            const b = ctx.hellLayer.toLocal({ x: start.x, y: start.y });
+            const x1 = Math.min(a.x, b.x), y1 = Math.min(a.y, b.y);
+            const x2 = Math.max(a.x, b.x), y2 = Math.max(a.y, b.y);
+            if (!e.shiftKey) clearSelection(state);
+            let count = 0;
+            for (const g of state.ghosts) {
+              const p = ghostHellPos(state, g);
+              if (p.x >= x1 && p.x <= x2 && p.y >= y1 && p.y <= y2) {
+                selectGhost(state, g);
+                count++;
+              }
+            }
+            if (count > 0) playSound('select', 0.33);
+            if (count >= 2) state.multiSelectSeen = true;
+          }
+        } else if (moved < SPACE_DRAG_TOL) {
           const lp = e.getLocalPosition(ctx.spaceLayer);
           const sb = spaceBuildingAt(state, lp.x, lp.y);
           // Ambient dragons sit behind the floating buildings, so they only get
@@ -571,8 +628,41 @@ function clearSelection(state: GameState) {
   for (const b of state.buildings.values()) b.selected = false;
   for (const w of state.waterSources.values()) w.selected = false;
   for (const sb of state.spaceBuildings.values()) sb.selected = false;
+  for (const gh of state.ghosts) gh.selected = false;
   state.hole.selected = false;
   state.selectedAmbientDragonId = null;
+}
+
+// Mark a ghost as selected. The sim only tracks an explicit hx/hy once a ghost
+// has been "touched"; seed them from its current drift-derived position here so
+// the next walk command starts from where it actually is on screen.
+function selectGhost(state: GameState, g: Ghost) {
+  g.selected = true;
+  if (g.hx === undefined || g.hy === undefined) {
+    const p = ghostHellPos(state, g);
+    g.hx = p.x;
+    g.hy = p.y;
+  }
+}
+
+// Right-click in hell view: walk every selected ghost to the clicked hell-coord.
+// Multiple ghosts get a small per-ghost offset so they don't pile up exactly on
+// the same point. No-op (with an error beep) if nothing is selected.
+function handleHellRightClick(state: GameState, hx: number, hy: number) {
+  const selected = state.ghosts.filter((g) => g.selected);
+  if (selected.length === 0) { playSound('error'); return; }
+  for (const g of selected) {
+    const dx = (Math.random() - 0.5) * HELL.ghostHitRadius;
+    const dy = (Math.random() - 0.5) * HELL.ghostHitRadius;
+    g.goal = { x: hx + dx, y: hy + dy };
+    if (g.hx === undefined || g.hy === undefined) {
+      const p = ghostHellPos(state, g);
+      g.hx = p.x;
+      g.hy = p.y;
+    }
+  }
+  playSound('select', 0.4);
+  appendLog(state, `${selected.length} ghost(s) drift toward the cursor.`);
 }
 
 function goblinAt(state: GameState, x: number, y: number): Goblin | null {
@@ -940,6 +1030,7 @@ function placeBuilding(state: GameState, x: number, y: number) {
   playSound('place', 1.6);
   appendLog(state, `${def.name} #${b.displayNum} construction started — right-click goblins onto it to staff the build.`);
   autoAssignAllIdle(state);
+  maybeTriggerBobCutscene(state, b, def.name);
 }
 
 // Wall placement — Ƶ1 per cell, 1×1 Building entity that goes straight to
@@ -966,7 +1057,62 @@ function tryPlaceWallAt(state: GameState, cx: number, cy: number, silent: boolea
     selected: false,
   };
   state.buildings.set(b.id, b);
+  maybeTriggerBobCutscene(state, b, BUILDING_DEFS.wall.name);
   return true;
+}
+
+// Trigger the Bob cutscene if the player just placed their 30th-or-later
+// building and Bob hasn't been spawned yet. Walls count. The cutscene fires
+// async (no await) — paused-mode is enforced by the bob-cutscene-hold body
+// class — and on "yes" the picker takes over the next ground click.
+function maybeTriggerBobCutscene(state: GameState, b: Building, kindName: string) {
+  if (state.bobPickingHole) return;
+  // The cheat overrides every gate (threshold + bobSpawned) so a dev can
+  // re-trigger the cutscene at will. Self-clears once the cutscene fires.
+  if (!state.bobCheatPending) {
+    if (state.bobSpawned) return;
+    let total = 0;
+    for (const k in state.buildingCounts) total += state.buildingCounts[k as BuildingKind];
+    if (total < 30) return;
+  }
+  state.bobCheatPending = false;
+  const ord = ordinalWord(b.displayNum);
+  // Bail out of any pending build/strike — both surface a cursor ghost that
+  // would still follow the mouse during the cutscene if left armed.
+  state.pendingBuild = null;
+  state.pendingStrike = false;
+  void runBobCutscene(ord, kindName).then((res) => {
+    if (res === 'yes') {
+      state.bobPickingHole = true;
+      appendLog(state, 'Bob is waiting — click any Goblin Hole to summon him.');
+      playSound('select', 0.5);
+    }
+  });
+}
+
+// Render a positive integer as its English ordinal word ("first", "twenty-
+// fourth", ...). Covers 1–99 by name; falls back to numeric ordinals
+// ("123rd") above that.
+function ordinalWord(n: number): string {
+  const ones = ['', 'first', 'second', 'third', 'fourth', 'fifth', 'sixth', 'seventh', 'eighth', 'ninth'];
+  const teens = ['tenth', 'eleventh', 'twelfth', 'thirteenth', 'fourteenth', 'fifteenth', 'sixteenth', 'seventeenth', 'eighteenth', 'nineteenth'];
+  const tensCardinal = ['', '', 'twenty', 'thirty', 'forty', 'fifty', 'sixty', 'seventy', 'eighty', 'ninety'];
+  const tensOrdinal = ['', '', 'twentieth', 'thirtieth', 'fortieth', 'fiftieth', 'sixtieth', 'seventieth', 'eightieth', 'ninetieth'];
+  if (n <= 0) return `${n}th`;
+  if (n < 10) return ones[n];
+  if (n < 20) return teens[n - 10];
+  if (n < 100) {
+    const t = Math.floor(n / 10);
+    const o = n % 10;
+    return o === 0 ? tensOrdinal[t] : `${tensCardinal[t]}-${ones[o]}`;
+  }
+  const lastTwo = n % 100;
+  if (lastTwo >= 11 && lastTwo <= 13) return `${n}th`;
+  const last = n % 10;
+  if (last === 1) return `${n}st`;
+  if (last === 2) return `${n}nd`;
+  if (last === 3) return `${n}rd`;
+  return `${n}th`;
 }
 
 // Translucent blast-radius preview that follows the cursor while a Lightning

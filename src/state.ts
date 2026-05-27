@@ -52,6 +52,11 @@ export type Goblin = {
   // Rolled at spawn time when Goldgoblins is owned. Gold goblins render with
   // a yellow tint and drop GOLD_KILL_REWARD instead of the usual KILL_REWARD.
   gold?: boolean;
+  // The unique "bob" goblin summoned from the post-30-buildings cutscene.
+  // Renders with a yellow "bob" nametag above his head; otherwise behaves
+  // exactly like a normal goblin. Dies once like any goblin; his ghost in
+  // hell stays still rather than drifting.
+  bob?: boolean;
 };
 
 export type MinotaurState =
@@ -240,6 +245,23 @@ export type Ghost = {
   spawnAt: number;
   gold?: boolean;
   tiny?: boolean;
+  // True for the ghost of the cutscene-summoned Bob. Hell Bob doesn't drift
+  // downward and ignores walk commands — he just stands where he died with
+  // his yellow nametag intact.
+  bob?: boolean;
+  // Small per-ghost jitter so a cluster of ghosts doesn't render exactly stacked
+  // and doesn't all drift at the same speed. Set once at spawn; persisted.
+  offX?: number;
+  offY?: number;
+  speedMult?: number;
+  // Selection + walk-command state for the hell view. `hx/hy` are absolute hell
+  // coordinates (only set once the ghost has been interacted with or commanded);
+  // when set, they're the source of truth instead of the spawnAt+drift formula.
+  // `goal` is a hell-coord destination — the ghost walks to it at HELL_GHOST_WALK_SPEED.
+  selected?: boolean;
+  hx?: number;
+  hy?: number;
+  goal?: { x: number; y: number };
 };
 
 // One-shot jagged white bolt drawn from above down to a strike point. The
@@ -387,6 +409,18 @@ export type GameState = {
   // Sticky: flips true the first time a Hell Portal is placed. Gates the
   // "hold ↓ at the bottom of the map to descend into hell" affordance.
   hellUnlocked: boolean;
+  // Sticky once the player has accepted the Bob cutscene (the "tag me in
+  // boss?" prompt that fires after the 30th building). Stays true even after
+  // Bob dies, so the cutscene never re-offers.
+  bobSpawned: boolean;
+  // True between the player clicking "Okay" in the cutscene and clicking a
+  // Goblin Hole to seat Bob. Every hole pulses yellow during this state and
+  // a click on one summons Bob.
+  bobPickingHole: boolean;
+  // Dev cheat: when true, the next building placement triggers the Bob
+  // cutscene regardless of the 30-building threshold or bobSpawned state.
+  // Self-clearing once the cutscene fires.
+  bobCheatPending: boolean;
   // Ghosts of every unit the player has killed (goblin, minotaur, dragon),
   // displayed in Hell as static silhouettes at the world-x/y where they died.
   ghosts: Ghost[];
@@ -706,6 +740,9 @@ export function createInitialState(): GameState {
     optionsUnlocked: false,
     spaceUnlocked: false,
     hellUnlocked: false,
+    bobSpawned: false,
+    bobPickingHole: false,
+    bobCheatPending: false,
     ghosts: [],
     view: 'ground',
   };
@@ -782,7 +819,7 @@ export function recordGhost(
   kind: Ghost['kind'],
   x: number, y: number,
   facing: number,
-  opts: { gold?: boolean; tiny?: boolean } = {},
+  opts: { gold?: boolean; tiny?: boolean; bob?: boolean } = {},
 ): void {
   state.ghosts.push({
     id: state.nextId++,
@@ -790,6 +827,12 @@ export function recordGhost(
     spawnAt: state.now,
     gold: opts.gold || undefined,
     tiny: opts.tiny || undefined,
+    bob: opts.bob || undefined,
+    offX: opts.bob ? 0 : (Math.random() - 0.5) * 16,
+    offY: opts.bob ? 0 : (Math.random() - 0.5) * 16,
+    // Bob refuses to drift. A speedMult of 0 also disqualifies him from any
+    // walk command in handleHellRightClick (we skip ghosts with bob set).
+    speedMult: opts.bob ? 0 : 0.75 + Math.random() * 0.5,
   });
   pushDeathEffect(state, x, y, false, true);
 }

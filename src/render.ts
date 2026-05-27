@@ -125,6 +125,10 @@ type GoblinView = {
   outline: Sprite[];   // 4 cardinal-offset copies, black-tinted
   sprite: Sprite;
   selectionRing: Graphics;
+  // Yellow "bob" label drawn above the head, only for the cutscene-summoned
+  // goblin. Undefined on every other goblin so we don't allocate a Text the
+  // whole horde will never use.
+  nametag?: Text;
 };
 
 // Pure-Canvas radial-gradient texture for the foot shadow. Generated lazily so
@@ -283,6 +287,7 @@ type SpaceBuildingView = {
 type GhostView = {
   container: Container;
   sprite: Sprite;
+  selectionRing: Graphics;
 };
 
 // A decorative dragon drifting across the space scene. Renderer-owned: not in
@@ -412,6 +417,9 @@ export type RenderContext = {
   // the grid and buildings so a building placed on top covers it.
   holeGfx: Graphics;
   holeRing: Graphics;
+  // Pulsing yellow rings drawn over every Goblin Hole while the Bob picker
+  // is active (state.bobPickingHole). Cleared the rest of the time.
+  bobPickerGfx: Graphics;
   // Floating-text overlay (kill rewards, income ticks, power online).
   floatersLayer: Container;
   floaterViews: Map<number, Text>;
@@ -435,6 +443,7 @@ export type RenderContext = {
   goblinFilter: ColorMatrixFilter;
   minotaurFilter: ColorMatrixFilter;
   buildingFilter: ColorMatrixFilter;
+  hellGhostFilter: ColorMatrixFilter;
 };
 
 export async function createRender(parent: HTMLElement, state: GameState): Promise<RenderContext> {
@@ -479,6 +488,7 @@ export async function createRender(parent: HTMLElement, state: GameState): Promi
   const grid = new Graphics();
   const holeGfx = new Graphics();
   const holeRing = new Graphics();
+  const bobPickerGfx = new Graphics();
 
   const floatersLayer = new Container();
   const effectsLayer = new Container();
@@ -508,6 +518,7 @@ export async function createRender(parent: HTMLElement, state: GameState): Promi
   worldLayer.addChild(minotaurLayer);
   worldLayer.addChild(dragonLayer);
   worldLayer.addChild(holeRing);
+  worldLayer.addChild(bobPickerGfx);
   worldLayer.addChild(effectsLayer);
   worldLayer.addChild(whiteEffectsLayer);
   worldLayer.addChild(floatersLayer);
@@ -623,6 +634,7 @@ export async function createRender(parent: HTMLElement, state: GameState): Promi
   const goblinFilter = new ColorMatrixFilter();
   const minotaurFilter = new ColorMatrixFilter();
   const buildingFilter = new ColorMatrixFilter();
+  const hellGhostFilter = new ColorMatrixFilter();
 
   const ctx: RenderContext = {
     app, worldLayer, buildingLayer, goblinLayer, uiLayer,
@@ -648,12 +660,13 @@ export async function createRender(parent: HTMLElement, state: GameState): Promi
     hellPortalMirrorLayer,
     hellPortalMirrors: new Map(),
     hellEffectsLayer,
-    holeGfx, holeRing,
+    holeGfx, holeRing, bobPickerGfx,
     floatersLayer, floaterViews: new Map(),
     effectsLayer, deathViews: new Map(),
     deathFrames: null,
     whiteEffectsLayer, lightningGfx,
     walls, wallsVersion: -1, state, playBg, wallGfx, grid, goblinFilter, minotaurFilter, buildingFilter,
+    hellGhostFilter,
   };
 
   // Decode the GIF once into AnimatedSprite frames. Sharing GifSprite across
@@ -724,6 +737,7 @@ function applyOptions(ctx: RenderContext, o: Options) {
   applyFilter(ctx.goblinLayer, ctx.goblinFilter, o.goblinSaturation, o.goblinBrightness);
   applyFilter(ctx.minotaurLayer, ctx.minotaurFilter, o.minotaurSaturation, o.minotaurBrightness);
   applyFilter(ctx.buildingLayer, ctx.buildingFilter, o.buildingSaturation, o.buildingBrightness);
+  applyFilter(ctx.hellGhostLayer, ctx.hellGhostFilter, 1, o.hellGhostBrightness);
   applyDomOptions(o);
   applyFonts(ctx, o);
 }
@@ -892,7 +906,32 @@ function makeGoblinView(g: Goblin): GoblinView {
   c.addChild(ring);
   for (const s of outline) c.addChild(s);
   c.addChild(sprite);
-  return { container: c, shadow, outline, sprite, selectionRing: ring };
+
+  let nametag: Text | undefined;
+  if (g.bob) {
+    nametag = makeBobNametag();
+    c.addChild(nametag);
+  }
+  return { container: c, shadow, outline, sprite, selectionRing: ring, nametag };
+}
+
+// Yellow "bob" label above the head — shared between live Bob and hell Bob,
+// styled to match the gold-goblin tint so it reads as a name-plate rather
+// than a UI label. Drawn at half-pixel anchor so position.set(0, y) hangs
+// the label centered over the sprite.
+function makeBobNametag(): Text {
+  const t = new Text({
+    text: 'bob',
+    style: {
+      fontFamily: fontFamilyById(getOptions().fonts.buildingLabel.family).css,
+      fontSize: 12,
+      fill: 0xffd96b,
+      fontWeight: 'bold',
+      stroke: { color: 0x000000, width: 3 },
+    },
+  });
+  t.anchor.set(0.5, 1);
+  return t;
 }
 
 function makeMinotaurView(): MinotaurView {
@@ -1080,10 +1119,14 @@ export function ambientDragonAt(ctx: RenderContext, x: number, y: number): { id:
 // dim red so the whole hell scene reads as the underworld.
 function makeGhostView(g: Ghost): GhostView | null {
   const container = new Container();
-  // Position is updated each render frame based on (now - spawnAt) * fall
-  // speed; here we just seed it to the spawn coord.
-  container.position.set(worldToHellX(g.x), worldToHellY(g.y));
+  // Position is updated each render frame; here we just seed it.
+  container.position.set(worldToHellX(g.x + (g.offX ?? 0)), worldToHellY(g.y + (g.offY ?? 0)));
   container.alpha = getOptions().hellGhostAlpha;
+
+  // Selection ring lives inside the container so it follows the ghost. Sized
+  // to roughly match the sprite footprint per-kind.
+  const selectionRing = new Graphics();
+  selectionRing.visible = false;
 
   if (g.kind === 'goblin') {
     const sheet = goblinIdleSheet ?? goblinWalkSheet;
@@ -1095,8 +1138,15 @@ function makeGhostView(g: Ghost): GhostView | null {
     const px = getOptions().goblinDisplayPx;
     sprite.scale.set(px / sheet.meta.spriteSize);
     sprite.tint = g.gold ? 0xc9a85a : 0xa06868;
+    selectionRing.circle(0, 0, GOBLIN.radius + 4).stroke({ width: 2, color: 0xffd96b });
+    container.addChild(selectionRing);
     container.addChild(sprite);
-    return { container, sprite };
+    if (g.bob) {
+      const tag = makeBobNametag();
+      tag.y = -px * 0.55;
+      container.addChild(tag);
+    }
+    return { container, sprite, selectionRing };
   }
   if (g.kind === 'minotaur') {
     const sheet = minotaurWalkSheet;
@@ -1108,8 +1158,10 @@ function makeGhostView(g: Ghost): GhostView | null {
     const px = getOptions().minotaurDisplayPx * (g.tiny ? TINYTAUR.scale : 1);
     sprite.scale.set(px / sheet.meta.spriteSize);
     sprite.tint = 0x9a5050;
+    selectionRing.circle(0, 0, MINOTAUR.radius + 6).stroke({ width: 2, color: 0xffd96b });
+    container.addChild(selectionRing);
     container.addChild(sprite);
-    return { container, sprite };
+    return { container, sprite, selectionRing };
   }
   // Dragon ghost: reuse the placeholder block + glyph but in deep dim red.
   const half = DRAGON_BLOCK / 2;
@@ -1123,13 +1175,15 @@ function makeGhostView(g: Ghost): GhostView | null {
   });
   label.anchor.set(0.5);
   label.alpha = 0.8;
+  selectionRing.circle(0, 0, DRAGON.displayPx * 0.5).stroke({ width: 2, color: 0xffd96b });
+  container.addChild(selectionRing);
   container.addChild(block);
   container.addChild(label);
   // Dragon facing is -1 (left) / +1 (right); the glyph faces left, mirror on +1.
   container.scale.set(g.facing > 0 ? -1 : 1, 1);
   // Cast block as the "sprite" for the view interface; we never touch it after
   // creation here, so any Container child works.
-  return { container, sprite: block as unknown as Sprite };
+  return { container, sprite: block as unknown as Sprite, selectionRing };
 }
 
 // Build the hell-side mirror of an overworld hell_portal — a darker copy of
@@ -1312,6 +1366,31 @@ function drawHole(ctx: RenderContext, state: GameState) {
     ctx.holeRing
       .rect(c.x - half, c.y - half, half * 2, half * 2)
       .stroke({ width: 2, color: 0xffd96b });
+  }
+}
+
+// Pulsing yellow ring around every Goblin Hole (main + completed building
+// holes) while state.bobPickingHole is true. Sin-wave alpha so a click target
+// reads as alive; cleared on every other frame so flipping bobPickingHole off
+// leaves no residue.
+function drawBobPicker(ctx: RenderContext, state: GameState) {
+  ctx.bobPickerGfx.clear();
+  if (!state.bobPickingHole) return;
+  const t = state.now;
+  const pulse = 0.55 + 0.35 * Math.sin(t * 4);
+  const inflate = 4 + 2 * Math.sin(t * 4);
+  const ring = (cx: number, cy: number, half: number) => {
+    ctx.bobPickerGfx
+      .rect(cx - half - inflate, cy - half - inflate, (half + inflate) * 2, (half + inflate) * 2)
+      .stroke({ width: 3, color: 0xffd96b, alpha: pulse });
+  };
+  const main = holeCenter(state);
+  ring(main.x, main.y, (CELL * HOLE_SIZE) / 2 + 2);
+  for (const b of state.buildings.values()) {
+    if (b.kind !== 'goblin_hole' || b.state === 'constructing') continue;
+    const bc = buildingCenter(b);
+    const def = defOf(b);
+    ring(bc.x, bc.y, def.size / 2 + 2);
   }
 }
 
@@ -1601,6 +1680,40 @@ export function worldToHellX(wx: number): number {
 export function worldToHellY(wy: number): number {
   return wy + (HELL.height - WORLD.height) / 2;
 }
+
+// Current hell-coord position of a ghost — explicit hx/hy if the sim is
+// tracking it (commanded / interacted), otherwise derived from spawnAt + drift
+// with the per-ghost jitter. Both the renderer and input.ts need this, so it
+// lives here as the single source of truth.
+export function ghostHellPos(state: GameState, g: Ghost): { x: number; y: number } {
+  if (g.hx !== undefined && g.hy !== undefined) return { x: g.hx, y: g.hy };
+  const fall = getOptions().hellGhostFallSpeed;
+  // speedMult drives drift only (per-ghost jitter); Bob has 0 here so he
+  // sits where he died until a walk command moves him.
+  const driftMult = g.speedMult ?? 1;
+  return {
+    x: worldToHellX(g.x + (g.offX ?? 0)),
+    y: worldToHellY(g.y + (g.offY ?? 0)) + (state.now - g.spawnAt) * fall * driftMult,
+  };
+}
+
+// Pick the topmost ghost under a hell-coord point, or null if none is within
+// HELL.ghostHitRadius. Used by input.ts to resolve a tap in the hell view.
+export function ghostAtHell(state: GameState, hx: number, hy: number): Ghost | null {
+  let best: Ghost | null = null;
+  let bestD = HELL.ghostHitRadius * HELL.ghostHitRadius;
+  for (const g of state.ghosts) {
+    const p = ghostHellPos(state, g);
+    const dx = p.x - hx;
+    const dy = p.y - hy;
+    const d = dx * dx + dy * dy;
+    if (d <= bestD) {
+      bestD = d;
+      best = g;
+    }
+  }
+  return best;
+}
 // Center the hell camera over the world-position you stepped off from on the
 // ground, so arrival lands you above the same play area you just left.
 export function centerHellCameraOnWorld(ctx: RenderContext, wx: number, wy: number) {
@@ -1704,6 +1817,7 @@ export function render(state: GameState, ctx: RenderContext) {
   // Goblin Hole — re-drawn each frame (cheap and keeps the position cell-exact
   // even if anything moves it later).
   drawHole(ctx, state);
+  drawBobPicker(ctx, state);
 
   // Floaters: rising fading text. Sim adds & expires; renderer just animates.
   drawFloaters(ctx, state);
@@ -1738,6 +1852,9 @@ export function render(state: GameState, ctx: RenderContext) {
       const sy = displayPx / 64;
       v.shadow.scale.set(sy * 0.75, sy);
     }
+    // Bob nametag follows the goblin scale — keep it just above the sprite's
+    // top so it stays attached even when the player tunes goblinDisplayPx.
+    if (v.nametag) v.nametag.y = -displayPx * 0.55;
     // Per-frame sprite-Y offset so the player can tune sprite-to-cell
     // alignment from the options panel. Outline copies preserve their
     // cardinal offsets relative to the sprite.
@@ -2073,9 +2190,24 @@ export function render(state: GameState, ctx: RenderContext) {
       ctx.ghostViews.set(gh.id, made);
       v = made;
     }
-    const drift = (state.now - gh.spawnAt) * fall;
-    v.container.position.set(worldToHellX(gh.x), worldToHellY(gh.y) + drift);
+    // Once a ghost has been touched by the sim (commanded to walk, or just
+    // selected), its position is tracked explicitly via hx/hy. Otherwise the
+    // hell-y is derived from spawnAt+drift with the per-ghost speed multiplier.
+    let hx: number;
+    let hy: number;
+    if (gh.hx !== undefined && gh.hy !== undefined) {
+      hx = gh.hx;
+      hy = gh.hy;
+    } else {
+      // speedMult drives drift only — passive jitter so ghosts don't fall in
+      // lockstep. Bob's drift mult is 0, so he stays put until commanded.
+      const driftMult = gh.speedMult ?? 1;
+      hx = worldToHellX(gh.x + (gh.offX ?? 0));
+      hy = worldToHellY(gh.y + (gh.offY ?? 0)) + (state.now - gh.spawnAt) * fall * driftMult;
+    }
+    v.container.position.set(hx, hy);
     v.container.alpha = ghostAlpha;
+    v.selectionRing.visible = !!gh.selected;
   }
   for (const [id, v] of ctx.ghostViews) {
     if (!seenGh.has(id)) {

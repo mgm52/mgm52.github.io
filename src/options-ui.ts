@@ -9,6 +9,7 @@ export type OptionsUICallbacks = {
   onCheatBlood: () => void;
   onCheatPower: () => void;
   onCheatBones: () => void;
+  onTriggerBob: () => void;
   onTaskSkip: () => void;
   onShowTitleScreen: () => void;
 };
@@ -237,6 +238,7 @@ function rebuildPanel(panel: HTMLElement, callbacks: OptionsUICallbacks, refresh
     slider('Ember count',    o.hellEmberCount, 0, 2500, 25, (v) => setOption('hellEmberCount', v)),
     slider('Ember brightness', o.hellEmberBrightness, 0, 1.5, 0.05, (v) => setOption('hellEmberBrightness', v)),
     slider('Ghost alpha',    o.hellGhostAlpha, 0, 1, 0.02, (v) => setOption('hellGhostAlpha', v)),
+    slider('Ghost brightness', o.hellGhostBrightness, 0, 3, 0.05, (v) => setOption('hellGhostBrightness', v)),
     slider('Ghost fall (px/s)', o.hellGhostFallSpeed, 0, 60, 1, (v) => setOption('hellGhostFallSpeed', v)),
     color('Blood splatter',  o.hellBloodColor,      (v) => setOption('hellBloodColor', v)),
   ]));
@@ -270,6 +272,13 @@ function rebuildPanel(panel: HTMLElement, callbacks: OptionsUICallbacks, refresh
   cheatBones.textContent = 'Cheat +100 dragon bones';
   cheatBones.addEventListener('click', () => callbacks.onCheatBones());
   panel.appendChild(cheatBones);
+
+  const cheatBob = document.createElement('button');
+  cheatBob.type = 'button';
+  cheatBob.className = 'options-reset';
+  cheatBob.textContent = 'Cheat: trigger Bob on next building';
+  cheatBob.addEventListener('click', () => callbacks.onTriggerBob());
+  panel.appendChild(cheatBob);
 
   const taskSkip = document.createElement('button');
   taskSkip.type = 'button';

@@ -346,6 +346,79 @@ export async function runIntro(): Promise<void> {
   if (introAborted) teardownIntro(overlay, speechEl, yesBtn, noBtn);
 }
 
+// Mid-game cutscene: same goblin, slides back up after the player places their
+// 30th building. Reuses the entire intro DOM and animation, but with a Bob-
+// specific script that names the building ordinal/type and surfaces an
+// Okay/No choice. Returns 'yes' when the player accepts (caller seats Bob via
+// the hole picker), 'no' when they decline. Designed to be called outside of
+// playIntroSequence: it doesn't touch introActive/introAborted, so skipIntro()
+// stays a no-op while this runs. The pausable sleep + intro-paused class still
+// apply, so pressing P during the Bob cutscene freezes it correctly.
+export async function runBobCutscene(ordinal: string, kindName: string): Promise<'yes' | 'no'> {
+  const overlay = document.getElementById('intro-overlay');
+  const goblinEl = document.getElementById('intro-goblin');
+  const speechEl = document.getElementById('intro-speech');
+  const yesBtn = document.getElementById('intro-yes') as HTMLButtonElement | null;
+  const noBtn  = document.getElementById('intro-no')  as HTMLButtonElement | null;
+  const clickWall = document.getElementById('intro-clickwall');
+  if (!overlay || !goblinEl || !speechEl || !yesBtn || !noBtn || !clickWall) return 'no';
+
+  // bob-cutscene-hold suspends the tick loop (see main.ts) so the world
+  // freezes underneath the overlay — the "game pauses" part of the spec —
+  // without surfacing the regular pause overlay.
+  document.body.classList.add('bob-cutscene-hold');
+  // Reset the goblin to back-facing so the slide-up + turn-around plays from
+  // the same starting pose as the original intro.
+  goblinEl.style.setProperty('--row', '0');
+  overlay.classList.remove('faced', 'exit', 'speaking', 'click-armed', 'show-buttons');
+  speechEl.textContent = '';
+  speechEl.classList.remove('done');
+
+  overlay.classList.add('visible');
+  await sleep(50);
+  overlay.classList.add('up');
+  await sleep(SLIDE_UP_MS + 100);
+  await sleep(POST_SLIDE_BEAT_MS);
+  overlay.classList.add('faced');
+  await turnGoblinAround(goblinEl);
+
+  await runSpeak(overlay, speechEl, clickWall, 'oh my!');
+  await runSpeak(overlay, speechEl, clickWall, 'oh my word!');
+  await runSpeak(overlay, speechEl, clickWall, `you've come so far! you're placing your ${ordinal} ${kindName}!`);
+  await runSpeak(overlay, speechEl, clickWall, 'tag me in boss?');
+
+  yesBtn.querySelector('.build-name')!.textContent = 'OKAY';
+  noBtn.querySelector('.build-name')!.textContent = 'NO';
+  yesBtn.hidden = false;
+  noBtn.hidden = false;
+  overlay.classList.add('show-buttons');
+  const picked = await waitForChoice([yesBtn, noBtn]);
+  playSound('click', 0.8, 1);
+  overlay.classList.remove('show-buttons');
+  yesBtn.hidden = true;
+  noBtn.hidden = true;
+  await sleep(200);
+
+  // Walk off the same way the original intro does. Pivot East, swap .up → .exit
+  // to play the slide-right animation, then drop .visible.
+  await faceRow(goblinEl, EXIT_FACING_ROW);
+  overlay.classList.remove('up');
+  overlay.classList.add('exit');
+  await sleep(SLIDE_OUT_MS + 100);
+  overlay.classList.remove('visible');
+  await sleep(700);
+  overlay.classList.remove('exit', 'faced');
+  // Restore the YES/NO labels so the original intro DOM is left exactly as
+  // we found it. Belt-and-braces: the new-game intro never runs after Bob
+  // since it's once-only, but a dev reload + Bob cutscene loop shouldn't
+  // leave OKAY/NO sticking to the buttons.
+  yesBtn.querySelector('.build-name')!.textContent = 'YES';
+  noBtn.querySelector('.build-name')!.textContent = 'NO';
+
+  document.body.classList.remove('bob-cutscene-hold');
+  return picked === 0 ? 'yes' : 'no';
+}
+
 // For new games only: how long the player gets to wander and click the empty
 // world before the goblin slides up and starts talking.
 const PRE_INTRO_FREE_CLICK_MS = 6_500;

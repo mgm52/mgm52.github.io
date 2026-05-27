@@ -93,6 +93,9 @@ export function loadGame(): { state: GameState; savedAt: number } | null {
     env.state.maxStruckAtOnce ??= (env.state as { struck13Goblins?: boolean }).struck13Goblins ? 13 : 0;
     env.state.spaceUnlocked ??= false;
     env.state.hellUnlocked ??= false;
+    env.state.bobSpawned ??= false;
+    env.state.bobPickingHole ??= false;
+    env.state.bobCheatPending ??= false;
     env.state.ghosts ??= [];
     // Pre-existing ghosts from saves predating the downward drift get a
     // spawnAt anchored to load time, so they start their fall fresh rather

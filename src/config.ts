@@ -177,6 +177,11 @@ export const HELL = {
   // Visual style of the void.
   bgColor: 0x0a0203,
   fogColor: 0x4a0a0e,
+  // Hit radius (hell-px) for clicking a ghost. Generous so a single tap on a
+  // small drifting silhouette still lands.
+  ghostHitRadius: 24,
+  // Speed (hell-px / sec) a ghost walks toward a commanded destination.
+  ghostWalkSpeed: 40,
 };
 
 // One-shot Ritual upgrades. Autocommand + Goldblins unlock once a Phone
