@@ -1662,13 +1662,17 @@ export function render(state: GameState, ctx: RenderContext) {
   const scaledH = WORLD.height * RENDER_SCALE;
   const offsetX = Math.max(0, (ctx.viewport.width - scaledW) / 2);
   const offsetY = Math.max(0, (ctx.viewport.height - scaledH) / 2);
-  // As the climb begins, slide the whole ground scene downward (and back up on
-  // descent) so the play area visibly drops away beneath you rather than just
-  // fading in place under the sky. Synced to the ground's fade-out range.
+  // As the climb begins, slide the whole ground scene downward (and back up
+  // on descent) so the play area visibly drops away beneath you rather than
+  // just fading in place under the sky. The mirror on the descent to hell
+  // slides the ground UPWARD off the top of the screen, so the player feels
+  // the surface receding overhead as they descend. Synced to the ground's
+  // fade-out range in both directions.
   const climbDrop = smoothstep(0.02, 0.22, ctx.altitude) * ctx.viewport.height * 0.35;
+  const descendLift = -smoothstep(0.02, 0.22, ctx.depth) * ctx.viewport.height * 0.35;
   ctx.worldLayer.position.set(
     Math.round(offsetX - ctx.camera.x * RENDER_SCALE),
-    Math.round(offsetY - ctx.camera.y * RENDER_SCALE + climbDrop),
+    Math.round(offsetY - ctx.camera.y * RENDER_SCALE + climbDrop + descendLift),
   );
 
   const opts = getOptions();
