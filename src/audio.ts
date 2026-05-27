@@ -29,6 +29,10 @@ export type SoundName = keyof typeof REGISTRY;
 let masterVolume = 0.7;
 let musicVolume = 0.7;
 let muted = false;
+// Set to true while the player is in the hell view. Used to suppress goblin
+// spawn cries (the underworld stays quiet for new arrivals) while letting
+// every other sound — including goblin_death — through unchanged.
+let inHellView = false;
 // Per-frame multiplier on the music layer only. Used by the hell transition
 // to fade the quartet out as the player descends and back in on the return.
 // 1 = full, 0 = silent. Crackle is independent so the vinyl hiss persists
@@ -52,6 +56,7 @@ export function preloadSounds() {
 
 export function playSound(name: SoundName, volume = 1, playbackRate?: number) {
   if (muted) return;
+  if (inHellView && name === 'goblin_spawn') return;
   const pool = pools.get(name);
   if (!pool) return;
   const free = pool.find((a) => a.paused || a.ended) ?? pool[0];
@@ -107,6 +112,7 @@ export function setMusicVolume(v: number) {
 }
 export function setMuted(m: boolean) { muted = m; }
 export function isMuted() { return muted; }
+export function setInHellView(b: boolean) { inHellView = b; }
 
 // ─── Looping background music ───────────────────────────────────────
 // One persistent <audio> element, lazy-started after first user gesture so

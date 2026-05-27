@@ -237,6 +237,7 @@ function rebuildPanel(panel: HTMLElement, callbacks: OptionsUICallbacks, refresh
     slider('Glow intensity', o.hellGlowIntensity, 0, 3, 0.05, (v) => setOption('hellGlowIntensity', v)),
     slider('Ember count',    o.hellEmberCount, 0, 2500, 25, (v) => setOption('hellEmberCount', v)),
     slider('Ember brightness', o.hellEmberBrightness, 0, 1.5, 0.05, (v) => setOption('hellEmberBrightness', v)),
+    slider('Ember size',     o.hellEmberSize, 0.1, 5, 0.1, (v) => setOption('hellEmberSize', v)),
     slider('Ghost alpha',    o.hellGhostAlpha, 0, 1, 0.02, (v) => setOption('hellGhostAlpha', v)),
     slider('Ghost brightness', o.hellGhostBrightness, 0, 3, 0.05, (v) => setOption('hellGhostBrightness', v)),
     slider('Ghost fall (px/s)', o.hellGhostFallSpeed, 0, 60, 1, (v) => setOption('hellGhostFallSpeed', v)),

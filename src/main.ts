@@ -1,4 +1,4 @@
-import { playSound, preloadSounds, setCrackleEnabled, setMasterVolume, setMusicAttenuation, setMusicVolume, startBackgroundCrackle, startBackgroundMusic } from './audio';
+import { playSound, preloadSounds, setCrackleEnabled, setInHellView, setMasterVolume, setMusicAttenuation, setMusicVolume, startBackgroundCrackle, startBackgroundMusic } from './audio';
 import {
   AUTOSPAWN_TIERS, CAMERA_SPEED, CELL, DRAGON, GOBLIN, GOLD_KILL_REWARD, HELL, KILL_REWARD, RENDER_SCALE, START_CELL,
   SUMMON_UPGRADES, TICK_MS, MINOTAUR, WORLD, digBloodCost, minotaurBloodCost,
@@ -772,6 +772,9 @@ async function main() {
     // return. Space stays at full volume. Linear in depth — the underworld
     // is silent at the bottom.
     setMusicAttenuation(1 - ctx.depth);
+    // Suppress goblin_spawn cries once we're actually in hell — the
+    // underworld is supposed to be hushed. Death cries still play.
+    setInHellView(state.view === 'hell');
     render(state, ctx);
     refreshUI(state);
     requestAnimationFrame(frame);
