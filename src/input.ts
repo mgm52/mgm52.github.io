@@ -1067,6 +1067,10 @@ function tryPlaceWallAt(state: GameState, cx: number, cy: number, silent: boolea
 // class — and on "yes" the picker takes over the next ground click.
 function maybeTriggerBobCutscene(state: GameState, b: Building, kindName: string) {
   if (state.bobPickingHole) return;
+  // Goblin Holes are the seat target for Bob, so it would be confusing to
+  // have the cutscene fire on top of one — defer until the next non-hole
+  // placement. The cheat (if armed) stays pending.
+  if (b.kind === 'goblin_hole') return;
   // The cheat overrides every gate (threshold + bobSpawned) so a dev can
   // re-trigger the cutscene at will. It stays pending across "no" answers
   // so the offer persists until the player actually accepts; cleared once
