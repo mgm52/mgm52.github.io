@@ -1,5 +1,6 @@
 import { playDecayingGoblinDeath, playDecayingGoblinSpawn, playDecayingGoldKillCash, playSound } from './audio';
-import { BUILDING_DEFS, CELL, COLS, DRAGON, DRAGON_KILL_REWARD, GOBLIN, GOLD_GOBLIN_CHANCE, GOLD_KILL_REWARD, KILL_REWARD, LIGHTNING, MINOTAUR_KILL_REWARD, SPACE, SUMMON_UPGRADES, TICK_S, MINOTAUR, TINYTAUR, WATER_DEPLETION_PP_PER_SEC, WATER_METER_MAX, formatPower } from './config';
+import { BUILDING_DEFS, CELL, COLS, DRAGON, DRAGON_KILL_REWARD, GOBLIN, GOLD_GOBLIN_CHANCE, GOLD_KILL_REWARD, HELL, KILL_REWARD, LIGHTNING, MINOTAUR_KILL_REWARD, SPACE, SUMMON_UPGRADES, TICK_S, MINOTAUR, TINYTAUR, WATER_DEPLETION_PP_PER_SEC, WATER_METER_MAX, WORLD, formatPower } from './config';
+import { getOptions } from './options';
 import {
   ALL_DIRS, Building, Cell, DX, DY, Dir, Dragon, GameState, Goblin, HOLE_SIZE, Minotaur, SpaceBuilding, WaterSource,
   appendLog, buildingAtCell, buildingCenter, buildingFootprint, buildingPerimeter,
@@ -178,6 +179,19 @@ export function tick(state: GameState) {
   for (let i = state.powerBoosts.length - 1; i >= 0; i--) {
     const pb = state.powerBoosts[i];
     if (state.now - pb.startAt >= pb.duration) state.powerBoosts.splice(i, 1);
+  }
+  // Ghosts drift downward at hellGhostFallSpeed px/sec. Once their hell-y
+  // crosses the bottom of HELL bounds they're gone forever — the underworld
+  // forgets eventually. Computed lazily here from spawnAt so we don't mutate
+  // every ghost every tick.
+  const fall = getOptions().hellGhostFallSpeed;
+  if (fall > 0 && state.ghosts.length > 0) {
+    const hellYOffset = (HELL.height - WORLD.height) / 2;
+    for (let i = state.ghosts.length - 1; i >= 0; i--) {
+      const g = state.ghosts[i];
+      const hellY = g.y + hellYOffset + (state.now - g.spawnAt) * fall;
+      if (hellY > HELL.height) state.ghosts.splice(i, 1);
+    }
   }
 }
 

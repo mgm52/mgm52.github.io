@@ -224,15 +224,20 @@ export type DeathEffect = {
   hell?: boolean;
 };
 
-// A ghost of a unit the player has killed — surfaced in Hell as a static
-// silhouette at the world-x/y where the unit died. Persisted across saves so
-// the underworld never forgets. `facing` is radians for goblin/minotaur and
-// ±1 (sprite mirror) for dragons, matching the live unit's facing field.
+// A ghost of a unit the player has killed — surfaced in Hell as a silhouette
+// that drifts slowly downward from the world-x/y where the unit died until it
+// disappears off the bottom of the hell scene. Persisted across saves so the
+// underworld never forgets. `facing` is radians for goblin/minotaur and ±1
+// (sprite mirror) for dragons, matching the live unit's facing field.
+// `spawnAt` is state.now at recording; the renderer uses (state.now - spawnAt)
+// to derive the current y drift, and the sim prunes ghosts that have fallen
+// past the bottom of HELL.
 export type Ghost = {
   id: number;
   kind: 'goblin' | 'minotaur' | 'dragon';
   x: number; y: number;
   facing: number;
+  spawnAt: number;
   gold?: boolean;
   tiny?: boolean;
 };
@@ -782,6 +787,7 @@ export function recordGhost(
   state.ghosts.push({
     id: state.nextId++,
     kind, x, y, facing,
+    spawnAt: state.now,
     gold: opts.gold || undefined,
     tiny: opts.tiny || undefined,
   });
