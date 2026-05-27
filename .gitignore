@@ -29,5 +29,8 @@ Thumbs.db
 .cache/
 .vite/
 
+# Local screenshots
+screenshots/
+
 # Claude Code local settings
 .claude/

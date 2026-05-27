@@ -213,10 +213,11 @@ function drawHellBackground(g: Graphics, o: Options): void {
   // so the field reshuffles whenever the player tweaks these, which is fine
   // (rebuilds run after settings changes; no per-frame redraw).
   const count = Math.max(0, Math.round(o.hellEmberCount));
+  const sizeMul = Math.max(0.01, o.hellEmberSize);
   for (let i = 0; i < count; i++) {
     const x = Math.random() * HELL.width;
     const y = Math.random() * HELL.height;
-    const r = 0.5 + Math.random() * 1.4;
+    const r = (0.5 + Math.random() * 1.4) * sizeMul;
     const tint = Math.random();
     const col = tint < 0.6 ? 0xff8830 : tint < 0.9 ? 0xff5020 : 0xffe0a0;
     const a = (0.35 + Math.random() * 0.45) * o.hellEmberBrightness;
@@ -1196,6 +1197,17 @@ function makeHellPortalMirror(b: Building): Container {
   const ctr = buildingCenter(b);
   c.position.set(worldToHellX(ctr.x), worldToHellY(ctr.y));
   const half = def.size / 2;
+  // Concentric halo rings drawn first so they sit BEHIND the body/core.
+  // Stroked outlines (not filled discs) so the portal reads as emanating
+  // rings in the underworld. The inner halo is a closely-spaced pair of
+  // strokes — gives a doubled-line "occult sigil" feel.
+  const halo = new Graphics();
+  const outerR = def.size * 3.6;
+  const innerR = def.size * 2.2;
+  const innerGap = 6;
+  halo.circle(0, 0, outerR).stroke({ width: 3, color: 0xfff4c0, alpha: 0.6 });
+  halo.circle(0, 0, innerR).stroke({ width: 4, color: 0xffe070, alpha: 0.85 });
+  halo.circle(0, 0, innerR - innerGap).stroke({ width: 2, color: 0xffe070, alpha: 0.7 });
   const body = new Graphics();
   body.rect(-half, -half, def.size, def.size).fill({ color: 0x2a0610, alpha: 0.95 });
   body.rect(-half, -half, def.size, def.size).stroke({ width: 3, color: 0xff2030 });
@@ -1204,20 +1216,9 @@ function makeHellPortalMirror(b: Building): Container {
   const core = new Graphics();
   const inner = def.size * 0.55;
   core.rect(-inner / 2, -inner / 2, inner, inner).fill({ color: 0xff5a2a, alpha: 0.75 });
-  const label = new Text({
-    text: '???',
-    style: {
-      fontFamily: fontFamilyById(getOptions().fonts.buildingLabel.family).css,
-      fontSize: buildingLabelSize(def.cellSize, getOptions().fonts.buildingLabel.scale * getOptions().globalFontScale),
-      fill: 0xffd8d0,
-      fontWeight: 'bold',
-      stroke: { color: 0x2a0610, width: 2 },
-    },
-  });
-  label.anchor.set(0.5);
+  c.addChild(halo);
   c.addChild(body);
   c.addChild(core);
-  c.addChild(label);
   return c;
 }
 
@@ -1272,8 +1273,12 @@ function makeBuildingView(b: Building): BuildingView {
   const labelCfg: FontConfig = o.fonts.buildingLabel;
   const warningCfg: FontConfig = o.fonts.buildingWarning;
   const gs = o.globalFontScale;
+  // Hell Portal's display name is the deliberately-ominous '???' — but echoing
+  // that literal on the map ground reads as a debug placeholder. Keep the
+  // sidebar/build-menu name intact and just blank the on-building label.
+  const labelText = b.kind === 'hell_portal' ? '' : def.short;
   const label = new Text({
-    text: def.short,
+    text: labelText,
     style: {
       fontFamily: fontFamilyById(labelCfg.family).css,
       fontSize: buildingLabelSize(def.cellSize, labelCfg.scale * gs),
@@ -1282,7 +1287,7 @@ function makeBuildingView(b: Building): BuildingView {
     },
   });
   label.anchor.set(0.5);
-  label.visible = o.buildingLabelEnabled;
+  label.visible = o.buildingLabelEnabled && labelText !== '';
 
   const progress = new Graphics();
 
@@ -2233,7 +2238,8 @@ export function render(state: GameState, ctx: RenderContext) {
       ctx.hellPortalMirrors.set(b.id, m);
     }
     // Gentle red pulse on the core; whole mirror dimmer while still building.
-    const core = m.children[1] as Graphics;
+    // Child order in makeHellPortalMirror: 0 halo, 1 body, 2 core.
+    const core = m.children[2] as Graphics;
     if (core) core.alpha = b.state === 'constructing' ? 0.25 : (0.55 + 0.25 * Math.sin(state.now * 2.4));
     m.alpha = b.state === 'constructing' ? 0.5 : 1;
   }
@@ -2313,20 +2319,31 @@ function drawHellBeams(ctx: RenderContext, state: GameState): void {
     if (drawFrac <= 0) continue;
     const c = buildingCenter(b);
     const def = defOf(b);
-    // Downward beam on the overworld — portal-bottom → world bottom edge.
+    // Downward beam on the overworld — animates from the portal-bottom toward
+    // the world bottom edge, but once the draw-in finishes we extend the line
+    // well past WORLD.height. During the descent transition the world layer
+    // lifts upward off-screen; without the extension the beam would terminate
+    // at the world boundary mid-frame and read as a visibly cut-off red stub.
     const downStartY = c.y + def.size / 2;
-    const downSpan = WORLD.height - downStartY;
-    if (downSpan > 0) {
-      const y2 = downStartY + downSpan * drawFrac;
+    const animSpan = WORLD.height - downStartY;
+    const overshoot = ctx.viewport.height / RENDER_SCALE; // enough to clear any descent lift
+    if (animSpan > 0) {
+      const animEnd = downStartY + animSpan * drawFrac;
+      // Once the line has drawn the full animSpan, extend past WORLD.height
+      // into the OOB region. Off-screen in normal play; uncovered + visible
+      // when the world layer lifts up during the hell-descent transition.
+      const y2 = drawFrac >= 1 ? animEnd + overshoot : animEnd;
       strokeBeam(ground, c.x, downStartY, c.x, y2);
     }
-    // Upward beam on the hell side — mirror portal's top → top of HELL bounds.
+    // Upward beam on the hell side — terminates at the mirror portal's
+    // CENTER (not its top edge) so the line reads as plunging into the
+    // beacon rather than capping above it.
     const hx = worldToHellX(c.x);
-    const hyBottom = worldToHellY(c.y - def.size / 2);
-    const upSpan = hyBottom;
+    const hyEnd = worldToHellY(c.y);
+    const upSpan = hyEnd;
     if (upSpan > 0) {
-      const y2 = hyBottom - upSpan * drawFrac;
-      strokeBeam(hell, hx, hyBottom, hx, y2);
+      const y2 = hyEnd - upSpan * drawFrac;
+      strokeBeam(hell, hx, hyEnd, hx, y2);
     }
   }
 }

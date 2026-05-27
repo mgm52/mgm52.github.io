@@ -209,6 +209,7 @@ export type Options = {
   hellGlowIntensity: number;  // multiplier on every glow ring's alpha
   hellEmberCount: number;     // number of ember specks scattered across the bg
   hellEmberBrightness: number; // multiplier on every ember's alpha
+  hellEmberSize: number;      // multiplier on every ember's radius (1 = native size)
   hellGhostAlpha: number;     // overall alpha applied to ghost containers
   hellGhostBrightness: number; // multiplier on ghost-layer brightness (1 = no change)
   hellGhostFallSpeed: number; // px/sec the ghosts drift downward in hell
@@ -275,15 +276,16 @@ export const DEFAULT_OPTIONS: Options = {
   // Hell defaults — pulled down from the earlier "way too light" pass so the
   // underworld reads as oppressive: a near-black maroon gradient with a few
   // dim red blooms and a sparse ember dust. Tunable from the admin cog.
-  hellBgTop: 0x0c0204,
+  hellBgTop: 0xcb0606,
   hellBgBottom: 0x2a0608,
   hellGlowColor: 0xff3010,
-  hellGlowIntensity: 0.55,
-  hellEmberCount: 500,
+  hellGlowIntensity: 0.65,
+  hellEmberCount: 525,
   hellEmberBrightness: 0.55,
-  hellGhostAlpha: 0.78,
-  hellGhostBrightness: 1.0,
-  hellGhostFallSpeed: 10,
+  hellEmberSize: 1.0,
+  hellGhostAlpha: 0.84,
+  hellGhostBrightness: 1.05,
+  hellGhostFallSpeed: 7,
   hellBloodColor: 0x4a8acf,
 };
 
