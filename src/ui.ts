@@ -1359,7 +1359,7 @@ function showSpaceBuilding(_state: GameState, sb: SpaceBuilding, panel: HTMLElem
   name.textContent = `${displayName} #${b.displayNum}`;
   if (isOrbitalBeacon) {
     stateEl.textContent = 'Dormant — uselessly orbiting';
-    extra.innerHTML = 'Dumb annoying useless beacon';
+    extra.innerHTML = 'I love pollution';
     return;
   }
   // Consumers in orbit still need the ground grid — `state` reflects whether
