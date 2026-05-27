@@ -306,6 +306,9 @@ export type RenderContext = {
   nextAmbientSpawnAt: number;
   ambientIdSeq: number;
   // Full-screen overlay for the climb between ground and space.
+  // blackOverlay fades in first to cover the ground; sky paints over it; space
+  // fades in last underneath the dissolving sky.
+  blackOverlay: Graphics;
   skyLayer: Container;
   skyGfx: Graphics;
   cloudGfx: Graphics;
@@ -438,20 +441,28 @@ export async function createRender(parent: HTMLElement, state: GameState): Promi
   spaceLayer.visible = false;
   app.stage.addChild(spaceLayer);
 
-  // ─── Climb transition overlay (screen-space) ───
+  // ─── Climb transition overlays (screen-space) ───
+  // Phase 1: blackOverlay fades in over the ground so the play area visibly
+  // dims toward black before any bright sky appears. Sits between worldLayer
+  // and the space/sky stack in z-order.
+  const blackOverlay = new Graphics();
+  blackOverlay.visible = false;
+  app.stage.addChildAt(blackOverlay, app.stage.getChildIndex(spaceLayer));
+
+  // Phase 2/3: sky gradient with drifting clouds, then star fade.
   const skyLayer = new Container();
   const skyGfx = new Graphics();
   const cloudGfx = new Graphics();
   const starGfx = new Graphics();
   skyLayer.addChild(skyGfx);
+  skyLayer.addChild(cloudGfx);   // clouds beneath stars
   skyLayer.addChild(starGfx);
-  skyLayer.addChild(cloudGfx);
   skyLayer.visible = false;
   app.stage.addChild(skyLayer);
 
   // Precompute the overlay's stars and cloud bands once.
   const transStars: TransStar[] = [];
-  for (let i = 0; i < 220; i++) {
+  for (let i = 0; i < 260; i++) {
     transStars.push({
       fx: Math.random(),
       fy: Math.random(),
@@ -459,8 +470,11 @@ export async function createRender(parent: HTMLElement, state: GameState): Promi
       phase: Math.random() * Math.PI * 2,
     });
   }
+  // Clouds live in the altitude band where the sky is brightest (peak blue
+  // sits at h≈0.78). Spreading them across 0.50–1.05 keeps a steady stream
+  // drifting through the middle of the screen for the whole sky phase.
   const transClouds: TransCloud[] = [];
-  for (let i = 0; i < 9; i++) {
+  for (let i = 0; i < 18; i++) {
     const puffs: [number, number, number][] = [];
     const lobes = 4 + Math.floor(Math.random() * 4);
     for (let p = 0; p < lobes; p++) {
@@ -471,9 +485,9 @@ export async function createRender(parent: HTMLElement, state: GameState): Promi
       ]);
     }
     transClouds.push({
-      h: 0.05 + Math.random() * 0.34,   // altitude band of the cloud
+      h: 0.50 + Math.random() * 0.55,   // altitude band of the cloud (mid-sky)
       fx: Math.random(),
-      scale: 70 + Math.random() * 90,
+      scale: 80 + Math.random() * 110,
       puffs,
     });
   }
@@ -498,7 +512,7 @@ export async function createRender(parent: HTMLElement, state: GameState): Promi
     spaceLayer, spaceBg, spaceBuildingViews: new Map(),
     spaceCamera: { x: 0, y: 0 },
     spaceAmbientLayer, ambientDragons: [], nextAmbientSpawnAt: 0, ambientIdSeq: 1,
-    skyLayer, skyGfx, cloudGfx, starGfx,
+    blackOverlay, skyLayer, skyGfx, cloudGfx, starGfx,
     transStars, transClouds,
     altitude: 0,
     holeGfx, holeRing,
@@ -1259,8 +1273,12 @@ function makeSpaceBuildingView(sb: SpaceBuilding): SpaceBuildingView {
   sizeBuildingSprite(sprite, def.size);
 
   const gs = o.globalFontScale;
+  // Dragon Beacons stop being beacons the moment they're hoisted into orbit —
+  // the haul-up severs whatever made them useful. Relabel to match the info
+  // panel and the joke ("Useless Beacon").
+  const short = sb.building.kind === 'dragon_beacon' ? 'UB' : def.short;
   const label = new Text({
-    text: def.short,
+    text: short,
     style: {
       fontFamily: fontFamilyById(o.fonts.buildingLabel.family).css,
       fontSize: buildingLabelSize(def.cellSize, o.fonts.buildingLabel.scale * gs),
@@ -1278,13 +1296,15 @@ function makeSpaceBuildingView(sb: SpaceBuilding): SpaceBuildingView {
 }
 
 // ─── Space scene + climb transition ─────────────────────────────────
-// Gradient sampled from low to high altitude. The bottom stops are nearly as
-// dark as the play area (oobColor ≈ #040404) so the sky bloom doesn't slam
-// against the dark ground with a bright daytime horizon. Mid-altitude stops
-// give a daylight blue band, then the gradient sinks into deep space again.
+// Gradient sampled from low to high altitude. The bottom stops are pure black
+// so the sky overlay smoothly continues the black-overlay phase upward; the
+// blue band sits high in the gradient (peak around h≈0.78) so it ends up in
+// the middle of the screen during the sky-peak phase of the climb. Above the
+// blue, the gradient sinks back into deep space.
 const SKY_STOPS: [number, number][] = [
-  [0.00, 0x06080f], [0.18, 0x122142], [0.36, 0x254a82], [0.52, 0x3f7fd8],
-  [0.68, 0x1c3f86], [0.84, 0x0a1640], [1.00, 0x03040f], [1.30, 0x010109],
+  [0.00, 0x000000], [0.35, 0x030814], [0.52, 0x0d1c44], [0.66, 0x254a82],
+  [0.78, 0x3f7fd8], [0.88, 0x1c3f86], [1.00, 0x0a1640], [1.15, 0x03040f],
+  [1.40, 0x000000],
 ];
 function lerpHex(a: number, b: number, t: number): number {
   const ar = (a >> 16) & 255, ag = (a >> 8) & 255, ab = a & 255;
@@ -1347,7 +1367,7 @@ function drawTransition(ctx: RenderContext, a: number, now: number) {
   // Stars fade in over the back half of the climb, twinkling gently.
   const sg = ctx.starGfx;
   sg.clear();
-  const starA = smoothstep(0.45, 0.95, a);
+  const starA = smoothstep(0.55, 0.98, a);
   if (starA > 0.01) {
     for (const s of ctx.transStars) {
       const tw = 0.55 + 0.45 * Math.sin(now * 2.5 + s.phase);
@@ -1355,24 +1375,26 @@ function drawTransition(ctx: RenderContext, a: number, now: number) {
     }
   }
 
-  // Clouds drift past as we climb through their altitude band.
+  // Clouds drift past as we climb through their altitude band. Cloud opacity
+  // is keyed to where the cloud sits on screen (0 = top, 1 = bottom): each
+  // cloud blooms as it enters from the top, peaks while crossing the middle,
+  // and fades as it exits the bottom. That keeps the cloud field anchored
+  // to the bright-blue band in the centre of the sky rather than popping in
+  // at a fixed altitude.
   const cg = ctx.cloudGfx;
   cg.clear();
   for (const c of ctx.transClouds) {
-    const y = H * (hTop - c.h) / (hTop - hBottom);
-    if (y < -c.scale || y > H + c.scale) continue;
-    // Clouds bloom in as we approach their altitude band, then fade out once
-    // we've climbed well above them. Without the fade-in, every cloud pops
-    // into existence the moment the sky overlay does — too sudden against
-    // the dark play area.
-    const fadeIn = smoothstep(c.h - 0.20, c.h - 0.02, a);
-    const fadeOut = 1 - smoothstep(c.h + 0.05, c.h + 0.22, a);
+    const yFrac = (hTop - c.h) / span;
+    if (yFrac < -0.2 || yFrac > 1.2) continue;
+    const fadeIn = smoothstep(-0.15, 0.30, yFrac);
+    const fadeOut = 1 - smoothstep(0.70, 1.15, yFrac);
     const fade = fadeIn * fadeOut;
     if (fade <= 0.01) continue;
+    const y = H * yFrac;
     const cx = c.fx * W;
     for (const [px, py, pr] of c.puffs) {
       cg.circle(cx + px * c.scale, y + py * c.scale, pr * c.scale * 0.6)
-        .fill({ color: 0xf2f6ff, alpha: 0.5 * fade });
+        .fill({ color: 0xf2f6ff, alpha: 0.55 * fade });
     }
   }
 }
@@ -1388,7 +1410,7 @@ export function render(state: GameState, ctx: RenderContext) {
   // As the climb begins, slide the whole ground scene downward (and back up on
   // descent) so the play area visibly drops away beneath you rather than just
   // fading in place under the sky. Synced to the ground's fade-out range.
-  const climbDrop = smoothstep(0.02, 0.18, ctx.altitude) * ctx.viewport.height * 0.6;
+  const climbDrop = smoothstep(0.02, 0.22, ctx.altitude) * ctx.viewport.height * 0.35;
   ctx.worldLayer.position.set(
     Math.round(offsetX - ctx.camera.x * RENDER_SCALE),
     Math.round(offsetY - ctx.camera.y * RENDER_SCALE + climbDrop),
@@ -1705,7 +1727,7 @@ export function render(state: GameState, ctx: RenderContext) {
     // ascent, the whole space scene (stars, buildings, ambient dragons) drops
     // into place from above rather than just fading in. Settles to 0 once you're
     // fully in orbit; lifts back up off the top on descent.
-    const spaceSlide = -(1 - smoothstep(0.84, 1.0, ctx.altitude)) * ctx.viewport.height * 0.6;
+    const spaceSlide = -(1 - smoothstep(0.82, 1.0, ctx.altitude)) * ctx.viewport.height * 0.4;
     ctx.spaceLayer.position.set(
       Math.round(offX - ctx.spaceCamera.x * RENDER_SCALE),
       Math.round(offY - ctx.spaceCamera.y * RENDER_SCALE + spaceSlide),
@@ -1736,22 +1758,36 @@ export function render(state: GameState, ctx: RenderContext) {
     }
   }
 
-  // Scene cross-fades driven by altitude (0 ground … 1 space). Rather than
-  // snapping each scene on/off, fade them so nothing pops:
-  //  • the ground recedes as the climb begins,
-  //  • the sky overlay blooms in over it, then dissolves near the top,
-  //  • the space diorama fades up underneath the dissolving sky.
-  // z-order is world < space < sky, so the late sky fade reveals space cleanly.
+  // Scene cross-fades driven by altitude (0 ground … 1 space). The climb runs
+  // in three overlapping phases so nothing pops:
+  //  • blackOverlay fades in *over* the ground first, dimming the play area
+  //    toward black before any sky shows up,
+  //  • once the screen is dark, the sky gradient fades in over the black
+  //    (clouds drift past as we climb through the blue band),
+  //  • the sky dissolves near the top while the space diorama fades up
+  //    underneath it.
+  // z-order: world < black < space < sky.
   const a = ctx.altitude;
-  // Ground and sky overlap through the lower-altitude band so the dark play
-  // area cross-fades into the (now also dark) low-sky gradient instead of the
-  // sky punching in over a still-dark ground.
-  const groundFade = 1 - smoothstep(0.05, 0.32, a);
-  const spaceFade = smoothstep(0.84, 1.0, a);
-  const skyFade = Math.min(smoothstep(0.0, 0.32, a), 1 - smoothstep(0.84, 1.0, a));
+  // Black overlay takes the lead: it's fully opaque well before the sky
+  // overlay starts being visible, so the bright daylight never punches in
+  // over a partially-faded play area.
+  const blackFade = smoothstep(0.02, 0.20, a);
+  const groundFade = 1 - smoothstep(0.04, 0.18, a);
+  // Sky waits until the screen is dark, then blooms in. Holds through the
+  // middle of the climb, then fades as space takes over.
+  const skyFade = Math.min(smoothstep(0.18, 0.45, a), 1 - smoothstep(0.82, 1.0, a));
+  const spaceFade = smoothstep(0.82, 1.0, a);
 
   ctx.worldLayer.visible = groundFade > 0.001;
   ctx.worldLayer.alpha = groundFade;
+  if (blackFade > 0.001) {
+    if (!ctx.blackOverlay.visible) ctx.blackOverlay.visible = true;
+    ctx.blackOverlay.clear();
+    ctx.blackOverlay.rect(0, 0, ctx.viewport.width, ctx.viewport.height).fill(0x000000);
+    ctx.blackOverlay.alpha = blackFade;
+  } else if (ctx.blackOverlay.visible) {
+    ctx.blackOverlay.visible = false;
+  }
   ctx.spaceLayer.visible = spaceFade > 0.001;
   ctx.spaceLayer.alpha = spaceFade;
   ctx.skyLayer.visible = skyFade > 0.001;

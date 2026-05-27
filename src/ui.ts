@@ -830,8 +830,9 @@ export function refreshUI(state: GameState) {
     tinytaurBtn.style.display = 'none';
   }
 
-  // Dragon button — shows whenever at least one Dragon Beacon is `active`, and
-  // the simultaneous-dragon cap (live + queued) equals the active-beacon count.
+  // Dragon button — shows whenever at least one Dragon Beacon is `active`. The
+  // spawn-queue cap equals the active-beacon count (live dragons are uncapped,
+  // mirroring how Goblin Holes cap the spawn queue but not live goblins).
   const dragonBtn = document.getElementById('btn-summon-dragon') as HTMLButtonElement;
   let activeBeaconCount = 0;
   for (const b of state.buildings.values()) {
@@ -842,7 +843,7 @@ export function refreshUI(state: GameState) {
     applyFadeInOnFirstShow('btn-summon-dragon');
     const queued = state.dragonSpawnQueue.length;
     const live = state.dragons.size;
-    const atCap = live + queued >= activeBeaconCount;
+    const atCap = queued >= activeBeaconCount;
     const canAffordDragon = state.blood >= DRAGON.bloodCost;
     dragonBtn.disabled = atCap || !canAffordDragon;
     const dragonCost = document.getElementById('cost-summon-dragon')!;
@@ -1349,8 +1350,18 @@ function showSpaceBuilding(_state: GameState, sb: SpaceBuilding, panel: HTMLElem
   const def = defOf(b);
   const isActive = b.state === 'active';
   const cls = isActive ? 'active' : 'dormant';
-  portrait.innerHTML = `<div class="portrait-building ${b.kind} ${cls}">${def.short}</div>`;
-  name.textContent = `${def.name} #${b.displayNum}`;
+  // A Dragon Beacon in orbit can't summon anything — its tether to the ground
+  // is broken — so it's relabelled to make its uselessness obvious.
+  const isOrbitalBeacon = b.kind === 'dragon_beacon';
+  const displayName = isOrbitalBeacon ? 'Useless Beacon' : def.name;
+  const displayShort = isOrbitalBeacon ? 'UB' : def.short;
+  portrait.innerHTML = `<div class="portrait-building ${b.kind} ${cls}">${displayShort}</div>`;
+  name.textContent = `${displayName} #${b.displayNum}`;
+  if (isOrbitalBeacon) {
+    stateEl.textContent = 'Dormant — uselessly orbiting';
+    extra.innerHTML = 'I love pollution';
+    return;
+  }
   // Consumers in orbit still need the ground grid — `state` reflects whether
   // resolvePowerAndState could spare the draw this tick. Generators stay
   // active in orbit (no upkeep).

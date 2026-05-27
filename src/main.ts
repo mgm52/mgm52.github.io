@@ -275,16 +275,17 @@ async function main() {
       if (!spawnTinytaur(state)) { playSound('error'); return; }
     },
     onSummonDragon: () => {
-      // The simultaneous-dragon cap (live + queued) equals the number of
-      // currently-active Dragon Beacons — beacons gate the option entirely
-      // and also size the fleet.
+      // The simultaneous-spawn-queue cap equals the number of currently-active
+      // Dragon Beacons — like Goblin Holes for goblins, beacons gate how many
+      // dragons can be mid-ritual at once. Live dragons are uncapped: a
+      // beacon's queue slot frees the moment its dragon takes flight.
       let activeBeacons = 0;
       for (const b of state.buildings.values()) {
         if (b.kind === 'dragon_beacon' && b.state === 'active') activeBeacons++;
       }
       if (activeBeacons === 0) { playSound('error'); return; }
       if (state.blood < DRAGON.bloodCost) { playSound('error'); return; }
-      if (state.dragons.size + state.dragonSpawnQueue.length >= activeBeacons) { playSound('error'); return; }
+      if (state.dragonSpawnQueue.length >= activeBeacons) { playSound('error'); return; }
       state.blood -= DRAGON.bloodCost;
       state.dragonSpawnQueue.push({ remaining: DRAGON.spawnTime });
       playSound('ritual');
