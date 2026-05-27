@@ -1,11 +1,11 @@
 import { Application, Container, FederatedPointerEvent, Graphics } from 'pixi.js';
 import { playSound } from './audio';
 import { flashCursor } from './cursor-fx';
-import { BUILDABLE_KINDS, BUILDING_DEFS, BuildingKind, CELL, DRAGON, GOBLIN, LIGHTNING, MINOTAUR, RENDER_SCALE, WORLD, formatPower } from './config';
-import { RenderContext, ambientDragonAt, clampCamera, clampHellCamera, clampSpaceCamera, currentHellScale } from './render';
+import { BUILDABLE_KINDS, BUILDING_DEFS, BuildingKind, CELL, DRAGON, GOBLIN, HELL, LIGHTNING, MINOTAUR, RENDER_SCALE, WORLD, formatPower } from './config';
+import { RenderContext, ambientDragonAt, clampCamera, clampHellCamera, clampSpaceCamera, currentHellScale, ghostAtHell, ghostHellPos } from './render';
 import { autoAssignAllIdle, lightningStrike } from './sim';
 import {
-  Building, Cell, Dragon, GameState, Goblin, Minotaur, WaterSource,
+  Building, Cell, Dragon, GameState, Ghost, Goblin, Minotaur, WaterSource,
   appendLog, buildingAtCell, cellKey, defOf, findFreeCellNear,
   holeAtCell, isInBounds, nextBuildingDisplayNum, pixelToCell, spaceBuildingAt,
   waterCarrierCount, waterSourceAtCell,
@@ -112,6 +112,13 @@ export function setupInput(
         if (input.pointers.size >= 2) {
           const pts = [...input.pointers.values()];
           input.panLast = { x: (pts[0].x + pts[1].x) / 2, y: (pts[0].y + pts[1].y) / 2 };
+        }
+        // Hell view: right-click is a "walk here" command for any selected ghosts.
+        // (Space view has no analogous command; ignored there.)
+        if (e.button === 2 && state.view === 'hell' && input.pointers.size < 2) {
+          flashCursor(e.clientX, e.clientY);
+          const hp = e.getLocalPosition(ctx.hellLayer);
+          handleHellRightClick(state, hp.x, hp.y);
         }
       }
       return;
@@ -254,7 +261,30 @@ export function setupInput(
       input.spaceSelectionGfx.clear();
       if (start) {
         const moved = Math.hypot(e.global.x - start.x, e.global.y - start.y);
-        if (moved < SPACE_DRAG_TOL) {
+        if (state.view === 'hell') {
+          if (moved < SPACE_DRAG_TOL) {
+            const hp = e.getLocalPosition(ctx.hellLayer);
+            const gh = ghostAtHell(state, hp.x, hp.y);
+            if (!e.shiftKey) clearSelection(state);
+            if (gh) { selectGhost(state, gh); playSound('select', 0.33); }
+          } else {
+            const a = e.getLocalPosition(ctx.hellLayer);
+            const b = ctx.hellLayer.toLocal({ x: start.x, y: start.y });
+            const x1 = Math.min(a.x, b.x), y1 = Math.min(a.y, b.y);
+            const x2 = Math.max(a.x, b.x), y2 = Math.max(a.y, b.y);
+            if (!e.shiftKey) clearSelection(state);
+            let count = 0;
+            for (const g of state.ghosts) {
+              const p = ghostHellPos(state, g);
+              if (p.x >= x1 && p.x <= x2 && p.y >= y1 && p.y <= y2) {
+                selectGhost(state, g);
+                count++;
+              }
+            }
+            if (count > 0) playSound('select', 0.33);
+            if (count >= 2) state.multiSelectSeen = true;
+          }
+        } else if (moved < SPACE_DRAG_TOL) {
           const lp = e.getLocalPosition(ctx.spaceLayer);
           const sb = spaceBuildingAt(state, lp.x, lp.y);
           // Ambient dragons sit behind the floating buildings, so they only get
@@ -571,8 +601,41 @@ function clearSelection(state: GameState) {
   for (const b of state.buildings.values()) b.selected = false;
   for (const w of state.waterSources.values()) w.selected = false;
   for (const sb of state.spaceBuildings.values()) sb.selected = false;
+  for (const gh of state.ghosts) gh.selected = false;
   state.hole.selected = false;
   state.selectedAmbientDragonId = null;
+}
+
+// Mark a ghost as selected. The sim only tracks an explicit hx/hy once a ghost
+// has been "touched"; seed them from its current drift-derived position here so
+// the next walk command starts from where it actually is on screen.
+function selectGhost(state: GameState, g: Ghost) {
+  g.selected = true;
+  if (g.hx === undefined || g.hy === undefined) {
+    const p = ghostHellPos(state, g);
+    g.hx = p.x;
+    g.hy = p.y;
+  }
+}
+
+// Right-click in hell view: walk every selected ghost to the clicked hell-coord.
+// Multiple ghosts get a small per-ghost offset so they don't pile up exactly on
+// the same point. No-op (with an error beep) if nothing is selected.
+function handleHellRightClick(state: GameState, hx: number, hy: number) {
+  const selected = state.ghosts.filter((g) => g.selected);
+  if (selected.length === 0) { playSound('error'); return; }
+  for (const g of selected) {
+    const dx = (Math.random() - 0.5) * HELL.ghostHitRadius;
+    const dy = (Math.random() - 0.5) * HELL.ghostHitRadius;
+    g.goal = { x: hx + dx, y: hy + dy };
+    if (g.hx === undefined || g.hy === undefined) {
+      const p = ghostHellPos(state, g);
+      g.hx = p.x;
+      g.hy = p.y;
+    }
+  }
+  playSound('select', 0.4);
+  appendLog(state, `${selected.length} ghost(s) drift toward the cursor.`);
 }
 
 function goblinAt(state: GameState, x: number, y: number): Goblin | null {

@@ -180,16 +180,40 @@ export function tick(state: GameState) {
     const pb = state.powerBoosts[i];
     if (state.now - pb.startAt >= pb.duration) state.powerBoosts.splice(i, 1);
   }
-  // Ghosts drift downward at hellGhostFallSpeed px/sec. Once their hell-y
-  // crosses the bottom of HELL bounds they're gone forever — the underworld
-  // forgets eventually. Computed lazily here from spawnAt so we don't mutate
-  // every ghost every tick.
+  // Ghosts drift downward at hellGhostFallSpeed px/sec, scaled by each ghost's
+  // per-spawn speedMult so a cluster of ghosts spreads out over time rather
+  // than falling in lockstep. Drifting ghosts are computed lazily from spawnAt
+  // (no per-tick mutation) and pruned the moment their hell-y crosses the
+  // bottom. Once a ghost has been interacted with (hx/hy set) we track its
+  // position explicitly each tick — that branch also handles walking toward a
+  // commanded goal at HELL.ghostWalkSpeed, then resuming the downward drift
+  // from the new position.
   const fall = getOptions().hellGhostFallSpeed;
-  if (fall > 0 && state.ghosts.length > 0) {
-    const hellYOffset = (HELL.height - WORLD.height) / 2;
-    for (let i = state.ghosts.length - 1; i >= 0; i--) {
-      const g = state.ghosts[i];
-      const hellY = g.y + hellYOffset + (state.now - g.spawnAt) * fall;
+  const hellYOffset = (HELL.height - WORLD.height) / 2;
+  for (let i = state.ghosts.length - 1; i >= 0; i--) {
+    const g = state.ghosts[i];
+    const mult = g.speedMult ?? 1;
+    if (g.hx !== undefined && g.hy !== undefined) {
+      if (g.goal) {
+        const dx = g.goal.x - g.hx;
+        const dy = g.goal.y - g.hy;
+        const dist = Math.hypot(dx, dy);
+        const step = HELL.ghostWalkSpeed * mult * TICK_S;
+        if (dist <= step) {
+          g.hx = g.goal.x;
+          g.hy = g.goal.y;
+          g.goal = undefined;
+        } else {
+          g.hx += (dx / dist) * step;
+          g.hy += (dy / dist) * step;
+          g.facing = Math.atan2(dy, dx);
+        }
+      } else if (fall > 0) {
+        g.hy += fall * mult * TICK_S;
+      }
+      if (g.hy > HELL.height) state.ghosts.splice(i, 1);
+    } else if (fall > 0) {
+      const hellY = g.y + (g.offY ?? 0) + hellYOffset + (state.now - g.spawnAt) * fall * mult;
       if (hellY > HELL.height) state.ghosts.splice(i, 1);
     }
   }

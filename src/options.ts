@@ -210,6 +210,7 @@ export type Options = {
   hellEmberCount: number;     // number of ember specks scattered across the bg
   hellEmberBrightness: number; // multiplier on every ember's alpha
   hellGhostAlpha: number;     // overall alpha applied to ghost containers
+  hellGhostBrightness: number; // multiplier on ghost-layer brightness (1 = no change)
   hellGhostFallSpeed: number; // px/sec the ghosts drift downward in hell
   hellBloodColor: number;     // tint applied to the hell-side death splatters
 };
@@ -281,6 +282,7 @@ export const DEFAULT_OPTIONS: Options = {
   hellEmberCount: 500,
   hellEmberBrightness: 0.55,
   hellGhostAlpha: 0.78,
+  hellGhostBrightness: 1.0,
   hellGhostFallSpeed: 10,
   hellBloodColor: 0x4a8acf,
 };

@@ -240,6 +240,19 @@ export type Ghost = {
   spawnAt: number;
   gold?: boolean;
   tiny?: boolean;
+  // Small per-ghost jitter so a cluster of ghosts doesn't render exactly stacked
+  // and doesn't all drift at the same speed. Set once at spawn; persisted.
+  offX?: number;
+  offY?: number;
+  speedMult?: number;
+  // Selection + walk-command state for the hell view. `hx/hy` are absolute hell
+  // coordinates (only set once the ghost has been interacted with or commanded);
+  // when set, they're the source of truth instead of the spawnAt+drift formula.
+  // `goal` is a hell-coord destination — the ghost walks to it at HELL_GHOST_WALK_SPEED.
+  selected?: boolean;
+  hx?: number;
+  hy?: number;
+  goal?: { x: number; y: number };
 };
 
 // One-shot jagged white bolt drawn from above down to a strike point. The
@@ -790,6 +803,9 @@ export function recordGhost(
     spawnAt: state.now,
     gold: opts.gold || undefined,
     tiny: opts.tiny || undefined,
+    offX: (Math.random() - 0.5) * 16,
+    offY: (Math.random() - 0.5) * 16,
+    speedMult: 0.75 + Math.random() * 0.5,
   });
   pushDeathEffect(state, x, y, false, true);
 }

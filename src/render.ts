@@ -283,6 +283,7 @@ type SpaceBuildingView = {
 type GhostView = {
   container: Container;
   sprite: Sprite;
+  selectionRing: Graphics;
 };
 
 // A decorative dragon drifting across the space scene. Renderer-owned: not in
@@ -435,6 +436,7 @@ export type RenderContext = {
   goblinFilter: ColorMatrixFilter;
   minotaurFilter: ColorMatrixFilter;
   buildingFilter: ColorMatrixFilter;
+  hellGhostFilter: ColorMatrixFilter;
 };
 
 export async function createRender(parent: HTMLElement, state: GameState): Promise<RenderContext> {
@@ -623,6 +625,7 @@ export async function createRender(parent: HTMLElement, state: GameState): Promi
   const goblinFilter = new ColorMatrixFilter();
   const minotaurFilter = new ColorMatrixFilter();
   const buildingFilter = new ColorMatrixFilter();
+  const hellGhostFilter = new ColorMatrixFilter();
 
   const ctx: RenderContext = {
     app, worldLayer, buildingLayer, goblinLayer, uiLayer,
@@ -654,6 +657,7 @@ export async function createRender(parent: HTMLElement, state: GameState): Promi
     deathFrames: null,
     whiteEffectsLayer, lightningGfx,
     walls, wallsVersion: -1, state, playBg, wallGfx, grid, goblinFilter, minotaurFilter, buildingFilter,
+    hellGhostFilter,
   };
 
   // Decode the GIF once into AnimatedSprite frames. Sharing GifSprite across
@@ -724,6 +728,7 @@ function applyOptions(ctx: RenderContext, o: Options) {
   applyFilter(ctx.goblinLayer, ctx.goblinFilter, o.goblinSaturation, o.goblinBrightness);
   applyFilter(ctx.minotaurLayer, ctx.minotaurFilter, o.minotaurSaturation, o.minotaurBrightness);
   applyFilter(ctx.buildingLayer, ctx.buildingFilter, o.buildingSaturation, o.buildingBrightness);
+  applyFilter(ctx.hellGhostLayer, ctx.hellGhostFilter, 1, o.hellGhostBrightness);
   applyDomOptions(o);
   applyFonts(ctx, o);
 }
@@ -1080,10 +1085,14 @@ export function ambientDragonAt(ctx: RenderContext, x: number, y: number): { id:
 // dim red so the whole hell scene reads as the underworld.
 function makeGhostView(g: Ghost): GhostView | null {
   const container = new Container();
-  // Position is updated each render frame based on (now - spawnAt) * fall
-  // speed; here we just seed it to the spawn coord.
-  container.position.set(worldToHellX(g.x), worldToHellY(g.y));
+  // Position is updated each render frame; here we just seed it.
+  container.position.set(worldToHellX(g.x + (g.offX ?? 0)), worldToHellY(g.y + (g.offY ?? 0)));
   container.alpha = getOptions().hellGhostAlpha;
+
+  // Selection ring lives inside the container so it follows the ghost. Sized
+  // to roughly match the sprite footprint per-kind.
+  const selectionRing = new Graphics();
+  selectionRing.visible = false;
 
   if (g.kind === 'goblin') {
     const sheet = goblinIdleSheet ?? goblinWalkSheet;
@@ -1095,8 +1104,10 @@ function makeGhostView(g: Ghost): GhostView | null {
     const px = getOptions().goblinDisplayPx;
     sprite.scale.set(px / sheet.meta.spriteSize);
     sprite.tint = g.gold ? 0xc9a85a : 0xa06868;
+    selectionRing.circle(0, 0, GOBLIN.radius + 4).stroke({ width: 2, color: 0xffd96b });
+    container.addChild(selectionRing);
     container.addChild(sprite);
-    return { container, sprite };
+    return { container, sprite, selectionRing };
   }
   if (g.kind === 'minotaur') {
     const sheet = minotaurWalkSheet;
@@ -1108,8 +1119,10 @@ function makeGhostView(g: Ghost): GhostView | null {
     const px = getOptions().minotaurDisplayPx * (g.tiny ? TINYTAUR.scale : 1);
     sprite.scale.set(px / sheet.meta.spriteSize);
     sprite.tint = 0x9a5050;
+    selectionRing.circle(0, 0, MINOTAUR.radius + 6).stroke({ width: 2, color: 0xffd96b });
+    container.addChild(selectionRing);
     container.addChild(sprite);
-    return { container, sprite };
+    return { container, sprite, selectionRing };
   }
   // Dragon ghost: reuse the placeholder block + glyph but in deep dim red.
   const half = DRAGON_BLOCK / 2;
@@ -1123,13 +1136,15 @@ function makeGhostView(g: Ghost): GhostView | null {
   });
   label.anchor.set(0.5);
   label.alpha = 0.8;
+  selectionRing.circle(0, 0, DRAGON.displayPx * 0.5).stroke({ width: 2, color: 0xffd96b });
+  container.addChild(selectionRing);
   container.addChild(block);
   container.addChild(label);
   // Dragon facing is -1 (left) / +1 (right); the glyph faces left, mirror on +1.
   container.scale.set(g.facing > 0 ? -1 : 1, 1);
   // Cast block as the "sprite" for the view interface; we never touch it after
   // creation here, so any Container child works.
-  return { container, sprite: block as unknown as Sprite };
+  return { container, sprite: block as unknown as Sprite, selectionRing };
 }
 
 // Build the hell-side mirror of an overworld hell_portal — a darker copy of
@@ -1600,6 +1615,38 @@ export function worldToHellX(wx: number): number {
 }
 export function worldToHellY(wy: number): number {
   return wy + (HELL.height - WORLD.height) / 2;
+}
+
+// Current hell-coord position of a ghost — explicit hx/hy if the sim is
+// tracking it (commanded / interacted), otherwise derived from spawnAt + drift
+// with the per-ghost jitter. Both the renderer and input.ts need this, so it
+// lives here as the single source of truth.
+export function ghostHellPos(state: GameState, g: Ghost): { x: number; y: number } {
+  if (g.hx !== undefined && g.hy !== undefined) return { x: g.hx, y: g.hy };
+  const fall = getOptions().hellGhostFallSpeed;
+  const mult = g.speedMult ?? 1;
+  return {
+    x: worldToHellX(g.x + (g.offX ?? 0)),
+    y: worldToHellY(g.y + (g.offY ?? 0)) + (state.now - g.spawnAt) * fall * mult,
+  };
+}
+
+// Pick the topmost ghost under a hell-coord point, or null if none is within
+// HELL.ghostHitRadius. Used by input.ts to resolve a tap in the hell view.
+export function ghostAtHell(state: GameState, hx: number, hy: number): Ghost | null {
+  let best: Ghost | null = null;
+  let bestD = HELL.ghostHitRadius * HELL.ghostHitRadius;
+  for (const g of state.ghosts) {
+    const p = ghostHellPos(state, g);
+    const dx = p.x - hx;
+    const dy = p.y - hy;
+    const d = dx * dx + dy * dy;
+    if (d <= bestD) {
+      bestD = d;
+      best = g;
+    }
+  }
+  return best;
 }
 // Center the hell camera over the world-position you stepped off from on the
 // ground, so arrival lands you above the same play area you just left.
@@ -2073,9 +2120,22 @@ export function render(state: GameState, ctx: RenderContext) {
       ctx.ghostViews.set(gh.id, made);
       v = made;
     }
-    const drift = (state.now - gh.spawnAt) * fall;
-    v.container.position.set(worldToHellX(gh.x), worldToHellY(gh.y) + drift);
+    // Once a ghost has been touched by the sim (commanded to walk, or just
+    // selected), its position is tracked explicitly via hx/hy. Otherwise the
+    // hell-y is derived from spawnAt+drift with the per-ghost speed multiplier.
+    let hx: number;
+    let hy: number;
+    if (gh.hx !== undefined && gh.hy !== undefined) {
+      hx = gh.hx;
+      hy = gh.hy;
+    } else {
+      const mult = gh.speedMult ?? 1;
+      hx = worldToHellX(gh.x + (gh.offX ?? 0));
+      hy = worldToHellY(gh.y + (gh.offY ?? 0)) + (state.now - gh.spawnAt) * fall * mult;
+    }
+    v.container.position.set(hx, hy);
     v.container.alpha = ghostAlpha;
+    v.selectionRing.visible = !!gh.selected;
   }
   for (const [id, v] of ctx.ghostViews) {
     if (!seenGh.has(id)) {
