@@ -32,6 +32,10 @@ export function tick(state: GameState) {
     nextAutoAssignAt = state.now + AUTO_ASSIGN_INTERVAL;
   }
 
+  if (state.lightningStrikeCooldown > 0) {
+    state.lightningStrikeCooldown = Math.max(0, state.lightningStrikeCooldown - TICK_S);
+  }
+
   // ── 1. Spawn queue ────────────────────────────────────────────────
   if (state.autoSpawnEnabled) {
     state.autoSpawnTimer -= TICK_S;
@@ -98,11 +102,6 @@ export function tick(state: GameState) {
   // Floating space buildings drift within their bounds.
   for (const sb of state.spaceBuildings.values()) updateSpaceBuilding(sb);
 
-  // Sticky: once any Dragon Beacon has finished, the Dragon summon stays open.
-  if (!state.dragonSummonUnlocked && constructedDragonBeacon(state)) {
-    state.dragonSummonUnlocked = true;
-  }
-
   // Sticky: the Tinytaur summon reveals itself once the player has fielded
   // enough Minotaurs at once to pay its sacrifice cost.
   if (!state.tinytaurUnlocked && state.minotaurs.size >= TINYTAUR.minotaurCost) {
@@ -145,11 +144,15 @@ export function tick(state: GameState) {
     }
   }
 
-  // Space buildings keep paying their income with no upkeep — no maintainers,
-  // no water, no power grid. The same one-second cadence as ground income.
+  // Space buildings keep paying their income — same one-second cadence as
+  // ground income — but they still need the grid: a dormant orbital
+  // Hypercentre (cut off by power shortage) earns nothing until the link is
+  // restored. Generators in orbit run upkeep-free; resolvePowerAndState keeps
+  // them marked active.
   for (const sb of state.spaceBuildings.values()) {
     const def = BUILDING_DEFS[sb.building.kind];
     if (def.income <= 0) continue;
+    if (sb.building.state !== 'active') { sb.nextIncomeAt = undefined; continue; }
     if (sb.nextIncomeAt === undefined) { sb.nextIncomeAt = state.now + 1; continue; }
     if (state.now >= sb.nextIncomeAt) {
       earnMoney(state, def.income);
@@ -201,43 +204,47 @@ export function lightningStrike(state: GameState, x: number, y: number): boolean
   // Lightning vaporises every unit in the blast — goblins, minotaurs, and
   // dragons — and pays out their usual kill rewards. Dragons grant their
   // dragon-on-dragon bone drop; any building a struck dragon was carrying is
-  // lost with it, matching dragonKill's semantics. Rewards are summed into one
-  // floater per resource at the strike's centre so a big cull doesn't spray
-  // dozens of numbers.
+  // lost with it, matching dragonKill's semantics. Each victim emits its own
+  // floater above its head (same as a single goblin death) so the player
+  // sees discrete drops rather than one aggregate readout at the centre.
   let killed = 0;
-  let totalMoney = 0;
-  let totalBlood = 0;
-  let totalBones = 0;
   for (const g of [...state.goblins.values()]) {
     if (within(g.pos.x, g.pos.y)) {
       const r = goblinKillReward(state, g);
-      totalMoney += r.money;
-      totalBlood += r.blood;
+      const tx = g.pos.x, ty = g.pos.y;
+      earnMoney(state, r.money);
+      earnBlood(state, r.blood);
+      state.bloodUnlocked = true;
+      pushFloater(state, tx, ty, `+Ƶ${r.money.toLocaleString('en-US')}`, 0xffd96b, 1.6);
+      pushFloater(state, tx, ty - 14, `+${r.blood} blood`, 0xff8a8a, 1.6);
       removeGoblin(state, g.id);
       killed++;
     }
   }
   for (const m of [...state.minotaurs.values()]) {
     if (within(m.pos.x, m.pos.y)) {
-      totalMoney += MINOTAUR_KILL_REWARD.money;
-      totalBlood += MINOTAUR_KILL_REWARD.blood;
+      const tx = m.pos.x, ty = m.pos.y;
+      if (MINOTAUR_KILL_REWARD.money > 0) {
+        earnMoney(state, MINOTAUR_KILL_REWARD.money);
+        pushFloater(state, tx, ty, `+Ƶ${MINOTAUR_KILL_REWARD.money.toLocaleString('en-US')}`, 0xffd96b, 1.6);
+      }
+      earnBlood(state, MINOTAUR_KILL_REWARD.blood);
+      state.bloodUnlocked = true;
+      pushFloater(state, tx, ty - 14, `+${MINOTAUR_KILL_REWARD.blood} blood`, 0xff8a8a, 1.6);
       state.minotaurs.delete(m.id);
       killed++;
     }
   }
   for (const d of [...state.dragons.values()]) {
     if (within(d.pos.x, d.pos.y)) {
-      totalBones += DRAGON_KILL_REWARD.dragonBone;
+      const tx = d.pos.x, ty = d.pos.y;
+      earnDragonBone(state, DRAGON_KILL_REWARD.dragonBone);
+      state.dragonBoneUnlocked = true;
+      pushFloater(state, tx, ty, `+${DRAGON_KILL_REWARD.dragonBone} dragon bone${DRAGON_KILL_REWARD.dragonBone === 1 ? '' : 's'}`, 0xeae0c0, 1.8);
       removeDragon(state, d.id);
       killed++;
     }
   }
-  if (totalMoney > 0) earnMoney(state, totalMoney);
-  if (totalBlood > 0) { earnBlood(state, totalBlood); state.bloodUnlocked = true; }
-  if (totalBones > 0) { earnDragonBone(state, totalBones); state.dragonBoneUnlocked = true; }
-  if (totalMoney > 0) pushFloater(state, x, y - 28, `+Ƶ${totalMoney.toLocaleString('en-US')}`, 0xffd96b, 1.6);
-  if (totalBlood > 0) pushFloater(state, x, y - 42, `+${totalBlood} blood`, 0xff8a8a, 1.6);
-  if (totalBones > 0) pushFloater(state, x, y - 56, `+${totalBones} dragon bone${totalBones === 1 ? '' : 's'}`, 0xeae0c0, 1.8);
 
   // Stat: remember the biggest single-strike cull (sticky).
   if (killed > state.maxStruckAtOnce) state.maxStruckAtOnce = killed;
@@ -283,6 +290,10 @@ export function lightningStrike(state: GameState, x: number, y: number): boolean
   playSound('destroy', 0.7, 0.4);
   if (killed > 0) playDecayingGoblinDeath(0.6);
   appendLog(state, `Lightning strike! ${killed} unit${killed === 1 ? '' : 's'} vaporised.`);
+  // 2-second cooldown to stop the player from carpet-bombing through every
+  // wave of spawns in one breath. Ticked down in the sim, gated in main's
+  // onLightningStrike + ui's button refresh.
+  state.lightningStrikeCooldown = 2;
   return true;
 }
 
@@ -735,7 +746,7 @@ function updateMinotaur(state: GameState, t: Minotaur, autoTargets: Map<number, 
       if (state.now < s.attackAt) return;
       const c = buildingCenter(b);
       const def = defOf(b);
-      appendLog(state, `Minotaur #${t.id} smashes ${def.name} #${b.id}.`);
+      appendLog(state, `Minotaur #${t.id} smashes ${def.name} #${b.displayNum}.`);
       pushDeathEffect(state, c.x, c.y);
       destroyBuilding(state, b.id);
       playSound('destroy', 0.5);
@@ -846,24 +857,25 @@ function updateMinotaur(state: GameState, t: Minotaur, autoTargets: Map<number, 
 }
 
 // ─── Dragons ────────────────────────────────────────────────────────
-// Summon a dragon. Launches from the first finished Dragon Beacon (or the
-// hole, as a fallback) and starts in its default seeking behaviour. Instant —
-// no queue. Returns false only if there's nowhere sensible to launch from.
+// Summon a dragon. Targets the first finished Dragon Beacon (or the hole, as
+// a fallback) but spawns far above and swoops down so the entrance reads as
+// arriving from off-screen rather than popping into existence at the beacon.
 export function spawnDragon(state: GameState): boolean {
   const beacon = constructedDragonBeacon(state);
   const origin = beacon ? buildingCenter(beacon) : holeCenter(state);
   const id = state.nextId++;
+  const goal = { x: origin.x, y: origin.y - CELL * 2 };
   const d: Dragon = {
     id,
-    pos: { x: origin.x, y: origin.y - CELL * 2 },
+    pos: { x: goal.x, y: goal.y - DRAGON.swoopFromOffset },
     facing: 1,
-    state: { kind: 'seeking' },
+    state: { kind: 'swooping_in', goal },
     carrying: null,
     selected: false,
     spawnAt: state.now,
   };
   state.dragons.set(id, d);
-  appendLog(state, `Dragon #${id} unfurls its wings.`);
+  appendLog(state, `Dragon #${id} swoops down from above.`);
   // The summon ritual sound fires when the player queues the summon (main.ts);
   // this is the dragon actually arriving.
   playSound('online', 0.5, 0.35);
@@ -906,7 +918,7 @@ function dragonLift(state: GameState, d: Dragon, b: Building) {
   state.buildings.delete(b.id);
   d.carrying = b;
   d.state = { kind: 'carrying' };
-  appendLog(state, `Dragon #${d.id} hoists ${defOf(b).name} #${b.id} skyward.`);
+  appendLog(state, `Dragon #${d.id} hoists ${defOf(b).name} #${b.displayNum} skyward.`);
   playSound('online', 0.8, 0.45);
 }
 
@@ -928,7 +940,7 @@ function dragonReachSpace(state: GameState, d: Dragon) {
       selected: false,
     });
     state.spaceUnlocked = true;
-    appendLog(state, `${defOf(b).name} #${b.id} now drifts among the stars.`);
+    appendLog(state, `${defOf(b).name} #${b.displayNum} now drifts among the stars.`);
     playSound('task_complete', 0.6);
   }
   removeDragon(state, d.id);
@@ -954,7 +966,7 @@ function dragonDropAt(state: GameState, d: Dragon, goal: { x: number; y: number 
   state.buildings.set(b.id, b);
   d.carrying = null;
   d.state = { kind: 'seeking' };
-  appendLog(state, `Dragon #${d.id} sets ${def.name} #${b.id} back down.`);
+  appendLog(state, `Dragon #${d.id} sets ${def.name} #${b.displayNum} back down.`);
   playSound('place', 1.2);
   autoAssignAllIdle(state);
   return true;
@@ -1130,6 +1142,17 @@ function updateDragon(state: GameState, d: Dragon) {
       }
       s.attackAt = undefined;
       dragonFlyToward(d, tx, ty, speed);
+      return;
+    }
+
+    case 'swooping_in': {
+      // Fast entrance from above. On arrival, hand off to seeking and reset
+      // the spawn clock so the usual seek-delay hover beat starts from the
+      // landing (giving the player a window to issue a manual command).
+      if (dragonFlyToward(d, d.state.goal.x, d.state.goal.y, DRAGON.swoopSpeed)) {
+        d.state = { kind: 'seeking' };
+        d.spawnAt = state.now;
+      }
       return;
     }
 
@@ -1925,7 +1948,7 @@ function updateConstruction(state: GameState, b: Building) {
     // straight to active.
     b.state = (def.maintainersRequired === 0 && def.powerOutput === 0) ? 'active' : 'dormant';
     playSound('build_done');
-    appendLog(state, `${def.name} #${b.id} construction complete.`);
+    appendLog(state, `${def.name} #${b.displayNum} construction complete.`);
   }
 }
 
@@ -1980,6 +2003,35 @@ function resolvePowerAndState(state: GameState) {
     setActiveOrDormant(state, b, active, reason);
   }
 
+  // Space consumers draw from the same grid as ground consumers — orbit
+  // doesn't free a building from its power link. Evaluated after ground
+  // buildings so the local lights stay on first; any excess capacity then
+  // feeds the orbiting fleet. Income for space buildings (in the per-second
+  // loop above) skips dormant ones, so an underpowered space Hypercentre
+  // earns nothing until the grid catches back up.
+  for (const sb of state.spaceBuildings.values()) {
+    const b = sb.building;
+    const def = BUILDING_DEFS[b.kind];
+    if (def.powerOutput >= 0) continue;
+    const draw = -def.powerOutput;
+    const wasActive = b.state === 'active';
+    const fits = consumed + draw <= production;
+    if (fits) {
+      consumed += draw;
+      if (!wasActive) {
+        b.state = 'active';
+        appendLog(state, `${def.name} #${b.displayNum} re-establishes its power link from orbit.`);
+        pushFloater(state, sb.pos.x, sb.pos.y - POWER_FLOATER_Y_OFFSET, `-${formatPower(draw)}`, 0x8acfff, 1.6, undefined, true);
+      }
+    } else {
+      if (wasActive) {
+        b.state = 'dormant';
+        appendLog(state, `${def.name} #${b.displayNum} goes dark — orbital power link severed.`);
+        pushFloater(state, sb.pos.x, sb.pos.y - POWER_FLOATER_Y_OFFSET, `+${formatPower(draw)}`, 0x8acfff, 1.6, undefined, true);
+      }
+    }
+  }
+
   state.lastPowerProduced = production;
   state.lastPowerConsumed = consumed;
 }
@@ -1995,7 +2047,7 @@ function setActiveOrDormant(
     if (b.state !== 'active') {
       b.state = 'active';
       playSound('online');
-      appendLog(state, `${def.name} #${b.id} online.`);
+      appendLog(state, `${def.name} #${b.displayNum} online.`);
       const c = buildingCenter(b);
       // Raise power floaters above the building center so they don't pile up
       // under the gold "+Ƶ" income floater that spawns at the same point.
@@ -2012,7 +2064,7 @@ function setActiveOrDormant(
         reason === 'no_power' ? 'underpowered' :
         reason === 'no_water' ? 'needs water' :
         `needs ${def.maintainersRequired} maintainer${def.maintainersRequired === 1 ? '' : 's'}`;
-      appendLog(state, `${def.name} #${b.id} dormant — ${why}.`);
+      appendLog(state, `${def.name} #${b.displayNum} dormant — ${why}.`);
       // A thirsty building (DC/HC) that just ran dry stops drawing its load —
       // surface the power it freed back to the grid. The matching watered →
       // online draw is shown by the activation floater above.

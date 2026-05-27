@@ -348,7 +348,7 @@ export async function runIntro(): Promise<void> {
 
 // For new games only: how long the player gets to wander and click the empty
 // world before the goblin slides up and starts talking.
-const PRE_INTRO_FREE_CLICK_MS = 7_000;
+const PRE_INTRO_FREE_CLICK_MS = 6_500;
 // Staggered fade-in after the cutscene resolves: the summon panel comes in
 // first, then the task line trails behind so the eye doesn't see both reveal
 // at once.

@@ -2,12 +2,13 @@ import { Application, Container, FederatedPointerEvent, Graphics } from 'pixi.js
 import { playSound } from './audio';
 import { flashCursor } from './cursor-fx';
 import { BUILDABLE_KINDS, BUILDING_DEFS, BuildingKind, CELL, DRAGON, GOBLIN, LIGHTNING, MINOTAUR, RENDER_SCALE, WORLD, formatPower } from './config';
-import { RenderContext, clampCamera, clampSpaceCamera } from './render';
+import { RenderContext, ambientDragonAt, clampCamera, clampSpaceCamera } from './render';
 import { autoAssignAllIdle, lightningStrike } from './sim';
 import {
   Building, Cell, Dragon, GameState, Goblin, Minotaur, WaterSource,
   appendLog, buildingAtCell, cellKey, defOf, findFreeCellNear,
-  holeAtCell, isInBounds, pixelToCell, spaceBuildingAt, waterCarrierCount, waterSourceAtCell,
+  holeAtCell, isInBounds, nextBuildingDisplayNum, pixelToCell, spaceBuildingAt,
+  waterCarrierCount, waterSourceAtCell,
 } from './state';
 
 type ActivePointer = {
@@ -251,8 +252,12 @@ export function setupInput(
         if (moved < SPACE_DRAG_TOL) {
           const lp = e.getLocalPosition(ctx.spaceLayer);
           const sb = spaceBuildingAt(state, lp.x, lp.y);
+          // Ambient dragons sit behind the floating buildings, so they only get
+          // a hit when nothing higher-priority is under the pointer.
+          const ad = sb ? null : ambientDragonAt(ctx, lp.x, lp.y);
           if (!e.shiftKey) clearSelection(state);
           if (sb) { sb.selected = true; playSound('select', 0.33); }
+          else if (ad) { state.selectedAmbientDragonId = ad.id; playSound('select', 0.33); }
         } else {
           // Box corners: drag origin + release point, both mapped to space-layer
           // coords (where the floating buildings live).
@@ -562,6 +567,7 @@ function clearSelection(state: GameState) {
   for (const w of state.waterSources.values()) w.selected = false;
   for (const sb of state.spaceBuildings.values()) sb.selected = false;
   state.hole.selected = false;
+  state.selectedAmbientDragonId = null;
 }
 
 function goblinAt(state: GameState, x: number, y: number): Goblin | null {
@@ -687,7 +693,7 @@ function handleRightClick(state: GameState, x: number, y: number) {
         for (const d of freeDragons) {
           d.state = { kind: 'going_to_building', buildingId: targetBuilding.id };
         }
-        appendLog(state, `${freeDragons.length} dragon(s) sent to haul ${defOf(targetBuilding).name} #${targetBuilding.id} to space.`);
+        appendLog(state, `${freeDragons.length} dragon(s) sent to haul ${defOf(targetBuilding).name} #${targetBuilding.displayNum} to space.`);
       } else {
         for (const d of freeDragons) {
           d.state = { kind: 'moving_to', goal: { x, y } };
@@ -747,7 +753,7 @@ function handleRightClick(state: GameState, x: number, y: number) {
         m.state = { kind: 'going_to_destroy', buildingId: targetBuilding.id };
         resetMinotaurStuck(m, state.now);
       }
-      appendLog(state, `${selectedMinotaurs.length} minotaur(s) ordered to smash ${defOf(targetBuilding).name} #${targetBuilding.id}.`);
+      appendLog(state, `${selectedMinotaurs.length} minotaur(s) ordered to smash ${defOf(targetBuilding).name} #${targetBuilding.displayNum}.`);
     } else {
       // Empty cell — walk there, then resume the usual hunt/wander.
       for (const m of selectedMinotaurs) {
@@ -835,7 +841,7 @@ function assignToBuilding(state: GameState, goblins: Goblin[], b: Building) {
     added++;
   }
   if (added > 0) {
-    appendLog(state, `${added} goblin(s) assigned to ${role} ${def.name} #${b.id}.`);
+    appendLog(state, `${added} goblin(s) assigned to ${role} ${def.name} #${b.displayNum}.`);
   }
 }
 
@@ -903,6 +909,7 @@ function placeBuilding(state: GameState, x: number, y: number) {
   if (def.bloodCost) state.blood -= def.bloodCost;
   const b: Building = {
     id: state.nextId++,
+    displayNum: nextBuildingDisplayNum(state, kind),
     kind,
     cell: tl,
     state: 'constructing',
@@ -913,7 +920,7 @@ function placeBuilding(state: GameState, x: number, y: number) {
   state.buildings.set(b.id, b);
   state.pendingBuild = null;
   playSound('place', 1.6);
-  appendLog(state, `${def.name} #${b.id} construction started — right-click goblins onto it to staff the build.`);
+  appendLog(state, `${def.name} #${b.displayNum} construction started — right-click goblins onto it to staff the build.`);
   autoAssignAllIdle(state);
 }
 
@@ -932,6 +939,7 @@ function tryPlaceWallAt(state: GameState, cx: number, cy: number, silent: boolea
   state.money -= 1;
   const b: Building = {
     id: state.nextId++,
+    displayNum: nextBuildingDisplayNum(state, 'wall'),
     kind: 'wall',
     cell: { cx, cy },
     state: 'active',

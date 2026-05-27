@@ -129,7 +129,11 @@ export type DragonState =
   // A dragon target is fratricide — the victim drops a Dragon Bone.
   | { kind: 'going_to_kill'; targetKind: 'goblin' | 'minotaur' | 'dragon'; targetId: number; attackAt?: number }
   // Commanded: hoist one specific building (even the Beacon) up to space.
-  | { kind: 'going_to_building'; buildingId: number };
+  | { kind: 'going_to_building'; buildingId: number }
+  // Entrance animation: spawned far above the goal and flies down fast. On
+  // arrival flips to `seeking` with spawnAt reset, so the usual seek-delay
+  // hover beat starts from the landing rather than from the summon click.
+  | { kind: 'swooping_in'; goal: Vec2 };
 
 export type Dragon = {
   id: number;
@@ -161,6 +165,11 @@ export type BuildingState = 'constructing' | 'active' | 'dormant';
 
 export type Building = {
   id: number;
+  // Within-kind ordinal stamped at creation (1, 2, 3, …) — what the player sees
+  // in logs and the info panel. Independent of `id`, which is a global monotonic
+  // counter shared with goblins/minotaurs/dragons and reads as confusingly high
+  // by the time the player builds their second Hypercentre.
+  displayNum: number;
   kind: BuildingKind;
   cell: Cell;
   state: BuildingState;
@@ -305,10 +314,22 @@ export type GameState = {
   // True while the player is aiming a Lightning Strike (next map click fires
   // it). Ephemeral — never meaningfully persisted.
   pendingStrike: boolean;
+  // Seconds remaining on the Lightning Strike cooldown after a successful
+  // strike. Ticks down in the sim; the button is disabled while > 0.
+  lightningStrikeCooldown: number;
+  // Currently-selected ambient (background) dragon — renderer-owned cosmetic
+  // dragons that the player can click for a "Distant dragon" popup but never
+  // command. Null when nothing is picked. The renderer clears it when the
+  // matching dragon despawns so the info panel never references a ghost.
+  selectedAmbientDragonId: number | null;
   spawnQueue: { remaining: number; slot: number }[];
   minotaurSpawnQueue: { remaining: number }[];
   dragonSpawnQueue: { remaining: number }[];
   pendingBuild: PendingBuild;
+  // Per-kind ordinal counters; incremented at building creation to stamp
+  // Building.displayNum. Monotonic — destroying a building does NOT free up its
+  // number, so the player sees "#2", "#3", "#4" even if #2 was smashed.
+  buildingCounts: Record<BuildingKind, number>;
   log: { time: number; msg: string }[];
   occupancy: Map<string, number>;
   walls: Set<string>;     // permanently impassable cells (mutated by Dig)
@@ -335,9 +356,6 @@ export type GameState = {
   // the final task (collect_dragon_bone) — that's the demo-end gag, so the
   // secret-settings reveal gates on getting that far. Sticky once flipped.
   optionsUnlocked: boolean;
-  // Sticky: flips true once any Dragon Beacon has finished constructing, so the
-  // Dragon summon button survives even if every beacon is later hauled to space.
-  dragonSummonUnlocked: boolean;
   // Sticky: flips true the first time a building reaches space. Gates the
   // "hold ↑ at the top of the map to rise into space" affordance.
   spaceUnlocked: boolean;
@@ -361,6 +379,31 @@ export type UnlockState = {
 };
 
 export function defOf(b: Building): BuildingDef { return BUILDING_DEFS[b.kind]; }
+
+// Build a counts map seeded to zero for every defined kind. New-game init and
+// pre-buildingCounts save migration both need this.
+export function emptyBuildingCounts(): Record<BuildingKind, number> {
+  const counts = {} as Record<BuildingKind, number>;
+  for (const k of Object.keys(BUILDING_DEFS) as BuildingKind[]) counts[k] = 0;
+  return counts;
+}
+
+// Bump the per-kind counter and return the next within-kind ordinal. Callers
+// stamp the result onto a freshly-created Building's `displayNum`.
+export function nextBuildingDisplayNum(state: GameState, kind: BuildingKind): number {
+  const next = (state.buildingCounts[kind] ?? 0) + 1;
+  state.buildingCounts[kind] = next;
+  return next;
+}
+
+// Human-readable label for a building reference held by goblin/dragon state.
+// Falls back to a bare `#id` if the building has been destroyed mid-tick (the
+// describe-state helpers can be called between sim and render).
+export function buildingLabel(state: GameState, buildingId: number): string {
+  const b = state.buildings.get(buildingId);
+  if (!b) return `#${buildingId}`;
+  return `${BUILDING_DEFS[b.kind].name} #${b.displayNum}`;
+}
 
 export function cellKey(cx: number, cy: number): string { return `${cx},${cy}`; }
 
@@ -614,6 +657,9 @@ export function createInitialState(): GameState {
     minotaurSpawnQueue: [],
     dragonSpawnQueue: [],
     pendingBuild: null,
+    buildingCounts: emptyBuildingCounts(),
+    lightningStrikeCooldown: 0,
+    selectedAmbientDragonId: null,
     log: [],
     occupancy: new Map(),
     walls: new Set<string>(),  // populated after construction
@@ -627,7 +673,6 @@ export function createInitialState(): GameState {
     waterSeen: false,
     multiSelectSeen: false,
     optionsUnlocked: false,
-    dragonSummonUnlocked: false,
     spaceUnlocked: false,
     view: 'ground',
   };

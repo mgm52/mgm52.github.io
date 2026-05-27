@@ -239,6 +239,11 @@ type AmbientDragon = {
   bobAmp: number;
   spawnAt: number;       // state.now when it entered
   container: Container;  // lives in spaceAmbientLayer
+  selectionRing: Graphics;
+  // Live space-x/y from the last frame (after movement + bob). Cached so a
+  // pointer hit-test doesn't have to re-derive it from x0/dir/speed.
+  cx: number;
+  cy: number;
 };
 
 // A precomputed star for the climb-transition overlay (screen-space fractions).
@@ -833,24 +838,33 @@ function spawnAmbientDragon(ctx: RenderContext, midScene: boolean): void {
   label.anchor.set(0.5);
   label.alpha = 0.82;
 
+  const selectionRing = new Graphics();
+  selectionRing.circle(0, 0, DRAGON.displayPx * 0.5).stroke({ width: 2, color: 0xffd96b });
+  selectionRing.visible = false;
+
   container.addChild(glow);
   container.addChild(block);
   container.addChild(label);
+  container.addChild(selectionRing);
   ctx.spaceAmbientLayer.addChild(container);
 
+  const x0 = midScene
+    ? SPACE.width * (0.15 + Math.random() * 0.70)
+    : (dir > 0 ? -cfg.margin : SPACE.width + cfg.margin);
+  const y = SPACE.height * (0.12 + Math.random() * 0.76);
   ctx.ambientDragons.push({
     id: ctx.ambientIdSeq++,
     // When pre-filling an empty scene, start somewhere on-screen so arriving in
     // space isn't a beat of emptiness; otherwise enter from just off the edge.
-    x0: midScene
-      ? SPACE.width * (0.15 + Math.random() * 0.70)
-      : (dir > 0 ? -cfg.margin : SPACE.width + cfg.margin),
-    y: SPACE.height * (0.12 + Math.random() * 0.76),
+    x0, y,
     dir, speed, scale,
     bobPhase: Math.random() * Math.PI * 2,
     bobAmp: cfg.bobAmpMin + Math.random() * (cfg.bobAmpMax - cfg.bobAmpMin),
     spawnAt: ctx.state.now,
     container,
+    selectionRing,
+    cx: x0,
+    cy: y,
   });
 }
 
@@ -865,6 +879,8 @@ function updateAmbientDragons(ctx: RenderContext): void {
       ctx.ambientDragons.length = 0;
     }
     ctx.nextAmbientSpawnAt = 0;
+    // Selection is renderer-cosmetic; once the layer's gone, drop it.
+    if (ctx.state.selectedAmbientDragonId !== null) ctx.state.selectedAmbientDragonId = null;
     return;
   }
   const now = ctx.state.now;
@@ -877,15 +893,37 @@ function updateAmbientDragons(ctx: RenderContext): void {
     const x = a.x0 + a.dir * a.speed * (now - a.spawnAt);
     const gone = a.dir > 0 ? x > SPACE.width + cfg.margin : x < -cfg.margin;
     if (gone) {
+      if (ctx.state.selectedAmbientDragonId === a.id) ctx.state.selectedAmbientDragonId = null;
       a.container.destroy({ children: true });
       ctx.ambientDragons.splice(i, 1);
       continue;
     }
     const bob = Math.sin((now + a.bobPhase) * 2.2) * a.bobAmp;
-    a.container.position.set(x, a.y + bob);
+    a.cx = x;
+    a.cy = a.y + bob;
+    a.container.position.set(x, a.cy);
     // The 🐉 glyph faces left; mirror on x when travelling right.
     a.container.scale.set(a.dir > 0 ? -a.scale : a.scale, a.scale);
+    a.selectionRing.visible = ctx.state.selectedAmbientDragonId === a.id;
   }
+}
+
+// Hit-test space-layer pointer coords against every ambient dragon on screen
+// and return the closest one (or null). Mirrors spaceBuildingAt's contract;
+// used by input.ts to let the player click the decorative dragons.
+export function ambientDragonAt(ctx: RenderContext, x: number, y: number): { id: number } | null {
+  let best: AmbientDragon | null = null;
+  let bestD = Infinity;
+  for (const a of ctx.ambientDragons) {
+    // Hit radius scales with the dragon's draw size — a small distant dragon
+    // takes a tighter click than a closer/larger one.
+    const r = DRAGON_BLOCK * a.scale * 0.6;
+    const dx = x - a.cx, dy = y - a.cy;
+    if (Math.abs(dx) > r || Math.abs(dy) > r) continue;
+    const d = dx * dx + dy * dy;
+    if (d < bestD) { bestD = d; best = a; }
+  }
+  return best ? { id: best.id } : null;
 }
 
 function makeWaterView(w: WaterSource): WaterView {
@@ -1240,9 +1278,13 @@ function makeSpaceBuildingView(sb: SpaceBuilding): SpaceBuildingView {
 }
 
 // ─── Space scene + climb transition ─────────────────────────────────
+// Gradient sampled from low to high altitude. The bottom stops are nearly as
+// dark as the play area (oobColor ≈ #040404) so the sky bloom doesn't slam
+// against the dark ground with a bright daytime horizon. Mid-altitude stops
+// give a daylight blue band, then the gradient sinks into deep space again.
 const SKY_STOPS: [number, number][] = [
-  [0.00, 0xbfe0ff], [0.18, 0x7fb5f0], [0.40, 0x3f7fd8],
-  [0.62, 0x1c3f86], [0.82, 0x0a1640], [1.00, 0x03040f], [1.30, 0x010109],
+  [0.00, 0x06080f], [0.18, 0x122142], [0.36, 0x254a82], [0.52, 0x3f7fd8],
+  [0.68, 0x1c3f86], [0.84, 0x0a1640], [1.00, 0x03040f], [1.30, 0x010109],
 ];
 function lerpHex(a: number, b: number, t: number): number {
   const ar = (a >> 16) & 255, ag = (a >> 8) & 255, ab = a & 255;
@@ -1319,8 +1361,13 @@ function drawTransition(ctx: RenderContext, a: number, now: number) {
   for (const c of ctx.transClouds) {
     const y = H * (hTop - c.h) / (hTop - hBottom);
     if (y < -c.scale || y > H + c.scale) continue;
-    // Fade out once we've climbed well above the cloud.
-    const fade = 1 - smoothstep(c.h + 0.05, c.h + 0.22, a);
+    // Clouds bloom in as we approach their altitude band, then fade out once
+    // we've climbed well above them. Without the fade-in, every cloud pops
+    // into existence the moment the sky overlay does — too sudden against
+    // the dark play area.
+    const fadeIn = smoothstep(c.h - 0.20, c.h - 0.02, a);
+    const fadeOut = 1 - smoothstep(c.h + 0.05, c.h + 0.22, a);
+    const fade = fadeIn * fadeOut;
     if (fade <= 0.01) continue;
     const cx = c.fx * W;
     for (const [px, py, pr] of c.puffs) {
@@ -1696,9 +1743,12 @@ export function render(state: GameState, ctx: RenderContext) {
   //  • the space diorama fades up underneath the dissolving sky.
   // z-order is world < space < sky, so the late sky fade reveals space cleanly.
   const a = ctx.altitude;
-  const groundFade = 1 - smoothstep(0.02, 0.18, a);
+  // Ground and sky overlap through the lower-altitude band so the dark play
+  // area cross-fades into the (now also dark) low-sky gradient instead of the
+  // sky punching in over a still-dark ground.
+  const groundFade = 1 - smoothstep(0.05, 0.32, a);
   const spaceFade = smoothstep(0.84, 1.0, a);
-  const skyFade = Math.min(smoothstep(0.0, 0.1, a), 1 - smoothstep(0.84, 1.0, a));
+  const skyFade = Math.min(smoothstep(0.0, 0.32, a), 1 - smoothstep(0.84, 1.0, a));
 
   ctx.worldLayer.visible = groundFade > 0.001;
   ctx.worldLayer.alpha = groundFade;

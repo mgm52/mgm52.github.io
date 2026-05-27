@@ -57,7 +57,7 @@ export const MINOTAUR = {
   speed: 70,
   radius: 22,
   bloodCost: 8,        // base cost; doubles per purchase up to bloodCostCap
-  bloodCostCap: 64,
+  bloodCostCap: 32,
   spawnTime: 2,
   spawnCapacity: 1,
   arriveDist: 2,
@@ -65,8 +65,8 @@ export const MINOTAUR = {
   wanderInterval: 1.2,
 };
 
-// Minotaur summoning gets pricier the more you've bought: 8 → 16 → 32 → 64,
-// then flat at the cap. `bought` is the number summoned so far this run.
+// Minotaur summoning gets pricier the more you've bought: 8 → 16 → 32, then
+// flat at the cap. `bought` is the number summoned so far this run.
 export function minotaurBloodCost(bought: number): number {
   return Math.min(MINOTAUR.bloodCostCap, MINOTAUR.bloodCost * (2 ** bought));
 }
@@ -118,6 +118,12 @@ export const DRAGON = {
   killReach: 22,         // px the fire-breath reaches past the target center
   spaceY: -4 * CELL,     // world-y a carrier climbs to before its load enters space
   displayPx: 132,        // on-screen sprite size of a full dragon
+  // Entrance swoop: a freshly-summoned dragon spawns this many px above its
+  // landing point and flies down at swoopSpeed. The offset is well past the
+  // top of the viewport at any reasonable zoom, so it reads as arriving from
+  // off-screen rather than popping into existence at the beacon.
+  swoopFromOffset: 1200, // px above target on summon
+  swoopSpeed: 1500,      // px/sec entry speed
 };
 
 // Ambient dragons — purely decorative silhouettes that drift across the space
