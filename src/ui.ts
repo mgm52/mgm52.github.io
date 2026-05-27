@@ -23,6 +23,7 @@ const SORTED_KINDS: BuildingKind[] = [
   'goblin_wheel', 'phone_farm', 'gas_engine',
   'goblin_hole', 'datacentre',
   'nuclear_reactor', 'hypercentre', 'dragon_beacon',
+  'hell_portal',
 ];
 
 // Inserted between adjacent build buttons that belong to different tutorial
@@ -265,7 +266,7 @@ const TASKS: Task[] = [
   {
     id: 'collect_dragon_bone',
     text: 'Collect a dragon bone',
-    unlocks: [],
+    unlocks: ['hell_portal'],
     isDone: (s) => s.dragonBoneEarned >= 1,
     prereq: ['build_hypercentre'],
   },
@@ -545,6 +546,9 @@ export function setupUI(state: GameState, callbacks: UICallbacks) {
     const bloodCostBit = def.bloodCost
       ? ` · <span class="build-cost build-blood-cost" id="blood-cost-${kind}">${def.bloodCost} blood</span>`
       : '';
+    const dragonBoneCostBit = def.dragonBoneCost
+      ? ` · <span class="build-cost build-bone-cost" id="bone-cost-${kind}">${def.dragonBoneCost} bone${def.dragonBoneCost === 1 ? '' : 's'}</span>`
+      : '';
     const yieldBits: string[] = [];
     if (def.income) yieldBits.push(`<span class="yield-money">+Ƶ${def.income.toLocaleString('en-US')}/s</span>`);
     if (def.powerOutput > 0) {
@@ -563,7 +567,7 @@ export function setupUI(state: GameState, callbacks: UICallbacks) {
         <div class="build-text">
           <div class="build-name">${def.name}</div>
           <div class="build-meta">
-            <span class="build-cost" id="cost-${kind}">Ƶ${def.cost.toLocaleString('en-US')}</span>${powerCostBit}${bloodCostBit}
+            <span class="build-cost" id="cost-${kind}">Ƶ${def.cost.toLocaleString('en-US')}</span>${powerCostBit}${bloodCostBit}${dragonBoneCostBit}
           </div>
         </div>
         ${yieldHtml}
@@ -1049,11 +1053,12 @@ export function refreshUI(state: GameState) {
     if (!visible) { setBuyFlash(btnId(kind), false); continue; }
     const canAffordMoney = state.money >= def.cost;
     const canAffordBlood = !def.bloodCost || state.blood >= def.bloodCost;
+    const canAffordBone = !def.dragonBoneCost || state.dragonBone >= def.dragonBoneCost;
     const draw = def.powerOutput < 0 ? -def.powerOutput : 0;
     const enoughPower = draw === 0 || draw <= availablePower;
     // Set the disabled state BEFORE kicking off the fade-in so the right
     // keyframes (full vs disabled-target opacity) get picked.
-    btn.disabled = !canAffordMoney || !canAffordBlood || !enoughPower;
+    btn.disabled = !canAffordMoney || !canAffordBlood || !canAffordBone || !enoughPower;
     applyFadeInOnFirstShow(btnId(kind));
     // Flash for attention while affordable and never built before.
     setBuyFlash(btnId(kind), !btn.disabled && !everBuiltKinds.has(kind));
@@ -1063,6 +1068,8 @@ export function refreshUI(state: GameState) {
     if (powerCostEl) powerCostEl.classList.toggle('met', enoughPower);
     const bloodCostEl = document.getElementById(`blood-cost-${kind}`);
     if (bloodCostEl) bloodCostEl.classList.toggle('met', canAffordBlood);
+    const boneCostEl = document.getElementById(`bone-cost-${kind}`);
+    if (boneCostEl) boneCostEl.classList.toggle('met', canAffordBone);
   }
 
   // Hide separators that mark a task boundary the player hasn't crossed yet.

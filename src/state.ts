@@ -217,6 +217,19 @@ export type DeathEffect = {
   white?: boolean;
 };
 
+// A ghost of a unit the player has killed — surfaced in Hell as a static
+// silhouette at the world-x/y where the unit died. Persisted across saves so
+// the underworld never forgets. `facing` is radians for goblin/minotaur and
+// ±1 (sprite mirror) for dragons, matching the live unit's facing field.
+export type Ghost = {
+  id: number;
+  kind: 'goblin' | 'minotaur' | 'dragon';
+  x: number; y: number;
+  facing: number;
+  gold?: boolean;
+  tiny?: boolean;
+};
+
 // One-shot jagged white bolt drawn from above down to a strike point. The
 // polyline is precomputed at spawn so it doesn't reshuffle every frame.
 export type LightningBolt = {
@@ -359,9 +372,18 @@ export type GameState = {
   // Sticky: flips true the first time a building reaches space. Gates the
   // "hold ↑ at the top of the map to rise into space" affordance.
   spaceUnlocked: boolean;
+  // Sticky: flips true the first time a Hell Portal is placed. Gates the
+  // "hold ↓ at the bottom of the map to descend into hell" affordance.
+  hellUnlocked: boolean;
+  // state.now when the first Hell Portal was placed — drives the red beam's
+  // draw-in animation. Null until the player places one.
+  hellPortalPlacedAt: number | null;
+  // Ghosts of every unit the player has killed (goblin, minotaur, dragon),
+  // displayed in Hell as static silhouettes at the world-x/y where they died.
+  ghosts: Ghost[];
   // Which scene the player is currently looking at. Ephemeral — always reset to
-  // 'ground' on load; the climb animation lives entirely in the renderer.
-  view: 'ground' | 'space';
+  // 'ground' on load; scene transitions live entirely in the renderer.
+  view: 'ground' | 'space' | 'hell';
   // Persisted UI unlock progress (the sticky sets that live in ui.ts). Saved so
   // tutorial unlocks, the dig gate, and "outgrown" hides survive a reload even
   // after the buildings that triggered them are gone. ui.ts hydrates its module
@@ -674,6 +696,9 @@ export function createInitialState(): GameState {
     multiSelectSeen: false,
     optionsUnlocked: false,
     spaceUnlocked: false,
+    hellUnlocked: false,
+    hellPortalPlacedAt: null,
+    ghosts: [],
     view: 'ground',
   };
   state.walls = rebuildWalls(state);
@@ -737,6 +762,24 @@ export function totalIncome(state: GameState): number {
   let inc = 0;
   for (const b of state.buildings.values()) if (b.state === 'active') inc += defOf(b).income;
   return inc;
+}
+
+// Stamp a permanent ghost at the world-x/y where a unit died. Called from
+// every kill site (lightning, dragon, minotaur, goblin, tinytaur sacrifice,
+// player kill button). The ghosts list is rendered in Hell.
+export function recordGhost(
+  state: GameState,
+  kind: Ghost['kind'],
+  x: number, y: number,
+  facing: number,
+  opts: { gold?: boolean; tiny?: boolean } = {},
+): void {
+  state.ghosts.push({
+    id: state.nextId++,
+    kind, x, y, facing,
+    gold: opts.gold || undefined,
+    tiny: opts.tiny || undefined,
+  });
 }
 
 export function pushDeathEffect(state: GameState, x: number, y: number, white = false) {

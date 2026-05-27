@@ -487,6 +487,21 @@
       #ascend-hint { top: 14px; }
       #descend-hint { bottom: 14px; }
       #ascend-hint.visible, #descend-hint.visible { opacity: 1; }
+      /* Hell prompts mirror the space pair (bottom-of-ground → descend,
+         top-of-hell → ascend) but render in a hot-red palette so they read
+         as "down" rather than "up". */
+      #descend-hell-hint, #ascend-hell-hint {
+        position: absolute; left: 50%; transform: translateX(-50%);
+        background: rgba(28, 4, 6, 0.78); padding: 9px 16px;
+        border: 1px solid rgba(255, 80, 80, 0.45);
+        border-radius: 4px; font-family: var(--font-body); font-size: calc(17px * var(--font-body-scale));
+        pointer-events: none; color: #ffd0c8; letter-spacing: 1px;
+        text-shadow: 0 0 8px rgba(255, 80, 80, 0.6);
+        opacity: 0; transition: opacity 600ms ease; z-index: 6;
+      }
+      #descend-hell-hint { bottom: 14px; }
+      #ascend-hell-hint { top: 14px; }
+      #descend-hell-hint.visible, #ascend-hell-hint.visible { opacity: 1; }
       /* From orbit you can't build or summon — dim those panels out. */
       body.space-view #panel-summon,
       body.space-view #panel-build {
@@ -1102,6 +1117,10 @@
              at least one building has been hauled into space. -->
         <div id="ascend-hint">Hold ↑ to rise into space</div>
         <div id="descend-hint">Hold ↓ to return to the surface</div>
+        <!-- Hell-view prompts — shown by main.ts at the bottom edge of the
+             ground (once a Hell Portal exists) and at the top edge of hell. -->
+        <div id="descend-hell-hint">Hold ↓ to descend into hell</div>
+        <div id="ascend-hell-hint">Hold ↑ to return to the surface</div>
         <button id="pause-btn" type="button" aria-label="Pause">⏸</button>
         <div id="pause-overlay">
           <div class="pause-title">PAUSED</div>

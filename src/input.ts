@@ -2,7 +2,7 @@ import { Application, Container, FederatedPointerEvent, Graphics } from 'pixi.js
 import { playSound } from './audio';
 import { flashCursor } from './cursor-fx';
 import { BUILDABLE_KINDS, BUILDING_DEFS, BuildingKind, CELL, DRAGON, GOBLIN, LIGHTNING, MINOTAUR, RENDER_SCALE, WORLD, formatPower } from './config';
-import { RenderContext, ambientDragonAt, clampCamera, clampSpaceCamera } from './render';
+import { RenderContext, ambientDragonAt, clampCamera, clampHellCamera, clampSpaceCamera, currentHellScale } from './render';
 import { autoAssignAllIdle, lightningStrike } from './sim';
 import {
   Building, Cell, Dragon, GameState, Goblin, Minotaur, WaterSource,
@@ -180,10 +180,15 @@ export function setupInput(
         ctx.camera.x -= dx / RENDER_SCALE;
         ctx.camera.y -= dy / RENDER_SCALE;
         clampCamera(ctx);
-      } else {
+      } else if (state.view === 'space') {
         ctx.spaceCamera.x -= dx / RENDER_SCALE;
         ctx.spaceCamera.y -= dy / RENDER_SCALE;
         clampSpaceCamera(ctx);
+      } else {
+        const scale = currentHellScale(ctx);
+        ctx.hellCamera.x -= dx / scale;
+        ctx.hellCamera.y -= dy / scale;
+        clampHellCamera(ctx);
       }
       input.panLast = { x: midX, y: midY };
       return;
@@ -690,10 +695,16 @@ function handleRightClick(state: GameState, x: number, y: number) {
         }
         appendLog(state, `${freeDragons.length} dragon(s) turning on Dragon #${targetDragon.id}.`);
       } else if (targetBuilding) {
-        for (const d of freeDragons) {
-          d.state = { kind: 'going_to_building', buildingId: targetBuilding.id };
+        // Hell Portals are anchored to the abyss — no dragon can lift them.
+        if (targetBuilding.kind === 'hell_portal') {
+          playSound('error');
+          appendLog(state, `${defOf(targetBuilding).name} is rooted to the abyss — dragons cannot move it.`);
+        } else {
+          for (const d of freeDragons) {
+            d.state = { kind: 'going_to_building', buildingId: targetBuilding.id };
+          }
+          appendLog(state, `${freeDragons.length} dragon(s) sent to haul ${defOf(targetBuilding).name} #${targetBuilding.displayNum} to space.`);
         }
-        appendLog(state, `${freeDragons.length} dragon(s) sent to haul ${defOf(targetBuilding).name} #${targetBuilding.displayNum} to space.`);
       } else {
         for (const d of freeDragons) {
           d.state = { kind: 'moving_to', goal: { x, y } };
@@ -889,6 +900,7 @@ function placeBuilding(state: GameState, x: number, y: number) {
   const def = BUILDING_DEFS[kind];
   if (state.money < def.cost) { playSound('error'); appendLog(state, 'Not enough Ƶ.'); return; }
   if (def.bloodCost && state.blood < def.bloodCost) { playSound('error'); appendLog(state, `Need ${def.bloodCost} blood to build ${def.name}.`); return; }
+  if (def.dragonBoneCost && state.dragonBone < def.dragonBoneCost) { playSound('error'); appendLog(state, `Need ${def.dragonBoneCost} dragon bone${def.dragonBoneCost === 1 ? '' : 's'} to build ${def.name}.`); return; }
   if (def.powerOutput < 0) {
     const draw = -def.powerOutput;
     const available = state.lastPowerProduced - state.lastPowerConsumed;
@@ -907,6 +919,7 @@ function placeBuilding(state: GameState, x: number, y: number) {
 
   state.money -= def.cost;
   if (def.bloodCost) state.blood -= def.bloodCost;
+  if (def.dragonBoneCost) state.dragonBone -= def.dragonBoneCost;
   const b: Building = {
     id: state.nextId++,
     displayNum: nextBuildingDisplayNum(state, kind),
@@ -919,6 +932,12 @@ function placeBuilding(state: GameState, x: number, y: number) {
   };
   state.buildings.set(b.id, b);
   state.pendingBuild = null;
+  // Hell Portal: placing one (sticky) unlocks the descent affordance and
+  // anchors the red beam's draw-in animation.
+  if (kind === 'hell_portal' && !state.hellUnlocked) {
+    state.hellUnlocked = true;
+    state.hellPortalPlacedAt = state.now;
+  }
   playSound('place', 1.6);
   appendLog(state, `${def.name} #${b.displayNum} construction started — right-click goblins onto it to staff the build.`);
   autoAssignAllIdle(state);

@@ -158,6 +158,27 @@ export const SPACE = {
   margin: 90,            // keep floating buildings this far inside the bounds
 };
 
+// Hell — the dim mirror world the Hell Portal opens onto. Its own coordinate
+// space, deliberately bigger than the overworld so the camera has somewhere
+// to zoom out into on arrival. Ghosts of every killed unit are scattered here
+// at the same world-x/y where they died.
+export const HELL = {
+  width: 4800,
+  height: 3200,
+  // On arrival the camera shows hell at the normal RENDER_SCALE, then eases
+  // out to this multiplier so the player can see the larger map. Going back
+  // up reverses the zoom first, then plays the rise transition.
+  zoomedOutScale: 0.5,   // fraction of RENDER_SCALE shown at full zoom-out
+  zoomMs: 1600,          // duration of the easing zoom in/out
+  // Red beam from the portal down to the abyss — animates in over this many
+  // ms after placement, then stays drawn at full length.
+  lineDrawMs: 1400,
+  lineColor: 0xff2030,
+  // Visual style of the void.
+  bgColor: 0x0a0203,
+  fogColor: 0x4a0a0e,
+};
+
 // One-shot Ritual upgrades. Autocommand + Goldblins unlock once a Phone
 // Farm has been built; Autospawn unlocks once a Gas Turbine has been built.
 // "Autocommand": newly-hatched goblins route themselves to understaffed
@@ -248,6 +269,7 @@ export type BuildingDef = {
   size: number;           // pixel size = cellSize * CELL
   cost: number;
   bloodCost?: number;     // optional secondary cost in blood
+  dragonBoneCost?: number; // optional tertiary cost in dragon bones
   buildersRequired: number;
   buildTime: number;      // seconds
   maintainersRequired: number;
@@ -442,10 +464,35 @@ export const BUILDING_DEFS = {
       constructing: 0x3a3f47, constructingBorder: 0x808890,
     },
   }),
+  // Hell Portal — the third unlock from the Collect-a-Dragon-Bone task. A
+  // 2×2 portal that doubles as a (modest) power source AND opens the way
+  // down to Hell. Once placed, a red beam animates from the portal toward
+  // the abyss below and the player can hold ↓ at the bottom of the map to
+  // descend. Display name is literally "???" — its true nature is left
+  // ominous in the build menu.
+  hell_portal: def(2, {
+    name: '???',
+    short: '???',
+    cost: 10_000_000,
+    bloodCost: 1000,
+    dragonBoneCost: 10,
+    buildersRequired: 4,
+    buildTime: 12,
+    maintainersRequired: 0,
+    income: 0,
+    powerOutput: 1_000_000_000, // 1 GW — "a power source, of sorts"
+    wanderInterval: 1.0,
+    wanderJitter: 0.2,
+    colors: {
+      active: 0x6a0a14, activeBorder: 0xff2030,
+      dormant: 0x3a0a14, dormantBorder: 0x8a2030,
+      constructing: 0x3a3f47, constructingBorder: 0x808890,
+    },
+  }),
 } as const;
 
 export type BuildingKind = keyof typeof BUILDING_DEFS;
-export const BUILDABLE_KINDS: BuildingKind[] = ['goblin_wheel', 'gas_engine', 'datacentre', 'phone_farm', 'goblin_hole', 'nuclear_reactor', 'hypercentre', 'dragon_beacon', 'wall'];
+export const BUILDABLE_KINDS: BuildingKind[] = ['goblin_wheel', 'gas_engine', 'datacentre', 'phone_farm', 'goblin_hole', 'nuclear_reactor', 'hypercentre', 'dragon_beacon', 'hell_portal', 'wall'];
 
 export const START_MONEY = 0;
 export const START_GOBLINS = 0;

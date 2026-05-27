@@ -7,7 +7,7 @@ import {
   earnBlood, earnDragonBone, earnMoney, findFreeCellNear,
   getSpawnCapacity, holeBlockedByBuilding, holeCenter, isCellBlocked, isCellInBuilding, isCellInWaterSource,
   isInBounds, maintainerCount, nearestCellInWaterSource, occupyCell, pushDeathEffect, pushFloater,
-  pushLightningBolt, releaseCell, removeDragon, removeGoblin, waterCarrierCount,
+  pushLightningBolt, recordGhost, releaseCell, removeDragon, removeGoblin, waterCarrierCount,
 } from './state';
 
 // Auto-assign normally only runs on discrete events (a spawn, a manual command,
@@ -217,6 +217,7 @@ export function lightningStrike(state: GameState, x: number, y: number): boolean
       state.bloodUnlocked = true;
       pushFloater(state, tx, ty, `+Ƶ${r.money.toLocaleString('en-US')}`, 0xffd96b, 1.6);
       pushFloater(state, tx, ty - 14, `+${r.blood} blood`, 0xff8a8a, 1.6);
+      recordGhost(state, 'goblin', tx, ty, g.facing, { gold: g.gold });
       removeGoblin(state, g.id);
       killed++;
     }
@@ -231,6 +232,7 @@ export function lightningStrike(state: GameState, x: number, y: number): boolean
       earnBlood(state, MINOTAUR_KILL_REWARD.blood);
       state.bloodUnlocked = true;
       pushFloater(state, tx, ty - 14, `+${MINOTAUR_KILL_REWARD.blood} blood`, 0xff8a8a, 1.6);
+      recordGhost(state, 'minotaur', tx, ty, m.facing, { tiny: m.tiny });
       state.minotaurs.delete(m.id);
       killed++;
     }
@@ -241,6 +243,7 @@ export function lightningStrike(state: GameState, x: number, y: number): boolean
       earnDragonBone(state, DRAGON_KILL_REWARD.dragonBone);
       state.dragonBoneUnlocked = true;
       pushFloater(state, tx, ty, `+${DRAGON_KILL_REWARD.dragonBone} dragon bone${DRAGON_KILL_REWARD.dragonBone === 1 ? '' : 's'}`, 0xeae0c0, 1.8);
+      recordGhost(state, 'dragon', tx, ty, d.facing);
       removeDragon(state, d.id);
       killed++;
     }
@@ -517,6 +520,7 @@ export function spawnTinytaur(state: GameState): boolean {
   const birthCell = victims[0].cell;
   for (const m of victims) {
     pushDeathEffect(state, m.pos.x, m.pos.y);
+    recordGhost(state, 'minotaur', m.pos.x, m.pos.y, m.facing, { tiny: m.tiny });
     state.minotaurs.delete(m.id);
   }
   const t = makeMinotaur(state, birthCell, true);
@@ -780,6 +784,7 @@ function updateMinotaur(state: GameState, t: Minotaur, autoTargets: Map<number, 
       }
       if (state.now < s.attackAt) return;
       const tx = target.pos.x, ty = target.pos.y;
+      recordGhost(state, 'minotaur', tx, ty, target.facing, { tiny: target.tiny });
       state.minotaurs.delete(target.id);
       earnMoney(state, MINOTAUR_KILL_REWARD.money);
       earnBlood(state, MINOTAUR_KILL_REWARD.blood);
@@ -821,6 +826,7 @@ function updateMinotaur(state: GameState, t: Minotaur, autoTargets: Map<number, 
       const tx = target.pos.x, ty = target.pos.y;
       const reward = goblinKillReward(state, target);
       const wasGold = !!target.gold;
+      recordGhost(state, 'goblin', tx, ty, target.facing, { gold: target.gold });
       removeGoblin(state, target.id);
       earnMoney(state, reward.money);
       earnBlood(state, reward.blood);
@@ -906,6 +912,14 @@ function dragonFlyToward(d: Dragon, tx: number, ty: number, speed: number): bool
 function dragonLift(state: GameState, d: Dragon, b: Building) {
   // A dragon already hauling a building can't pick up a second one.
   if (d.carrying) return;
+  // Hell Portals are rooted to the abyss — no dragon may haul one. Already
+  // filtered out at command time in input.ts and skipped by the auto-seek
+  // (income-based) picker, but kept here as defense in depth.
+  if (b.kind === 'hell_portal') {
+    d.state = { kind: 'seeking' };
+    appendLog(state, `Dragon #${d.id} cannot pry the ??? from the ground.`);
+    return;
+  }
   for (const gid of b.assignedGoblins) {
     const g = state.goblins.get(gid);
     if (!g) continue;
@@ -1006,6 +1020,7 @@ function dragonKill(state: GameState, d: Dragon, kind: 'goblin' | 'minotaur' | '
     if (!victim || victim.id === d.id) return;
     const tx = victim.pos.x, ty = victim.pos.y;
     const bones = DRAGON_KILL_REWARD.dragonBone;
+    recordGhost(state, 'dragon', tx, ty, victim.facing);
     removeDragon(state, id);
     earnDragonBone(state, bones);
     state.dragonBoneUnlocked = true;
@@ -1021,6 +1036,7 @@ function dragonKill(state: GameState, d: Dragon, kind: 'goblin' | 'minotaur' | '
     const tx = g.pos.x, ty = g.pos.y;
     const reward = goblinKillReward(state, g);
     const wasGold = !!g.gold;
+    recordGhost(state, 'goblin', tx, ty, g.facing, { gold: g.gold });
     removeGoblin(state, id);
     earnMoney(state, reward.money);
     earnBlood(state, reward.blood);
@@ -1035,6 +1051,7 @@ function dragonKill(state: GameState, d: Dragon, kind: 'goblin' | 'minotaur' | '
     const m = state.minotaurs.get(id);
     if (!m) return;
     const tx = m.pos.x, ty = m.pos.y;
+    recordGhost(state, 'minotaur', tx, ty, m.facing, { tiny: m.tiny });
     state.minotaurs.delete(id);
     earnMoney(state, MINOTAUR_KILL_REWARD.money);
     earnBlood(state, MINOTAUR_KILL_REWARD.blood);
@@ -1642,6 +1659,7 @@ function updateGoblin(state: GameState, g: Goblin) {
         const tx = target.pos.x, ty = target.pos.y;
         const reward = goblinKillReward(state, target);
         const wasGold = !!target.gold;
+        recordGhost(state, 'goblin', tx, ty, target.facing, { gold: target.gold });
         removeGoblin(state, target.id);
         earnMoney(state, reward.money);
         earnBlood(state, reward.blood);
