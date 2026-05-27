@@ -6,6 +6,11 @@ import { mkdirSync } from 'fs';
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
+// Optional ember-size override via env var. Persisted to localStorage so the
+// dev build's mergeDefaults() pulls it in on next load.
+const emberSize = process.env.EMBER_SIZE ? Number(process.env.EMBER_SIZE) : null;
+const outPath = process.env.OUT || 'screenshots/hell-with-building.png';
+
 const browser = await chromium.launch({
   executablePath: '/opt/pw-browsers/chromium-1194/chrome-linux/chrome',
 });
@@ -15,6 +20,17 @@ const page = await context.newPage();
 page.on('pageerror', (e) => console.log('PAGE ERR:', e.message));
 
 await page.goto('http://127.0.0.1:5173', { waitUntil: 'networkidle' });
+
+if (emberSize !== null) {
+  await page.evaluate((size) => {
+    const raw = localStorage.getItem('rts.options.v2');
+    const opts = raw ? JSON.parse(raw) : {};
+    opts.hellEmberSize = size;
+    localStorage.setItem('rts.options.v2', JSON.stringify(opts));
+  }, emberSize);
+  await page.reload({ waitUntil: 'networkidle' });
+}
+
 await page.waitForFunction(() => !!window.__game?.state, { timeout: 15_000 });
 
 // Dismiss the title-screen overlay if it's up — it blocks input + sits over
@@ -81,8 +97,7 @@ await page.evaluate(() => {
 await sleep(1000);
 
 mkdirSync('screenshots', { recursive: true });
-const out = 'screenshots/hell-with-building.png';
-await page.screenshot({ path: out, fullPage: false });
-console.log(`Wrote ${out}`);
+await page.screenshot({ path: outPath, fullPage: false });
+console.log(`Wrote ${outPath}`);
 
 await browser.close();
