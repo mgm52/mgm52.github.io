@@ -1198,14 +1198,13 @@ function makeHellPortalMirror(b: Building): Container {
   c.position.set(worldToHellX(ctr.x), worldToHellY(ctr.y));
   const half = def.size / 2;
   // Two large concentric halo rings drawn first so they sit BEHIND the
-  // body/core/label sprites. The outer ring is a soft white wash, the inner
-  // a brighter yellow — together they read as a beacon emanating around the
-  // portal in the underworld.
+  // body/core sprites. Stroked outlines (not filled discs) so the portal
+  // reads as emanating radial lines in the underworld rather than a blob.
   const halo = new Graphics();
   const outerR = def.size * 2.4;
   const innerR = def.size * 1.5;
-  halo.circle(0, 0, outerR).fill({ color: 0xfff4c0, alpha: 0.12 });
-  halo.circle(0, 0, innerR).fill({ color: 0xffe070, alpha: 0.22 });
+  halo.circle(0, 0, outerR).stroke({ width: 3, color: 0xfff4c0, alpha: 0.6 });
+  halo.circle(0, 0, innerR).stroke({ width: 4, color: 0xffe070, alpha: 0.8 });
   const body = new Graphics();
   body.rect(-half, -half, def.size, def.size).fill({ color: 0x2a0610, alpha: 0.95 });
   body.rect(-half, -half, def.size, def.size).stroke({ width: 3, color: 0xff2030 });
