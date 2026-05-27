@@ -938,18 +938,20 @@ export function refreshUI(state: GameState) {
   const panelBuild = document.getElementById('panel-build')!;
   panelBuild.style.display = (firstTaskDone || ritualVisible) ? '' : 'none';
 
-  // Autocommand → Autowater replace chain: the Autocommand button hides once
-  // owned and Autowater takes its slot, mirroring how Autospawn /
-  // Goldblins x10 work elsewhere on this panel.
+  // Autocommand → Autowater replace chain: Autowater needs Autocommand owned
+  // AND a water source dug (so the upgrade has something to act on). The
+  // Autocommand button hides ONLY once Autowater is actually visible — until
+  // then it lingers (as "owned") so the slot isn't left empty.
+  const autoWaterVisible = state.autoAssignEnabled && state.waterSources.size > 0;
   refreshRitualButton(
     'btn-buy-autoassign', 'cost-buy-autoassign',
-    phaseRunPhoneFarm && !state.autoAssignEnabled,
+    phaseRunPhoneFarm && !autoWaterVisible,
     state.autoAssignEnabled, state.blood >= SUMMON_UPGRADES.autoAssign.bloodCost,
     `${SUMMON_UPGRADES.autoAssign.bloodCost} blood`,
   );
   refreshRitualButton(
     'btn-buy-autowater', 'cost-buy-autowater',
-    state.autoAssignEnabled,
+    autoWaterVisible,
     state.autoWaterEnabled, state.blood >= SUMMON_UPGRADES.autoWater.bloodCost,
     `${SUMMON_UPGRADES.autoWater.bloodCost} blood`,
   );
