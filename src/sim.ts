@@ -32,6 +32,10 @@ export function tick(state: GameState) {
     nextAutoAssignAt = state.now + AUTO_ASSIGN_INTERVAL;
   }
 
+  if (state.lightningStrikeCooldown > 0) {
+    state.lightningStrikeCooldown = Math.max(0, state.lightningStrikeCooldown - TICK_S);
+  }
+
   // ── 1. Spawn queue ────────────────────────────────────────────────
   if (state.autoSpawnEnabled) {
     state.autoSpawnTimer -= TICK_S;
@@ -140,11 +144,15 @@ export function tick(state: GameState) {
     }
   }
 
-  // Space buildings keep paying their income with no upkeep — no maintainers,
-  // no water, no power grid. The same one-second cadence as ground income.
+  // Space buildings keep paying their income — same one-second cadence as
+  // ground income — but they still need the grid: a dormant orbital
+  // Hypercentre (cut off by power shortage) earns nothing until the link is
+  // restored. Generators in orbit run upkeep-free; resolvePowerAndState keeps
+  // them marked active.
   for (const sb of state.spaceBuildings.values()) {
     const def = BUILDING_DEFS[sb.building.kind];
     if (def.income <= 0) continue;
+    if (sb.building.state !== 'active') { sb.nextIncomeAt = undefined; continue; }
     if (sb.nextIncomeAt === undefined) { sb.nextIncomeAt = state.now + 1; continue; }
     if (state.now >= sb.nextIncomeAt) {
       earnMoney(state, def.income);
@@ -196,43 +204,47 @@ export function lightningStrike(state: GameState, x: number, y: number): boolean
   // Lightning vaporises every unit in the blast — goblins, minotaurs, and
   // dragons — and pays out their usual kill rewards. Dragons grant their
   // dragon-on-dragon bone drop; any building a struck dragon was carrying is
-  // lost with it, matching dragonKill's semantics. Rewards are summed into one
-  // floater per resource at the strike's centre so a big cull doesn't spray
-  // dozens of numbers.
+  // lost with it, matching dragonKill's semantics. Each victim emits its own
+  // floater above its head (same as a single goblin death) so the player
+  // sees discrete drops rather than one aggregate readout at the centre.
   let killed = 0;
-  let totalMoney = 0;
-  let totalBlood = 0;
-  let totalBones = 0;
   for (const g of [...state.goblins.values()]) {
     if (within(g.pos.x, g.pos.y)) {
       const r = goblinKillReward(state, g);
-      totalMoney += r.money;
-      totalBlood += r.blood;
+      const tx = g.pos.x, ty = g.pos.y;
+      earnMoney(state, r.money);
+      earnBlood(state, r.blood);
+      state.bloodUnlocked = true;
+      pushFloater(state, tx, ty, `+Ƶ${r.money.toLocaleString('en-US')}`, 0xffd96b, 1.6);
+      pushFloater(state, tx, ty - 14, `+${r.blood} blood`, 0xff8a8a, 1.6);
       removeGoblin(state, g.id);
       killed++;
     }
   }
   for (const m of [...state.minotaurs.values()]) {
     if (within(m.pos.x, m.pos.y)) {
-      totalMoney += MINOTAUR_KILL_REWARD.money;
-      totalBlood += MINOTAUR_KILL_REWARD.blood;
+      const tx = m.pos.x, ty = m.pos.y;
+      if (MINOTAUR_KILL_REWARD.money > 0) {
+        earnMoney(state, MINOTAUR_KILL_REWARD.money);
+        pushFloater(state, tx, ty, `+Ƶ${MINOTAUR_KILL_REWARD.money.toLocaleString('en-US')}`, 0xffd96b, 1.6);
+      }
+      earnBlood(state, MINOTAUR_KILL_REWARD.blood);
+      state.bloodUnlocked = true;
+      pushFloater(state, tx, ty - 14, `+${MINOTAUR_KILL_REWARD.blood} blood`, 0xff8a8a, 1.6);
       state.minotaurs.delete(m.id);
       killed++;
     }
   }
   for (const d of [...state.dragons.values()]) {
     if (within(d.pos.x, d.pos.y)) {
-      totalBones += DRAGON_KILL_REWARD.dragonBone;
+      const tx = d.pos.x, ty = d.pos.y;
+      earnDragonBone(state, DRAGON_KILL_REWARD.dragonBone);
+      state.dragonBoneUnlocked = true;
+      pushFloater(state, tx, ty, `+${DRAGON_KILL_REWARD.dragonBone} dragon bone${DRAGON_KILL_REWARD.dragonBone === 1 ? '' : 's'}`, 0xeae0c0, 1.8);
       removeDragon(state, d.id);
       killed++;
     }
   }
-  if (totalMoney > 0) earnMoney(state, totalMoney);
-  if (totalBlood > 0) { earnBlood(state, totalBlood); state.bloodUnlocked = true; }
-  if (totalBones > 0) { earnDragonBone(state, totalBones); state.dragonBoneUnlocked = true; }
-  if (totalMoney > 0) pushFloater(state, x, y - 28, `+Ƶ${totalMoney.toLocaleString('en-US')}`, 0xffd96b, 1.6);
-  if (totalBlood > 0) pushFloater(state, x, y - 42, `+${totalBlood} blood`, 0xff8a8a, 1.6);
-  if (totalBones > 0) pushFloater(state, x, y - 56, `+${totalBones} dragon bone${totalBones === 1 ? '' : 's'}`, 0xeae0c0, 1.8);
 
   // Stat: remember the biggest single-strike cull (sticky).
   if (killed > state.maxStruckAtOnce) state.maxStruckAtOnce = killed;
@@ -278,6 +290,10 @@ export function lightningStrike(state: GameState, x: number, y: number): boolean
   playSound('destroy', 0.7, 0.4);
   if (killed > 0) playDecayingGoblinDeath(0.6);
   appendLog(state, `Lightning strike! ${killed} unit${killed === 1 ? '' : 's'} vaporised.`);
+  // 2-second cooldown to stop the player from carpet-bombing through every
+  // wave of spawns in one breath. Ticked down in the sim, gated in main's
+  // onLightningStrike + ui's button refresh.
+  state.lightningStrikeCooldown = 2;
   return true;
 }
 
@@ -1985,6 +2001,35 @@ function resolvePowerAndState(state: GameState) {
     else if (consumed + draw > production) reason = 'no_power';
     else { active = true; consumed += draw; }
     setActiveOrDormant(state, b, active, reason);
+  }
+
+  // Space consumers draw from the same grid as ground consumers — orbit
+  // doesn't free a building from its power link. Evaluated after ground
+  // buildings so the local lights stay on first; any excess capacity then
+  // feeds the orbiting fleet. Income for space buildings (in the per-second
+  // loop above) skips dormant ones, so an underpowered space Hypercentre
+  // earns nothing until the grid catches back up.
+  for (const sb of state.spaceBuildings.values()) {
+    const b = sb.building;
+    const def = BUILDING_DEFS[b.kind];
+    if (def.powerOutput >= 0) continue;
+    const draw = -def.powerOutput;
+    const wasActive = b.state === 'active';
+    const fits = consumed + draw <= production;
+    if (fits) {
+      consumed += draw;
+      if (!wasActive) {
+        b.state = 'active';
+        appendLog(state, `${def.name} #${b.displayNum} re-establishes its power link from orbit.`);
+        pushFloater(state, sb.pos.x, sb.pos.y - POWER_FLOATER_Y_OFFSET, `-${formatPower(draw)}`, 0x8acfff, 1.6, undefined, true);
+      }
+    } else {
+      if (wasActive) {
+        b.state = 'dormant';
+        appendLog(state, `${def.name} #${b.displayNum} goes dark — orbital power link severed.`);
+        pushFloater(state, sb.pos.x, sb.pos.y - POWER_FLOATER_Y_OFFSET, `+${formatPower(draw)}`, 0x8acfff, 1.6, undefined, true);
+      }
+    }
   }
 
   state.lastPowerProduced = production;

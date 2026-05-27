@@ -917,9 +917,10 @@ export function refreshUI(state: GameState) {
     lightningBtn.style.display = '';
     applyFadeInOnFirstShow('btn-lightning-strike');
     const canAffordLightning = state.blood >= LIGHTNING.bloodCost;
-    lightningBtn.disabled = !canAffordLightning;
+    const onCooldown = state.lightningStrikeCooldown > 0;
+    lightningBtn.disabled = !canAffordLightning || onCooldown;
     lightningBtn.classList.toggle('active', state.pendingStrike);
-    document.getElementById('cost-lightning-strike')!.classList.toggle('met', canAffordLightning);
+    document.getElementById('cost-lightning-strike')!.classList.toggle('met', canAffordLightning && !onCooldown);
   } else {
     lightningBtn.style.display = 'none';
   }
@@ -937,17 +938,18 @@ export function refreshUI(state: GameState) {
   const panelBuild = document.getElementById('panel-build')!;
   panelBuild.style.display = (firstTaskDone || ritualVisible) ? '' : 'none';
 
-  // Autocommand — unlocked by the Run-a-Phone-Farm task (Phase 2).
+  // Autocommand → Autowater replace chain: the Autocommand button hides once
+  // owned and Autowater takes its slot, mirroring how Autospawn /
+  // Goldblins x10 work elsewhere on this panel.
   refreshRitualButton(
     'btn-buy-autoassign', 'cost-buy-autoassign',
-    phaseRunPhoneFarm, state.autoAssignEnabled, state.blood >= SUMMON_UPGRADES.autoAssign.bloodCost,
+    phaseRunPhoneFarm && !state.autoAssignEnabled,
+    state.autoAssignEnabled, state.blood >= SUMMON_UPGRADES.autoAssign.bloodCost,
     `${SUMMON_UPGRADES.autoAssign.bloodCost} blood`,
   );
-  // Autowater — appears once Autocommand is owned and a water source has
-  // been dug (so the upgrade actually has something to act on).
   refreshRitualButton(
     'btn-buy-autowater', 'cost-buy-autowater',
-    state.autoAssignEnabled && state.waterSources.size > 0,
+    state.autoAssignEnabled,
     state.autoWaterEnabled, state.blood >= SUMMON_UPGRADES.autoWater.bloodCost,
     `${SUMMON_UPGRADES.autoWater.bloodCost} blood`,
   );
@@ -1150,6 +1152,14 @@ function refreshInfoPanel(state: GameState) {
     name.textContent = `${selectedSpace.length} buildings in orbit`;
     stateEl.textContent = '';
     extra.innerHTML = `<span style="color:#6a7080">Adrift among the stars, earning freely</span>`;
+  } else if (state.selectedAmbientDragonId !== null) {
+    // Background dragons are decorative-only: clicking one just identifies it.
+    // No state, no commands — the panel is intentionally bare.
+    panel.classList.add('visible');
+    portrait.innerHTML = `<div class="portrait-goblin" style="background:#3a2410;border-color:#a06a3a;color:#e0c098">d</div>`;
+    name.textContent = 'Distant dragon';
+    stateEl.textContent = '';
+    extra.innerHTML = '';
   } else if (selectedBuildings.length === 1 && selectedGoblins.length === 0) {
     showBuilding(state, selectedBuildings[0], panel, portrait, name, stateEl, extra);
     destroyBtn.style.display = '';
@@ -1335,12 +1345,25 @@ function showSpaceBuilding(_state: GameState, sb: SpaceBuilding, panel: HTMLElem
   panel.classList.add('visible');
   const b = sb.building;
   const def = defOf(b);
-  portrait.innerHTML = `<div class="portrait-building ${b.kind} active">${def.short}</div>`;
+  const isActive = b.state === 'active';
+  const cls = isActive ? 'active' : 'dormant';
+  portrait.innerHTML = `<div class="portrait-building ${b.kind} ${cls}">${def.short}</div>`;
   name.textContent = `${def.name} #${b.displayNum}`;
-  // In orbit, the building's stats stop mattering — the panel is reduced to a
-  // single chilling line. (Income still accrues; we just don't surface it.)
-  stateEl.textContent = '';
-  extra.textContent = 'No one can hear it scream.';
+  // Consumers in orbit still need the ground grid — `state` reflects whether
+  // resolvePowerAndState could spare the draw this tick. Generators stay
+  // active in orbit (no upkeep).
+  if (def.powerOutput < 0) {
+    stateEl.textContent = isActive ? 'Active — powered from below' : 'Dormant — power link severed';
+  } else if (def.powerOutput > 0) {
+    stateEl.textContent = 'Active — beaming power down';
+  } else {
+    stateEl.textContent = isActive ? 'Active' : 'Dormant';
+  }
+  const lines: string[] = [];
+  if (def.powerOutput > 0) lines.push(`Power output: ${formatPower(def.powerOutput)}`);
+  else if (def.powerOutput < 0) lines.push(`Power draw: ${formatPower(-def.powerOutput)}`);
+  lines.push('No one can hear it scream.');
+  extra.innerHTML = lines.join('<br>');
 }
 
 function setText(id: string, t: string) {

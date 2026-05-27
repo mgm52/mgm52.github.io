@@ -314,6 +314,14 @@ export type GameState = {
   // True while the player is aiming a Lightning Strike (next map click fires
   // it). Ephemeral — never meaningfully persisted.
   pendingStrike: boolean;
+  // Seconds remaining on the Lightning Strike cooldown after a successful
+  // strike. Ticks down in the sim; the button is disabled while > 0.
+  lightningStrikeCooldown: number;
+  // Currently-selected ambient (background) dragon — renderer-owned cosmetic
+  // dragons that the player can click for a "Distant dragon" popup but never
+  // command. Null when nothing is picked. The renderer clears it when the
+  // matching dragon despawns so the info panel never references a ghost.
+  selectedAmbientDragonId: number | null;
   spawnQueue: { remaining: number; slot: number }[];
   minotaurSpawnQueue: { remaining: number }[];
   dragonSpawnQueue: { remaining: number }[];
@@ -650,6 +658,8 @@ export function createInitialState(): GameState {
     dragonSpawnQueue: [],
     pendingBuild: null,
     buildingCounts: emptyBuildingCounts(),
+    lightningStrikeCooldown: 0,
+    selectedAmbientDragonId: null,
     log: [],
     occupancy: new Map(),
     walls: new Set<string>(),  // populated after construction

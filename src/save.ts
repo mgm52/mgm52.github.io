@@ -93,6 +93,8 @@ export function loadGame(): { state: GameState; savedAt: number } | null {
     env.state.maxStruckAtOnce ??= (env.state as { struck13Goblins?: boolean }).struck13Goblins ? 13 : 0;
     env.state.spaceUnlocked ??= false;
     env.state.view = 'ground';
+    env.state.lightningStrikeCooldown ??= 0;
+    env.state.selectedAmbientDragonId = null;
     // Building.displayNum + state.buildingCounts were added so each kind shows
     // its own ordinal (#1, #2…) rather than a global id. Old saves carry only
     // `id`s, so re-number every building (ground + space) in id-order per

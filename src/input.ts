@@ -2,7 +2,7 @@ import { Application, Container, FederatedPointerEvent, Graphics } from 'pixi.js
 import { playSound } from './audio';
 import { flashCursor } from './cursor-fx';
 import { BUILDABLE_KINDS, BUILDING_DEFS, BuildingKind, CELL, DRAGON, GOBLIN, LIGHTNING, MINOTAUR, RENDER_SCALE, WORLD, formatPower } from './config';
-import { RenderContext, clampCamera, clampSpaceCamera } from './render';
+import { RenderContext, ambientDragonAt, clampCamera, clampSpaceCamera } from './render';
 import { autoAssignAllIdle, lightningStrike } from './sim';
 import {
   Building, Cell, Dragon, GameState, Goblin, Minotaur, WaterSource,
@@ -252,8 +252,12 @@ export function setupInput(
         if (moved < SPACE_DRAG_TOL) {
           const lp = e.getLocalPosition(ctx.spaceLayer);
           const sb = spaceBuildingAt(state, lp.x, lp.y);
+          // Ambient dragons sit behind the floating buildings, so they only get
+          // a hit when nothing higher-priority is under the pointer.
+          const ad = sb ? null : ambientDragonAt(ctx, lp.x, lp.y);
           if (!e.shiftKey) clearSelection(state);
           if (sb) { sb.selected = true; playSound('select', 0.33); }
+          else if (ad) { state.selectedAmbientDragonId = ad.id; playSound('select', 0.33); }
         } else {
           // Box corners: drag origin + release point, both mapped to space-layer
           // coords (where the floating buildings live).
@@ -563,6 +567,7 @@ function clearSelection(state: GameState) {
   for (const w of state.waterSources.values()) w.selected = false;
   for (const sb of state.spaceBuildings.values()) sb.selected = false;
   state.hole.selected = false;
+  state.selectedAmbientDragonId = null;
 }
 
 function goblinAt(state: GameState, x: number, y: number): Goblin | null {
