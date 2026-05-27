@@ -165,6 +165,11 @@ export type BuildingState = 'constructing' | 'active' | 'dormant';
 
 export type Building = {
   id: number;
+  // Within-kind ordinal stamped at creation (1, 2, 3, …) — what the player sees
+  // in logs and the info panel. Independent of `id`, which is a global monotonic
+  // counter shared with goblins/minotaurs/dragons and reads as confusingly high
+  // by the time the player builds their second Hypercentre.
+  displayNum: number;
   kind: BuildingKind;
   cell: Cell;
   state: BuildingState;
@@ -313,6 +318,10 @@ export type GameState = {
   minotaurSpawnQueue: { remaining: number }[];
   dragonSpawnQueue: { remaining: number }[];
   pendingBuild: PendingBuild;
+  // Per-kind ordinal counters; incremented at building creation to stamp
+  // Building.displayNum. Monotonic — destroying a building does NOT free up its
+  // number, so the player sees "#2", "#3", "#4" even if #2 was smashed.
+  buildingCounts: Record<BuildingKind, number>;
   log: { time: number; msg: string }[];
   occupancy: Map<string, number>;
   walls: Set<string>;     // permanently impassable cells (mutated by Dig)
@@ -362,6 +371,31 @@ export type UnlockState = {
 };
 
 export function defOf(b: Building): BuildingDef { return BUILDING_DEFS[b.kind]; }
+
+// Build a counts map seeded to zero for every defined kind. New-game init and
+// pre-buildingCounts save migration both need this.
+export function emptyBuildingCounts(): Record<BuildingKind, number> {
+  const counts = {} as Record<BuildingKind, number>;
+  for (const k of Object.keys(BUILDING_DEFS) as BuildingKind[]) counts[k] = 0;
+  return counts;
+}
+
+// Bump the per-kind counter and return the next within-kind ordinal. Callers
+// stamp the result onto a freshly-created Building's `displayNum`.
+export function nextBuildingDisplayNum(state: GameState, kind: BuildingKind): number {
+  const next = (state.buildingCounts[kind] ?? 0) + 1;
+  state.buildingCounts[kind] = next;
+  return next;
+}
+
+// Human-readable label for a building reference held by goblin/dragon state.
+// Falls back to a bare `#id` if the building has been destroyed mid-tick (the
+// describe-state helpers can be called between sim and render).
+export function buildingLabel(state: GameState, buildingId: number): string {
+  const b = state.buildings.get(buildingId);
+  if (!b) return `#${buildingId}`;
+  return `${BUILDING_DEFS[b.kind].name} #${b.displayNum}`;
+}
 
 export function cellKey(cx: number, cy: number): string { return `${cx},${cy}`; }
 
@@ -615,6 +649,7 @@ export function createInitialState(): GameState {
     minotaurSpawnQueue: [],
     dragonSpawnQueue: [],
     pendingBuild: null,
+    buildingCounts: emptyBuildingCounts(),
     log: [],
     occupancy: new Map(),
     walls: new Set<string>(),  // populated after construction

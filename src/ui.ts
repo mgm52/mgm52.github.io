@@ -6,9 +6,9 @@ import {
 } from './config';
 import {
   Building, Cell, DragonState, GameState, Goblin, GoblinState, SpaceBuilding, WaterSource,
-  appendLog, buildingCenter, cellCenter, cellKey, countIdle, defOf, digDirection, earnDragonBone,
-  getSpawnCapacity, holeBlockedByBuilding, isCellBlocked, isInBounds, maintainerCount, occupyCell,
-  waterCarrierCount,
+  appendLog, buildingCenter, buildingLabel, cellCenter, cellKey, countIdle, defOf, digDirection,
+  earnDragonBone, getSpawnCapacity, holeBlockedByBuilding, isCellBlocked, isInBounds,
+  maintainerCount, nextBuildingDisplayNum, occupyCell, waterCarrierCount,
 } from './state';
 import { spawnMinotaur } from './sim';
 import { unlockOptionsCog } from './options-ui';
@@ -601,7 +601,7 @@ export function setupUI(state: GameState, callbacks: UICallbacks) {
     }
     best.target = null;
     best.state = { kind: 'going_to_destroy', buildingId: target.id };
-    appendLog(state, `Minotaur #${best.id} ordered to smash ${defOf(target).name} #${target.id}.`);
+    appendLog(state, `Minotaur #${best.id} ordered to smash ${defOf(target).name} #${target.displayNum}.`);
     // Brief confirmation: swap the label to "Minotaur dispatched…" for 2s.
     // refreshInfoPanel only toggles this button's display, never its text, so
     // the override survives the per-frame refresh until the timer restores it.
@@ -1171,7 +1171,7 @@ function refreshInfoPanel(state: GameState) {
     portrait.innerHTML = `<div class="portrait-goblin" style="background:#5a1d10;border-color:#ffb24a;color:#ffe0a0">D</div>`;
     if (selectedDragons.length === 1) {
       name.textContent = `Dragon #${selectedDragons[0].id}`;
-      stateEl.textContent = describeDragonState(selectedDragons[0].state);
+      stateEl.textContent = describeDragonState(state, selectedDragons[0].state);
     } else {
       name.textContent = `${selectedDragons.length} dragons`;
       stateEl.textContent = '';
@@ -1186,7 +1186,7 @@ function refreshInfoPanel(state: GameState) {
         ? `<div class="portrait-goblin" style="background:#3a1a4a;border-color:#a06aff;color:#ffe0a0;font-size:0.7em">t</div>`
         : `<div class="portrait-goblin" style="background:#6a1a1a;border-color:#a06aff;color:#ffe0a0">M</div>`;
       name.textContent = m.tiny ? `Tinytaur #${m.id}` : `Minotaur #${m.id}`;
-      stateEl.textContent = describeMinotaurState(m.state);
+      stateEl.textContent = describeMinotaurState(state, m.state);
       extra.innerHTML = `<span style="color:#6a7080">Right click anywhere to command (or space)</span>`;
     } else if (selectedMinotaurs.length > 1) {
       panel.classList.add('visible');
@@ -1200,15 +1200,15 @@ function refreshInfoPanel(state: GameState) {
   }
 }
 
-function describeDragonState(s: DragonState): string {
+function describeDragonState(state: GameState, s: DragonState): string {
   switch (s.kind) {
     case 'swooping_in': return 'Swooping in from above';
     case 'seeking': return 'Seeking the choicest building';
-    case 'hovering_to_lift': return `Looming over building #${s.buildingId}`;
+    case 'hovering_to_lift': return `Looming over ${buildingLabel(state, s.buildingId)}`;
     case 'carrying': return 'Hauling a building to space';
     case 'delivering': return 'Carrying a building to a drop-off';
     case 'moving_to': return 'On the wing';
-    case 'going_to_building': return `Going to lift building #${s.buildingId}`;
+    case 'going_to_building': return `Going to lift ${buildingLabel(state, s.buildingId)}`;
     case 'going_to_kill':
       return s.targetKind === 'goblin'
         ? `Diving on goblin #${s.targetId}`
@@ -1218,13 +1218,13 @@ function describeDragonState(s: DragonState): string {
   }
 }
 
-function describeMinotaurState(s: import('./state').MinotaurState): string {
+function describeMinotaurState(state: GameState, s: import('./state').MinotaurState): string {
   switch (s.kind) {
     case 'wander': return 'Wandering';
     case 'moving_to': return 'Moving';
     case 'going_to_kill': return `Hunting goblin #${s.targetId}`;
     case 'going_to_kill_minotaur': return `Charging Minotaur #${s.targetId}`;
-    case 'going_to_destroy': return `Smashing building #${s.buildingId}`;
+    case 'going_to_destroy': return `Smashing ${buildingLabel(state, s.buildingId)}`;
   }
 }
 
@@ -1260,7 +1260,7 @@ function showGoblin(state: GameState, g: Goblin, panel: HTMLElement, portrait: H
   panel.classList.add('visible');
   portrait.innerHTML = `<div class="portrait-goblin">G</div>`;
   name.textContent = `Goblin #${g.id}`;
-  stateEl.textContent = describeGoblinState(g.state);
+  stateEl.textContent = describeGoblinState(state, g.state);
   setCommandHint(extra, state);
 }
 
@@ -1286,7 +1286,7 @@ function showBuilding(state: GameState, b: Building, panel: HTMLElement, portrai
   const cls = b.state === 'constructing' ? 'constructing' :
               b.state === 'dormant' ? 'dormant' : 'active';
   portrait.innerHTML = `<div class="portrait-building ${b.kind} ${cls}">${def.short}</div>`;
-  name.textContent = `${def.name} #${b.id}`;
+  name.textContent = `${def.name} #${b.displayNum}`;
 
   if (b.state === 'constructing') {
     const pct = Math.round(b.buildProgress * 100);
@@ -1336,19 +1336,11 @@ function showSpaceBuilding(_state: GameState, sb: SpaceBuilding, panel: HTMLElem
   const b = sb.building;
   const def = defOf(b);
   portrait.innerHTML = `<div class="portrait-building ${b.kind} active">${def.short}</div>`;
-  name.textContent = `${def.name} #${b.id}`;
-
-  // Mirror the ground building's "Active — ..." readout. A space building runs
-  // identically to its ground self, just with no maintainer / water / power
-  // upkeep and no grid placement.
-  const bits: string[] = [];
-  if (def.income) bits.push(`earning Ƶ${def.income.toLocaleString('en-US')}/s`);
-  if (def.powerOutput > 0) bits.push(`producing ${formatPower(def.powerOutput)}`);
-  stateEl.textContent = bits.length ? `Active — ${bits.join(', ')}` : 'Active';
-
-  const lines: string[] = ['Floating free in orbit — no upkeep'];
-  if (def.powerOutput > 0) lines.push(`Power output: ${formatPower(def.powerOutput)}`);
-  extra.innerHTML = lines.join('<br>');
+  name.textContent = `${def.name} #${b.displayNum}`;
+  // In orbit, the building's stats stop mattering — the panel is reduced to a
+  // single chilling line. (Income still accrues; we just don't surface it.)
+  stateEl.textContent = '';
+  extra.textContent = 'No one can hear it scream.';
 }
 
 function setText(id: string, t: string) {
@@ -1363,18 +1355,18 @@ function setFillWidth(id: string, progress: number) {
   el.style.width = `${pct}%`;
 }
 
-function describeGoblinState(s: GoblinState): string {
+function describeGoblinState(state: GameState, s: GoblinState): string {
   switch (s.kind) {
     case 'idle': return '';
     case 'moving': return 'Moving';
-    case 'going_to_build': return `Walking to build site #${s.buildingId}`;
-    case 'going_to_maintain': return `Walking to maintain #${s.buildingId}`;
-    case 'building': return `Constructing #${s.buildingId}`;
-    case 'maintaining': return `Maintaining #${s.buildingId}`;
+    case 'going_to_build': return `Walking to build site ${buildingLabel(state, s.buildingId)}`;
+    case 'going_to_maintain': return `Walking to maintain ${buildingLabel(state, s.buildingId)}`;
+    case 'building': return `Constructing ${buildingLabel(state, s.buildingId)}`;
+    case 'maintaining': return `Maintaining ${buildingLabel(state, s.buildingId)}`;
     case 'fetching_water':
       return s.phase === 'to_source'
-        ? `Fetching water for #${s.buildingId}`
-        : `Delivering water to #${s.buildingId}`;
+        ? `Fetching water for ${buildingLabel(state, s.buildingId)}`
+        : `Delivering water to ${buildingLabel(state, s.buildingId)}`;
     case 'going_to_kill': return `Hunting goblin #${s.targetId}`;
   }
 }
@@ -1538,6 +1530,7 @@ function placeOneBuilding(state: GameState, kind: BuildingKind, opts: PlaceOpts 
   if (!tl) return null;
   const b: Building = {
     id: state.nextId++,
+    displayNum: nextBuildingDisplayNum(state, kind),
     kind,
     cell: tl,
     state: 'dormant',

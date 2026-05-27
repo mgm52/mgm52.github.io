@@ -1,6 +1,8 @@
 import * as devalue from 'devalue';
 import { compressToUTF16, decompressFromUTF16 } from 'lz-string';
-import { GameState, pruneAllAssignedGoblins, rebuildWalls } from './state';
+import {
+  Building, GameState, emptyBuildingCounts, pruneAllAssignedGoblins, rebuildWalls,
+} from './state';
 
 const STORAGE_KEY = 'rts.savegame.v1';
 const VERSION = 2;
@@ -91,6 +93,23 @@ export function loadGame(): { state: GameState; savedAt: number } | null {
     env.state.maxStruckAtOnce ??= (env.state as { struck13Goblins?: boolean }).struck13Goblins ? 13 : 0;
     env.state.spaceUnlocked ??= false;
     env.state.view = 'ground';
+    // Building.displayNum + state.buildingCounts were added so each kind shows
+    // its own ordinal (#1, #2…) rather than a global id. Old saves carry only
+    // `id`s, so re-number every building (ground + space) in id-order per
+    // kind, and seed the counters off the final tally so future placements
+    // continue from the right number.
+    if (env.state.buildingCounts === undefined) {
+      const all: Building[] = [
+        ...env.state.buildings.values(),
+        ...[...env.state.spaceBuildings.values()].map((sb) => sb.building),
+      ].sort((a, b) => a.id - b.id);
+      const counts = emptyBuildingCounts();
+      for (const b of all) {
+        counts[b.kind] = (counts[b.kind] ?? 0) + 1;
+        b.displayNum = counts[b.kind];
+      }
+      env.state.buildingCounts = counts;
+    }
     // Walls are deterministic from playArea; rebuild after load so any future
     // schema drift in the persisted Set doesn't desync rendering / pathing.
     env.state.walls = rebuildWalls(env.state);

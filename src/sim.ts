@@ -730,7 +730,7 @@ function updateMinotaur(state: GameState, t: Minotaur, autoTargets: Map<number, 
       if (state.now < s.attackAt) return;
       const c = buildingCenter(b);
       const def = defOf(b);
-      appendLog(state, `Minotaur #${t.id} smashes ${def.name} #${b.id}.`);
+      appendLog(state, `Minotaur #${t.id} smashes ${def.name} #${b.displayNum}.`);
       pushDeathEffect(state, c.x, c.y);
       destroyBuilding(state, b.id);
       playSound('destroy', 0.5);
@@ -902,7 +902,7 @@ function dragonLift(state: GameState, d: Dragon, b: Building) {
   state.buildings.delete(b.id);
   d.carrying = b;
   d.state = { kind: 'carrying' };
-  appendLog(state, `Dragon #${d.id} hoists ${defOf(b).name} #${b.id} skyward.`);
+  appendLog(state, `Dragon #${d.id} hoists ${defOf(b).name} #${b.displayNum} skyward.`);
   playSound('online', 0.8, 0.45);
 }
 
@@ -924,7 +924,7 @@ function dragonReachSpace(state: GameState, d: Dragon) {
       selected: false,
     });
     state.spaceUnlocked = true;
-    appendLog(state, `${defOf(b).name} #${b.id} now drifts among the stars.`);
+    appendLog(state, `${defOf(b).name} #${b.displayNum} now drifts among the stars.`);
     playSound('task_complete', 0.6);
   }
   removeDragon(state, d.id);
@@ -950,7 +950,7 @@ function dragonDropAt(state: GameState, d: Dragon, goal: { x: number; y: number 
   state.buildings.set(b.id, b);
   d.carrying = null;
   d.state = { kind: 'seeking' };
-  appendLog(state, `Dragon #${d.id} sets ${def.name} #${b.id} back down.`);
+  appendLog(state, `Dragon #${d.id} sets ${def.name} #${b.displayNum} back down.`);
   playSound('place', 1.2);
   autoAssignAllIdle(state);
   return true;
@@ -1932,7 +1932,7 @@ function updateConstruction(state: GameState, b: Building) {
     // straight to active.
     b.state = (def.maintainersRequired === 0 && def.powerOutput === 0) ? 'active' : 'dormant';
     playSound('build_done');
-    appendLog(state, `${def.name} #${b.id} construction complete.`);
+    appendLog(state, `${def.name} #${b.displayNum} construction complete.`);
   }
 }
 
@@ -2002,7 +2002,7 @@ function setActiveOrDormant(
     if (b.state !== 'active') {
       b.state = 'active';
       playSound('online');
-      appendLog(state, `${def.name} #${b.id} online.`);
+      appendLog(state, `${def.name} #${b.displayNum} online.`);
       const c = buildingCenter(b);
       // Raise power floaters above the building center so they don't pile up
       // under the gold "+Ƶ" income floater that spawns at the same point.
@@ -2019,7 +2019,7 @@ function setActiveOrDormant(
         reason === 'no_power' ? 'underpowered' :
         reason === 'no_water' ? 'needs water' :
         `needs ${def.maintainersRequired} maintainer${def.maintainersRequired === 1 ? '' : 's'}`;
-      appendLog(state, `${def.name} #${b.id} dormant — ${why}.`);
+      appendLog(state, `${def.name} #${b.displayNum} dormant — ${why}.`);
       // A thirsty building (DC/HC) that just ran dry stops drawing its load —
       // surface the power it freed back to the grid. The matching watered →
       // online draw is shown by the activation floater above.

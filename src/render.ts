@@ -1240,9 +1240,13 @@ function makeSpaceBuildingView(sb: SpaceBuilding): SpaceBuildingView {
 }
 
 // ─── Space scene + climb transition ─────────────────────────────────
+// Gradient sampled from low to high altitude. The bottom stops are nearly as
+// dark as the play area (oobColor ≈ #040404) so the sky bloom doesn't slam
+// against the dark ground with a bright daytime horizon. Mid-altitude stops
+// give a daylight blue band, then the gradient sinks into deep space again.
 const SKY_STOPS: [number, number][] = [
-  [0.00, 0xbfe0ff], [0.18, 0x7fb5f0], [0.40, 0x3f7fd8],
-  [0.62, 0x1c3f86], [0.82, 0x0a1640], [1.00, 0x03040f], [1.30, 0x010109],
+  [0.00, 0x06080f], [0.18, 0x122142], [0.36, 0x254a82], [0.52, 0x3f7fd8],
+  [0.68, 0x1c3f86], [0.84, 0x0a1640], [1.00, 0x03040f], [1.30, 0x010109],
 ];
 function lerpHex(a: number, b: number, t: number): number {
   const ar = (a >> 16) & 255, ag = (a >> 8) & 255, ab = a & 255;
@@ -1319,8 +1323,13 @@ function drawTransition(ctx: RenderContext, a: number, now: number) {
   for (const c of ctx.transClouds) {
     const y = H * (hTop - c.h) / (hTop - hBottom);
     if (y < -c.scale || y > H + c.scale) continue;
-    // Fade out once we've climbed well above the cloud.
-    const fade = 1 - smoothstep(c.h + 0.05, c.h + 0.22, a);
+    // Clouds bloom in as we approach their altitude band, then fade out once
+    // we've climbed well above them. Without the fade-in, every cloud pops
+    // into existence the moment the sky overlay does — too sudden against
+    // the dark play area.
+    const fadeIn = smoothstep(c.h - 0.20, c.h - 0.02, a);
+    const fadeOut = 1 - smoothstep(c.h + 0.05, c.h + 0.22, a);
+    const fade = fadeIn * fadeOut;
     if (fade <= 0.01) continue;
     const cx = c.fx * W;
     for (const [px, py, pr] of c.puffs) {
@@ -1696,9 +1705,12 @@ export function render(state: GameState, ctx: RenderContext) {
   //  • the space diorama fades up underneath the dissolving sky.
   // z-order is world < space < sky, so the late sky fade reveals space cleanly.
   const a = ctx.altitude;
-  const groundFade = 1 - smoothstep(0.02, 0.18, a);
+  // Ground and sky overlap through the lower-altitude band so the dark play
+  // area cross-fades into the (now also dark) low-sky gradient instead of the
+  // sky punching in over a still-dark ground.
+  const groundFade = 1 - smoothstep(0.05, 0.32, a);
   const spaceFade = smoothstep(0.84, 1.0, a);
-  const skyFade = Math.min(smoothstep(0.0, 0.1, a), 1 - smoothstep(0.84, 1.0, a));
+  const skyFade = Math.min(smoothstep(0.0, 0.32, a), 1 - smoothstep(0.84, 1.0, a));
 
   ctx.worldLayer.visible = groundFade > 0.001;
   ctx.worldLayer.alpha = groundFade;
