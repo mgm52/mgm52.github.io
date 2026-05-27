@@ -2,8 +2,9 @@ import { Application, Container, FederatedPointerEvent, Graphics } from 'pixi.js
 import { playSound } from './audio';
 import { flashCursor } from './cursor-fx';
 import { BUILDABLE_KINDS, BUILDING_DEFS, BuildingKind, CELL, DRAGON, GOBLIN, HELL, LIGHTNING, MINOTAUR, RENDER_SCALE, WORLD, formatPower } from './config';
+import { runBobCutscene } from './intro';
 import { RenderContext, ambientDragonAt, clampCamera, clampHellCamera, clampSpaceCamera, currentHellScale, ghostAtHell, ghostHellPos } from './render';
-import { autoAssignAllIdle, lightningStrike } from './sim';
+import { autoAssignAllIdle, lightningStrike, spawnBob } from './sim';
 import {
   Building, Cell, Dragon, GameState, Ghost, Goblin, Minotaur, WaterSource,
   appendLog, buildingAtCell, cellKey, defOf, findFreeCellNear,
@@ -134,6 +135,32 @@ export function setupInput(
       input.panLast = { x: (pts[0].x + pts[1].x) / 2, y: (pts[0].y + pts[1].y) / 2 };
       return;
     }
+
+    // Bob picker: after the cutscene accepts, the next ground tap must land on
+    // a Goblin Hole (main hole or any completed goblin_hole building). A click
+    // anywhere else just beeps; right-click does nothing. No selection, no
+    // build, no strike fires while the picker is active.
+    if (state.bobPickingHole && e.button === 0) {
+      input.isDragging = false;
+      input.selectionGfx.clear();
+      const c = pixelToCell(local.x, local.y);
+      const onMain = holeAtCell(state, c.cx, c.cy);
+      const b = onMain ? null : buildingAtCell(state, c.cx, c.cy);
+      const onBuildingHole = b !== null && b.kind === 'goblin_hole' && b.state !== 'constructing';
+      const target: Cell | null = onMain
+        ? state.hole.cell
+        : (onBuildingHole && b ? b.cell : null);
+      if (target) {
+        if (spawnBob(state, target)) {
+          state.bobPickingHole = false;
+          state.bobSpawned = true;
+        }
+      } else {
+        playSound('error');
+      }
+      return;
+    }
+    if (state.bobPickingHole) return;
 
     if (e.button === 2) {
       flashCursor(e.clientX, e.clientY);
@@ -1003,6 +1030,7 @@ function placeBuilding(state: GameState, x: number, y: number) {
   playSound('place', 1.6);
   appendLog(state, `${def.name} #${b.displayNum} construction started — right-click goblins onto it to staff the build.`);
   autoAssignAllIdle(state);
+  maybeTriggerBobCutscene(state, b, def.name);
 }
 
 // Wall placement — Ƶ1 per cell, 1×1 Building entity that goes straight to
@@ -1029,7 +1057,62 @@ function tryPlaceWallAt(state: GameState, cx: number, cy: number, silent: boolea
     selected: false,
   };
   state.buildings.set(b.id, b);
+  maybeTriggerBobCutscene(state, b, BUILDING_DEFS.wall.name);
   return true;
+}
+
+// Trigger the Bob cutscene if the player just placed their 30th-or-later
+// building and Bob hasn't been spawned yet. Walls count. The cutscene fires
+// async (no await) — paused-mode is enforced by the bob-cutscene-hold body
+// class — and on "yes" the picker takes over the next ground click.
+function maybeTriggerBobCutscene(state: GameState, b: Building, kindName: string) {
+  if (state.bobPickingHole) return;
+  // The cheat overrides every gate (threshold + bobSpawned) so a dev can
+  // re-trigger the cutscene at will. Self-clears once the cutscene fires.
+  if (!state.bobCheatPending) {
+    if (state.bobSpawned) return;
+    let total = 0;
+    for (const k in state.buildingCounts) total += state.buildingCounts[k as BuildingKind];
+    if (total < 30) return;
+  }
+  state.bobCheatPending = false;
+  const ord = ordinalWord(b.displayNum);
+  // Bail out of any pending build/strike — both surface a cursor ghost that
+  // would still follow the mouse during the cutscene if left armed.
+  state.pendingBuild = null;
+  state.pendingStrike = false;
+  void runBobCutscene(ord, kindName).then((res) => {
+    if (res === 'yes') {
+      state.bobPickingHole = true;
+      appendLog(state, 'Bob is waiting — click any Goblin Hole to summon him.');
+      playSound('select', 0.5);
+    }
+  });
+}
+
+// Render a positive integer as its English ordinal word ("first", "twenty-
+// fourth", ...). Covers 1–99 by name; falls back to numeric ordinals
+// ("123rd") above that.
+function ordinalWord(n: number): string {
+  const ones = ['', 'first', 'second', 'third', 'fourth', 'fifth', 'sixth', 'seventh', 'eighth', 'ninth'];
+  const teens = ['tenth', 'eleventh', 'twelfth', 'thirteenth', 'fourteenth', 'fifteenth', 'sixteenth', 'seventeenth', 'eighteenth', 'nineteenth'];
+  const tensCardinal = ['', '', 'twenty', 'thirty', 'forty', 'fifty', 'sixty', 'seventy', 'eighty', 'ninety'];
+  const tensOrdinal = ['', '', 'twentieth', 'thirtieth', 'fortieth', 'fiftieth', 'sixtieth', 'seventieth', 'eightieth', 'ninetieth'];
+  if (n <= 0) return `${n}th`;
+  if (n < 10) return ones[n];
+  if (n < 20) return teens[n - 10];
+  if (n < 100) {
+    const t = Math.floor(n / 10);
+    const o = n % 10;
+    return o === 0 ? tensOrdinal[t] : `${tensCardinal[t]}-${ones[o]}`;
+  }
+  const lastTwo = n % 100;
+  if (lastTwo >= 11 && lastTwo <= 13) return `${n}th`;
+  const last = n % 10;
+  if (last === 1) return `${n}st`;
+  if (last === 2) return `${n}nd`;
+  if (last === 3) return `${n}rd`;
+  return `${n}th`;
 }
 
 // Translucent blast-radius preview that follows the cursor while a Lightning

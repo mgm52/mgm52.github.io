@@ -244,6 +244,14 @@ async function main() {
       state.dragonBoneUnlocked = true;
       appendLog(state, 'Cheat: +100 dragon bones.');
     },
+    onTriggerBob: () => {
+      // Re-arm the cutscene for the next building placement, regardless of
+      // the 30-building threshold or whether Bob has been spawned before.
+      state.bobSpawned = false;
+      state.bobPickingHole = false;
+      state.bobCheatPending = true;
+      appendLog(state, 'Cheat: Bob will appear on your next building placement.');
+    },
     onTaskSkip: () => { skipIntro(); executeTaskSkip(state); },
     onShowTitleScreen: () => { void showTitleScreen(); },
   });
@@ -379,7 +387,7 @@ async function main() {
       const reward = g.gold
         ? { money: GOLD_KILL_REWARD.money * state.goldgoblinMultiplier, blood: GOLD_KILL_REWARD.blood }
         : KILL_REWARD;
-      recordGhost(state, 'goblin', x, y, g.facing, { gold: g.gold });
+      recordGhost(state, 'goblin', x, y, g.facing, { gold: g.gold, bob: g.bob });
       removeGoblin(state, id);
       earnMoney(state, reward.money);
       earnBlood(state, reward.blood);
@@ -560,7 +568,8 @@ async function main() {
     // it the spawn-hint / no-task timers in refreshUI) doesn't drift forward
     // during the intro's preamble + dialog. Once the intro releases the
     // hold, ticks resume from 0 and the hint gets its full 30s/90s grace.
-    const introActive = document.body.classList.contains('intro-hold');
+    const introActive = document.body.classList.contains('intro-hold')
+      || document.body.classList.contains('bob-cutscene-hold');
     if (!paused && !introActive) {
       acc += dt;
       if (acc > TICK_MS * 10) acc = TICK_MS * 10;

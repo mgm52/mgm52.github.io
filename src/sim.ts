@@ -192,13 +192,17 @@ export function tick(state: GameState) {
   const hellYOffset = (HELL.height - WORLD.height) / 2;
   for (let i = state.ghosts.length - 1; i >= 0; i--) {
     const g = state.ghosts[i];
-    const mult = g.speedMult ?? 1;
+    // speedMult is a per-ghost jitter on the *passive drift* only, so a
+    // cluster spreads out rather than falling in lockstep. Walk commands run
+    // at HELL.ghostWalkSpeed for everyone — including Bob (drift mult 0) —
+    // so the player can still drag him around the underworld on command.
+    const driftMult = g.speedMult ?? 1;
     if (g.hx !== undefined && g.hy !== undefined) {
       if (g.goal) {
         const dx = g.goal.x - g.hx;
         const dy = g.goal.y - g.hy;
         const dist = Math.hypot(dx, dy);
-        const step = HELL.ghostWalkSpeed * mult * TICK_S;
+        const step = HELL.ghostWalkSpeed * TICK_S;
         if (dist <= step) {
           g.hx = g.goal.x;
           g.hy = g.goal.y;
@@ -209,11 +213,11 @@ export function tick(state: GameState) {
           g.facing = Math.atan2(dy, dx);
         }
       } else if (fall > 0) {
-        g.hy += fall * mult * TICK_S;
+        g.hy += fall * driftMult * TICK_S;
       }
       if (g.hy > HELL.height) state.ghosts.splice(i, 1);
     } else if (fall > 0) {
-      const hellY = g.y + (g.offY ?? 0) + hellYOffset + (state.now - g.spawnAt) * fall * mult;
+      const hellY = g.y + (g.offY ?? 0) + hellYOffset + (state.now - g.spawnAt) * fall * driftMult;
       if (hellY > HELL.height) state.ghosts.splice(i, 1);
     }
   }
@@ -255,7 +259,7 @@ export function lightningStrike(state: GameState, x: number, y: number): boolean
       state.bloodUnlocked = true;
       pushFloater(state, tx, ty, `+Ƶ${r.money.toLocaleString('en-US')}`, 0xffd96b, 1.6);
       pushFloater(state, tx, ty - 14, `+${r.blood} blood`, 0xff8a8a, 1.6);
-      recordGhost(state, 'goblin', tx, ty, g.facing, { gold: g.gold });
+      recordGhost(state, 'goblin', tx, ty, g.facing, { gold: g.gold, bob: g.bob });
       removeGoblin(state, g.id);
       killed++;
     }
@@ -388,6 +392,37 @@ function spawnGoblin(state: GameState) {
   playDecayingGoblinSpawn(0.96 + Math.random() * 0.08);
   appendLog(state, isGold ? `Gold Goblin #${id} hatched!` : `Goblin #${id} hatched.`);
   if (state.autoAssignEnabled) autoAssignAllIdle(state);
+}
+
+// Seat Bob (the cutscene-summoned goblin) at the chosen hole. Bypasses the
+// spawn queue — he's a one-shot summon, not a regular hatchling — but uses the
+// same perimeter-cell picker so he can't land on top of an existing goblin or
+// inside a building footprint. Returns false (with an error beep) when no free
+// cell is reachable around the hole; the caller stays in bobPickingHole so the
+// player can try a different hole.
+export function spawnBob(state: GameState, holeCell: Cell): boolean {
+  const cell = pickHolePerimeterCellAt(state, holeCell)
+    ?? findFreeCellNear(state, holeCell.cx, holeCell.cy);
+  if (!cell) {
+    playSound('error');
+    appendLog(state, 'No room to summon Bob — try a different Goblin Hole.');
+    return false;
+  }
+  const id = state.nextId++;
+  const g: Goblin = {
+    id, pos: cellCenter(cell), cell,
+    target: null, goal: null,
+    path: [], facing: Math.PI / 2,
+    state: { kind: 'idle' }, selected: false, idleSince: null, lastCellChangedAt: state.now,
+    bob: true,
+  };
+  state.goblins.set(id, g);
+  occupyCell(state, cell.cx, cell.cy, id);
+  state.spawnsCompleted++;
+  playDecayingGoblinSpawn(0.85);
+  appendLog(state, 'Bob has joined the crew.');
+  if (state.autoAssignEnabled) autoAssignAllIdle(state);
+  return true;
 }
 
 // How many carriers Autowater should keep on a drinking building. Close to the
@@ -864,7 +899,7 @@ function updateMinotaur(state: GameState, t: Minotaur, autoTargets: Map<number, 
       const tx = target.pos.x, ty = target.pos.y;
       const reward = goblinKillReward(state, target);
       const wasGold = !!target.gold;
-      recordGhost(state, 'goblin', tx, ty, target.facing, { gold: target.gold });
+      recordGhost(state, 'goblin', tx, ty, target.facing, { gold: target.gold, bob: target.bob });
       removeGoblin(state, target.id);
       earnMoney(state, reward.money);
       earnBlood(state, reward.blood);
@@ -1074,7 +1109,7 @@ function dragonKill(state: GameState, d: Dragon, kind: 'goblin' | 'minotaur' | '
     const tx = g.pos.x, ty = g.pos.y;
     const reward = goblinKillReward(state, g);
     const wasGold = !!g.gold;
-    recordGhost(state, 'goblin', tx, ty, g.facing, { gold: g.gold });
+    recordGhost(state, 'goblin', tx, ty, g.facing, { gold: g.gold, bob: g.bob });
     removeGoblin(state, id);
     earnMoney(state, reward.money);
     earnBlood(state, reward.blood);
@@ -1697,7 +1732,7 @@ function updateGoblin(state: GameState, g: Goblin) {
         const tx = target.pos.x, ty = target.pos.y;
         const reward = goblinKillReward(state, target);
         const wasGold = !!target.gold;
-        recordGhost(state, 'goblin', tx, ty, target.facing, { gold: target.gold });
+        recordGhost(state, 'goblin', tx, ty, target.facing, { gold: target.gold, bob: target.bob });
         removeGoblin(state, target.id);
         earnMoney(state, reward.money);
         earnBlood(state, reward.blood);

@@ -9,6 +9,7 @@ export type OptionsUICallbacks = {
   onCheatBlood: () => void;
   onCheatPower: () => void;
   onCheatBones: () => void;
+  onTriggerBob: () => void;
   onTaskSkip: () => void;
   onShowTitleScreen: () => void;
 };
@@ -271,6 +272,13 @@ function rebuildPanel(panel: HTMLElement, callbacks: OptionsUICallbacks, refresh
   cheatBones.textContent = 'Cheat +100 dragon bones';
   cheatBones.addEventListener('click', () => callbacks.onCheatBones());
   panel.appendChild(cheatBones);
+
+  const cheatBob = document.createElement('button');
+  cheatBob.type = 'button';
+  cheatBob.className = 'options-reset';
+  cheatBob.textContent = 'Cheat: trigger Bob on next building';
+  cheatBob.addEventListener('click', () => callbacks.onTriggerBob());
+  panel.appendChild(cheatBob);
 
   const taskSkip = document.createElement('button');
   taskSkip.type = 'button';
