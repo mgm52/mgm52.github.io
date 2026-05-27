@@ -9,9 +9,9 @@ extensions.add(GifAsset);
 // game seconds. Used as a manual sprite-sheet — we pick the frame ourselves
 // each tick based on (state.now - spawnAt) so playback always starts at frame 0.
 type DeathFrames = { textures: Texture[]; ends: number[]; duration: number };
-import { AMBIENT_DRAGON, BUILDING_DEFS, BuildingKind, CELL, COLS, DRAGON, GOBLIN, RENDER_SCALE, ROWS, MINOTAUR, SPACE, TINYTAUR, WORLD } from './config';
+import { AMBIENT_DRAGON, BUILDING_DEFS, BuildingKind, CELL, COLS, DRAGON, GOBLIN, HELL, RENDER_SCALE, ROWS, MINOTAUR, SPACE, TINYTAUR, WORLD } from './config';
 import { ensureFontLoaded, fontFamilyById, getOptions, onOptionsChange, type FontConfig, type Options } from './options';
-import { Building, Dragon, GameState, Goblin, HOLE_SIZE, Minotaur, SpaceBuilding, WaterSource, buildingCenter, cellCenter, defOf, holeCenter, isInPlayCell, maintainerCount } from './state';
+import { Building, Dragon, GameState, Ghost, Goblin, HOLE_SIZE, Minotaur, SpaceBuilding, WaterSource, buildingCenter, cellCenter, defOf, holeCenter, isInPlayCell, maintainerCount } from './state';
 
 export type Camera = { x: number; y: number };
 
@@ -167,6 +167,45 @@ function getGlowTexture(): Texture {
   return glowTexture;
 }
 
+// Dim infernal wash + drifting fog rings for the hell scene. Painted once
+// across HELL bounds; the ghosts ride on top.
+function drawHellBackground(g: Graphics): void {
+  g.clear();
+  // Deep base wash with a slow vertical gradient toward black at the bottom.
+  const stripes = 32;
+  for (let i = 0; i < stripes; i++) {
+    const t = i / stripes;
+    const r = Math.round(0x0a + (0x1a - 0x0a) * (1 - t));
+    const gr = Math.round(0x02 + (0x06 - 0x02) * (1 - t));
+    const b = Math.round(0x03 + (0x08 - 0x03) * (1 - t));
+    const col = (r << 16) | (gr << 8) | b;
+    g.rect(0, Math.floor(t * HELL.height), HELL.width, Math.ceil(HELL.height / stripes) + 1).fill(col);
+  }
+  // Sparse blood-mist rings — soft red blooms scattered across the bounds.
+  const mist: [number, number, number, number][] = [
+    [HELL.width * 0.18, HELL.height * 0.22, 380, HELL.fogColor],
+    [HELL.width * 0.74, HELL.height * 0.32, 450, 0x3a0612],
+    [HELL.width * 0.52, HELL.height * 0.58, 520, 0x4a0a14],
+    [HELL.width * 0.28, HELL.height * 0.78, 360, 0x3a0612],
+    [HELL.width * 0.82, HELL.height * 0.86, 410, HELL.fogColor],
+  ];
+  for (const [nx, ny, nr, col] of mist) {
+    for (let i = 5; i >= 1; i--) {
+      g.circle(nx, ny, nr * (i / 5)).fill({ color: col, alpha: 0.05 });
+    }
+  }
+  // Faint ember specks — a hellish equivalent of the starfield. Mostly red,
+  // a sprinkle of orange.
+  for (let i = 0; i < 700; i++) {
+    const x = Math.random() * HELL.width;
+    const y = Math.random() * HELL.height;
+    const r = 0.4 + Math.random() * 1.3;
+    const tint = Math.random();
+    const col = tint < 0.7 ? 0x8a1818 : tint < 0.9 ? 0xb83820 : 0xff6a3a;
+    g.circle(x, y, r).fill({ color: col, alpha: 0.25 + Math.random() * 0.55 });
+  }
+}
+
 // One-time starfield + nebula for the space scene, painted across SPACE bounds.
 function drawSpaceBackground(g: Graphics): void {
   g.clear();
@@ -223,6 +262,13 @@ type SpaceBuildingView = {
   sprite: Sprite;
   label: Text;
   selectionRing: Graphics;
+};
+
+// A static silhouette of a killed unit, rendered at the world-x/y where it
+// died. Lives in hellLayer. Made once on first sight; tinted dim red.
+type GhostView = {
+  container: Container;
+  sprite: Sprite;
 };
 
 // A decorative dragon drifting across the space scene. Renderer-owned: not in
@@ -318,6 +364,24 @@ export type RenderContext = {
   // 0 = on the ground, 1 = in space. Animated by main.ts; the renderer reads it
   // to cross-fade the scenes and drive the overlay.
   altitude: number;
+  // ─── Hell scene + descent transition ───
+  // Mirror of the space scene, but downward. Has its own layer, camera, and
+  // background. Ghosts of every killed unit are scattered across hellLayer.
+  hellLayer: Container;
+  hellBg: Graphics;
+  hellGhostLayer: Container;
+  ghostViews: Map<number, GhostView>;
+  hellCamera: Camera;
+  // 0 = on the ground, 1 = fully in hell. Drives the cross-fade and a darker
+  // overlay between the two.
+  depth: number;
+  // 0 = camera at the normal RENDER_SCALE, 1 = eased out to HELL.zoomedOutScale.
+  // Animated by main.ts after the descent transition completes.
+  hellZoom: number;
+  // The portal-to-abyss beam: a red line drawn from each hell_portal's
+  // bottom-center straight down toward the world's edge. Animates in over
+  // HELL.lineDrawMs ms after a portal is placed.
+  hellBeamGfx: Graphics;
   // Goblin Hole: a fixed pit-graphic plus its selection ring. Drawn between
   // the grid and buildings so a building placed on top covers it.
   holeGfx: Graphics;
@@ -441,6 +505,32 @@ export async function createRender(parent: HTMLElement, state: GameState): Promi
   spaceLayer.visible = false;
   app.stage.addChild(spaceLayer);
 
+  // The red beam(s) from any hell_portal building down to the abyss. Drawn
+  // each frame in world space (top of worldLayer) so it pans with the camera
+  // and is visible from the ground; alpha is gated on the portal's draw-in
+  // animation.
+  const hellBeamGfx = new Graphics();
+  worldLayer.addChildAt(hellBeamGfx, worldLayer.getChildIndex(uiLayer));
+
+  // ─── Hell scene ───
+  // Mirror of the space scene but downward and bigger. Has its own layer,
+  // camera, and background. Hell starts hidden; visibility/scale are driven
+  // by ctx.depth and ctx.hellZoom each frame.
+  const hellLayer = new Container();
+  const hellBg = new Graphics();
+  drawHellBackground(hellBg);
+  hellLayer.addChild(hellBg);
+  const hellGhostLayer = new Container();
+  hellGhostLayer.cullableChildren = true;
+  hellLayer.addChild(hellGhostLayer);
+  hellLayer.scale.set(RENDER_SCALE);
+  hellLayer.visible = false;
+  // Hell sits between the ground and the sky/space stack so the descent's
+  // black overlay can cover it during the transition. The space scene
+  // remains topmost in z-order so an ascend transition from hell would still
+  // read correctly.
+  app.stage.addChildAt(hellLayer, app.stage.getChildIndex(spaceLayer));
+
   // ─── Climb transition overlays (screen-space) ───
   // Phase 1: blackOverlay fades in over the ground so the play area visibly
   // dims toward black before any bright sky appears. Sits between worldLayer
@@ -515,6 +605,11 @@ export async function createRender(parent: HTMLElement, state: GameState): Promi
     blackOverlay, skyLayer, skyGfx, cloudGfx, starGfx,
     transStars, transClouds,
     altitude: 0,
+    hellLayer, hellBg, hellGhostLayer, ghostViews: new Map(),
+    hellCamera: { x: 0, y: 0 },
+    depth: 0,
+    hellZoom: 0,
+    hellBeamGfx,
     holeGfx, holeRing,
     floatersLayer, floaterViews: new Map(),
     effectsLayer, deathViews: new Map(),
@@ -940,6 +1035,62 @@ export function ambientDragonAt(ctx: RenderContext, x: number, y: number): { id:
   return best ? { id: best.id } : null;
 }
 
+// Build a static silhouette of a killed unit at its death position. Uses the
+// first frame of the matching idle/walk sheet for the row that matches the
+// recorded facing — no per-frame animation, no shadow, no outline. Tinted
+// dim red so the whole hell scene reads as the underworld.
+function makeGhostView(g: Ghost): GhostView | null {
+  const container = new Container();
+  container.position.set(worldToHellX(g.x), worldToHellY(g.y));
+  container.alpha = 0.62;
+
+  if (g.kind === 'goblin') {
+    const sheet = goblinIdleSheet ?? goblinWalkSheet;
+    if (!sheet) return null;
+    const dir = dirIndex(sheet.meta, g.facing);
+    const tex = sheet.frames[dir][0];
+    const sprite = new Sprite(tex);
+    sprite.anchor.set(0.5);
+    const px = getOptions().goblinDisplayPx;
+    sprite.scale.set(px / sheet.meta.spriteSize);
+    sprite.tint = g.gold ? 0xb88a3a : 0xd06868;
+    container.addChild(sprite);
+    return { container, sprite };
+  }
+  if (g.kind === 'minotaur') {
+    const sheet = minotaurWalkSheet;
+    if (!sheet) return null;
+    const dir = dirIndex(sheet.meta, g.facing);
+    const tex = sheet.frames[dir][0];
+    const sprite = new Sprite(tex);
+    sprite.anchor.set(0.5);
+    const px = getOptions().minotaurDisplayPx * (g.tiny ? TINYTAUR.scale : 1);
+    sprite.scale.set(px / sheet.meta.spriteSize);
+    sprite.tint = 0xb84848;
+    container.addChild(sprite);
+    return { container, sprite };
+  }
+  // Dragon ghost: reuse the placeholder block + glyph but dim it.
+  const half = DRAGON_BLOCK / 2;
+  const block = new Graphics();
+  block.roundRect(-half, -half, DRAGON_BLOCK, DRAGON_BLOCK, 8)
+    .fill(0x4a0a14)
+    .stroke({ width: 3, color: 0x8a2030 });
+  const label = new Text({
+    text: '🐉',
+    style: { fontFamily: 'sans-serif', fontSize: Math.round(DRAGON_BLOCK * 0.62), fill: 0xffffff },
+  });
+  label.anchor.set(0.5);
+  label.alpha = 0.7;
+  container.addChild(block);
+  container.addChild(label);
+  // Dragon facing is -1 (left) / +1 (right); the glyph faces left, mirror on +1.
+  container.scale.set(g.facing > 0 ? -1 : 1, 1);
+  // Cast block as the "sprite" for the view interface; we never touch it after
+  // creation here, so any Container child works.
+  return { container, sprite: block as unknown as Sprite };
+}
+
 function makeWaterView(w: WaterSource): WaterView {
   const c = new Container();
   const body = new Graphics();
@@ -1345,6 +1496,37 @@ export function centerSpaceCamera(ctx: RenderContext) {
 // True extent the space camera can pan (so main can detect "at the bottom").
 export function spaceCameraMaxY(ctx: RenderContext): number {
   return Math.max(0, SPACE.height - ctx.viewport.height / RENDER_SCALE);
+}
+
+// Clamp the hell camera to HELL bounds. `scale` is the live hell-layer scale
+// (changes with hellZoom), so the clamp accounts for how much world is visible.
+export function clampHellCamera(ctx: RenderContext, scale: number = currentHellScale(ctx)) {
+  const maxX = Math.max(0, HELL.width - ctx.viewport.width / scale);
+  const maxY = Math.max(0, HELL.height - ctx.viewport.height / scale);
+  ctx.hellCamera.x = Math.max(0, Math.min(maxX, ctx.hellCamera.x));
+  ctx.hellCamera.y = Math.max(0, Math.min(maxY, ctx.hellCamera.y));
+}
+// HELL is larger than WORLD, so the overworld's play area is offset into the
+// center of the hell scene. These two map between the two spaces.
+export function worldToHellX(wx: number): number {
+  return wx + (HELL.width - WORLD.width) / 2;
+}
+export function worldToHellY(wy: number): number {
+  return wy + (HELL.height - WORLD.height) / 2;
+}
+// Center the hell camera over the world-position you stepped off from on the
+// ground, so arrival lands you above the same play area you just left.
+export function centerHellCameraOnWorld(ctx: RenderContext, wx: number, wy: number) {
+  const scale = currentHellScale(ctx);
+  ctx.hellCamera.x = worldToHellX(wx) - ctx.viewport.width / (2 * scale);
+  ctx.hellCamera.y = worldToHellY(wy) - ctx.viewport.height / (2 * scale);
+  clampHellCamera(ctx, scale);
+}
+export function currentHellScale(ctx: RenderContext): number {
+  // hellZoom ramps 0 (overworld zoom) → 1 (fully zoomed out).
+  const k = Math.max(0, Math.min(1, ctx.hellZoom));
+  const factor = 1 + (HELL.zoomedOutScale - 1) * k;
+  return RENDER_SCALE * factor;
 }
 
 function drawTransition(ctx: RenderContext, a: number, now: number) {
@@ -1758,25 +1940,79 @@ export function render(state: GameState, ctx: RenderContext) {
     }
   }
 
-  // Scene cross-fades driven by altitude (0 ground … 1 space). The climb runs
-  // in three overlapping phases so nothing pops:
+  // ─── Hell red beam ───
+  // One vertical red line per Hell Portal, drawn from the portal's
+  // bottom-center down toward the world's bottom edge. Animates its length
+  // in over HELL.lineDrawMs after state.hellPortalPlacedAt.
+  drawHellBeams(ctx, state);
+
+  // ─── Hell scene ───
+  // Position the hell layer with its own camera + dynamic scale. Scale eases
+  // out (RENDER_SCALE → RENDER_SCALE * HELL.zoomedOutScale) after arrival.
+  {
+    const scale = currentHellScale(ctx);
+    ctx.hellLayer.scale.set(scale);
+    const scaledW = HELL.width * scale;
+    const scaledH = HELL.height * scale;
+    const offX = Math.max(0, (ctx.viewport.width - scaledW) / 2);
+    const offY = Math.max(0, (ctx.viewport.height - scaledH) / 2);
+    // Mirror the space slide-in but in the opposite direction: as the ground
+    // drops away, hell rises into view from below.
+    const hellSlide = (1 - smoothstep(0.82, 1.0, ctx.depth)) * ctx.viewport.height * 0.4;
+    ctx.hellLayer.position.set(
+      Math.round(offX - ctx.hellCamera.x * scale),
+      Math.round(offY - ctx.hellCamera.y * scale + hellSlide),
+    );
+  }
+  // Sync ghost views with state.ghosts. Ghosts are immutable once recorded,
+  // so views are made-once / never-updated.
+  const seenGh = new Set<number>();
+  for (const gh of state.ghosts) {
+    seenGh.add(gh.id);
+    if (ctx.ghostViews.has(gh.id)) continue;
+    const v = makeGhostView(gh);
+    if (!v) continue;
+    v.container.cullable = true;
+    ctx.hellGhostLayer.addChild(v.container);
+    ctx.ghostViews.set(gh.id, v);
+  }
+  for (const [id, v] of ctx.ghostViews) {
+    if (!seenGh.has(id)) {
+      v.container.destroy({ children: true });
+      ctx.ghostViews.delete(id);
+    }
+  }
+
+  // Scene cross-fades driven by altitude (0 ground … 1 space) and depth
+  // (0 ground … 1 hell). The climb runs in three overlapping phases so
+  // nothing pops:
   //  • blackOverlay fades in *over* the ground first, dimming the play area
   //    toward black before any sky shows up,
   //  • once the screen is dark, the sky gradient fades in over the black
   //    (clouds drift past as we climb through the blue band),
   //  • the sky dissolves near the top while the space diorama fades up
   //    underneath it.
-  // z-order: world < black < space < sky.
+  // z-order: world < black < hell < space < sky.
   const a = ctx.altitude;
-  // Black overlay takes the lead: it's fully opaque well before the sky
-  // overlay starts being visible, so the bright daylight never punches in
-  // over a partially-faded play area.
-  const blackFade = smoothstep(0.02, 0.20, a);
-  const groundFade = 1 - smoothstep(0.04, 0.18, a);
+  const dp = ctx.depth;
+  // Black overlay takes the lead during ascent or descent: it's fully opaque
+  // well before the destination scene becomes visible, so the bright
+  // intermediate (sky on ascent, none on descent) never punches in over a
+  // partially-faded play area.
+  const blackFromAscent = smoothstep(0.02, 0.20, a);
+  const blackFromDescent = smoothstep(0.05, 0.55, dp) * (1 - smoothstep(0.78, 1.0, dp));
+  const blackFade = Math.max(blackFromAscent, blackFromDescent);
+  const groundFade = (1 - smoothstep(0.04, 0.18, a)) * (1 - smoothstep(0.04, 0.18, dp));
   // Sky waits until the screen is dark, then blooms in. Holds through the
-  // middle of the climb, then fades as space takes over.
-  const skyFade = Math.min(smoothstep(0.18, 0.45, a), 1 - smoothstep(0.82, 1.0, a));
+  // middle of the climb, then fades as space takes over. Only during the
+  // ascent — descent has no daylight phase.
+  const skyFade = a > 0
+    ? Math.min(smoothstep(0.18, 0.45, a), 1 - smoothstep(0.82, 1.0, a))
+    : 0;
   const spaceFade = smoothstep(0.82, 1.0, a);
+  // Hell fades up under the descent's black overlay near the bottom of the
+  // descent, mirroring how space fades up under the sky on ascent.
+  const hellFade = smoothstep(0.78, 1.0, dp);
 
   ctx.worldLayer.visible = groundFade > 0.001;
   ctx.worldLayer.alpha = groundFade;
@@ -1790,7 +2026,46 @@ export function render(state: GameState, ctx: RenderContext) {
   }
   ctx.spaceLayer.visible = spaceFade > 0.001;
   ctx.spaceLayer.alpha = spaceFade;
+  ctx.hellLayer.visible = hellFade > 0.001;
+  ctx.hellLayer.alpha = hellFade;
   ctx.skyLayer.visible = skyFade > 0.001;
   ctx.skyLayer.alpha = skyFade;
   if (ctx.skyLayer.visible) drawTransition(ctx, a, state.now);
+}
+
+// Paint the red beam(s) from every Hell Portal building down to the world's
+// bottom edge. Length grows from 0 to full over HELL.lineDrawMs once
+// state.hellPortalPlacedAt is set. Drawn each frame in world coordinates so
+// the line stays glued to its portal under camera pan.
+function drawHellBeams(ctx: RenderContext, state: GameState): void {
+  const g = ctx.hellBeamGfx;
+  g.clear();
+  // Cheap early-out if there's no portal yet.
+  if (state.hellPortalPlacedAt === null) return;
+  const elapsedMs = (state.now - state.hellPortalPlacedAt) * 1000;
+  const drawFrac = Math.max(0, Math.min(1, elapsedMs / HELL.lineDrawMs));
+  if (drawFrac <= 0) return;
+  let any = false;
+  for (const b of state.buildings.values()) {
+    if (b.kind !== 'hell_portal') continue;
+    any = true;
+    const c = buildingCenter(b);
+    const def = defOf(b);
+    const startY = c.y + def.size / 2;
+    const endY = WORLD.height;
+    const span = endY - startY;
+    if (span <= 0) continue;
+    const y2 = startY + span * drawFrac;
+    // Outer halo + bright core, like the lightning bolt's two-pass look.
+    g.moveTo(c.x, startY).lineTo(c.x, y2)
+      .stroke({ width: 14, color: HELL.lineColor, alpha: 0.22 });
+    g.moveTo(c.x, startY).lineTo(c.x, y2)
+      .stroke({ width: 6, color: HELL.lineColor, alpha: 0.55 });
+    g.moveTo(c.x, startY).lineTo(c.x, y2)
+      .stroke({ width: 2, color: 0xffd0d0, alpha: 0.95 });
+  }
+  if (!any) {
+    // Portal was destroyed before its beam finished animating. Stop drawing.
+    g.clear();
+  }
 }

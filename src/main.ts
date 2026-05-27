@@ -1,14 +1,14 @@
 import { playSound, preloadSounds, setCrackleEnabled, setMasterVolume, setMusicVolume, startBackgroundCrackle, startBackgroundMusic } from './audio';
 import {
-  AUTOSPAWN_TIERS, CAMERA_SPEED, CELL, DRAGON, GOBLIN, GOLD_KILL_REWARD, KILL_REWARD, RENDER_SCALE, START_CELL,
-  SUMMON_UPGRADES, TICK_MS, MINOTAUR, digBloodCost, minotaurBloodCost,
+  AUTOSPAWN_TIERS, CAMERA_SPEED, CELL, DRAGON, GOBLIN, GOLD_KILL_REWARD, HELL, KILL_REWARD, RENDER_SCALE, START_CELL,
+  SUMMON_UPGRADES, TICK_MS, MINOTAUR, WORLD, digBloodCost, minotaurBloodCost,
 } from './config';
 import { setupInput } from './input';
 import { playIntroSequence, setIntroPaused, skipIntro } from './intro';
 import { getOptions, onOptionsChange } from './options';
 import { relockOptionsCog, setupOptionsUI } from './options-ui';
-import { applyDomOptions, centerCameraOn, centerSpaceCamera, clampCamera, clampSpaceCamera, createRender, render, spaceCameraMaxY } from './render';
-import { appendLog, cellCenter, createInitialState, destroyBuilding, digDirection, earnBlood, earnMoney, getSpawnCapacity, pushDeathEffect, pushFloater, removeGoblin, type GameState } from './state';
+import { applyDomOptions, centerCameraOn, centerHellCameraOnWorld, centerSpaceCamera, clampCamera, clampHellCamera, clampSpaceCamera, createRender, currentHellScale, render, spaceCameraMaxY } from './render';
+import { appendLog, cellCenter, createInitialState, destroyBuilding, digDirection, earnBlood, earnMoney, getSpawnCapacity, pushDeathEffect, pushFloater, recordGhost, removeGoblin, type GameState } from './state';
 import { autoAssignAllIdle, spawnDragon, spawnMinotaur, spawnTinytaur, tick } from './sim';
 import { executeTaskSkip, refreshUI, setupUI } from './ui';
 import { clearSave, formatRelativeTime, loadGame, saveGame } from './save';
@@ -374,6 +374,7 @@ async function main() {
       const reward = g.gold
         ? { money: GOLD_KILL_REWARD.money * state.goldgoblinMultiplier, blood: GOLD_KILL_REWARD.blood }
         : KILL_REWARD;
+      recordGhost(state, 'goblin', x, y, g.facing, { gold: g.gold });
       removeGoblin(state, id);
       earnMoney(state, reward.money);
       earnBlood(state, reward.blood);
@@ -461,6 +462,24 @@ async function main() {
   let ascendHold = 0, descendHold = 0;
   const ascendHint = document.getElementById('ascend-hint');
   const descendHint = document.getElementById('descend-hint');
+
+  // ─── Hell-view descent state ────────────────────────────────────────
+  // Mirror of the space-climb pair. Hold ↓ at the bottom of the map (once a
+  // Hell Portal exists) to descend; hold ↑ at the top of hell to rise back
+  // out. ctx.depth eases 0 → 1 over HELL_TRANS_MS, and on arrival ctx.hellZoom
+  // eases 0 → 1 over HELL.zoomMs to reveal the larger area. Reverse on return.
+  const HELL_TRANS_MS = 2600;
+  let hellTransitioning = false;
+  let hellTransFrom = 0, hellTransTo = 0, hellTransStart = 0;
+  let hellZooming = false;
+  let hellZoomFrom = 0, hellZoomTo = 0, hellZoomStart = 0;
+  // World-coord focus point the zoom-out should pivot around — keeps the
+  // landing spot under the camera as the scale eases out and the same spot
+  // under the camera on the return zoom-in too.
+  let hellZoomFocusX = 0, hellZoomFocusY = 0;
+  let descendHellHold = 0, ascendHellHold = 0;
+  const descendHellHint = document.getElementById('descend-hell-hint');
+  const ascendHellHint = document.getElementById('ascend-hell-hint');
 
   // Autosave to localStorage every SAVE_INTERVAL_MS, plus on visibilitychange
   // and pagehide so a closed tab loses at most this much progress.
@@ -561,6 +580,22 @@ async function main() {
     const downHeld = held.has('s') || held.has('arrowdown');
     const panMove = (CAMERA_SPEED * dt) / 1000;
 
+    // Ease the hell zoom-out (or zoom-in on return) independent of the
+    // descent transition. Kicked off when arriving in hell / leaving hell.
+    if (hellZooming) {
+      const t = Math.min(1, (now - hellZoomStart) / HELL.zoomMs);
+      const e = t * t * (3 - 2 * t);
+      ctx.hellZoom = hellZoomFrom + (hellZoomTo - hellZoomFrom) * e;
+      if (t >= 1) {
+        ctx.hellZoom = hellZoomTo;
+        hellZooming = false;
+      }
+      // Recenter the hell camera on the recorded world-focus each frame so
+      // the zoom appears to pivot around the player's landing spot instead
+      // of pulling toward a corner as the bounds change.
+      centerHellCameraOnWorld(ctx, hellZoomFocusX, hellZoomFocusY);
+    }
+
     if (transitioning) {
       // Mid-climb: drive altitude with an ease-in-out and ignore pan input.
       const t = Math.min(1, (now - transStart) / SPACE_TRANS_MS);
@@ -573,6 +608,28 @@ async function main() {
       }
       ascendHint?.classList.remove('visible');
       descendHint?.classList.remove('visible');
+      descendHellHint?.classList.remove('visible');
+      ascendHellHint?.classList.remove('visible');
+    } else if (hellTransitioning) {
+      // Mid-descent: drive depth with the same ease-in-out and ignore pan.
+      const t = Math.min(1, (now - hellTransStart) / HELL_TRANS_MS);
+      const e = t * t * (3 - 2 * t);
+      ctx.depth = hellTransFrom + (hellTransTo - hellTransFrom) * e;
+      if (t >= 1) {
+        ctx.depth = hellTransTo;
+        hellTransitioning = false;
+        if (hellTransTo >= 0.5) {
+          state.view = 'hell';
+          // Arrival: kick off the camera zoom-out reveal.
+          hellZooming = true; hellZoomFrom = 0; hellZoomTo = 1; hellZoomStart = now;
+        } else {
+          state.view = 'ground';
+        }
+      }
+      ascendHint?.classList.remove('visible');
+      descendHint?.classList.remove('visible');
+      descendHellHint?.classList.remove('visible');
+      ascendHellHint?.classList.remove('visible');
     } else if (ctx.altitude >= 0.9999) {
       // ── Space view ── pan the space camera; hold ↓ at the bottom to descend.
       state.view = 'space';
@@ -592,8 +649,47 @@ async function main() {
       } else { descendHold = 0; }
       ascendHint?.classList.remove('visible');
       descendHint?.classList.toggle('visible', atBottom && !transitioning);
+      descendHellHint?.classList.remove('visible');
+      ascendHellHint?.classList.remove('visible');
+    } else if (ctx.depth >= 0.9999) {
+      // ── Hell view ── pan the hell camera; hold ↑ at the top to rise back.
+      state.view = 'hell';
+      if (dx !== 0 || dy !== 0) {
+        const len = Math.hypot(dx, dy);
+        const scale = currentHellScale(ctx);
+        // Scale pan speed by inverse of zoom so panning when zoomed out covers
+        // the larger view at roughly the same on-screen pace.
+        const pan = (CAMERA_SPEED * dt) / 1000 * (RENDER_SCALE / scale);
+        ctx.hellCamera.x += (dx / len) * pan;
+        ctx.hellCamera.y += (dy / len) * pan;
+        clampHellCamera(ctx);
+      }
+      const atTop = ctx.hellCamera.y <= 1;
+      if (upHeld && atTop) {
+        ascendHellHold += dt;
+        if (ascendHellHold >= SPACE_HOLD_MS) {
+          // On return: pivot the zoom-in around whatever world spot is
+          // currently at the centre of the hell viewport. Then reverse the
+          // descent transition.
+          const scale = currentHellScale(ctx);
+          // (hell-coord at viewport centre) → world coord = hell - offset
+          const hellCenterX = ctx.hellCamera.x + ctx.viewport.width / (2 * scale);
+          const hellCenterY = ctx.hellCamera.y + ctx.viewport.height / (2 * scale);
+          hellZoomFocusX = hellCenterX - (HELL.width - WORLD.width) / 2;
+          hellZoomFocusY = hellCenterY - (HELL.height - WORLD.height) / 2;
+          hellZooming = true; hellZoomFrom = ctx.hellZoom; hellZoomTo = 0; hellZoomStart = now;
+          hellTransitioning = true; hellTransFrom = 1; hellTransTo = 0; hellTransStart = now;
+          ascendHellHold = 0;
+          playSound('ritual', 0.7, 0.5);
+        }
+      } else { ascendHellHold = 0; }
+      ascendHint?.classList.remove('visible');
+      descendHint?.classList.remove('visible');
+      descendHellHint?.classList.remove('visible');
+      ascendHellHint?.classList.toggle('visible', atTop && !hellTransitioning);
     } else {
-      // ── Ground view ── pan the world; hold ↑ at the top to rise into space.
+      // ── Ground view ── pan the world; hold ↑ at the top to rise into space,
+      // or hold ↓ at the bottom (Hell Portal placed) to descend into hell.
       state.view = 'ground';
       if (dx !== 0 || dy !== 0) {
         const len = Math.hypot(dx, dy);
@@ -602,6 +698,9 @@ async function main() {
         clampCamera(ctx);
       }
       const atTop = ctx.camera.y <= 1;
+      // True "at the bottom" check: camera.y is at its max pan extent.
+      const groundMaxY = Math.max(0, WORLD.height - ctx.viewport.height / RENDER_SCALE);
+      const atBottom = ctx.camera.y >= groundMaxY - 1;
       if (state.spaceUnlocked && upHeld && atTop) {
         ascendHold += dt;
         if (ascendHold >= SPACE_HOLD_MS) {
@@ -614,8 +713,26 @@ async function main() {
           playSound('online', 0.5, 0.3);
         }
       } else { ascendHold = 0; }
+      if (state.hellUnlocked && downHeld && atBottom) {
+        descendHellHold += dt;
+        if (descendHellHold >= SPACE_HOLD_MS) {
+          // Center hell on the player's current ground-camera focus, fully
+          // zoomed in. The zoom-out reveal kicks off when the transition lands.
+          ctx.hellZoom = 0;
+          hellZoomFocusX = ctx.camera.x + ctx.viewport.width / (2 * RENDER_SCALE);
+          hellZoomFocusY = ctx.camera.y + ctx.viewport.height / (2 * RENDER_SCALE);
+          centerHellCameraOnWorld(ctx, hellZoomFocusX, hellZoomFocusY);
+          hellTransitioning = true; hellTransFrom = 0; hellTransTo = 1; hellTransStart = now;
+          descendHellHold = 0;
+          state.view = 'hell';
+          state.pendingBuild = null; state.pendingStrike = false;
+          playSound('ritual', 0.6, 0.6);
+        }
+      } else { descendHellHold = 0; }
       descendHint?.classList.remove('visible');
       ascendHint?.classList.toggle('visible', state.spaceUnlocked && atTop && !transitioning);
+      descendHellHint?.classList.toggle('visible', state.hellUnlocked && atBottom && !hellTransitioning);
+      ascendHellHint?.classList.remove('visible');
       // Pan-hint trigger: once any water source intersects the camera's visible
       // rect, mark `waterSeen` sticky-true. The hint flips off in refreshUI.
       if (!state.waterSeen && state.waterSources.size > 0) {
@@ -631,8 +748,8 @@ async function main() {
         }
       }
     }
-    // Dim + disable the summon/build panels while looking at space (you can't
-    // build or summon from orbit).
+    // Dim + disable the summon/build panels whenever the player isn't on the
+    // ground — both orbit and hell view share this restriction.
     document.body.classList.toggle('space-view', state.view !== 'ground');
     render(state, ctx);
     refreshUI(state);
