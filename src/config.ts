@@ -57,7 +57,7 @@ export const MINOTAUR = {
   speed: 70,
   radius: 22,
   bloodCost: 8,        // base cost; doubles per purchase up to bloodCostCap
-  bloodCostCap: 64,
+  bloodCostCap: 32,
   spawnTime: 2,
   spawnCapacity: 1,
   arriveDist: 2,
@@ -65,8 +65,8 @@ export const MINOTAUR = {
   wanderInterval: 1.2,
 };
 
-// Minotaur summoning gets pricier the more you've bought: 8 → 16 → 32 → 64,
-// then flat at the cap. `bought` is the number summoned so far this run.
+// Minotaur summoning gets pricier the more you've bought: 8 → 16 → 32, then
+// flat at the cap. `bought` is the number summoned so far this run.
 export function minotaurBloodCost(bought: number): number {
   return Math.min(MINOTAUR.bloodCostCap, MINOTAUR.bloodCost * (2 ** bought));
 }
