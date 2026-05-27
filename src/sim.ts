@@ -940,7 +940,8 @@ function dragonReachSpace(state: GameState, d: Dragon) {
       selected: false,
     });
     state.spaceUnlocked = true;
-    appendLog(state, `${defOf(b).name} #${b.displayNum} now drifts among the stars.`);
+    const orbitName = b.kind === 'dragon_beacon' ? 'Useless Beacon' : defOf(b).name;
+    appendLog(state, `${orbitName} #${b.displayNum} now drifts among the stars.`);
     playSound('task_complete', 0.6);
   }
   removeDragon(state, d.id);
@@ -2011,6 +2012,10 @@ function resolvePowerAndState(state: GameState) {
   // earns nothing until the grid catches back up.
   for (const sb of state.spaceBuildings.values()) {
     const b = sb.building;
+    // Dragon Beacons in orbit are inert ("Useless Beacons") — they neither
+    // draw power nor summon anything. Skip them entirely so they don't
+    // silently siphon 10 GW from the grid.
+    if (b.kind === 'dragon_beacon') { b.state = 'dormant'; continue; }
     const def = BUILDING_DEFS[b.kind];
     if (def.powerOutput >= 0) continue;
     const draw = -def.powerOutput;
