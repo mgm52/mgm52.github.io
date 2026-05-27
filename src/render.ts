@@ -1376,7 +1376,9 @@ function drawHole(ctx: RenderContext, state: GameState) {
 function drawBobPicker(ctx: RenderContext, state: GameState) {
   ctx.bobPickerGfx.clear();
   if (!state.bobPickingHole) return;
-  const t = state.now;
+  // Picker pulses on wall-clock time so the ring keeps breathing even though
+  // tick-time is frozen during hole selection.
+  const t = performance.now() / 1000;
   const pulse = 0.55 + 0.35 * Math.sin(t * 4);
   const inflate = 4 + 2 * Math.sin(t * 4);
   const ring = (cx: number, cy: number, half: number) => {

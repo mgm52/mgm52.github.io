@@ -1068,14 +1068,15 @@ function tryPlaceWallAt(state: GameState, cx: number, cy: number, silent: boolea
 function maybeTriggerBobCutscene(state: GameState, b: Building, kindName: string) {
   if (state.bobPickingHole) return;
   // The cheat overrides every gate (threshold + bobSpawned) so a dev can
-  // re-trigger the cutscene at will. Self-clears once the cutscene fires.
+  // re-trigger the cutscene at will. It stays pending across "no" answers
+  // so the offer persists until the player actually accepts; cleared once
+  // they say "okay" below.
   if (!state.bobCheatPending) {
     if (state.bobSpawned) return;
     let total = 0;
     for (const k in state.buildingCounts) total += state.buildingCounts[k as BuildingKind];
     if (total < 30) return;
   }
-  state.bobCheatPending = false;
   const ord = ordinalWord(b.displayNum);
   // Bail out of any pending build/strike — both surface a cursor ghost that
   // would still follow the mouse during the cutscene if left armed.
@@ -1083,6 +1084,7 @@ function maybeTriggerBobCutscene(state: GameState, b: Building, kindName: string
   state.pendingStrike = false;
   void runBobCutscene(ord, kindName).then((res) => {
     if (res === 'yes') {
+      state.bobCheatPending = false;
       state.bobPickingHole = true;
       appendLog(state, 'Bob is waiting — click any Goblin Hole to summon him.');
       playSound('select', 0.5);
