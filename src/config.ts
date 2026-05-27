@@ -100,6 +100,10 @@ export const DRAGON = {
   // Minotaur's summon-in time. Only one dragon can be in the ritual at once.
   spawnTime: 2,          // seconds
   spawnCapacity: 1,
+  // Hard ceiling for the summon-progress track. The live cap matches the
+  // current active-beacon count, but the DOM pre-creates this many segments
+  // so the track can grow/shrink as beacons come and go without rebuilding.
+  concurrentBuildLimit: 16,
   // A freshly-summoned dragon hovers this long before it starts auto-seeking a
   // building to haul, giving the player a beat to issue a manual command first.
   seekDelay: 2.5,        // seconds

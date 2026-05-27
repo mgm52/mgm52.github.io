@@ -359,7 +359,7 @@ export function setupUI(state: GameState, callbacks: UICallbacks) {
   dragonBtn.id = 'btn-summon-dragon';
   dragonBtn.style.display = 'none';
   dragonBtn.innerHTML = `
-    ${progressTrack('summon-dragon', DRAGON.spawnCapacity)}
+    ${progressTrack('summon-dragon', DRAGON.concurrentBuildLimit)}
     <div class="build-content">
       <div class="build-text">
         <div class="build-name">Dragon</div>
@@ -849,9 +849,18 @@ export function refreshUI(state: GameState) {
     const dragonCost = document.getElementById('cost-summon-dragon')!;
     dragonCost.classList.toggle('met', canAffordDragon && !atCap);
     dragonBtn.classList.toggle('in-progress', queued > 0);
-    const dragonRemaining = queued > 0 ? state.dragonSpawnQueue[0].remaining : DRAGON.spawnTime;
-    const dragonFill = queued > 0 ? 1 - dragonRemaining / DRAGON.spawnTime : 0;
-    setFillWidth('fill-summon-dragon-0', Math.max(0, Math.min(1, dragonFill)));
+    // One progress line per beacon (with at least enough lines to keep showing
+    // any over-cap leftovers if a beacon was just hoisted into orbit while
+    // dragons were mid-ritual). Each queued dragon fills its corresponding
+    // line top-down.
+    const visibleSegs = Math.min(DRAGON.concurrentBuildLimit, Math.max(activeBeaconCount, queued));
+    for (let i = 0; i < DRAGON.concurrentBuildLimit; i++) {
+      const seg = document.getElementById(`seg-summon-dragon-${i}`);
+      if (seg) seg.style.display = i < visibleSegs ? '' : 'none';
+      const entry = state.dragonSpawnQueue[i];
+      const fill = entry ? 1 - entry.remaining / DRAGON.spawnTime : 0;
+      setFillWidth(`fill-summon-dragon-${i}`, Math.max(0, Math.min(1, fill)));
+    }
     setBuyFlash('btn-summon-dragon', canAffordDragon && !atCap && live === 0 && state.spaceBuildings.size === 0 && queued === 0);
   } else {
     dragonBtn.style.display = 'none';
