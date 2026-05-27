@@ -568,8 +568,11 @@ async function main() {
     // it the spawn-hint / no-task timers in refreshUI) doesn't drift forward
     // during the intro's preamble + dialog. Once the intro releases the
     // hold, ticks resume from 0 and the hint gets its full 30s/90s grace.
+    // Bob's hole-picker freezes the world the same way so the player can
+    // line up the summon without the rest of the colony advancing.
     const introActive = document.body.classList.contains('intro-hold')
-      || document.body.classList.contains('bob-cutscene-hold');
+      || document.body.classList.contains('bob-cutscene-hold')
+      || state.bobPickingHole;
     if (!paused && !introActive) {
       acc += dt;
       if (acc > TICK_MS * 10) acc = TICK_MS * 10;

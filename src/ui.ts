@@ -1097,7 +1097,10 @@ export function refreshUI(state: GameState) {
 
   // Placement hint
   const hint = document.getElementById('placement-hint')!;
-  if (state.pendingStrike) {
+  if (state.bobPickingHole) {
+    hint.style.display = 'block';
+    hint.textContent = 'Bob is waiting — click any Goblin Hole to summon him · time is frozen';
+  } else if (state.pendingStrike) {
     hint.style.display = 'block';
     hint.textContent = 'Tap to call down lightning · tap the button again or press ESC to cancel';
   } else if (state.pendingBuild) {
