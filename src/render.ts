@@ -1197,14 +1197,17 @@ function makeHellPortalMirror(b: Building): Container {
   const ctr = buildingCenter(b);
   c.position.set(worldToHellX(ctr.x), worldToHellY(ctr.y));
   const half = def.size / 2;
-  // Two large concentric halo rings drawn first so they sit BEHIND the
-  // body/core sprites. Stroked outlines (not filled discs) so the portal
-  // reads as emanating radial lines in the underworld rather than a blob.
+  // Concentric halo rings drawn first so they sit BEHIND the body/core.
+  // Stroked outlines (not filled discs) so the portal reads as emanating
+  // rings in the underworld. The inner halo is a closely-spaced pair of
+  // strokes — gives a doubled-line "occult sigil" feel.
   const halo = new Graphics();
-  const outerR = def.size * 2.4;
-  const innerR = def.size * 1.5;
+  const outerR = def.size * 3.6;
+  const innerR = def.size * 2.2;
+  const innerGap = 6;
   halo.circle(0, 0, outerR).stroke({ width: 3, color: 0xfff4c0, alpha: 0.6 });
-  halo.circle(0, 0, innerR).stroke({ width: 4, color: 0xffe070, alpha: 0.8 });
+  halo.circle(0, 0, innerR).stroke({ width: 4, color: 0xffe070, alpha: 0.85 });
+  halo.circle(0, 0, innerR - innerGap).stroke({ width: 2, color: 0xffe070, alpha: 0.7 });
   const body = new Graphics();
   body.rect(-half, -half, def.size, def.size).fill({ color: 0x2a0610, alpha: 0.95 });
   body.rect(-half, -half, def.size, def.size).stroke({ width: 3, color: 0xff2030 });
