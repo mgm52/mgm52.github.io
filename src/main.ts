@@ -1,4 +1,4 @@
-import { playSound, preloadSounds, setCrackleEnabled, setMasterVolume, setMusicVolume, startBackgroundCrackle, startBackgroundMusic } from './audio';
+import { playSound, preloadSounds, setCrackleEnabled, setMasterVolume, setMusicAttenuation, setMusicVolume, startBackgroundCrackle, startBackgroundMusic } from './audio';
 import {
   AUTOSPAWN_TIERS, CAMERA_SPEED, CELL, DRAGON, GOBLIN, GOLD_KILL_REWARD, HELL, KILL_REWARD, RENDER_SCALE, START_CELL,
   SUMMON_UPGRADES, TICK_MS, MINOTAUR, WORLD, digBloodCost, minotaurBloodCost,
@@ -751,6 +751,10 @@ async function main() {
     // Dim + disable the summon/build panels whenever the player isn't on the
     // ground — both orbit and hell view share this restriction.
     document.body.classList.toggle('space-view', state.view !== 'ground');
+    // Music + crackle fade out as you descend into hell and back in on the
+    // return. Space stays at full volume. Linear in depth — the underworld
+    // is silent at the bottom.
+    setMusicAttenuation(1 - ctx.depth);
     render(state, ctx);
     refreshUI(state);
     requestAnimationFrame(frame);

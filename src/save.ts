@@ -93,7 +93,6 @@ export function loadGame(): { state: GameState; savedAt: number } | null {
     env.state.maxStruckAtOnce ??= (env.state as { struck13Goblins?: boolean }).struck13Goblins ? 13 : 0;
     env.state.spaceUnlocked ??= false;
     env.state.hellUnlocked ??= false;
-    env.state.hellPortalPlacedAt ??= null;
     env.state.ghosts ??= [];
     env.state.view = 'ground';
     env.state.lightningStrikeCooldown ??= 0;
