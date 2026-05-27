@@ -94,6 +94,20 @@ export function loadGame(): { state: GameState; savedAt: number } | null {
     env.state.spaceUnlocked ??= false;
     env.state.hellUnlocked ??= false;
     env.state.ghosts ??= [];
+    // Pre-existing ghosts from saves predating the downward drift get a
+    // spawnAt anchored to load time, so they start their fall fresh rather
+    // than appearing already past the bottom.
+    for (const g of env.state.ghosts) {
+      if (g.spawnAt === undefined) g.spawnAt = env.state.now;
+    }
+    // Pre-existing Hell Portals from saves predating activatedAt get one set
+    // to a time well before now, so the beam draw-in animation has already
+    // completed when the player loads in — they expect to see the beam.
+    for (const b of env.state.buildings.values()) {
+      if (b.kind === 'hell_portal' && b.state !== 'constructing' && b.activatedAt === undefined) {
+        b.activatedAt = Math.max(0, env.state.now - 100);
+      }
+    }
     env.state.view = 'ground';
     env.state.lightningStrikeCooldown ??= 0;
     env.state.selectedAmbientDragonId = null;

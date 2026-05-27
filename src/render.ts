@@ -167,46 +167,56 @@ function getGlowTexture(): Texture {
   return glowTexture;
 }
 
-// Infernal wash + drifting fog rings for the hell scene. Painted once across
-// HELL bounds; the ghosts ride on top. Tuned so the world reads clearly — a
-// warm dark-maroon base with bright red blooms rather than near-black.
-function drawHellBackground(g: Graphics): void {
+// Infernal wash + drifting fog rings for the hell scene. Re-rendered whenever
+// any hell visual option changes; tunables come straight from the admin cog.
+// The fixed sprinkle positions are seeded so re-draws stay stable rather than
+// reshuffling on every slider tweak.
+function drawHellBackground(g: Graphics, o: Options): void {
   g.clear();
-  // Base wash with a vertical gradient from a warm maroon at the top to a
-  // hotter red-orange near the bottom (deeper hell = more fire).
+  // Base wash: simple vertical gradient between two configurable colours.
   const stripes = 48;
+  const topR = (o.hellBgTop >> 16) & 0xff;
+  const topG = (o.hellBgTop >> 8) & 0xff;
+  const topB = o.hellBgTop & 0xff;
+  const botR = (o.hellBgBottom >> 16) & 0xff;
+  const botG = (o.hellBgBottom >> 8) & 0xff;
+  const botB = o.hellBgBottom & 0xff;
   for (let i = 0; i < stripes; i++) {
     const t = i / stripes;
-    const r = Math.round(0x42 + (0x82 - 0x42) * t);
-    const gr = Math.round(0x10 + (0x1c - 0x10) * t);
-    const b = Math.round(0x12 + (0x14 - 0x12) * t);
+    const r = Math.round(topR + (botR - topR) * t);
+    const gr = Math.round(topG + (botG - topG) * t);
+    const b = Math.round(topB + (botB - topB) * t);
     const col = (r << 16) | (gr << 8) | b;
     g.rect(0, Math.floor(t * HELL.height), HELL.width, Math.ceil(HELL.height / stripes) + 1).fill(col);
   }
-  // Big soft blood-glow blooms — substantial fill alpha so the field reads
-  // as glowing rather than flat. A few orange-tinted ones lift the contrast.
-  const mist: [number, number, number, number, number][] = [
-    [HELL.width * 0.18, HELL.height * 0.22, 520, 0xb22030, 0.10],
-    [HELL.width * 0.74, HELL.height * 0.32, 600, 0xc04830, 0.09],
-    [HELL.width * 0.52, HELL.height * 0.58, 720, 0xff5a2a, 0.07],
-    [HELL.width * 0.28, HELL.height * 0.78, 540, 0xff8030, 0.09],
-    [HELL.width * 0.82, HELL.height * 0.86, 560, 0xb22030, 0.10],
-    [HELL.width * 0.10, HELL.height * 0.55, 420, 0xff5a2a, 0.07],
-    [HELL.width * 0.92, HELL.height * 0.50, 430, 0xff5a2a, 0.07],
+  // Soft fog blooms — fewer than the bright pass; alpha scales with the
+  // glow-intensity slider so the player can push the underworld brighter
+  // if they want without re-coding.
+  const mist: [number, number, number][] = [
+    [HELL.width * 0.18, HELL.height * 0.22, 520],
+    [HELL.width * 0.74, HELL.height * 0.32, 600],
+    [HELL.width * 0.52, HELL.height * 0.58, 720],
+    [HELL.width * 0.28, HELL.height * 0.78, 540],
+    [HELL.width * 0.82, HELL.height * 0.86, 560],
   ];
-  for (const [nx, ny, nr, col, a] of mist) {
-    for (let i = 6; i >= 1; i--) {
-      g.circle(nx, ny, nr * (i / 6)).fill({ color: col, alpha: a });
+  const baseGlow = 0.05 * o.hellGlowIntensity;
+  for (const [nx, ny, nr] of mist) {
+    for (let i = 5; i >= 1; i--) {
+      g.circle(nx, ny, nr * (i / 5)).fill({ color: o.hellGlowColor, alpha: baseGlow });
     }
   }
-  // Brighter, more numerous ember specks — feels like a sky of burning coals.
-  for (let i = 0; i < 1100; i++) {
+  // Ember specks — count + brightness driven by the sliders. RNG is per-call
+  // so the field reshuffles whenever the player tweaks these, which is fine
+  // (rebuilds run after settings changes; no per-frame redraw).
+  const count = Math.max(0, Math.round(o.hellEmberCount));
+  for (let i = 0; i < count; i++) {
     const x = Math.random() * HELL.width;
     const y = Math.random() * HELL.height;
-    const r = 0.6 + Math.random() * 1.8;
+    const r = 0.5 + Math.random() * 1.4;
     const tint = Math.random();
-    const col = tint < 0.55 ? 0xffb060 : tint < 0.85 ? 0xff7030 : 0xfff0c0;
-    g.circle(x, y, r).fill({ color: col, alpha: 0.5 + Math.random() * 0.5 });
+    const col = tint < 0.6 ? 0xff8830 : tint < 0.9 ? 0xff5020 : 0xffe0a0;
+    const a = (0.35 + Math.random() * 0.45) * o.hellEmberBrightness;
+    g.circle(x, y, r).fill({ color: col, alpha: a });
   }
 }
 
@@ -534,7 +544,7 @@ export async function createRender(parent: HTMLElement, state: GameState): Promi
   // by ctx.depth and ctx.hellZoom each frame.
   const hellLayer = new Container();
   const hellBg = new Graphics();
-  drawHellBackground(hellBg);
+  drawHellBackground(hellBg, getOptions());
   hellLayer.addChild(hellBg);
   const hellGhostLayer = new Container();
   hellGhostLayer.cullableChildren = true;
@@ -709,6 +719,7 @@ function applyOptions(ctx: RenderContext, o: Options) {
   redrawBackground(ctx, o);
   redrawWalls(ctx, o);
   redrawGrid(ctx, o);
+  drawHellBackground(ctx.hellBg, o);
   ctx.app.renderer.background.color = o.oobColor;
   applyFilter(ctx.goblinLayer, ctx.goblinFilter, o.goblinSaturation, o.goblinBrightness);
   applyFilter(ctx.minotaurLayer, ctx.minotaurFilter, o.minotaurSaturation, o.minotaurBrightness);
@@ -1069,8 +1080,10 @@ export function ambientDragonAt(ctx: RenderContext, x: number, y: number): { id:
 // dim red so the whole hell scene reads as the underworld.
 function makeGhostView(g: Ghost): GhostView | null {
   const container = new Container();
+  // Position is updated each render frame based on (now - spawnAt) * fall
+  // speed; here we just seed it to the spawn coord.
   container.position.set(worldToHellX(g.x), worldToHellY(g.y));
-  container.alpha = 0.88;
+  container.alpha = getOptions().hellGhostAlpha;
 
   if (g.kind === 'goblin') {
     const sheet = goblinIdleSheet ?? goblinWalkSheet;
@@ -1081,7 +1094,7 @@ function makeGhostView(g: Ghost): GhostView | null {
     sprite.anchor.set(0.5);
     const px = getOptions().goblinDisplayPx;
     sprite.scale.set(px / sheet.meta.spriteSize);
-    sprite.tint = g.gold ? 0xffd060 : 0xff8888;
+    sprite.tint = g.gold ? 0xc9a85a : 0xa06868;
     container.addChild(sprite);
     return { container, sprite };
   }
@@ -1094,22 +1107,22 @@ function makeGhostView(g: Ghost): GhostView | null {
     sprite.anchor.set(0.5);
     const px = getOptions().minotaurDisplayPx * (g.tiny ? TINYTAUR.scale : 1);
     sprite.scale.set(px / sheet.meta.spriteSize);
-    sprite.tint = 0xff6868;
+    sprite.tint = 0x9a5050;
     container.addChild(sprite);
     return { container, sprite };
   }
-  // Dragon ghost: reuse the placeholder block + glyph but in deep red.
+  // Dragon ghost: reuse the placeholder block + glyph but in deep dim red.
   const half = DRAGON_BLOCK / 2;
   const block = new Graphics();
   block.roundRect(-half, -half, DRAGON_BLOCK, DRAGON_BLOCK, 8)
-    .fill(0x8a1828)
-    .stroke({ width: 3, color: 0xff5a4a });
+    .fill(0x4a0e18)
+    .stroke({ width: 3, color: 0x8a3030 });
   const label = new Text({
     text: '🐉',
     style: { fontFamily: 'sans-serif', fontSize: Math.round(DRAGON_BLOCK * 0.62), fill: 0xffffff },
   });
   label.anchor.set(0.5);
-  label.alpha = 0.9;
+  label.alpha = 0.8;
   container.addChild(block);
   container.addChild(label);
   // Dragon facing is -1 (left) / +1 (right); the glyph faces left, mirror on +1.
@@ -1333,7 +1346,8 @@ function drawDeathEffects(ctx: RenderContext, state: GameState) {
       layer.addChild(sprite);
       ctx.deathViews.set(e.id, sprite);
     }
-    if (!e.white) sprite.tint = getOptions().bloodColor;
+    if (e.hell) sprite.tint = getOptions().hellBloodColor;
+    else if (!e.white) sprite.tint = getOptions().bloodColor;
     const elapsed = state.now - e.spawnAt;
     if (elapsed >= frames.duration) {
       sprite.visible = false;
@@ -2041,17 +2055,27 @@ export function render(state: GameState, ctx: RenderContext) {
       Math.round(offY - ctx.hellCamera.y * scale + hellSlide),
     );
   }
-  // Sync ghost views with state.ghosts. Ghosts are immutable once recorded,
-  // so views are made-once / never-updated.
+  // Sync ghost views with state.ghosts. Each ghost drifts downward at
+  // hellGhostFallSpeed (px/sec) from its hell-mapped spawn point; the sim
+  // tick prunes ghosts whose y has crossed HELL.height so a view that
+  // existed last frame may be gone from state.ghosts this frame.
   const seenGh = new Set<number>();
+  const fall = opts.hellGhostFallSpeed;
+  const ghostAlpha = opts.hellGhostAlpha;
   for (const gh of state.ghosts) {
     seenGh.add(gh.id);
-    if (ctx.ghostViews.has(gh.id)) continue;
-    const v = makeGhostView(gh);
-    if (!v) continue;
-    v.container.cullable = true;
-    ctx.hellGhostLayer.addChild(v.container);
-    ctx.ghostViews.set(gh.id, v);
+    let v = ctx.ghostViews.get(gh.id);
+    if (!v) {
+      const made = makeGhostView(gh);
+      if (!made) continue;
+      made.container.cullable = true;
+      ctx.hellGhostLayer.addChild(made.container);
+      ctx.ghostViews.set(gh.id, made);
+      v = made;
+    }
+    const drift = (state.now - gh.spawnAt) * fall;
+    v.container.position.set(worldToHellX(gh.x), worldToHellY(gh.y) + drift);
+    v.container.alpha = ghostAlpha;
   }
   for (const [id, v] of ctx.ghostViews) {
     if (!seenGh.has(id)) {

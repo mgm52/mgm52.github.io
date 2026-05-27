@@ -201,6 +201,17 @@ export type Options = {
   volume: number;        // master — applied to both SFX and music
   musicVolume: number;   // additional multiplier on background music + crackle
   crackleEnabled: boolean; // toggle the vinyl-crackle ambience layer
+  // Hell visuals — live-tunable from the admin cog so the underworld's
+  // contrast can be dialled in. drawHellBackground re-runs on any change.
+  hellBgTop: number;          // top of the vertical gradient (dim by default)
+  hellBgBottom: number;       // bottom of the vertical gradient
+  hellGlowColor: number;      // tint of the soft fog blooms
+  hellGlowIntensity: number;  // multiplier on every glow ring's alpha
+  hellEmberCount: number;     // number of ember specks scattered across the bg
+  hellEmberBrightness: number; // multiplier on every ember's alpha
+  hellGhostAlpha: number;     // overall alpha applied to ghost containers
+  hellGhostFallSpeed: number; // px/sec the ghosts drift downward in hell
+  hellBloodColor: number;     // tint applied to the hell-side death splatters
 };
 
 export const DEFAULT_OPTIONS: Options = {
@@ -260,6 +271,18 @@ export const DEFAULT_OPTIONS: Options = {
   // earlier music-at-master-volume default.
   musicVolume: 0.7,
   crackleEnabled: true,
+  // Hell defaults — pulled down from the earlier "way too light" pass so the
+  // underworld reads as oppressive: a near-black maroon gradient with a few
+  // dim red blooms and a sparse ember dust. Tunable from the admin cog.
+  hellBgTop: 0x0c0204,
+  hellBgBottom: 0x2a0608,
+  hellGlowColor: 0xff3010,
+  hellGlowIntensity: 0.55,
+  hellEmberCount: 500,
+  hellEmberBrightness: 0.55,
+  hellGhostAlpha: 0.78,
+  hellGhostFallSpeed: 10,
+  hellBloodColor: 0x4a8acf,
 };
 
 // Set every font key to the same family at once. Convenience for the options

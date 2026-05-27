@@ -8,7 +8,7 @@ import { playIntroSequence, setIntroPaused, skipIntro } from './intro';
 import { getOptions, onOptionsChange } from './options';
 import { relockOptionsCog, setupOptionsUI } from './options-ui';
 import { applyDomOptions, centerCameraOn, centerHellCameraOnWorld, centerSpaceCamera, clampCamera, clampHellCamera, clampSpaceCamera, createRender, currentHellScale, render, spaceCameraMaxY } from './render';
-import { appendLog, cellCenter, createInitialState, destroyBuilding, digDirection, earnBlood, earnMoney, getSpawnCapacity, pushDeathEffect, pushFloater, recordGhost, removeGoblin, type GameState } from './state';
+import { appendLog, cellCenter, createInitialState, destroyBuilding, digDirection, earnBlood, earnDragonBone, earnMoney, getSpawnCapacity, pushDeathEffect, pushFloater, recordGhost, removeGoblin, type GameState } from './state';
 import { autoAssignAllIdle, spawnDragon, spawnMinotaur, spawnTinytaur, tick } from './sim';
 import { executeTaskSkip, refreshUI, setupUI } from './ui';
 import { clearSave, formatRelativeTime, loadGame, saveGame } from './save';
@@ -238,6 +238,11 @@ async function main() {
     onCheatPower: () => {
       state.powerBoosts.push({ startAt: state.now, peak: CHEAT_POWER_WATTS, duration: CHEAT_POWER_SECONDS });
       appendLog(state, 'Cheat: +1 GW power.');
+    },
+    onCheatBones: () => {
+      earnDragonBone(state, 100);
+      state.dragonBoneUnlocked = true;
+      appendLog(state, 'Cheat: +100 dragon bones.');
     },
     onTaskSkip: () => { skipIntro(); executeTaskSkip(state); },
     onShowTitleScreen: () => { void showTitleScreen(); },

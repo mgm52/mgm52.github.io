@@ -8,6 +8,7 @@ export type OptionsUICallbacks = {
   onCheatMoney: () => void;
   onCheatBlood: () => void;
   onCheatPower: () => void;
+  onCheatBones: () => void;
   onTaskSkip: () => void;
   onShowTitleScreen: () => void;
 };
@@ -228,6 +229,18 @@ function rebuildPanel(panel: HTMLElement, callbacks: OptionsUICallbacks, refresh
     toggle('Vinyl crackle', o.crackleEnabled,                (v) => { setOption('crackleEnabled', v); refreshPublic?.(); }),
   ]));
 
+  panel.appendChild(section('Hell', [
+    color('BG top',          o.hellBgTop,           (v) => setOption('hellBgTop', v)),
+    color('BG bottom',       o.hellBgBottom,        (v) => setOption('hellBgBottom', v)),
+    color('Glow color',      o.hellGlowColor,       (v) => setOption('hellGlowColor', v)),
+    slider('Glow intensity', o.hellGlowIntensity, 0, 3, 0.05, (v) => setOption('hellGlowIntensity', v)),
+    slider('Ember count',    o.hellEmberCount, 0, 2500, 25, (v) => setOption('hellEmberCount', v)),
+    slider('Ember brightness', o.hellEmberBrightness, 0, 1.5, 0.05, (v) => setOption('hellEmberBrightness', v)),
+    slider('Ghost alpha',    o.hellGhostAlpha, 0, 1, 0.02, (v) => setOption('hellGhostAlpha', v)),
+    slider('Ghost fall (px/s)', o.hellGhostFallSpeed, 0, 60, 1, (v) => setOption('hellGhostFallSpeed', v)),
+    color('Blood splatter',  o.hellBloodColor,      (v) => setOption('hellBloodColor', v)),
+  ]));
+
   panel.appendChild(fontsSection(o));
 
   const cheat = document.createElement('button');
@@ -250,6 +263,13 @@ function rebuildPanel(panel: HTMLElement, callbacks: OptionsUICallbacks, refresh
   cheatPower.textContent = 'Cheat +1 GW power';
   cheatPower.addEventListener('click', () => callbacks.onCheatPower());
   panel.appendChild(cheatPower);
+
+  const cheatBones = document.createElement('button');
+  cheatBones.type = 'button';
+  cheatBones.className = 'options-reset';
+  cheatBones.textContent = 'Cheat +100 dragon bones';
+  cheatBones.addEventListener('click', () => callbacks.onCheatBones());
+  panel.appendChild(cheatBones);
 
   const taskSkip = document.createElement('button');
   taskSkip.type = 'button';
