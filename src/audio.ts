@@ -29,6 +29,10 @@ export type SoundName = keyof typeof REGISTRY;
 let masterVolume = 0.7;
 let musicVolume = 0.7;
 let muted = false;
+// Per-frame multiplier on the music + crackle layers. Used by the hell
+// transition to fade the vinyl quartet out as the player descends and back
+// in on the return. 1 = full, 0 = silent. Other scenes leave it at 1.
+let musicAttenuation = 1;
 
 export function preloadSounds() {
   for (const [name, url] of Object.entries(REGISTRY)) {
@@ -110,7 +114,18 @@ export function isMuted() { return muted; }
 // further on top of the master volume.
 let musicEl: HTMLAudioElement | null = null;
 function effectiveMusicVolume(): number {
-  return Math.max(0, Math.min(1, masterVolume * musicVolume));
+  return Math.max(0, Math.min(1, masterVolume * musicVolume * musicAttenuation));
+}
+
+// Live multiplier on the music + crackle layers. Pass 1 for full volume,
+// 0 to silence everything music-related. Applies to the current playback in
+// place and is also used by future sound-volume recomputes.
+export function setMusicAttenuation(factor: number): void {
+  const clamped = Math.max(0, Math.min(1, factor));
+  if (clamped === musicAttenuation) return;
+  musicAttenuation = clamped;
+  if (musicEl) musicEl.volume = effectiveMusicVolume();
+  if (crackleEl) crackleEl.volume = effectiveCrackleVolume();
 }
 export function startBackgroundMusic(url: string): void {
   if (musicEl) return;
@@ -149,7 +164,7 @@ function currentCrackleGain(): number {
 }
 function effectiveCrackleVolume(): number {
   if (!crackleEnabled) return 0;
-  return Math.max(0, Math.min(1, masterVolume * musicVolume * currentCrackleGain()));
+  return Math.max(0, Math.min(1, masterVolume * musicVolume * musicAttenuation * currentCrackleGain()));
 }
 function tickCrackleRamp(): void {
   if (crackleEl) crackleEl.volume = effectiveCrackleVolume();
