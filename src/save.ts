@@ -113,6 +113,9 @@ export function loadGame(): { state: GameState; savedAt: number } | null {
       d.selected = false;
     }
     env.state.slewTwoDragonsInOneStrike ??= false;
+    // The Earn-blood task's goal is captured live; null means "not yet snapshot"
+    // and refreshUI will take it the next time the task is on-screen.
+    env.state.bloodTaskTarget ??= null;
     // Pre-existing Hell Portals from saves predating activatedAt get one set
     // to a time well before now, so the beam draw-in animation has already
     // completed when the player loads in — they expect to see the beam.

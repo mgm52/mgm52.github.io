@@ -190,12 +190,24 @@ function playTaskCompleteAnimation(taskId: string): void {
 type Task = {
   id: string;
   text: string;
+  // Optional per-frame label override (for tasks whose goal is computed at
+  // runtime, e.g. the Earn-blood task's dynamic blood target). Falls back to
+  // `text` when absent.
+  dynamicText?: (s: GameState) => string;
   unlocks: BuildingKind[];
   isDone: (s: GameState) => boolean;
   prereq?: string[];
   // Optional side-tasks don't gate any other task and render as "Optional: …".
   optional?: boolean;
 };
+
+// The Earn-blood side-task's goal scales with how much blood the player is
+// sitting on the moment it appears: double it, rounded to the nearest ten, and
+// floored at 30. Stops the task from being already-satisfied for a player who
+// has stockpiled blood by the time they reach Phase 3.
+function bloodTaskGoal(currentBlood: number): number {
+  return Math.max(30, Math.round((2 * currentBlood) / 10) * 10);
+}
 // Tasks are sticky: once a task's isDone has ever returned true in this session,
 // we treat it as permanently complete. Stops unlocks/build buttons from
 // regressing if e.g. the only Goblin Wheel gets destroyed.
@@ -279,10 +291,14 @@ const TASKS: Task[] = [
   {
     // Optional side-task: unlocks after Phase 3 (build_gas_engine). Grants the
     // Goblin Hole (buildable) plus the Goldblins ritual (gated in refreshUI).
+    // The goal is snapshot the frame the task appears (bloodTaskGoal of the
+    // player's live blood, captured in refreshUI) and judged against current
+    // blood held — spend blood and the goal slides out of reach again.
     id: 'earn_30_blood',
-    text: 'Earn 30 blood',
+    text: 'Hoard 30 blood',
+    dynamicText: (s) => `Hoard ${s.bloodTaskTarget ?? 30} blood`,
     unlocks: ['goblin_hole'],
-    isDone: (s) => s.bloodEarned >= 30,
+    isDone: (s) => s.bloodTaskTarget != null && s.blood >= s.bloodTaskTarget,
     prereq: ['build_gas_engine'],
     optional: true,
   },
@@ -890,12 +906,12 @@ export function refreshUI(state: GameState) {
   // black-out and then fade in.
   const unlocked = new Set<BuildingKind>();
   for (const t of TASKS) {
-    // A task can only complete once its prereqs have. Without this guard an
-    // isDone that's satisfiable from turn one — earn_30_blood, met just by
-    // killing goblins (1 blood each) — fires out of DAG order and unlocks its
-    // building (the Goblin Hole) before the Phone Farm/Gas Turbine it follows.
-    // Safe as a single forward pass: prereqs precede their dependents in TASKS,
-    // so they're added to completedTaskIds earlier in this same loop.
+    // A task can only complete once its prereqs have, so an isDone satisfiable
+    // out of DAG order can't fire its unlock early (the Goblin Hole's
+    // earn_30_blood task, gated behind build_gas_engine, would otherwise pop the
+    // moment blood crossed its goal). Safe as a single forward pass: prereqs
+    // precede their dependents in TASKS, so they're added to completedTaskIds
+    // earlier in this same loop.
     const prereqsDone = !t.prereq || t.prereq.every(id => completedTaskIds.has(id));
     if (completedTaskIds.has(t.id) || (prereqsDone && t.isDone(state))) {
       completedTaskIds.add(t.id);
@@ -916,6 +932,14 @@ export function refreshUI(state: GameState) {
         window.setTimeout(() => triggerFinalGameAlerts(state), 2800);
       }
     }
+  }
+  // Snapshot the Earn-blood task's dynamic goal the first frame it appears —
+  // i.e. its prereq (build_gas_engine) is done but it isn't yet. Frozen
+  // thereafter and persisted on state, so the goal can't drift as blood moves.
+  if (state.bloodTaskTarget == null
+      && completedTaskIds.has('build_gas_engine')
+      && !completedTaskIds.has('earn_30_blood')) {
+    state.bloodTaskTarget = bloodTaskGoal(state.blood);
   }
   const activeTasks: Task[] = [];
   for (const t of TASKS) {
@@ -1041,7 +1065,8 @@ export function refreshUI(state: GameState) {
     taskEl.innerHTML = activeTasks
       .map(t => {
         const label = t.optional ? 'Optional' : 'Work';
-        return `<div><strong>${label}:</strong> ${t.text}</div>`;
+        const text = t.dynamicText ? t.dynamicText(state) : t.text;
+        return `<div><strong>${label}:</strong> ${text}</div>`;
       })
       .join('');
   } else {
