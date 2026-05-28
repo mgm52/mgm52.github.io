@@ -1,5 +1,5 @@
 import { Application, Container, FederatedPointerEvent, Graphics } from 'pixi.js';
-import { playSound } from './audio';
+import { playSound, playMinotaurCommand } from './audio';
 import { flashCursor } from './cursor-fx';
 import { demonRebuke } from './demon-dialogue';
 import { BUILDABLE_KINDS, BUILDING_DEFS, BuildingKind, CELL, DRAGON, GOBLIN, HELL, LIGHTNING, MINOTAUR, WORLD, formatPower } from './config';
@@ -591,18 +591,6 @@ function resetMinotaurStuck(m: Minotaur, now: number) {
   m.stuckStreak = 0;
 }
 
-// Minotaur version of the grunt burst — same sample but at a much lower
-// playback rate so it reads as a deeper, beastlier bellow than the goblin grunt.
-function playMinotaurGruntBurst(count: number) {
-  for (let i = 0; i < count; i++) {
-    const delay = i * 140;
-    setTimeout(() => {
-      const rate = 0.28 + Math.random() * 0.16;
-      playSound('command_3', 1, rate);
-    }, delay);
-  }
-}
-
 // A guttural roar per commanded dragon — the 'ritual' sample pitched right
 // down so it reads as a beastly bellow, staggered so several dragons chorus.
 function playDragonRoarBurst(count: number) {
@@ -766,7 +754,7 @@ function handleRightClick(state: GameState, x: number, y: number) {
   const selectedDragons = [...state.dragons.values()].filter((d) => d.selected);
   if (selectedGoblins.length === 0 && selectedMinotaurs.length === 0 && selectedDragons.length === 0) return;
   if (selectedGoblins.length > 0) playGruntBurst(selectedGoblins.length);
-  if (selectedMinotaurs.length > 0) playMinotaurGruntBurst(selectedMinotaurs.length);
+  if (selectedMinotaurs.length > 0) playMinotaurCommand(selectedMinotaurs.length);
   if (selectedDragons.length > 0) playDragonRoarBurst(selectedDragons.length);
 
   const targetGoblin = goblinAt(state, x, y);

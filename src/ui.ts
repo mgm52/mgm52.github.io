@@ -1,4 +1,4 @@
-import { playSound } from './audio';
+import { playSound, playMinotaurCommand } from './audio';
 import {
   AUTOSPAWN_TIERS, BUILDABLE_KINDS, BUILDING_DEFS, BuildingKind, DRAG_SELECT_HINT_DELAY_SEC, MULTI_SPAWN_HINT_DELAY_SEC,
   DRAGON, GOBLIN, LIGHTNING, SPAWN_HINT_NO_SPAWN_SEC,
@@ -644,6 +644,8 @@ export function setupUI(state: GameState, callbacks: UICallbacks) {
     }
     best.target = null;
     best.state = { kind: 'going_to_destroy', buildingId: target.id };
+    // Same bellow the right-click command path plays — one dispatched minotaur.
+    playMinotaurCommand(1);
     appendLog(state, `Minotaur #${best.id} ordered to smash ${defOf(target).name} #${target.displayNum}.`);
     // Brief confirmation: swap the label to "Minotaur dispatched…" for 2s.
     // refreshInfoPanel only toggles this button's display, never its text, so
