@@ -116,7 +116,7 @@ export function loadGame(): { state: GameState; savedAt: number } | null {
     // pending claim is ephemeral, so clear it (the seated `occupied` flag and
     // `soulSigilCompletedAt` persist).
     env.state.soulChairs ??= createSoulChairs();
-    for (const c of env.state.soulChairs) c.claimedBy = undefined;
+    for (const c of env.state.soulChairs) { c.claimedBy = undefined; c.selected = false; }
     env.state.bobParlayed ??= false;
     env.state.hellHintShown ??= false;
     env.state.slewTwoDragonsInOneStrike ??= false;

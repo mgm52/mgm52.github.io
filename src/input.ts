@@ -298,10 +298,14 @@ export function setupInput(
             // demon, but a soul on top of it still takes priority.
             const gh = ghostAtHell(state, hp.x, hp.y);
             const portal = gh ? null : hellPortalAt(state, hp.x, hp.y);
-            const dm = (gh || portal) ? null : demonAtHell(state, hp.x, hp.y);
+            // Soul chairs beat the giant demon behind them but yield to a soul
+            // or the beacon sitting on top.
+            const chair = (gh || portal) ? null : soulChairAt(state, hp.x, hp.y);
+            const dm = (gh || portal || chair) ? null : demonAtHell(state, hp.x, hp.y);
             if (!e.shiftKey) clearSelection(state);
             if (gh) { selectGhost(state, gh); playSound('select', 0.33); }
             else if (portal) { portal.selected = true; playSound('select', 0.33); }
+            else if (chair) { chair.selected = true; playSound('select', 0.33); }
             else if (dm) { dm.selected = true; playSound('select', 0.33); }
           } else {
             const a = e.getLocalPosition(ctx.hellLayer);
@@ -627,6 +631,7 @@ function clearSelection(state: GameState) {
   for (const sb of state.spaceBuildings.values()) sb.selected = false;
   for (const gh of state.ghosts) gh.selected = false;
   for (const d of state.demons.values()) d.selected = false;
+  for (const c of state.soulChairs) c.selected = false;
   state.hole.selected = false;
   state.selectedAmbientDragonId = null;
 }

@@ -1377,6 +1377,10 @@ function syncSoulSigil(ctx: RenderContext, state: GameState): void {
       cg.circle(hx, hy, chairRadius * 0.55).fill({ color: 0xff5a2a, alpha: 0.5 * pulse + 0.2 });
       cg.circle(hx, hy, chairRadius * 0.28).fill({ color: 0xffd6a0, alpha: 0.45 * pulse + 0.25 });
     }
+    // Selection ring — matches the gold highlight other selected things get.
+    if (chair.selected) {
+      cg.circle(hx, hy, chairRadius + 8).stroke({ width: 3, color: 0xffd96b, alpha: 0.95 });
+    }
     // Seat-in burst: a quick expanding ring when the soul first lands.
     if (chair.filledAt !== undefined) {
       const age = now - chair.filledAt;

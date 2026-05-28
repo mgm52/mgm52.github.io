@@ -314,6 +314,8 @@ export type SoulChair = {
   // Ephemeral: id of the soul currently walking to claim this chair, so a crowd
   // command only ever sends a single soul. Reset on load.
   claimedBy?: number;
+  // Selection state for the hell info panel. Ephemeral — reset on load.
+  selected?: boolean;
 };
 
 // One-shot jagged white bolt drawn from above down to a strike point. The
