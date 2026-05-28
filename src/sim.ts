@@ -1261,13 +1261,18 @@ function updateDragon(state: GameState, d: Dragon) {
       }
       const tx = target.pos.x, ty = target.pos.y;
       const dist = Math.hypot(tx - d.pos.x, ty - d.pos.y);
-      if (dist <= DRAGON.arriveDist + DRAGON.killReach) {
-        if (s.attackAt === undefined) {
-          s.attackAt = state.now + DRAGON.attackWindup;
-          if (Math.abs(tx - d.pos.x) > 0.5) d.facing = tx < d.pos.x ? -1 : 1;
-          return;
-        }
-        if (state.now < s.attackAt) return;
+      const inRange = dist <= DRAGON.arriveDist + DRAGON.killReach;
+      // Begin the windup the first time we close to striking range. Crucially we
+      // never clear it once set — a moving target (e.g. another dragon) would
+      // otherwise drift just out of reach every frame and reset the windup
+      // forever, the "starts then stops attacking" bug. Once committed, the
+      // dragon keeps chasing and lands the blow the instant it's both wound up
+      // and back in reach.
+      if (inRange && s.attackAt === undefined) {
+        s.attackAt = state.now + DRAGON.attackWindup;
+      }
+      if (Math.abs(tx - d.pos.x) > 0.5) d.facing = tx < d.pos.x ? -1 : 1;
+      if (inRange && s.attackAt !== undefined && state.now >= s.attackAt) {
         dragonKill(state, d, s.targetKind, s.targetId);
         // Hover in place for postKillPause before drifting back to default
         // seeking — reuses moving_to's linger machinery with the current
@@ -1279,7 +1284,8 @@ function updateDragon(state: GameState, d: Dragon) {
         };
         return;
       }
-      s.attackAt = undefined;
+      // Keep pursuing — both while winding up (so a drifting target can't slip
+      // away and cancel the strike) and while still closing the gap.
       dragonFlyToward(d, tx, ty, speed);
       return;
     }
