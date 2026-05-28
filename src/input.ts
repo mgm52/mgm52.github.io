@@ -2,7 +2,7 @@ import { Application, Container, FederatedPointerEvent, Graphics } from 'pixi.js
 import { playSound } from './audio';
 import { flashCursor } from './cursor-fx';
 import { demonRebuke } from './demon-dialogue';
-import { BUILDABLE_KINDS, BUILDING_DEFS, BuildingKind, CELL, DRAGON, GOBLIN, HELL, LIGHTNING, MINOTAUR, RENDER_SCALE, WORLD, formatPower } from './config';
+import { BUILDABLE_KINDS, BUILDING_DEFS, BuildingKind, CELL, DRAGON, GOBLIN, HELL, LIGHTNING, MINOTAUR, WORLD, formatPower } from './config';
 import { runBobCutscene } from './intro';
 import { RenderContext, ambientDragonAt, clampCamera, clampHellCamera, clampSpaceCamera, currentHellScale, ghostAtHell, ghostHellPos } from './render';
 import { autoAssignAllIdle, lightningStrike, spawnBob } from './sim';
@@ -212,12 +212,12 @@ export function setupInput(
       const dx = midX - input.panLast.x;
       const dy = midY - input.panLast.y;
       if (state.view === 'ground') {
-        ctx.camera.x -= dx / RENDER_SCALE;
-        ctx.camera.y -= dy / RENDER_SCALE;
+        ctx.camera.x -= dx / ctx.renderScale;
+        ctx.camera.y -= dy / ctx.renderScale;
         clampCamera(ctx);
       } else if (state.view === 'space') {
-        ctx.spaceCamera.x -= dx / RENDER_SCALE;
-        ctx.spaceCamera.y -= dy / RENDER_SCALE;
+        ctx.spaceCamera.x -= dx / ctx.renderScale;
+        ctx.spaceCamera.y -= dy / ctx.renderScale;
         clampSpaceCamera(ctx);
       } else {
         const scale = currentHellScale(ctx);

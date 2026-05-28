@@ -1,6 +1,6 @@
 import { playSound, preloadSounds, setCrackleEnabled, setInHellView, setMasterVolume, setMusicAttenuation, setMusicVolume, startBackgroundCrackle, startBackgroundMusic } from './audio';
 import {
-  AUTOSPAWN_TIERS, CAMERA_SPEED, CELL, DRAGON, GOBLIN, GOLD_KILL_REWARD, HELL, KILL_REWARD, RENDER_SCALE, START_CELL,
+  AUTOSPAWN_TIERS, CAMERA_SPEED, CELL, DRAGON, GOBLIN, GOLD_KILL_REWARD, HELL, KILL_REWARD, START_CELL,
   SUMMON_UPGRADES, TICK_MS, MINOTAUR, WORLD, digBloodCost, minotaurBloodCost,
 } from './config';
 import { setupInput } from './input';
@@ -702,7 +702,7 @@ async function main() {
         const scale = currentHellScale(ctx);
         // Scale pan speed by inverse of zoom so panning when zoomed out covers
         // the larger view at roughly the same on-screen pace.
-        const pan = (CAMERA_SPEED * dt) / 1000 * (RENDER_SCALE / scale);
+        const pan = (CAMERA_SPEED * dt) / 1000 * (ctx.renderScale / scale);
         ctx.hellCamera.x += (dx / len) * pan;
         ctx.hellCamera.y += (dy / len) * pan;
         clampHellCamera(ctx);
@@ -742,7 +742,7 @@ async function main() {
       }
       const atTop = ctx.camera.y <= 1;
       // True "at the bottom" check: camera.y is at its max pan extent.
-      const groundMaxY = Math.max(0, WORLD.height - ctx.viewport.height / RENDER_SCALE);
+      const groundMaxY = Math.max(0, WORLD.height - ctx.viewport.height / ctx.renderScale);
       const atBottom = ctx.camera.y >= groundMaxY - 1;
       if (state.spaceUnlocked && upHeld && atTop) {
         ascendHold += dt;
@@ -762,8 +762,8 @@ async function main() {
           // Center hell on the player's current ground-camera focus, fully
           // zoomed in. The zoom-out reveal kicks off when the transition lands.
           ctx.hellZoom = 0;
-          hellZoomFocusX = ctx.camera.x + ctx.viewport.width / (2 * RENDER_SCALE);
-          hellZoomFocusY = ctx.camera.y + ctx.viewport.height / (2 * RENDER_SCALE);
+          hellZoomFocusX = ctx.camera.x + ctx.viewport.width / (2 * ctx.renderScale);
+          hellZoomFocusY = ctx.camera.y + ctx.viewport.height / (2 * ctx.renderScale);
           centerHellCameraOnWorld(ctx, hellZoomFocusX, hellZoomFocusY);
           hellTransitioning = true; hellTransFrom = 0; hellTransTo = 1; hellTransStart = now;
           descendHellHold = 0;
@@ -781,8 +781,8 @@ async function main() {
       if (!state.waterSeen && state.waterSources.size > 0) {
         const vx0 = ctx.camera.x;
         const vy0 = ctx.camera.y;
-        const vx1 = vx0 + ctx.viewport.width / RENDER_SCALE;
-        const vy1 = vy0 + ctx.viewport.height / RENDER_SCALE;
+        const vx1 = vx0 + ctx.viewport.width / ctx.renderScale;
+        const vy1 = vy0 + ctx.viewport.height / ctx.renderScale;
         for (const w of state.waterSources.values()) {
           if (w.x1 * CELL > vx0 && w.x0 * CELL < vx1 && w.y1 * CELL > vy0 && w.y0 * CELL < vy1) {
             state.waterSeen = true;
