@@ -1314,17 +1314,24 @@ function syncSoulSigil(ctx: RenderContext, state: GameState): void {
   ring.circle(center.x, center.y, innerRadius).stroke({ width: 4, color: 0xff2030, alpha: ringGlow });
   ring.circle(center.x, center.y, innerRadius - 7).stroke({ width: 2, color: 0xff6048, alpha: ringGlow * 0.7 });
 
-  // Pentagram edges — drawn only between two filled chairs, so the star is
-  // sketched in progressively as souls are seated.
-  for (const [a, b] of SIGIL_EDGES) {
-    const ca = chairs[a], cb = chairs[b];
-    if (!ca?.occupied || !cb?.occupied) continue;
-    const baseA = completed ? 0.85 : 0.6;
-    ring.moveTo(ca.hx, ca.hy).lineTo(cb.hx, cb.hy).stroke({ width: 5, color: 0xff2030, alpha: baseA });
-    if (completed) {
-      // A brighter inner thread pulses over the red edge.
-      const a2 = 0.4 + 0.35 * Math.sin(now * 4);
-      ring.moveTo(ca.hx, ca.hy).lineTo(cb.hx, cb.hy).stroke({ width: 2, color: 0xffe0a0, alpha: a2 });
+  // A line links every pair of filled chairs (the complete graph), sketched in
+  // progressively as souls are seated. The five "inner" lines that skip a chair
+  // form the pentagram star and stay bright; the five "outer" perimeter lines
+  // between adjacent chairs are drawn thinner + fainter so the star reads on top.
+  for (let a = 0; a < chairs.length; a++) {
+    for (let b = a + 1; b < chairs.length; b++) {
+      const ca = chairs[a], cb = chairs[b];
+      if (!ca.occupied || !cb.occupied) continue;
+      const gap = Math.min(Math.abs(a - b), chairs.length - Math.abs(a - b));
+      const isStar = gap === 2; // skip-one pairs are the pentagram
+      const alpha = isStar ? (completed ? 0.85 : 0.6) : (completed ? 0.4 : 0.26);
+      ring.moveTo(ca.hx, ca.hy).lineTo(cb.hx, cb.hy)
+        .stroke({ width: isStar ? 5 : 3, color: 0xff2030, alpha });
+      if (completed && isStar) {
+        // A brighter inner thread pulses over the star edges.
+        const a2 = 0.4 + 0.35 * Math.sin(now * 4);
+        ring.moveTo(ca.hx, ca.hy).lineTo(cb.hx, cb.hy).stroke({ width: 2, color: 0xffe0a0, alpha: a2 });
+      }
     }
   }
 
