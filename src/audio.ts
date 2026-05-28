@@ -33,11 +33,18 @@ let muted = false;
 // spawn cries (the underworld stays quiet for new arrivals) while letting
 // every other sound — including goblin_death — through unchanged.
 let inHellView = false;
-// Per-frame multiplier on the music layer only. Used by the hell transition
-// to fade the quartet out as the player descends and back in on the return.
-// 1 = full, 0 = silent. Crackle is independent so the vinyl hiss persists
-// down in the underworld.
-let musicAttenuation = 1;
+// How far into hell the player is, 0 (surface) → 1 (fully descended). Drives a
+// playbackRate pitch-drop on the music quartet rather than muting it, so the
+// piece keeps playing but sinks into a slowed, dreamlike register underground.
+// Crackle is independent and stays present throughout.
+let musicDepth = 0;
+// Music playbackRate at full hell depth. 0.72 ≈ a major-third-ish drop — deep
+// without turning to mud. Tempo follows pitch (we resample, not time-stretch),
+// which suits the underworld's drag.
+const HELL_MUSIC_RATE = 0.72;
+function effectiveMusicRate(): number {
+  return 1 + (HELL_MUSIC_RATE - 1) * musicDepth;
+}
 
 export function preloadSounds() {
   for (const [name, url] of Object.entries(REGISTRY)) {
@@ -100,6 +107,19 @@ export function playDecayingGoldKillCash(rate?: number): void {
   playSound('cash', goblinDeathVolume * CASH_TO_DEATH_RATIO, rate);
 }
 
+// Minotaur command bellow — the command_3 grunt pitched well down so it reads
+// as a deeper, beastlier roar than the goblin grunt. Staggered ~140ms apart so
+// a commanded group choruses instead of overlapping into one blob.
+export function playMinotaurCommand(count = 1): void {
+  for (let i = 0; i < count; i++) {
+    const delay = i * 140;
+    setTimeout(() => {
+      const rate = 0.28 + Math.random() * 0.16;
+      playSound('command_3', 1, rate);
+    }, delay);
+  }
+}
+
 export function setMasterVolume(v: number) {
   masterVolume = Math.max(0, Math.min(1, v));
   if (musicEl) musicEl.volume = effectiveMusicVolume();
@@ -126,24 +146,37 @@ let musicEl: HTMLAudioElement | null = null;
 // This pulls it back up by 50%; the result is still clamped to 1.
 const MUSIC_GAIN = 1.5;
 function effectiveMusicVolume(): number {
-  return Math.max(0, Math.min(1, masterVolume * musicVolume * musicAttenuation * MUSIC_GAIN));
+  return Math.max(0, Math.min(1, masterVolume * musicVolume * MUSIC_GAIN));
 }
 
-// Live multiplier on the music layer (NOT the crackle, which is ambient and
-// stays present). Pass 1 for full volume, 0 to silence the music. Applies
-// to the current playback in place.
-export function setMusicAttenuation(factor: number): void {
-  const clamped = Math.max(0, Math.min(1, factor));
-  if (clamped === musicAttenuation) return;
-  musicAttenuation = clamped;
-  if (musicEl) musicEl.volume = effectiveMusicVolume();
+// Drive the hell pitch-drop. Pass the player's descent depth (0 surface → 1
+// fully in hell); the music slows + deepens in place rather than muting.
+export function setMusicDepth(depth: number): void {
+  const clamped = Math.max(0, Math.min(1, depth));
+  if (clamped === musicDepth) return;
+  musicDepth = clamped;
+  if (musicEl) {
+    musicEl.preservesPitch = false;
+    musicEl.playbackRate = effectiveMusicRate();
+  }
 }
 export function startBackgroundMusic(url: string): void {
   if (musicEl) return;
   const a = new Audio(url);
   a.loop = true;
   a.preload = 'auto';
+  // Pitch follows playbackRate (resampling) so the hell descent can deepen the
+  // music; preservesPitch would otherwise time-stretch and hold the pitch.
+  a.preservesPitch = false;
+  a.playbackRate = effectiveMusicRate();
   a.volume = effectiveMusicVolume();
+  // Safety net: the element loops, but if a browser ever fires `ended` (e.g. a
+  // loop hiccup at the track's end — "music stops at a certain point"), kick it
+  // straight back to the start so the quartet never falls silent mid-session.
+  a.addEventListener('ended', () => {
+    a.currentTime = 0;
+    a.play().catch(() => {});
+  });
   a.play().catch(() => {/* gated until next gesture; caller should retry */});
   musicEl = a;
 }
@@ -175,8 +208,8 @@ function currentCrackleGain(): number {
 }
 function effectiveCrackleVolume(): number {
   if (!crackleEnabled) return 0;
-  // Deliberately NOT multiplied by musicAttenuation — the vinyl crackle is
-  // ambient and stays present as the music quartet fades out for hell.
+  // The vinyl crackle is ambient — it stays at full pitch and presence even as
+  // the music quartet pitches down for the hell descent.
   return Math.max(0, Math.min(1, masterVolume * musicVolume * currentCrackleGain()));
 }
 function tickCrackleRamp(): void {

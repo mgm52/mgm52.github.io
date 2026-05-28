@@ -366,7 +366,7 @@ export type GameState = {
   // Ritual upgrades — sticky once bought, apply game-wide.
   autoAssignEnabled: boolean;
   autoSpawnEnabled: boolean;
-  // Extends Autocommand: when on, idle goblins are also auto-routed onto
+  // Extends Autobuild: when on, idle goblins are also auto-routed onto
   // watering duty for thirsty buildings. Requires autoAssignEnabled.
   autoWaterEnabled: boolean;
   goldgoblinsEnabled: boolean;
@@ -440,15 +440,13 @@ export type GameState = {
   // performs a drag-rectangle that picks up 2+ creatures; used to gate the
   // "Hint: drag to choose many creatures" nudge in refreshUI.
   multiSelectSeen: boolean;
-  // The optional Earn-blood side-task (gates the Goblin Hole) snapshots the
-  // player's live blood the frame it first appears and freezes a goal of
-  // max(30, round-to-tens(2×snapshot)). Null until that snapshot is taken;
-  // persisted so the goal stays fixed across reloads. Pass/fail is judged on
-  // *current* blood held, not lifetime earnings — spending blood lowers it.
-  bloodTaskTarget: number | null;
-  // In production builds the options cog is hidden until the player completes
-  // the final task (collect_dragon_bone) — that's the demo-end gag, so the
-  // secret-settings reveal gates on getting that far. Sticky once flipped.
+  // Multi-spawn onboarding state. Flips sticky-true the first time the player
+  // has 2+ goblins queued to spawn concurrently; gates the "queue several
+  // goblins at once" nudge in refreshUI.
+  multiSpawnSeen: boolean;
+  // In production builds the options cog is hidden until the demon's gift to a
+  // truthful Bob fires the demo-end gag (see revealSecretSettings) — or the
+  // shift-click / long-press R reveal gesture. Sticky once flipped.
   optionsUnlocked: boolean;
   // Sticky: flips true the first time a building reaches space. Gates the
   // "hold ↑ at the top of the map to rise into space" affordance.
@@ -642,6 +640,48 @@ export function findFreeCellNear(
   return null;
 }
 
+// Cardinal expansion order biased toward the play area (East first, then the
+// verticals, then West) so an open hole keeps streaming goblins out to its
+// right — mirroring the old perimeter picker's directional preference.
+const EMERGENCE_DIR_ORDER: Dir[] = [2, 0, 4, 6]; // E, N, S, W
+
+// Nearest free, unoccupied cell a goblin can emerge into from the hole at
+// (cx,cy), found by flooding outward through open space ONLY: walls, buildings,
+// water sources and the map edge are impassable, so the flood can't tunnel
+// through them. A hole sealed off (e.g. walled over) therefore reaches no free
+// cell and returns null — goblins can no longer pop out past a covering wall.
+// Occupied cells stay traversable (their goblin will move on) but are never
+// returned as a landing spot, and the hole's own cell is never returned.
+export function findHoleEmergenceCell(
+  state: GameState,
+  cx: number, cy: number,
+  maxSteps = 400,
+): Cell | null {
+  const passable = (x: number, y: number): boolean =>
+    isInBounds(x, y)
+    && !state.walls.has(cellKey(x, y))
+    && !buildingAtCell(state, x, y)
+    && !waterSourceAtCell(state, { cx: x, cy: y });
+  const visited = new Set<string>([cellKey(cx, cy)]);
+  const queue: Cell[] = [];
+  const enqueueNeighbors = (c: Cell) => {
+    for (const d of EMERGENCE_DIR_ORDER) {
+      const nx = c.cx + DX[d], ny = c.cy + DY[d];
+      const k = cellKey(nx, ny);
+      if (visited.has(k)) continue;
+      visited.add(k);
+      if (passable(nx, ny)) queue.push({ cx: nx, cy: ny });
+    }
+  };
+  enqueueNeighbors({ cx, cy });
+  while (queue.length > 0 && visited.size < maxSteps) {
+    const c = queue.shift()!;
+    if (!isCellBlocked(state, c.cx, c.cy)) return c;
+    enqueueNeighbors(c);
+  }
+  return null;
+}
+
 // Initial center play area, before any digs.
 export function initialPlayArea(): { x0: number; y0: number; x1: number; y1: number } {
   return {
@@ -786,7 +826,7 @@ export function createInitialState(): GameState {
     firstDugAt: null,
     waterSeen: false,
     multiSelectSeen: false,
-    bloodTaskTarget: null,
+    multiSpawnSeen: false,
     optionsUnlocked: false,
     spaceUnlocked: false,
     hellUnlocked: false,
@@ -875,7 +915,7 @@ export function hellToWorld(hx: number, hy: number): Vec2 {
 // punishment. Drops him at a free cell near the Goblin Hole.
 export function resurrectBob(state: GameState): void {
   const h = state.hole.cell;
-  const cell = findFreeCellNear(state, h.cx, h.cy);
+  const cell = findHoleEmergenceCell(state, h.cx, h.cy);
   if (!cell) {
     appendLog(state, 'Bob claws at the overworld but finds no room to land.');
     return;
@@ -1148,6 +1188,19 @@ export function holeCenter(state: GameState): Vec2 {
 }
 
 // True iff a building's footprint covers any of the Goblin Hole's 2×2 cells.
+// Money cost to build `kind` right now. Fixed at BUILDING_DEFS.cost for most
+// kinds, but the Goblin Hole doubles for every Goblin Hole already in play — so
+// it starts at its base price and gets twice as steep with each one placed.
+export function buildingMoneyCost(state: GameState, kind: BuildingKind): number {
+  const base = BUILDING_DEFS[kind].cost;
+  if (kind !== 'goblin_hole') return base;
+  let holes = 0;
+  for (const b of state.buildings.values()) {
+    if (b.kind === 'goblin_hole') holes++;
+  }
+  return base * 2 ** holes;
+}
+
 export function holeBlockedByBuilding(state: GameState): boolean {
   for (const c of holeCells(state)) {
     if (buildingAtCell(state, c.cx, c.cy)) return true;

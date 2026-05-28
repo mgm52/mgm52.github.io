@@ -36,6 +36,12 @@ export const SPAWN_HINT_NO_TASK_SEC = 90;
 // drag-select after this many seconds of total play. Sticky once seen.
 export const DRAG_SELECT_HINT_DELAY_SEC = 300;
 
+// Multi-spawn onboarding nudge. Once the player has spawned at least one goblin,
+// surface a "queue several at once" hint if they still haven't had more than one
+// goblin in the spawn queue at a time after this many seconds of total play.
+// Sticky once they queue 2+ concurrently.
+export const MULTI_SPAWN_HINT_DELAY_SEC = 300;
+
 export const GOBLIN = {
   speed: 110,
   radius: 12,
@@ -195,12 +201,13 @@ export const DEMON = {
   hitRadius: 390,     // click radius (hell-px) for selecting the demon
 };
 
-// One-shot Ritual upgrades. Autocommand + Goldblins unlock once a Phone
-// Farm has been built; Autospawn unlocks once a Gas Turbine has been built.
-// "Autocommand": newly-hatched goblins route themselves to understaffed
+// One-shot Ritual upgrades. Autobuild + Autospawn unlock once a Phone
+// Farm has been run; Goldblins unlocks via the Earn-30-blood side-task. Dig
+// unlocks once a Gas Turbine has been built.
+// "Autobuild": newly-hatched goblins route themselves to understaffed
 // buildings. "Autospawn": queues a free spawn every 3 seconds. "Autowater":
-// extends Autocommand so idle goblins are also routed onto watering duty —
-// unlocks once Autocommand is owned and a water source has been dug.
+// extends Autobuild so idle goblins are also routed onto watering duty —
+// unlocks once Autobuild is owned and a water source has been dug.
 export const SUMMON_UPGRADES = {
   autoAssign: { bloodCost: 13 },
   autoSpawn: { bloodCost: 13, intervalSeconds: 3 },
@@ -243,8 +250,8 @@ export const WATER_DEPLETION_PP_PER_SEC = 10;
 export const BASE_SPAWN_CAPACITY = 5;
 export const GOBLIN_HOLE_CAPACITY_PER_BUILDING = 5;
 
-// Lightning Strike — a ritual unlocked once the Collect-a-Dragon-Bone task is
-// done. Aim it at the map: it kills every unit inside a circular blast —
+// Lightning Strike — a ritual unlocked once the Ascend task is done. Aim it at
+// the map: it kills every unit inside a circular blast —
 // goblins, minotaurs, and dragons — granting their usual kill rewards, and
 // powers a temporary surge that decays linearly to zero.
 export const LIGHTNING = {
@@ -300,7 +307,7 @@ export type BuildingDef = {
   // a thirsty endgame building drain faster or a tier-1 sip more gently
   // without changing the global constant.
   waterDepletionPerSec?: number;
-  // Auto-assign target — Autocommand will keep this many carriers on the
+  // Auto-assign target — Autobuild will keep this many carriers on the
   // building. Manual right-click ignores the auto cap; `waterCarrierMax`
   // is a soft preference (drinkers below it are picked first) so a single
   // DC won't hoover up every goblin while another building is still dry.
@@ -400,7 +407,7 @@ export const BUILDING_DEFS = {
     buildTime: 15,
     maintainersRequired: 0,
     income: 0,
-    powerOutput: -10_000_000_000, // 10 GW
+    powerOutput: -5_000_000_000, // 5 GW
     wanderInterval: 1.0,
     wanderJitter: 0.2,
     colors: {
@@ -466,7 +473,7 @@ export const BUILDING_DEFS = {
   goblin_hole: def(1, {
     name: 'Goblin Hole',
     short: 'GH',
-    cost: 1313,
+    cost: 2626,
     buildersRequired: 0,
     buildTime: 4,
     maintainersRequired: 0,
@@ -480,7 +487,7 @@ export const BUILDING_DEFS = {
       constructing: 0x3a3f47, constructingBorder: 0x808890,
     },
   }),
-  // Hell Portal — the third unlock from the Collect-a-Dragon-Bone task. A
+  // Hell Portal — unlocked by the Ascend task. A
   // 2×2 portal that doubles as a (modest) power source AND opens the way
   // down to Hell. Once placed, a red beam animates from the portal toward
   // the abyss below and the player can hold ↓ at the bottom of the map to

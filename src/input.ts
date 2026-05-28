@@ -1,5 +1,5 @@
 import { Application, Container, FederatedPointerEvent, Graphics } from 'pixi.js';
-import { playSound } from './audio';
+import { playSound, playMinotaurCommand } from './audio';
 import { flashCursor } from './cursor-fx';
 import { demonRebuke } from './demon-dialogue';
 import { BUILDABLE_KINDS, BUILDING_DEFS, BuildingKind, CELL, DRAGON, GOBLIN, HELL, LIGHTNING, MINOTAUR, WORLD, formatPower } from './config';
@@ -8,7 +8,7 @@ import { RenderContext, ambientDragonAt, clampCamera, clampHellCamera, clampSpac
 import { autoAssignAllIdle, lightningStrike, spawnBob } from './sim';
 import {
   Building, Cell, Dragon, GameState, Ghost, Goblin, Minotaur, WaterSource,
-  appendLog, buildingAtCell, cellKey, defOf, demonAtHell, findFreeCellNear,
+  appendLog, buildingAtCell, buildingMoneyCost, cellKey, defOf, demonAtHell, findFreeCellNear,
   holeAtCell, isInBounds, nextBuildingDisplayNum, pixelToCell, spaceBuildingAt,
   waterCarrierCount, waterSourceAtCell,
 } from './state';
@@ -591,18 +591,6 @@ function resetMinotaurStuck(m: Minotaur, now: number) {
   m.stuckStreak = 0;
 }
 
-// Minotaur version of the grunt burst — same sample but at a much lower
-// playback rate so it reads as a deeper, beastlier bellow than the goblin grunt.
-function playMinotaurGruntBurst(count: number) {
-  for (let i = 0; i < count; i++) {
-    const delay = i * 140;
-    setTimeout(() => {
-      const rate = 0.28 + Math.random() * 0.16;
-      playSound('command_3', 1, rate);
-    }, delay);
-  }
-}
-
 // A guttural roar per commanded dragon — the 'ritual' sample pitched right
 // down so it reads as a beastly bellow, staggered so several dragons chorus.
 function playDragonRoarBurst(count: number) {
@@ -766,15 +754,22 @@ function handleRightClick(state: GameState, x: number, y: number) {
   const selectedDragons = [...state.dragons.values()].filter((d) => d.selected);
   if (selectedGoblins.length === 0 && selectedMinotaurs.length === 0 && selectedDragons.length === 0) return;
   if (selectedGoblins.length > 0) playGruntBurst(selectedGoblins.length);
-  if (selectedMinotaurs.length > 0) playMinotaurGruntBurst(selectedMinotaurs.length);
+  if (selectedMinotaurs.length > 0) playMinotaurCommand(selectedMinotaurs.length);
   if (selectedDragons.length > 0) playDragonRoarBurst(selectedDragons.length);
 
-  const targetGoblin = goblinAt(state, x, y);
-  const targetMinotaur = targetGoblin ? null : minotaurAt(state, x, y);
+  let targetGoblin = goblinAt(state, x, y);
+  // A goblin standing inside a building footprint (a worker/maintainer) shouldn't
+  // shadow the building it's in — a command aimed at such a goblin targets the
+  // building underneath instead.
+  const goblinHostBuilding = targetGoblin
+    ? buildingAtCell(state, targetGoblin.cell.cx, targetGoblin.cell.cy)
+    : null;
+  if (goblinHostBuilding) targetGoblin = null;
+  const targetMinotaur = (targetGoblin || goblinHostBuilding) ? null : minotaurAt(state, x, y);
   // A dragon target for fratricide: any non-selected dragon under the cursor.
   // Only meaningful when dragons are selected; skip the scan otherwise.
   let targetDragon: Dragon | null = null;
-  if (!targetGoblin && !targetMinotaur && selectedDragons.length > 0) {
+  if (!targetGoblin && !targetMinotaur && !goblinHostBuilding && selectedDragons.length > 0) {
     const selIds = new Set(selectedDragons.map((d) => d.id));
     for (const d of state.dragons.values()) {
       if (selIds.has(d.id)) continue;
@@ -784,7 +779,7 @@ function handleRightClick(state: GameState, x: number, y: number) {
   const targetCell = pixelToCell(x, y);
   const targetBuilding = (targetGoblin || targetMinotaur || targetDragon)
     ? null
-    : buildingAtCell(state, targetCell.cx, targetCell.cy);
+    : (goblinHostBuilding ?? buildingAtCell(state, targetCell.cx, targetCell.cy));
   const targetWater = (!targetGoblin && !targetMinotaur && !targetDragon && !targetBuilding)
     ? waterSourceAt(state, targetCell)
     : null;
@@ -1036,7 +1031,8 @@ function placeBuilding(state: GameState, x: number, y: number) {
     return;
   }
   const def = BUILDING_DEFS[kind];
-  if (state.money < def.cost) { playSound('error'); appendLog(state, 'Not enough Ƶ.'); return; }
+  const moneyCost = buildingMoneyCost(state, kind);
+  if (state.money < moneyCost) { playSound('error'); appendLog(state, 'Not enough Ƶ.'); return; }
   if (def.bloodCost && state.blood < def.bloodCost) { playSound('error'); appendLog(state, `Need ${def.bloodCost} blood to build ${def.name}.`); return; }
   if (def.dragonBoneCost && state.dragonBone < def.dragonBoneCost) { playSound('error'); appendLog(state, `Need ${def.dragonBoneCost} dragon bone${def.dragonBoneCost === 1 ? '' : 's'} to build ${def.name}.`); return; }
   if (def.powerOutput < 0) {
@@ -1055,7 +1051,7 @@ function placeBuilding(state: GameState, x: number, y: number) {
     return;
   }
 
-  state.money -= def.cost;
+  state.money -= moneyCost;
   if (def.bloodCost) state.blood -= def.bloodCost;
   if (def.dragonBoneCost) state.dragonBone -= def.dragonBoneCost;
   const b: Building = {

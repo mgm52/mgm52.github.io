@@ -30,10 +30,10 @@ export function setupOptionsUI(root: HTMLElement, callbacks: OptionsUICallbacks)
   publicPanel.id = 'options-panel-public';
   publicPanel.hidden = true;
 
-  // Admin cog — full options. In prod hidden until the player completes the
-  // final task (collect_dragon_bone) — unlockOptionsCog() flips it visible
-  // and persists the flag in localStorage so the unlock survives reloads.
-  // Dev keeps it always-on.
+  // Admin cog — full options. In prod hidden until the demo-end gag fires (the
+  // demon's gift, or the secret reveal gesture) — unlockOptionsCog() flips it
+  // visible and persists the flag in localStorage so the unlock survives
+  // reloads. Dev keeps it always-on.
   const adminCog = document.createElement('button');
   adminCog.id = 'options-cog';
   adminCog.type = 'button';
