@@ -8,7 +8,7 @@ import { RenderContext, ambientDragonAt, clampCamera, clampHellCamera, clampSpac
 import { autoAssignAllIdle, lightningStrike, spawnBob } from './sim';
 import {
   Building, Cell, Dragon, GameState, Ghost, Goblin, Minotaur, WaterSource,
-  appendLog, buildingAtCell, cellKey, defOf, demonAtHell, findFreeCellNear,
+  appendLog, buildingAtCell, buildingMoneyCost, cellKey, defOf, demonAtHell, findFreeCellNear,
   holeAtCell, isInBounds, nextBuildingDisplayNum, pixelToCell, spaceBuildingAt,
   waterCarrierCount, waterSourceAtCell,
 } from './state';
@@ -1031,7 +1031,8 @@ function placeBuilding(state: GameState, x: number, y: number) {
     return;
   }
   const def = BUILDING_DEFS[kind];
-  if (state.money < def.cost) { playSound('error'); appendLog(state, 'Not enough Ƶ.'); return; }
+  const moneyCost = buildingMoneyCost(state, kind);
+  if (state.money < moneyCost) { playSound('error'); appendLog(state, 'Not enough Ƶ.'); return; }
   if (def.bloodCost && state.blood < def.bloodCost) { playSound('error'); appendLog(state, `Need ${def.bloodCost} blood to build ${def.name}.`); return; }
   if (def.dragonBoneCost && state.dragonBone < def.dragonBoneCost) { playSound('error'); appendLog(state, `Need ${def.dragonBoneCost} dragon bone${def.dragonBoneCost === 1 ? '' : 's'} to build ${def.name}.`); return; }
   if (def.powerOutput < 0) {
@@ -1050,7 +1051,7 @@ function placeBuilding(state: GameState, x: number, y: number) {
     return;
   }
 
-  state.money -= def.cost;
+  state.money -= moneyCost;
   if (def.bloodCost) state.blood -= def.bloodCost;
   if (def.dragonBoneCost) state.dragonBone -= def.dragonBoneCost;
   const b: Building = {

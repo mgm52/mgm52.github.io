@@ -6,8 +6,8 @@ import {
 } from './config';
 import {
   Building, Cell, Demon, DragonState, GameState, Goblin, GoblinState, SpaceBuilding, WaterSource,
-  appendLog, buildingCenter, buildingLabel, cellCenter, cellKey, countIdle, defOf, digDirection,
-  earnDragonBone, getSpawnCapacity, holeBlockedByBuilding, isCellBlocked, isInBounds,
+  appendLog, buildingCenter, buildingLabel, buildingMoneyCost, cellCenter, cellKey, countIdle, defOf, digDirection,
+  getSpawnCapacity, holeBlockedByBuilding, isCellBlocked, isInBounds,
   maintainerCount, nextBuildingDisplayNum, occupyCell, waterCarrierCount,
 } from './state';
 import { spawnMinotaur } from './sim';
@@ -216,7 +216,7 @@ let currentTaskCached: Task | null = null;
 //   run_phone_farm       → Autobuild, Autospawn
 //   build_gas_engine     → Minotaur, Dig
 //   earn_30_blood        → Goldblins
-//   collect_dragon_bone  → Lightning Strike
+//   ascend               → Lightning Strike
 // The Dragon summon is special-cased: it has no gating task. Its button shows
 // whenever at least one Dragon Beacon is `active`, and the simultaneous-dragon
 // cap (live + queued) equals the active-beacon count.
@@ -276,10 +276,13 @@ const TASKS: Task[] = [
     prereq: ['run_datacentre'],
   },
   {
-    id: 'collect_dragon_bone',
-    text: 'Collect a dragon bone',
+    // Final task: complete the first time the player rises into the space view.
+    // Sticky completion means a momentary visit is enough — view resets to
+    // 'ground' on reload, but the completed flag persists.
+    id: 'ascend',
+    text: 'Ascend',
     unlocks: ['hell_portal'],
-    isDone: (s) => s.dragonBoneEarned >= 1,
+    isDone: (s) => s.view === 'space',
     prereq: ['build_hypercentre'],
   },
   {
@@ -534,8 +537,8 @@ export function setupUI(state: GameState, callbacks: UICallbacks) {
   digRow.appendChild(digOverlay);
   ritualList.appendChild(digRow);
 
-  // Lightning Strike — an aimed ritual unlocked once the Collect-a-Dragon-Bone
-  // task is done. Sits at the bottom of the Ritual list. Clicking arms it; the
+  // Lightning Strike — an aimed ritual unlocked once the Ascend task is done.
+  // Sits at the bottom of the Ritual list. Clicking arms it; the
   // next map click calls the bolt down, killing every unit in the blast
   // (goblins, minotaurs, dragons) for their kill rewards.
   const lightningBtn = document.createElement('button');
@@ -967,16 +970,16 @@ export function refreshUI(state: GameState) {
   //   run_phone_farm       → Autobuild, Autospawn
   //   build_gas_engine     → Dig (+ Minotaur, handled above)
   //   earn_30_blood        → Goldblins
-  //   collect_dragon_bone  → Lightning Strike
+  //   ascend               → Lightning Strike
   const phaseRunPhoneFarm = revealedTaskIds.has('run_phone_farm');
   const phaseGasTurbine = revealedTaskIds.has('build_gas_engine');
   const minotaurTaskDone = revealedTaskIds.has('earn_30_blood');
-  const dragonBoneDone = revealedTaskIds.has('collect_dragon_bone');
+  const ascendTaskDone = revealedTaskIds.has('ascend');
 
-  // Lightning Strike — a ritual unlocked once the Collect-a-Dragon-Bone task is
-  // done. Disabled when the player can't cover the blood cost; lit while armed.
+  // Lightning Strike — a ritual unlocked once the Ascend task is done. Disabled
+  // when the player can't cover the blood cost; lit while armed.
   const lightningBtn = document.getElementById('btn-lightning-strike') as HTMLButtonElement;
-  if (dragonBoneDone) {
+  if (ascendTaskDone) {
     lightningBtn.style.display = '';
     applyFadeInOnFirstShow('btn-lightning-strike');
     const canAffordLightning = state.blood >= LIGHTNING.bloodCost;
@@ -992,7 +995,7 @@ export function refreshUI(state: GameState) {
   // Minotaur (also rewarded around Phase 3), so a "needs Minotaur" banner covers
   // the row until one is summoned; see the dig-overlay below.
   const digUnlocked = phaseGasTurbine;
-  const ritualVisible = phaseRunPhoneFarm || phaseGasTurbine || minotaurTaskDone || dragonBoneDone;
+  const ritualVisible = phaseRunPhoneFarm || phaseGasTurbine || minotaurTaskDone || ascendTaskDone;
   const ritualSection = document.getElementById('ritual-section')!;
   ritualSection.style.display = ritualVisible ? '' : 'none';
   // Now that the panel renders as a bordered card, an empty container shows
@@ -1101,7 +1104,10 @@ export function refreshUI(state: GameState) {
     const visible = unlocked.has(kind) && !obsoletedKinds.has(kind);
     btn.classList.toggle('locked', !visible);
     if (!visible) { setBuyFlash(btnId(kind), false); continue; }
-    const canAffordMoney = state.money >= def.cost;
+    // Goblin Hole's price doubles per hole in play, so its cost is dynamic —
+    // refresh both the displayed figure and the affordability check each frame.
+    const moneyCost = buildingMoneyCost(state, kind);
+    const canAffordMoney = state.money >= moneyCost;
     const canAffordBlood = !def.bloodCost || state.blood >= def.bloodCost;
     const canAffordBone = !def.dragonBoneCost || state.dragonBone >= def.dragonBoneCost;
     const draw = def.powerOutput < 0 ? -def.powerOutput : 0;
@@ -1113,7 +1119,9 @@ export function refreshUI(state: GameState) {
     // Flash for attention while affordable and never built before.
     setBuyFlash(btnId(kind), !btn.disabled && !everBuiltKinds.has(kind));
     btn.classList.toggle('active', state.pendingBuild?.kind === kind);
-    document.getElementById(`cost-${kind}`)!.classList.toggle('met', canAffordMoney);
+    const costEl = document.getElementById(`cost-${kind}`)!;
+    costEl.textContent = `Ƶ${moneyCost.toLocaleString('en-US')}`;
+    costEl.classList.toggle('met', canAffordMoney);
     const powerCostEl = document.getElementById(`power-cost-${kind}`);
     if (powerCostEl) powerCostEl.classList.toggle('met', enoughPower);
     const bloodCostEl = document.getElementById(`blood-cost-${kind}`);
@@ -1598,15 +1606,14 @@ export function executeTaskSkip(state: GameState): void {
       state.bloodUnlocked = true;
       break;
     }
-    case 'collect_dragon_bone': {
-      // A real player would have built a Beacon to get here, so place one too
-      // — the Dragon summon button surfaces the moment any beacon goes active,
-      // which makes the post-skip world look like a normal playthrough rather
-      // than just handing over the bone. Then hand the bone outright so
-      // dragonBoneEarned satisfies isDone and the Lightning Strike unlock fires.
+    case 'ascend': {
+      // A real player would have built a Beacon and flown a building up to get
+      // here, so place a beacon (the Dragon summon button surfaces once any
+      // beacon is active) and flag space unlocked, so the post-skip world looks
+      // like a normal playthrough with the ascend affordance available. The skip
+      // force-completes the task regardless of the live `view`.
       ensureBuildingCount(state, 'dragon_beacon', 1);
-      earnDragonBone(state, 1);
-      state.dragonBoneUnlocked = true;
+      state.spaceUnlocked = true;
       break;
     }
   }

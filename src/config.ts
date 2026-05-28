@@ -250,8 +250,8 @@ export const WATER_DEPLETION_PP_PER_SEC = 10;
 export const BASE_SPAWN_CAPACITY = 5;
 export const GOBLIN_HOLE_CAPACITY_PER_BUILDING = 5;
 
-// Lightning Strike — a ritual unlocked once the Collect-a-Dragon-Bone task is
-// done. Aim it at the map: it kills every unit inside a circular blast —
+// Lightning Strike — a ritual unlocked once the Ascend task is done. Aim it at
+// the map: it kills every unit inside a circular blast —
 // goblins, minotaurs, and dragons — granting their usual kill rewards, and
 // powers a temporary surge that decays linearly to zero.
 export const LIGHTNING = {
@@ -407,7 +407,7 @@ export const BUILDING_DEFS = {
     buildTime: 15,
     maintainersRequired: 0,
     income: 0,
-    powerOutput: -10_000_000_000, // 10 GW
+    powerOutput: -5_000_000_000, // 5 GW
     wanderInterval: 1.0,
     wanderJitter: 0.2,
     colors: {
@@ -487,7 +487,7 @@ export const BUILDING_DEFS = {
       constructing: 0x3a3f47, constructingBorder: 0x808890,
     },
   }),
-  // Hell Portal — the third unlock from the Collect-a-Dragon-Bone task. A
+  // Hell Portal — unlocked by the Ascend task. A
   // 2×2 portal that doubles as a (modest) power source AND opens the way
   // down to Hell. Once placed, a red beam animates from the portal toward
   // the abyss below and the player can hold ↓ at the bottom of the map to

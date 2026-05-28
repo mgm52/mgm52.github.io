@@ -444,9 +444,9 @@ export type GameState = {
   // has 2+ goblins queued to spawn concurrently; gates the "queue several
   // goblins at once" nudge in refreshUI.
   multiSpawnSeen: boolean;
-  // In production builds the options cog is hidden until the player completes
-  // the final task (collect_dragon_bone) — that's the demo-end gag, so the
-  // secret-settings reveal gates on getting that far. Sticky once flipped.
+  // In production builds the options cog is hidden until the demon's gift to a
+  // truthful Bob fires the demo-end gag (see revealSecretSettings) — or the
+  // shift-click / long-press R reveal gesture. Sticky once flipped.
   optionsUnlocked: boolean;
   // Sticky: flips true the first time a building reaches space. Gates the
   // "hold ↑ at the top of the map to rise into space" affordance.
@@ -1188,6 +1188,19 @@ export function holeCenter(state: GameState): Vec2 {
 }
 
 // True iff a building's footprint covers any of the Goblin Hole's 2×2 cells.
+// Money cost to build `kind` right now. Fixed at BUILDING_DEFS.cost for most
+// kinds, but the Goblin Hole doubles for every Goblin Hole already in play — so
+// it starts at its base price and gets twice as steep with each one placed.
+export function buildingMoneyCost(state: GameState, kind: BuildingKind): number {
+  const base = BUILDING_DEFS[kind].cost;
+  if (kind !== 'goblin_hole') return base;
+  let holes = 0;
+  for (const b of state.buildings.values()) {
+    if (b.kind === 'goblin_hole') holes++;
+  }
+  return base * 2 ** holes;
+}
+
 export function holeBlockedByBuilding(state: GameState): boolean {
   for (const c of holeCells(state)) {
     if (buildingAtCell(state, c.cx, c.cy)) return true;
