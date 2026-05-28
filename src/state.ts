@@ -440,6 +440,10 @@ export type GameState = {
   // performs a drag-rectangle that picks up 2+ creatures; used to gate the
   // "Hint: drag to choose many creatures" nudge in refreshUI.
   multiSelectSeen: boolean;
+  // Multi-spawn onboarding state. Flips sticky-true the first time the player
+  // has 2+ goblins queued to spawn concurrently; gates the "queue several
+  // goblins at once" nudge in refreshUI.
+  multiSpawnSeen: boolean;
   // The optional Earn-blood side-task (gates the Goblin Hole) snapshots the
   // player's live blood the frame it first appears and freezes a goal of
   // max(30, round-to-tens(2×snapshot)). Null until that snapshot is taken;
@@ -786,6 +790,7 @@ export function createInitialState(): GameState {
     firstDugAt: null,
     waterSeen: false,
     multiSelectSeen: false,
+    multiSpawnSeen: false,
     bloodTaskTarget: null,
     optionsUnlocked: false,
     spaceUnlocked: false,

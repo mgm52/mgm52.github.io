@@ -58,6 +58,9 @@ export function tick(state: GameState) {
       }
     }
   }
+  // Sticky onboarding flag: the player has had 2+ goblins queued at once, so
+  // the "queue several at a time" hint never needs to surface (or hides now).
+  if (state.spawnQueue.length >= 2) state.multiSpawnSeen = true;
   for (let i = state.spawnQueue.length - 1; i >= 0; i--) {
     state.spawnQueue[i].remaining -= TICK_S;
     if (state.spawnQueue[i].remaining <= 0) {

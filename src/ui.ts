@@ -1,6 +1,6 @@
 import { playSound } from './audio';
 import {
-  AUTOSPAWN_TIERS, BUILDABLE_KINDS, BUILDING_DEFS, BuildingKind, DRAG_SELECT_HINT_DELAY_SEC,
+  AUTOSPAWN_TIERS, BUILDABLE_KINDS, BUILDING_DEFS, BuildingKind, DRAG_SELECT_HINT_DELAY_SEC, MULTI_SPAWN_HINT_DELAY_SEC,
   DRAGON, GOBLIN, LIGHTNING, SPAWN_HINT_NO_SPAWN_SEC,
   SPAWN_HINT_NO_TASK_SEC, SUMMON_UPGRADES, WATER_HINT_DELAY_SEC, digBloodCost, MINOTAUR, minotaurBloodCost, TINYTAUR, formatPower,
 } from './config';
@@ -1187,6 +1187,15 @@ export function refreshUI(state: GameState) {
     && !state.multiSelectSeen
     && state.now >= DRAG_SELECT_HINT_DELAY_SEC;
   dragSelectHint.classList.toggle('visible', dragSelectTrip);
+
+  // Multi-spawn hint — once the player has spawned at least one goblin, surface
+  // after MULTI_SPAWN_HINT_DELAY_SEC if they've still only ever had a single
+  // goblin in the spawn queue at a time. Sticky-hidden once they queue 2+.
+  const multiSpawnHint = document.getElementById('multi-spawn-hint')!;
+  const multiSpawnTrip = state.spawnsCompleted > 0
+    && !state.multiSpawnSeen
+    && state.now >= MULTI_SPAWN_HINT_DELAY_SEC;
+  multiSpawnHint.classList.toggle('visible', multiSpawnTrip);
 
   // Mirror the sticky unlock sets onto state so they're captured by the next
   // save. Holds live references to the module sets (+ the current boolean), so

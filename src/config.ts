@@ -36,6 +36,12 @@ export const SPAWN_HINT_NO_TASK_SEC = 90;
 // drag-select after this many seconds of total play. Sticky once seen.
 export const DRAG_SELECT_HINT_DELAY_SEC = 300;
 
+// Multi-spawn onboarding nudge. Once the player has spawned at least one goblin,
+// surface a "queue several at once" hint if they still haven't had more than one
+// goblin in the spawn queue at a time after this many seconds of total play.
+// Sticky once they queue 2+ concurrently.
+export const MULTI_SPAWN_HINT_DELAY_SEC = 300;
+
 export const GOBLIN = {
   speed: 110,
   radius: 12,
