@@ -377,8 +377,11 @@ export type GameState = {
   // (only ever increases).
   maxStruckAtOnce: number;
   // Sticky: flips true once the player has vaporised two or more dragons with a
-  // single Lightning Strike. The truth a demon weighs in Bob's parlay.
+  // single Lightning Strike. (Legacy: no longer read by the demon parlay.)
   slewTwoDragonsInOneStrike: boolean;
+  // Sticky: the Lightning Strike ritual. Granted solely by a truthful demon
+  // parlay (Bob owning a dragon bone); never unlocked any other way.
+  lightningUnlocked: boolean;
   // Number of Minotaurs summoned this run — drives the doubling summon cost.
   minotaursBought: number;
   // Multiplier applied to a gold goblin's GOLD_KILL_REWARD.money on death.
@@ -795,6 +798,7 @@ export function createInitialState(): GameState {
     tinytaurUnlocked: false,
     maxStruckAtOnce: 0,
     slewTwoDragonsInOneStrike: false,
+    lightningUnlocked: false,
     goldgoblinMultiplier: 1,
     autoSpawnTimer: 0,
     autoSpawnMultiplier: 0,

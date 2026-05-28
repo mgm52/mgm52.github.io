@@ -216,7 +216,8 @@ let currentTaskCached: Task | null = null;
 //   run_phone_farm       → Autobuild, Autospawn
 //   build_gas_engine     → Minotaur, Dig
 //   earn_30_blood        → Goldblins
-//   ascend               → Lightning Strike
+// Lightning Strike is special: it's granted by a truthful demon parlay, not a
+// task (see state.lightningUnlocked).
 // The Dragon summon is special-cased: it has no gating task. Its button shows
 // whenever at least one Dragon Beacon is `active`, and the simultaneous-dragon
 // cap (live + queued) equals the active-beacon count.
@@ -266,7 +267,9 @@ const TASKS: Task[] = [
   {
     id: 'build_hypercentre',
     text: 'Build a Hypercentre',
-    unlocks: ['dragon_beacon'],
+    // The Hell Portal ("???") opens up alongside the Dragon Beacon — no longer
+    // gated behind ascending.
+    unlocks: ['dragon_beacon', 'hell_portal'],
     isDone: (s) => {
       for (const b of s.buildings.values()) {
         if (b.kind === 'hypercentre') return true;
@@ -278,10 +281,11 @@ const TASKS: Task[] = [
   {
     // Final task: complete the first time the player rises into the space view.
     // Sticky completion means a momentary visit is enough — view resets to
-    // 'ground' on reload, but the completed flag persists.
+    // 'ground' on reload, but the completed flag persists. Grants no building;
+    // it's a milestone (Lightning now comes from the demon's parlay instead).
     id: 'ascend',
     text: 'Ascend',
-    unlocks: ['hell_portal'],
+    unlocks: [],
     isDone: (s) => s.view === 'space',
     prereq: ['build_hypercentre'],
   },
@@ -970,16 +974,16 @@ export function refreshUI(state: GameState) {
   //   run_phone_farm       → Autobuild, Autospawn
   //   build_gas_engine     → Dig (+ Minotaur, handled above)
   //   earn_30_blood        → Goldblins
-  //   ascend               → Lightning Strike
+  // (Lightning Strike is granted by the demon parlay, not a task.)
   const phaseRunPhoneFarm = revealedTaskIds.has('run_phone_farm');
   const phaseGasTurbine = revealedTaskIds.has('build_gas_engine');
   const minotaurTaskDone = revealedTaskIds.has('earn_30_blood');
-  const ascendTaskDone = revealedTaskIds.has('ascend');
 
-  // Lightning Strike — a ritual unlocked once the Ascend task is done. Disabled
-  // when the player can't cover the blood cost; lit while armed.
+  // Lightning Strike — a ritual granted only by a truthful demon parlay (see
+  // demon-dialogue.ts). Disabled when the player can't cover the blood cost;
+  // lit while armed.
   const lightningBtn = document.getElementById('btn-lightning-strike') as HTMLButtonElement;
-  if (ascendTaskDone) {
+  if (state.lightningUnlocked) {
     lightningBtn.style.display = '';
     applyFadeInOnFirstShow('btn-lightning-strike');
     const canAffordLightning = state.blood >= LIGHTNING.bloodCost;
@@ -995,7 +999,7 @@ export function refreshUI(state: GameState) {
   // Minotaur (also rewarded around Phase 3), so a "needs Minotaur" banner covers
   // the row until one is summoned; see the dig-overlay below.
   const digUnlocked = phaseGasTurbine;
-  const ritualVisible = phaseRunPhoneFarm || phaseGasTurbine || minotaurTaskDone || ascendTaskDone;
+  const ritualVisible = phaseRunPhoneFarm || phaseGasTurbine || minotaurTaskDone || state.lightningUnlocked;
   const ritualSection = document.getElementById('ritual-section')!;
   ritualSection.style.display = ritualVisible ? '' : 'none';
   // Now that the panel renders as a bordered card, an empty container shows

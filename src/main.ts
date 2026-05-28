@@ -488,6 +488,9 @@ async function main() {
   let hellTransFrom = 0, hellTransTo = 0, hellTransStart = 0;
   let hellZooming = false;
   let hellZoomFrom = 0, hellZoomTo = 0, hellZoomStart = 0;
+  // Duration of the current zoom ease. The arrival zoom-out is deliberately
+  // slower (50% longer) than the return zoom-in so the reveal lands gently.
+  let hellZoomDuration = HELL.zoomMs;
   // World-coord focus point the zoom-out should pivot around — keeps the
   // landing spot under the camera as the scale eases out and the same spot
   // under the camera on the return zoom-in too.
@@ -515,11 +518,12 @@ async function main() {
     playSound('ritual', 0.6, 0.6);
   }
   function triggerDescendToHell(now: number) {
-    // Center hell on the player's current ground-camera focus, fully zoomed in.
-    // The zoom-out reveal kicks off when the transition lands.
+    // Center hell on the overworld area (the centre of the world mapped into
+    // hell space), fully zoomed in, so arrival always frames the region that
+    // mirrors the surface. The zoom-out reveal pivots around this same point.
     ctx.hellZoom = 0;
-    hellZoomFocusX = ctx.camera.x + ctx.viewport.width / (2 * ctx.renderScale);
-    hellZoomFocusY = ctx.camera.y + ctx.viewport.height / (2 * ctx.renderScale);
+    hellZoomFocusX = WORLD.width / 2;
+    hellZoomFocusY = WORLD.height / 2;
     centerHellCameraOnWorld(ctx, hellZoomFocusX, hellZoomFocusY);
     hellTransitioning = true; hellTransFrom = 0; hellTransTo = 1; hellTransStart = now;
     descendHellHold = 0;
@@ -536,6 +540,7 @@ async function main() {
     hellZoomFocusX = hellCenterX - (HELL.width - WORLD.width) / 2;
     hellZoomFocusY = hellCenterY - (HELL.height - WORLD.height) / 2;
     hellZooming = true; hellZoomFrom = ctx.hellZoom; hellZoomTo = 0; hellZoomStart = now;
+    hellZoomDuration = HELL.zoomMs;
     hellTransitioning = true; hellTransFrom = 1; hellTransTo = 0; hellTransStart = now;
     ascendHellHold = 0;
     playSound('ritual', 0.7, 0.5);
@@ -686,7 +691,7 @@ async function main() {
     // Ease the hell zoom-out (or zoom-in on return) independent of the
     // descent transition. Kicked off when arriving in hell / leaving hell.
     if (hellZooming) {
-      const t = Math.min(1, (now - hellZoomStart) / HELL.zoomMs);
+      const t = Math.min(1, (now - hellZoomStart) / hellZoomDuration);
       const e = t * t * (3 - 2 * t);
       ctx.hellZoom = hellZoomFrom + (hellZoomTo - hellZoomFrom) * e;
       if (t >= 1) {
@@ -723,8 +728,10 @@ async function main() {
         hellTransitioning = false;
         if (hellTransTo >= 0.5) {
           state.view = 'hell';
-          // Arrival: kick off the camera zoom-out reveal.
+          // Arrival: kick off the camera zoom-out reveal — slowed by 50% so
+          // the underworld opens up gradually rather than snapping out.
           hellZooming = true; hellZoomFrom = 0; hellZoomTo = 1; hellZoomStart = now;
+          hellZoomDuration = HELL.zoomMs * 1.5;
         } else {
           state.view = 'ground';
         }

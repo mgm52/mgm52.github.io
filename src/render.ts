@@ -576,20 +576,23 @@ export async function createRender(parent: HTMLElement, state: GameState): Promi
   const hellLayer = new Container();
   const hellBg = new Graphics();
   drawHellBackground(hellBg, getOptions());
-  hellLayer.addChild(hellBg);
   const demonLayer = new Container();
   demonLayer.cullableChildren = true;
-  hellLayer.addChild(demonLayer);
   const hellGhostLayer = new Container();
   hellGhostLayer.cullableChildren = true;
-  hellLayer.addChild(hellGhostLayer);
-  // Mirror portals + their upward beams ride on top of the ghosts.
   const hellPortalMirrorLayer = new Container();
-  hellLayer.addChild(hellPortalMirrorLayer);
   const hellEffectsLayer = new Container();
   hellEffectsLayer.cullableChildren = true;
-  hellLayer.addChild(hellEffectsLayer);
   const hellSideBeamGfx = new Graphics();
+  // z-order (back → front): background, then the portal-mirror beacons (their
+  // halo rings sit under everyone), then the drifting ghosts/units, then the
+  // colossal demon on top so souls pass beneath it, then blood effects, and
+  // finally the upward portal beams.
+  hellLayer.addChild(hellBg);
+  hellLayer.addChild(hellPortalMirrorLayer);
+  hellLayer.addChild(hellGhostLayer);
+  hellLayer.addChild(demonLayer);
+  hellLayer.addChild(hellEffectsLayer);
   hellLayer.addChild(hellSideBeamGfx);
   hellLayer.scale.set(initScale);
   hellLayer.visible = false;
@@ -1253,9 +1256,9 @@ function makeHellPortalMirror(b: Building): Container {
   const outerR = def.size * 3.6;
   const innerR = def.size * 2.2;
   const innerGap = 6;
-  halo.circle(0, 0, outerR).stroke({ width: 3, color: 0xfff4c0, alpha: 0.6 });
-  halo.circle(0, 0, innerR).stroke({ width: 4, color: 0xffe070, alpha: 0.85 });
-  halo.circle(0, 0, innerR - innerGap).stroke({ width: 2, color: 0xffe070, alpha: 0.7 });
+  halo.circle(0, 0, outerR).stroke({ width: 3, color: 0xfff4c0, alpha: 0.3 });
+  halo.circle(0, 0, innerR).stroke({ width: 4, color: 0xffe070, alpha: 0.425 });
+  halo.circle(0, 0, innerR - innerGap).stroke({ width: 2, color: 0xffe070, alpha: 0.35 });
   const body = new Graphics();
   body.rect(-half, -half, def.size, def.size).fill({ color: 0x2a0610, alpha: 0.95 });
   body.rect(-half, -half, def.size, def.size).stroke({ width: 3, color: 0xff2030 });

@@ -169,7 +169,7 @@ export const SPACE = {
 // to zoom out into on arrival. Ghosts of every killed unit are scattered here
 // at the same world-x/y where they died.
 export const HELL = {
-  width: 4800,
+  width: 2400,
   height: 3200,
   // On arrival the camera shows hell at the normal RENDER_SCALE, then eases
   // out to this multiplier so the player can see the larger map. Going back
@@ -232,12 +232,17 @@ export const AUTOSPAWN_TIERS: { multiplier: number; bloodCost: number }[] = [
 // surround everything with water.
 export const DIG = {
   firstBloodCost: 100,
+  secondBloodCost: 500,
   laterBloodCost: 2000,
   cells: DIG_GROWTH_CELLS,
 };
-// Returns the blood cost of the next dig given the dug-direction set.
+// Returns the blood cost of the next dig given how many directions are already
+// dug: the first dig is cheap, the second steps up, and every dig after that
+// is the full price.
 export function digBloodCost(dugCount: number): number {
-  return dugCount === 0 ? DIG.firstBloodCost : DIG.laterBloodCost;
+  if (dugCount === 0) return DIG.firstBloodCost;
+  if (dugCount === 1) return DIG.secondBloodCost;
+  return DIG.laterBloodCost;
 }
 
 // Water meter — every building with `waterDeliveryAmount` keeps a 0..100
@@ -498,7 +503,6 @@ export const BUILDING_DEFS = {
     short: '???',
     cost: 10_000_000,
     bloodCost: 1000,
-    dragonBoneCost: 10,
     buildersRequired: 4,
     buildTime: 12,
     maintainersRequired: 0,
