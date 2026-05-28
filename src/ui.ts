@@ -211,7 +211,7 @@ let currentTaskCached: Task | null = null;
 // Abilities (summons + rituals) aren't buildings, so they aren't listed in a
 // task's `unlocks` (which only takes BuildingKind). Instead each is gated in
 // refreshUI on the reveal of the task that grants it:
-//   run_phone_farm       → Autocommand, Dig
+//   run_phone_farm       → Autobuild, Dig
 //   build_gas_engine     → Minotaur, Autospawn
 //   earn_30_blood        → Goldblins
 //   collect_dragon_bone  → Lightning Strike
@@ -412,7 +412,7 @@ export function setupUI(state: GameState, callbacks: UICallbacks) {
   autoAssignBtn.innerHTML = `
     <div class="build-content">
       <div class="build-text">
-        <div class="build-name">Autocommand</div>
+        <div class="build-name">Autobuild</div>
       </div>
       <div class="build-cost-side"><span class="build-cost" id="cost-buy-autoassign">${SUMMON_UPGRADES.autoAssign.bloodCost} blood</span></div>
     </div>
@@ -420,8 +420,8 @@ export function setupUI(state: GameState, callbacks: UICallbacks) {
   autoAssignBtn.addEventListener('click', () => { playSound('click', 1, 0.75); callbacks.onBuyAutoAssign(); });
   ritualList.appendChild(autoAssignBtn);
 
-  // Autowater — extends Autocommand onto watering duty. Surfaces once
-  // Autocommand is owned and a water source has been dug.
+  // Autowater — extends Autobuild onto watering duty. Surfaces once
+  // Autobuild is owned and a water source has been dug.
   const autoWaterBtn = document.createElement('button');
   autoWaterBtn.className = 'build-button build-button-compact';
   autoWaterBtn.id = 'btn-buy-autowater';
@@ -452,7 +452,7 @@ export function setupUI(state: GameState, callbacks: UICallbacks) {
   autoSpawnBtn.addEventListener('click', () => { playSound('click', 1, 0.75); callbacks.onBuyAutoSpawn(); });
   ritualList.appendChild(autoSpawnBtn);
 
-  // Goldgoblins — appears alongside Autocommand (once a Phone Farm is
+  // Goldgoblins — appears alongside Autobuild (once a Phone Farm is
   // built). Once bought, ~10% of new goblins spawn gold-tinted and drop
   // Ƶ150 each.
   const goldGoblinsBtn = document.createElement('button');
@@ -963,7 +963,7 @@ export function refreshUI(state: GameState) {
   // Reveal flags for the task-gated abilities. Gated on revealedTaskIds (not
   // completedTaskIds) so each button emerges AFTER its TASK COMPLETE overlay
   // fades, letting the fade-in animation play.
-  //   run_phone_farm       → Autocommand, Dig
+  //   run_phone_farm       → Autobuild, Dig
   //   build_gas_engine     → Autospawn (+ Minotaur, handled above)
   //   earn_30_blood        → Goldblins
   //   collect_dragon_bone  → Lightning Strike
@@ -1000,9 +1000,9 @@ export function refreshUI(state: GameState) {
   const panelBuild = document.getElementById('panel-build')!;
   panelBuild.style.display = (firstTaskDone || ritualVisible) ? '' : 'none';
 
-  // Autocommand → Autowater replace chain: Autowater needs Autocommand owned
+  // Autobuild → Autowater replace chain: Autowater needs Autobuild owned
   // AND a water source dug (so the upgrade has something to act on). The
-  // Autocommand button hides ONLY once Autowater is actually visible — until
+  // Autobuild button hides ONLY once Autowater is actually visible — until
   // then it lingers (as "owned") so the slot isn't left empty.
   const autoWaterVisible = state.autoAssignEnabled && state.waterSources.size > 0;
   refreshRitualButton(

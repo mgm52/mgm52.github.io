@@ -366,7 +366,7 @@ export type GameState = {
   // Ritual upgrades — sticky once bought, apply game-wide.
   autoAssignEnabled: boolean;
   autoSpawnEnabled: boolean;
-  // Extends Autocommand: when on, idle goblins are also auto-routed onto
+  // Extends Autobuild: when on, idle goblins are also auto-routed onto
   // watering duty for thirsty buildings. Requires autoAssignEnabled.
   autoWaterEnabled: boolean;
   goldgoblinsEnabled: boolean;
