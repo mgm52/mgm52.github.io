@@ -201,8 +201,9 @@ export const DEMON = {
   hitRadius: 390,     // click radius (hell-px) for selecting the demon
 };
 
-// One-shot Ritual upgrades. Autobuild + Goldblins unlock once a Phone
-// Farm has been built; Autospawn unlocks once a Gas Turbine has been built.
+// One-shot Ritual upgrades. Autobuild + Autospawn unlock once a Phone
+// Farm has been run; Goldblins unlocks via the Earn-30-blood side-task. Dig
+// unlocks once a Gas Turbine has been built.
 // "Autobuild": newly-hatched goblins route themselves to understaffed
 // buildings. "Autospawn": queues a free spawn every 3 seconds. "Autowater":
 // extends Autobuild so idle goblins are also routed onto watering duty —

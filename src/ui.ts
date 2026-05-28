@@ -211,8 +211,8 @@ let currentTaskCached: Task | null = null;
 // Abilities (summons + rituals) aren't buildings, so they aren't listed in a
 // task's `unlocks` (which only takes BuildingKind). Instead each is gated in
 // refreshUI on the reveal of the task that grants it:
-//   run_phone_farm       → Autobuild, Dig
-//   build_gas_engine     → Minotaur, Autospawn
+//   run_phone_farm       → Autobuild, Autospawn
+//   build_gas_engine     → Minotaur, Dig
 //   earn_30_blood        → Goldblins
 //   collect_dragon_bone  → Lightning Strike
 // The Dragon summon is special-cased: it has no gating task. Its button shows
@@ -488,7 +488,7 @@ export function setupUI(state: GameState, callbacks: UICallbacks) {
   ritualList.appendChild(goldX10Btn);
 
   // Dig row — four compact buttons (NESW) on a single line, unlocked by the
-  // Run-a-Phone-Farm task (Phase 2). Each is one-shot and costs DIG.bloodCost
+  // Construct-a-Gas-Turbine task (Phase 3). Each is one-shot and costs DIG.bloodCost
   // blood. Digging still needs a Minotaur, so until one is summoned a "needs
   // Minotaur" banner sits across the row and the buttons stay disabled.
   const digRow = document.createElement('div');
@@ -963,8 +963,8 @@ export function refreshUI(state: GameState) {
   // Reveal flags for the task-gated abilities. Gated on revealedTaskIds (not
   // completedTaskIds) so each button emerges AFTER its TASK COMPLETE overlay
   // fades, letting the fade-in animation play.
-  //   run_phone_farm       → Autobuild, Dig
-  //   build_gas_engine     → Autospawn (+ Minotaur, handled above)
+  //   run_phone_farm       → Autobuild, Autospawn
+  //   build_gas_engine     → Dig (+ Minotaur, handled above)
   //   earn_30_blood        → Goldblins
   //   collect_dragon_bone  → Lightning Strike
   const phaseRunPhoneFarm = revealedTaskIds.has('run_phone_farm');
@@ -987,10 +987,10 @@ export function refreshUI(state: GameState) {
     lightningBtn.style.display = 'none';
   }
 
-  // Dig rewards run_phone_farm (Phase 2). Digging itself still needs a Minotaur
-  // (rewarded later, at Phase 3), so a "needs Minotaur" banner covers the row
-  // until one is summoned; see the dig-overlay below.
-  const digUnlocked = phaseRunPhoneFarm;
+  // Dig rewards build_gas_engine (Phase 3). Digging itself still needs a
+  // Minotaur (also rewarded around Phase 3), so a "needs Minotaur" banner covers
+  // the row until one is summoned; see the dig-overlay below.
+  const digUnlocked = phaseGasTurbine;
   const ritualVisible = phaseRunPhoneFarm || phaseGasTurbine || blood30Done || dragonBoneDone;
   const ritualSection = document.getElementById('ritual-section')!;
   ritualSection.style.display = ritualVisible ? '' : 'none';
@@ -1017,8 +1017,8 @@ export function refreshUI(state: GameState) {
     state.autoWaterEnabled, state.blood >= SUMMON_UPGRADES.autoWater.bloodCost,
     `${SUMMON_UPGRADES.autoWater.bloodCost} blood`,
   );
-  // Autospawn — unlocked by the Construct-a-Gas-Turbine task (Phase 3).
-  refreshAutospawnButton(state, phaseGasTurbine);
+  // Autospawn — unlocked by the Run-a-Phone-Farm task (Phase 2).
+  refreshAutospawnButton(state, phaseRunPhoneFarm);
   // Goldblins → Goldblins x10 form a replace chain (like Autospawn): base
   // button hides once owned, x10 takes its place; x10 hides once owned.
   // Base Goldblins unlocks via the optional Earn-30-blood side-task; x10
@@ -1037,9 +1037,9 @@ export function refreshUI(state: GameState) {
     `${SUMMON_UPGRADES.goldgoblinsX10.bloodCost} blood`,
   );
 
-  // Dig row: unlocked by the Run-a-Phone-Farm task (Phase 2). Each direction
-  // is one-shot. First time the row appears, each button fades in. Until a
-  // Minotaur has been summoned (Phase 3 reward), a "needs Minotaur" banner
+  // Dig row: unlocked by the Construct-a-Gas-Turbine task (Phase 3). Each
+  // direction is one-shot. First time the row appears, each button fades in.
+  // Until a Minotaur has been summoned (also Phase 3), a "needs Minotaur" banner
   // covers the row and the buttons are disabled.
   if (state.minotaurs.size > 0) minotaurEverSummoned = true;
   const needsMinotaur = !minotaurEverSummoned;
