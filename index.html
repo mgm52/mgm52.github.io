@@ -785,18 +785,41 @@
         z-index: 1500;
         opacity: 1;
         transition: opacity 1400ms ease;
+        /* Staggered title-item fade tuning (see .fade-item below). */
+        --title-fade-dur: 900ms;
+        --title-fade-step: 500ms;
       }
       html.dev #title-screen { display: none; }
-      /* Title text + Play button — fade independently so we get
-         black → title → black → game on the play-click sequence. */
+      /* Title items fade in one-by-one (goblin → scaling → start/resume →
+         erase) on reveal, then fade out together on the play-click sequence
+         so we still get black → title → black → game. Each .fade-item starts
+         invisible; the cascade comes from a per-item --fade-step that scales
+         the transition-delay. The delay is only set in the .shown rule, so the
+         fade-out (when .shown is removed) runs with no delay = all together. */
       #title-screen .title-content {
         display: flex; flex-direction: column;
         align-items: center; gap: 32px;
-        opacity: 0;
-        transition: opacity 1400ms ease;
       }
-      #title-screen.shown .title-content { opacity: 1; }
       #title-screen.fading-out { opacity: 0; }
+      #title-screen .fade-item {
+        opacity: 0;
+        transition: opacity var(--title-fade-dur) ease;
+      }
+      #title-screen.shown .fade-item {
+        opacity: 1;
+        transition-delay: calc(var(--fade-step, 0) * var(--title-fade-step));
+      }
+      /* Buttons keep their hover background/border transitions; only opacity
+         carries the stagger delay (otherwise hover would lag by the delay). */
+      #title-screen .build-button.fade-item {
+        transition: background 0.1s, border-color 0.1s, opacity var(--title-fade-dur) ease;
+      }
+      #title-screen.shown .build-button.fade-item {
+        transition: background 0.1s, border-color 0.1s,
+                    opacity var(--title-fade-dur) ease calc(var(--fade-step, 0) * var(--title-fade-step));
+      }
+      /* Keep the dimmed look while a button is disabled (during the fill). */
+      #title-screen.shown .build-button.fade-item:disabled { opacity: 0.55; }
       #title-screen h1 {
         font-family: var(--font-display);
         font-size: clamp(32px, 7vw, 72px);
@@ -1170,8 +1193,8 @@
     </script>
     <div id="title-screen">
       <div class="title-content">
-        <h1>goblin scaling</h1>
-        <button id="title-resume" class="build-button" hidden>
+        <h1><span class="fade-item" style="--fade-step: 0">goblin</span> <span class="fade-item" style="--fade-step: 1">scaling</span></h1>
+        <button id="title-resume" class="build-button fade-item" style="--fade-step: 2" hidden>
           <div class="build-progress-track">
             <div class="seg"><div class="fill" id="title-resume-fill"></div></div>
           </div>
@@ -1182,7 +1205,7 @@
             </div>
           </div>
         </button>
-        <button id="title-erase" class="build-button" hidden>
+        <button id="title-erase" class="build-button fade-item" style="--fade-step: 3" hidden>
           <div class="build-progress-track">
             <div class="seg"><div class="fill" id="title-erase-fill"></div></div>
           </div>
@@ -1190,7 +1213,7 @@
             <div class="build-name">Erase Data</div>
           </div>
         </button>
-        <button id="title-play" class="build-button">
+        <button id="title-play" class="build-button fade-item" style="--fade-step: 2">
           <div class="build-progress-track">
             <div class="seg"><div class="fill" id="title-play-fill"></div></div>
           </div>

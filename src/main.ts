@@ -95,14 +95,15 @@ function showTitleScreen(savedAt: number | null = null): Promise<'new' | 'resume
       // touches the save itself, so wipe the unlock here too — otherwise an
       // old unlock would survive Erase Data.
       relockOptionsCog();
-      // 1400ms matches the .title-content opacity transition. Fade out, swap
-      // to the no-save layout, fade back in. Spawn's listener was attached at
-      // init so it stays live across the swap.
+      // 900ms matches --title-fade-dur (the .fade-item opacity transition;
+      // fade-out has no stagger delay). Fade out, swap to the no-save layout,
+      // fade back in. Spawn's listener was attached at init so it stays live
+      // across the swap.
       screen.classList.remove('shown');
       setTimeout(() => {
         renderLayout(false, null);
         requestAnimationFrame(() => screen.classList.add('shown'));
-      }, 1400);
+      }, 900);
     };
 
     renderLayout(savedAt !== null, savedAt);
