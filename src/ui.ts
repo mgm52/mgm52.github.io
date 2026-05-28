@@ -1145,7 +1145,7 @@ export function refreshUI(state: GameState) {
   hint.classList.toggle('bob-summon', state.bobPickingHole);
   if (state.bobPickingHole) {
     hint.style.display = 'block';
-    hint.textContent = 'choose a spawn point';
+    hint.textContent = 'choose a spawning hole';
   } else if (state.pendingStrike) {
     hint.style.display = 'block';
     hint.textContent = 'Tap to call down lightning · tap the button again or press ESC to cancel';
