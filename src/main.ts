@@ -496,6 +496,66 @@ async function main() {
   const descendHellHint = document.getElementById('descend-hell-hint');
   const ascendHellHint = document.getElementById('ascend-hell-hint');
 
+  // ─── Transition triggers ────────────────────────────────────────────
+  // Each kicks off one of the four ground↔space / ground↔hell transitions.
+  // Reached both from the hold-key logic in the frame loop and from tapping
+  // the on-screen hint (the only way to navigate on a touch device with no
+  // arrow keys).
+  function triggerAscendToSpace(now: number) {
+    centerSpaceCamera(ctx);
+    ctx.spaceCamera.y = 0; clampSpaceCamera(ctx);  // arrive looking down from the top
+    transitioning = true; transFrom = 0; transTo = 1; transStart = now; ascendHold = 0;
+    state.view = 'space';
+    state.pendingBuild = null; state.pendingStrike = false;
+    playSound('ritual', 0.7, 0.5);
+    playSound('online', 0.5, 0.3);
+  }
+  function triggerDescendToSurface(now: number) {
+    transitioning = true; transFrom = 1; transTo = 0; transStart = now; descendHold = 0;
+    playSound('ritual', 0.6, 0.6);
+  }
+  function triggerDescendToHell(now: number) {
+    // Center hell on the player's current ground-camera focus, fully zoomed in.
+    // The zoom-out reveal kicks off when the transition lands.
+    ctx.hellZoom = 0;
+    hellZoomFocusX = ctx.camera.x + ctx.viewport.width / (2 * ctx.renderScale);
+    hellZoomFocusY = ctx.camera.y + ctx.viewport.height / (2 * ctx.renderScale);
+    centerHellCameraOnWorld(ctx, hellZoomFocusX, hellZoomFocusY);
+    hellTransitioning = true; hellTransFrom = 0; hellTransTo = 1; hellTransStart = now;
+    descendHellHold = 0;
+    state.view = 'hell';
+    state.pendingBuild = null; state.pendingStrike = false;
+    playSound('ritual', 0.6, 0.6);
+  }
+  function triggerAscendFromHell(now: number) {
+    // On return: pivot the zoom-in around whatever world spot is currently at
+    // the centre of the hell viewport. Then reverse the descent transition.
+    const scale = currentHellScale(ctx);
+    const hellCenterX = ctx.hellCamera.x + ctx.viewport.width / (2 * scale);
+    const hellCenterY = ctx.hellCamera.y + ctx.viewport.height / (2 * scale);
+    hellZoomFocusX = hellCenterX - (HELL.width - WORLD.width) / 2;
+    hellZoomFocusY = hellCenterY - (HELL.height - WORLD.height) / 2;
+    hellZooming = true; hellZoomFrom = ctx.hellZoom; hellZoomTo = 0; hellZoomStart = now;
+    hellTransitioning = true; hellTransFrom = 1; hellTransTo = 0; hellTransStart = now;
+    ascendHellHold = 0;
+    playSound('ritual', 0.7, 0.5);
+  }
+
+  // On a touch device there are no arrow keys to hold, so let a tap on the
+  // (already edge-gated) hint fire the same transition. The `.visible` class is
+  // toggled by the frame loop precisely when the move is allowed, so gating on
+  // it keeps taps in lockstep with the hold-key path.
+  const tapHint = (el: HTMLElement | null, trigger: (now: number) => void) => {
+    el?.addEventListener('click', () => {
+      if (!el.classList.contains('visible')) return;
+      trigger(performance.now());
+    });
+  };
+  tapHint(ascendHint, triggerAscendToSpace);
+  tapHint(descendHint, triggerDescendToSurface);
+  tapHint(descendHellHint, triggerDescendToHell);
+  tapHint(ascendHellHint, triggerAscendFromHell);
+
   // Autosave to localStorage every SAVE_INTERVAL_MS, plus on visibilitychange
   // and pagehide so a closed tab loses at most this much progress.
   const SAVE_INTERVAL_MS = 10_000;
@@ -685,10 +745,7 @@ async function main() {
       const atBottom = ctx.spaceCamera.y >= spaceCameraMaxY(ctx) - 1;
       if (downHeld && atBottom) {
         descendHold += dt;
-        if (descendHold >= SPACE_HOLD_MS) {
-          transitioning = true; transFrom = 1; transTo = 0; transStart = now; descendHold = 0;
-          playSound('ritual', 0.6, 0.6);
-        }
+        if (descendHold >= SPACE_HOLD_MS) triggerDescendToSurface(now);
       } else { descendHold = 0; }
       ascendHint?.classList.remove('visible');
       descendHint?.classList.toggle('visible', atBottom && !transitioning);
@@ -710,21 +767,7 @@ async function main() {
       const atTop = ctx.hellCamera.y <= 1;
       if (upHeld && atTop) {
         ascendHellHold += dt;
-        if (ascendHellHold >= SPACE_HOLD_MS) {
-          // On return: pivot the zoom-in around whatever world spot is
-          // currently at the centre of the hell viewport. Then reverse the
-          // descent transition.
-          const scale = currentHellScale(ctx);
-          // (hell-coord at viewport centre) → world coord = hell - offset
-          const hellCenterX = ctx.hellCamera.x + ctx.viewport.width / (2 * scale);
-          const hellCenterY = ctx.hellCamera.y + ctx.viewport.height / (2 * scale);
-          hellZoomFocusX = hellCenterX - (HELL.width - WORLD.width) / 2;
-          hellZoomFocusY = hellCenterY - (HELL.height - WORLD.height) / 2;
-          hellZooming = true; hellZoomFrom = ctx.hellZoom; hellZoomTo = 0; hellZoomStart = now;
-          hellTransitioning = true; hellTransFrom = 1; hellTransTo = 0; hellTransStart = now;
-          ascendHellHold = 0;
-          playSound('ritual', 0.7, 0.5);
-        }
+        if (ascendHellHold >= SPACE_HOLD_MS) triggerAscendFromHell(now);
       } else { ascendHellHold = 0; }
       ascendHint?.classList.remove('visible');
       descendHint?.classList.remove('visible');
@@ -746,31 +789,11 @@ async function main() {
       const atBottom = ctx.camera.y >= groundMaxY - 1;
       if (state.spaceUnlocked && upHeld && atTop) {
         ascendHold += dt;
-        if (ascendHold >= SPACE_HOLD_MS) {
-          centerSpaceCamera(ctx);
-          ctx.spaceCamera.y = 0; clampSpaceCamera(ctx);  // arrive looking down from the top
-          transitioning = true; transFrom = 0; transTo = 1; transStart = now; ascendHold = 0;
-          state.view = 'space';
-          state.pendingBuild = null; state.pendingStrike = false;
-          playSound('ritual', 0.7, 0.5);
-          playSound('online', 0.5, 0.3);
-        }
+        if (ascendHold >= SPACE_HOLD_MS) triggerAscendToSpace(now);
       } else { ascendHold = 0; }
       if (state.hellUnlocked && downHeld && atBottom) {
         descendHellHold += dt;
-        if (descendHellHold >= SPACE_HOLD_MS) {
-          // Center hell on the player's current ground-camera focus, fully
-          // zoomed in. The zoom-out reveal kicks off when the transition lands.
-          ctx.hellZoom = 0;
-          hellZoomFocusX = ctx.camera.x + ctx.viewport.width / (2 * ctx.renderScale);
-          hellZoomFocusY = ctx.camera.y + ctx.viewport.height / (2 * ctx.renderScale);
-          centerHellCameraOnWorld(ctx, hellZoomFocusX, hellZoomFocusY);
-          hellTransitioning = true; hellTransFrom = 0; hellTransTo = 1; hellTransStart = now;
-          descendHellHold = 0;
-          state.view = 'hell';
-          state.pendingBuild = null; state.pendingStrike = false;
-          playSound('ritual', 0.6, 0.6);
-        }
+        if (descendHellHold >= SPACE_HOLD_MS) triggerDescendToHell(now);
       } else { descendHellHold = 0; }
       descendHint?.classList.remove('visible');
       ascendHint?.classList.toggle('visible', state.spaceUnlocked && atTop && !transitioning);

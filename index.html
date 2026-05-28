@@ -474,6 +474,15 @@
       #descend-hell-hint { bottom: 14px; }
       #ascend-hell-hint { top: 14px; }
       #descend-hell-hint.visible, #ascend-hell-hint.visible { opacity: 1; }
+      /* On touch there are no arrow keys, so the navigation hints double as
+         tap targets (handlers in main.ts). Only the visible (edge-gated) hint
+         accepts taps; enlarge the hit area a touch for fingers. */
+      @media (pointer: coarse) {
+        #ascend-hint.visible, #descend-hint.visible,
+        #descend-hell-hint.visible, #ascend-hell-hint.visible {
+          pointer-events: auto; cursor: pointer; padding: 14px 22px;
+        }
+      }
       /* From orbit you can't build or summon — dim those panels out. */
       body.space-view #panel-summon,
       body.space-view #panel-build {
