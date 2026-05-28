@@ -271,6 +271,7 @@ type MinotaurView = {
 // hellDemonLayer, positioned at the demon's absolute hell coordinates.
 type DemonView = {
   container: Container;
+  shadow: Sprite;
   sprite: Sprite;
   selectionRing: Graphics;
 };
@@ -982,6 +983,10 @@ function makeMinotaurView(): MinotaurView {
 
 function makeDemonView(): DemonView {
   const container = new Container();
+  // Soft foot shadow grounds the giant in the abyss — same radial-gradient
+  // ellipse the goblins/minotaurs use, sat behind everything else.
+  const shadow = new Sprite(getShadowTexture());
+  shadow.anchor.set(0.5);
   const ring = new Graphics();
   ring.circle(0, 0, DEMON.displayPx * 0.4).stroke({ width: 3, color: 0xff5a4a });
   ring.visible = false;
@@ -989,9 +994,10 @@ function makeDemonView(): DemonView {
   const sprite = new Sprite(startTex);
   sprite.anchor.set(0.5);
   sprite.tint = 0x7a2014; // deep infernal red — bigger and darker than a Minotaur
+  container.addChild(shadow);
   container.addChild(ring);
   container.addChild(sprite);
-  return { container, sprite, selectionRing: ring };
+  return { container, shadow, sprite, selectionRing: ring };
 }
 
 // No dragon sprite sheet ships, so the dragon is a placeholder tile: an orange
@@ -2378,6 +2384,14 @@ export function render(state: GameState, ctx: RenderContext) {
     }
     v.container.position.set(d.hx, d.hy);
     applyRingFlash(v.selectionRing, d.selected, d.commandFlashAt, state.now);
+    v.shadow.visible = opts.goblinShadow;
+    if (opts.goblinShadow) {
+      // The demon sprite isn't raised the way Minotaurs are, so push the
+      // shadow down to its feet (≈0.55 of its height) rather than 0.32.
+      v.shadow.position.set(0, DEMON.displayPx * 0.55);
+      const sy = DEMON.displayPx / 64;
+      v.shadow.scale.set(sy * 0.75, sy);
+    }
     const sheet = minotaurWalkSheet;
     if (sheet) {
       const dir = dirIndex(sheet.meta, d.facing);

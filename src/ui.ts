@@ -5,7 +5,7 @@ import {
   SPAWN_HINT_NO_TASK_SEC, SUMMON_UPGRADES, WATER_HINT_DELAY_SEC, digBloodCost, MINOTAUR, minotaurBloodCost, TINYTAUR, formatPower,
 } from './config';
 import {
-  Building, Cell, Demon, DragonState, GameState, Goblin, GoblinState, SpaceBuilding, WaterSource,
+  Building, Cell, Demon, DragonState, GameState, Ghost, Goblin, GoblinState, SpaceBuilding, WaterSource,
   appendLog, buildingCenter, buildingLabel, buildingMoneyCost, cellCenter, cellKey, countIdle, defOf, digDirection,
   getSpawnCapacity, holeBlockedByBuilding, isCellBlocked, isInBounds,
   maintainerCount, nextBuildingDisplayNum, occupyCell, waterCarrierCount,
@@ -1231,6 +1231,13 @@ function refreshInfoPanel(state: GameState) {
   const selectedBuildings = [...state.buildings.values()].filter((b) => b.selected);
   const selectedWater = [...state.waterSources.values()].find((w) => w.selected) ?? null;
   const selectedSpace = [...state.spaceBuildings.values()].filter((sb) => sb.selected);
+  const selectedGhosts = state.ghosts.filter((g) => g.selected);
+  // In hell a tap on the portal mirror selects the underlying Hell Portal
+  // building. Show it its own beacon panel (no ground-only Destroy/commands)
+  // rather than the regular building card.
+  const selectedHellPortal = state.view === 'hell'
+    ? (selectedBuildings.find((b) => b.kind === 'hell_portal') ?? null)
+    : null;
 
   const destroyBtn = document.getElementById('info-destroy')!;
   const killBtn = document.getElementById('info-kill')!;
@@ -1239,6 +1246,16 @@ function refreshInfoPanel(state: GameState) {
   const selectedDemon = [...state.demons.values()].find((d) => d.selected) ?? null;
   if (selectedDemon) {
     showDemon(state, selectedDemon, panel, portrait, name, stateEl, extra);
+  } else if (selectedHellPortal) {
+    showHellPortal(selectedHellPortal, panel, portrait, name, stateEl, extra);
+  } else if (selectedGhosts.length === 1) {
+    showGhost(selectedGhosts[0], panel, portrait, name, stateEl, extra);
+  } else if (selectedGhosts.length > 1) {
+    panel.classList.add('visible');
+    portrait.innerHTML = `<div class="portrait-goblin" style="background:#0c1018;border-color:#8fa6cc;color:#c6d4ee">☁</div>`;
+    name.textContent = `${selectedGhosts.length} souls`;
+    stateEl.textContent = '';
+    extra.innerHTML = `<span style="color:#6a7080">${hellCommandHint()}</span>`;
   } else if (selectedSpace.length === 1) {
     showSpaceBuilding(state, selectedSpace[0], panel, portrait, name, stateEl, extra);
   } else if (selectedSpace.length > 1) {
@@ -1340,6 +1357,43 @@ function showDemon(_state: GameState, d: Demon, panel: HTMLElement, portrait: HT
   name.textContent = 'Minotaur of the Pit';
   stateEl.textContent = d.busyWith !== null ? 'Locked in parlay' : 'Pacing the abyss';
   extra.innerHTML = `<span style="color:#ff4a4a">You cannot command this creature, only parlay</span>`;
+}
+
+// A drifting soul in the hell view. No commands list — the hint covers how to
+// steer it (walk, or onto the demon to parlay).
+function showGhost(g: Ghost, panel: HTMLElement, portrait: HTMLElement,
+                   name: HTMLElement, stateEl: HTMLElement, extra: HTMLElement) {
+  panel.classList.add('visible');
+  const glyph = g.bob ? 'B' : g.kind === 'minotaur' ? 'M' : g.kind === 'dragon' ? 'D' : 'G';
+  portrait.innerHTML = `<div class="portrait-goblin" style="background:#0c1018;border-color:#8fa6cc;color:#c6d4ee">${glyph}</div>`;
+  const kindLabel = g.kind === 'minotaur' ? 'Minotaur' : g.kind === 'dragon' ? 'Dragon' : 'Goblin';
+  name.textContent = g.bob ? "Bob's soul" : `${kindLabel} soul`;
+  stateEl.textContent = g.parlayDemonId !== undefined
+    ? 'Drawn toward the demon'
+    : g.goal ? 'Trudging through the abyss' : 'Adrift in the abyss';
+  extra.innerHTML = `<span style="color:#6a7080">${hellCommandHint()}</span>`;
+}
+
+// The Hell Portal seen from below — its hell-side mirror. Named for what it is
+// down here; the overworld build menu keeps the ominous "???".
+function showHellPortal(b: Building, panel: HTMLElement, portrait: HTMLElement,
+                        name: HTMLElement, stateEl: HTMLElement, extra: HTMLElement) {
+  panel.classList.add('visible');
+  const cls = b.state === 'constructing' ? 'constructing' : 'active';
+  portrait.innerHTML = `<div class="portrait-building hell_portal ${cls}">???</div>`;
+  name.textContent = 'Hell Beacon';
+  stateEl.textContent = b.state === 'constructing'
+    ? 'A rift tearing open above'
+    : 'A rift torn between worlds';
+  extra.innerHTML = `<span style="color:#ff8a6a">Its light pierces down into the abyss</span>`;
+}
+
+// Hint for steering souls in the hell view — long-tap on touch, right-click
+// (or space) otherwise, mirroring the ground command hints.
+function hellCommandHint(): string {
+  return TOUCH_PRIMARY
+    ? 'Long tap to send souls walking (or onto the demon to parlay)'
+    : 'Right click to send souls walking (or onto the demon to parlay)';
 }
 
 function showHole(state: GameState, panel: HTMLElement, portrait: HTMLElement,

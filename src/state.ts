@@ -901,6 +901,24 @@ export function demonAtHell(state: GameState, hx: number, hy: number): Demon | n
   return best;
 }
 
+// Topmost Hell Portal whose hell-side mirror covers a hell-coord point, or
+// null. The mirror sits at the portal's world centre mapped into hell space
+// (matching render.ts's worldToHell offset); we treat its footprint as a
+// generous square so the beacon is easy to tap in the abyss.
+export function hellPortalAt(state: GameState, hx: number, hy: number): Building | null {
+  const offX = (HELL.width - WORLD.width) / 2;
+  const offY = (HELL.height - WORLD.height) / 2;
+  for (const b of state.buildings.values()) {
+    if (b.kind !== 'hell_portal') continue;
+    const ctr = buildingCenter(b);
+    const reach = defOf(b).size;
+    if (Math.abs(ctr.x + offX - hx) <= reach && Math.abs(ctr.y + offY - hy) <= reach) {
+      return b;
+    }
+  }
+  return null;
+}
+
 // World coordinates that map (via worldToHell) to a hell-coord point — the
 // inverse of the offset baked into render.ts's worldToHellX/Y. Used to place a
 // hell-flagged effect at a given hell position.

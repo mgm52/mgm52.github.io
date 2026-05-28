@@ -36,12 +36,11 @@ const REBUKE_MS = 1700;
 export function demonRebuke(demon: Demon, text: string): void {
   const els = getEls();
   if (!els) return;
-  const { overlay, speech, speaker, lineEl } = els;
+  const { overlay, speech, lineEl } = els;
   if (overlay.classList.contains('visible') && !overlay.classList.contains('rebuke')) return;
   if (rebukeTimer !== null) { clearTimeout(rebukeTimer); rebukeTimer = null; }
   parlaySpeaker = { kind: 'demon', demon };
   speech.className = 'demon';
-  speaker.textContent = LABEL.demon;
   lineEl.textContent = text;
   speech.classList.add('done');               // no caret — it's an instant bark
   overlay.classList.add('visible', 'speaking', 'rebuke');
@@ -54,7 +53,6 @@ export function demonRebuke(demon: Demon, text: string): void {
   }, REBUKE_MS);
 }
 
-const LABEL: Record<Speaker, string> = { demon: 'Demon', goblin: 'Goblin', bob: 'Bob' };
 // A regular goblin can only manage one of these.
 const GIBBERISH = ['gleh', 'goink', 'grah', 'groh', 'gonk'];
 
@@ -151,7 +149,7 @@ function strikeGhostBack(state: GameState, ghost: Ghost): void {
 export async function runDemonDialogue(state: GameState, demon: Demon, ghost: Ghost): Promise<void> {
   const els = getEls();
   if (!els) return;
-  const { overlay, speech, speaker, lineEl, yesBtn, noBtn, clickWall } = els;
+  const { overlay, speech, lineEl, yesBtn, noBtn, clickWall } = els;
 
   // autoMs: auto-advance after typing instead of waiting for a click.
   // hold: leave the line on screen (no click/auto, speech stays visible) — used
@@ -161,7 +159,6 @@ export async function runDemonDialogue(state: GameState, demon: Demon, ghost: Gh
     // the approaching soul for goblin/bob lines.
     parlaySpeaker = who === 'demon' ? { kind: 'demon', demon } : { kind: 'ghost', ghost };
     speech.className = who;            // colour by speaker (also clears prior state)
-    speaker.textContent = LABEL[who];
     lineEl.innerHTML = '';
     overlay.classList.add('speaking');
     const segs = parseEmphasis(text);
@@ -214,7 +211,7 @@ export async function runDemonDialogue(state: GameState, demon: Demon, ghost: Gh
     if (ghost.bob) {
       await say('bob', 'hello mate');
       await say('demon', 'a clumsy wield of language');
-      await say('demon', 'have you *slayed two dragons in one strike*?', { hold: true });
+      await say('demon', 'have you *slain two dragons in one strike*?', { hold: true });
       const yes = await ask();
       if (!yes) {
         await say('demon', 'begone and be useful');
