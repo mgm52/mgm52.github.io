@@ -2,10 +2,10 @@ import { playSound, playMinotaurCommand } from './audio';
 import {
   AUTOSPAWN_TIERS, BUILDABLE_KINDS, BUILDING_DEFS, BuildingKind, DRAG_SELECT_HINT_DELAY_SEC, MULTI_SPAWN_HINT_DELAY_SEC,
   DRAGON, GOBLIN, LIGHTNING, SPAWN_HINT_NO_SPAWN_SEC,
-  SPAWN_HINT_NO_TASK_SEC, SUMMON_UPGRADES, WATER_HINT_DELAY_SEC, digBloodCost, MINOTAUR, minotaurBloodCost, TINYTAUR, formatPower,
+  SPAWN_HINT_NO_TASK_SEC, SUMMON_UPGRADES, WATER_HINT_DELAY_SEC, digBloodCost, MINOTAUR, minotaurBloodCost, TINYTAUR, formatPower, SOUL_SIGIL,
 } from './config';
 import {
-  Building, Cell, Demon, DragonState, GameState, Ghost, Goblin, GoblinState, SpaceBuilding, WaterSource,
+  Building, Cell, Demon, DragonState, GameState, Ghost, Goblin, GoblinState, SoulChair, SpaceBuilding, WaterSource,
   appendLog, buildingCenter, buildingLabel, buildingMoneyCost, cellCenter, cellKey, countIdle, defOf, digDirection,
   earnDragonBone, getSpawnCapacity, holeBlockedByBuilding, isCellBlocked, isInBounds,
   maintainerCount, nextBuildingDisplayNum, occupyCell, waterCarrierCount,
@@ -267,8 +267,8 @@ const TASKS: Task[] = [
   {
     id: 'build_hypercentre',
     text: 'Build a Hypercentre',
-    // The Hell Portal ("???") opens up alongside the Dragon Beacon — no longer
-    // gated behind ascending.
+    // The Hell Portal ("Weird power source") opens up alongside the Dragon
+    // Beacon — no longer gated behind ascending.
     unlocks: ['dragon_beacon', 'hell_portal'],
     isDone: (s) => {
       for (const b of s.buildings.values()) {
@@ -1268,10 +1268,13 @@ function refreshInfoPanel(state: GameState) {
   destroyBtn.style.display = 'none';
   killBtn.style.display = 'none';
   const selectedDemon = [...state.demons.values()].find((d) => d.selected) ?? null;
+  const selectedChair = state.soulChairs.find((c) => c.selected) ?? null;
   if (selectedDemon) {
     showDemon(state, selectedDemon, panel, portrait, name, stateEl, extra);
   } else if (selectedHellPortal) {
-    showHellPortal(selectedHellPortal, panel, portrait, name, stateEl, extra);
+    showHellPortal(state, selectedHellPortal, panel, portrait, name, stateEl, extra);
+  } else if (selectedChair) {
+    showSoulChair(state, selectedChair, panel, portrait, name, stateEl, extra);
   } else if (selectedGhosts.length === 1) {
     showGhost(selectedGhosts[0], panel, portrait, name, stateEl, extra);
   } else if (selectedGhosts.length > 1) {
@@ -1399,17 +1402,54 @@ function showGhost(g: Ghost, panel: HTMLElement, portrait: HTMLElement,
 }
 
 // The Hell Portal seen from below — its hell-side mirror. Named for what it is
-// down here; the overworld build menu keeps the ominous "???".
-function showHellPortal(b: Building, panel: HTMLElement, portrait: HTMLElement,
+// down here; the portrait keeps an ominous "???" glyph. Mirrors a building info
+// card: a state line plus a couple of stat lines (its own output + the upkeep
+// it asks of the player).
+function showHellPortal(_state: GameState, b: Building, panel: HTMLElement, portrait: HTMLElement,
                         name: HTMLElement, stateEl: HTMLElement, extra: HTMLElement) {
   panel.classList.add('visible');
   const cls = b.state === 'constructing' ? 'constructing' : 'active';
   portrait.innerHTML = `<div class="portrait-building hell_portal ${cls}">???</div>`;
-  name.textContent = 'Hell Beacon';
+  const def = defOf(b);
+  name.textContent = `${def.name} #${b.displayNum}`;
   stateEl.textContent = b.state === 'constructing'
     ? 'A rift tearing open above'
     : 'A rift torn between worlds';
-  extra.innerHTML = `<span style="color:#ff8a6a">Its light pierces down into the abyss</span>`;
+  const power = def.powerOutput === 0
+    ? 'Power output: +0 W'
+    : def.powerOutput > 0
+      ? `Power output: ${formatPower(def.powerOutput)}`
+      : `Power draw: ${formatPower(-def.powerOutput)}`;
+  extra.innerHTML = [
+    `<span style="color:#ff8a6a">Its light pierces down into the abyss</span>`,
+    `<span style="color:#8acfff">${power}</span>`,
+  ].join('<br>');
+}
+
+// A soul chair in the abyssal sigil — an info card in the style of a building's.
+// Shows whether it's bound, what it's worth, and how close the sigil is to its
+// 25 GW payout.
+function showSoulChair(state: GameState, c: SoulChair, panel: HTMLElement, portrait: HTMLElement,
+                       name: HTMLElement, stateEl: HTMLElement, extra: HTMLElement) {
+  panel.classList.add('visible');
+  const cls = c.occupied ? 'active' : 'constructing';
+  portrait.innerHTML = `<div class="portrait-building hell_portal ${cls}">${c.occupied ? '✦' : '○'}</div>`;
+  const filled = state.soulChairs.filter((sc) => sc.occupied).length;
+  const complete = filled === SOUL_SIGIL.count;
+  name.textContent = `Soul Chair #${c.index + 1}`;
+  stateEl.textContent = c.occupied
+    ? (complete ? 'Bound — the sigil is complete' : 'Bound to a soul')
+    : c.claimedBy !== undefined ? 'A soul approaches' : 'Empty — needs 1 soul';
+  const per = formatPower(SOUL_SIGIL.powerPerChair);
+  const total = formatPower(SOUL_SIGIL.count * SOUL_SIGIL.powerPerChair);
+  const lines = [
+    `<span style="color:#8acfff">Output: ${per} (only while all ${SOUL_SIGIL.count} are bound)</span>`,
+    `<span style="color:#ff8a6a">Sigil: ${filled}/${SOUL_SIGIL.count} chairs bound${complete ? ` — ${total} flowing` : ''}</span>`,
+  ];
+  if (!c.occupied) {
+    lines.push(`<span style="color:#6a7080">${TOUCH_PRIMARY ? 'Long tap' : 'Right click'} the chair to send a soul to it</span>`);
+  }
+  extra.innerHTML = lines.join('<br>');
 }
 
 // Hint for steering souls in the hell view — long-tap on touch, right-click

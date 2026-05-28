@@ -1,7 +1,7 @@
 import * as devalue from 'devalue';
 import { compressToUTF16, decompressFromUTF16 } from 'lz-string';
 import {
-  Building, GameState, createDemons, emptyBuildingCounts, pruneAllAssignedGoblins, rebuildWalls,
+  Building, GameState, createDemons, createSoulChairs, emptyBuildingCounts, pruneAllAssignedGoblins, rebuildWalls,
 } from './state';
 
 const STORAGE_KEY = 'rts.savegame.v1';
@@ -112,6 +112,13 @@ export function loadGame(): { state: GameState; savedAt: number } | null {
       d.busyWith = null;
       d.selected = false;
     }
+    // Soul sigil — added with the soul-chair mechanic. Seed for older saves; a
+    // pending claim is ephemeral, so clear it (the seated `occupied` flag and
+    // `soulSigilCompletedAt` persist).
+    env.state.soulChairs ??= createSoulChairs();
+    for (const c of env.state.soulChairs) { c.claimedBy = undefined; c.selected = false; }
+    env.state.bobParlayed ??= false;
+    env.state.hellHintShown ??= false;
     env.state.slewTwoDragonsInOneStrike ??= false;
     env.state.lightningUnlocked ??= false;
     // Pre-existing Hell Portals from saves predating activatedAt get one set

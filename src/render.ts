@@ -9,7 +9,7 @@ extensions.add(GifAsset);
 // game seconds. Used as a manual sprite-sheet — we pick the frame ourselves
 // each tick based on (state.now - spawnAt) so playback always starts at frame 0.
 type DeathFrames = { textures: Texture[]; ends: number[]; duration: number };
-import { AMBIENT_DRAGON, BUILDING_DEFS, BuildingKind, CELL, COLS, DEMON, DRAGON, GOBLIN, HELL, RENDER_SCALE, ROWS, MINOTAUR, SPACE, TINYTAUR, WORLD } from './config';
+import { AMBIENT_DRAGON, BUILDING_DEFS, BuildingKind, CELL, COLS, DEMON, DRAGON, GOBLIN, HELL, RENDER_SCALE, ROWS, MINOTAUR, SOUL_SIGIL, SPACE, TINYTAUR, WORLD } from './config';
 import { ensureFontLoaded, fontFamilyById, getOptions, onOptionsChange, type FontConfig, type Options } from './options';
 import { Building, Demon, Dragon, GameState, Ghost, Goblin, HOLE_SIZE, Minotaur, SpaceBuilding, WaterSource, buildingCenter, cellCenter, defOf, holeCenter, isInPlayCell, maintainerCount } from './state';
 import { getParlaySpeaker } from './demon-dialogue';
@@ -428,6 +428,14 @@ export type RenderContext = {
   // overworld hell_portal. Built/destroyed in lockstep with their counterpart.
   hellPortalMirrorLayer: Container;
   hellPortalMirrors: Map<number, Container>;
+  // The soul sigil: a central inner ring + five chairs + the pentagram edges
+  // that spring between filled chairs. Two Graphics (lines/ring + chair discs)
+  // are redrawn each frame for the pulse/seat/completion VFX; the "needs 1 soul"
+  // labels are Text objects made once and toggled by occupancy.
+  soulSigilLayer: Container;
+  soulSigilGfx: Graphics;
+  soulChairGfx: Graphics;
+  soulChairLabels: Map<number, Text>;
   // Death-effect splatters that ride in the hell scene (the "born in blood"
   // appearance of a ghost). Drawn from the same DeathEffect entries flagged
   // hell:true; the renderer maps their world coords into hell coords.
@@ -581,6 +589,11 @@ export async function createRender(parent: HTMLElement, state: GameState): Promi
   const hellGhostLayer = new Container();
   hellGhostLayer.cullableChildren = true;
   const hellPortalMirrorLayer = new Container();
+  const soulSigilLayer = new Container();
+  const soulSigilGfx = new Graphics();
+  const soulChairGfx = new Graphics();
+  soulSigilLayer.addChild(soulSigilGfx);  // ring + pentagram edges behind…
+  soulSigilLayer.addChild(soulChairGfx);  // …the chair discs
   const hellEffectsLayer = new Container();
   hellEffectsLayer.cullableChildren = true;
   const hellSideBeamGfx = new Graphics();
@@ -590,6 +603,7 @@ export async function createRender(parent: HTMLElement, state: GameState): Promi
   // finally the upward portal beams.
   hellLayer.addChild(hellBg);
   hellLayer.addChild(hellPortalMirrorLayer);
+  hellLayer.addChild(soulSigilLayer);
   hellLayer.addChild(hellGhostLayer);
   hellLayer.addChild(demonLayer);
   hellLayer.addChild(hellEffectsLayer);
@@ -686,6 +700,7 @@ export async function createRender(parent: HTMLElement, state: GameState): Promi
     hellSideBeamGfx,
     hellPortalMirrorLayer,
     hellPortalMirrors: new Map(),
+    soulSigilLayer, soulSigilGfx, soulChairGfx, soulChairLabels: new Map(),
     hellEffectsLayer,
     holeGfx, holeRing, bobPickerGfx,
     floatersLayer, floaterViews: new Map(),
@@ -1273,6 +1288,131 @@ function makeHellPortalMirror(b: Building): Container {
   return c;
 }
 
+// The five pentagram edges, as index pairs. Each chair links to the one two
+// steps around the ring (0-2-4-1-3-0), which is exactly the five-pointed star.
+const SIGIL_EDGES: readonly [number, number][] = [[0, 2], [2, 4], [4, 1], [1, 3], [3, 0]];
+
+// Redraw the soul sigil every frame: the central inner ring, the pentagram
+// edges between filled chairs, the chair discs (dark when empty, glowing when
+// filled), the seat-in burst, and — once all five are bound — a looping ritual
+// VFX (a wave of pulses chasing around the ring + a spark racing the star, plus
+// a one-shot shockwave on completion). The "needs 1 soul" labels are toggled
+// here too.
+function syncSoulSigil(ctx: RenderContext, state: GameState): void {
+  const chairs = state.soulChairs;
+  if (!chairs || chairs.length === 0) return;
+  const now = state.now;
+  const { center, innerRadius, chairRadius } = SOUL_SIGIL;
+  const completed = state.soulSigilCompletedAt !== undefined;
+  const compAge = completed ? now - (state.soulSigilCompletedAt as number) : 0;
+
+  const ring = ctx.soulSigilGfx;
+  ring.clear();
+  // Central inner ring the chairs surround — a doubled occult outline that
+  // brightens once the sigil is complete.
+  const ringGlow = completed ? 0.55 + 0.25 * Math.sin(now * 3) : 0.4;
+  ring.circle(center.x, center.y, innerRadius).stroke({ width: 4, color: 0xff2030, alpha: ringGlow });
+  ring.circle(center.x, center.y, innerRadius - 7).stroke({ width: 2, color: 0xff6048, alpha: ringGlow * 0.7 });
+
+  // A line links every pair of filled chairs (the complete graph), sketched in
+  // progressively as souls are seated. The five "inner" lines that skip a chair
+  // form the pentagram star and stay bright; the five "outer" perimeter lines
+  // between adjacent chairs are drawn thinner + fainter so the star reads on top.
+  for (let a = 0; a < chairs.length; a++) {
+    for (let b = a + 1; b < chairs.length; b++) {
+      const ca = chairs[a], cb = chairs[b];
+      if (!ca.occupied || !cb.occupied) continue;
+      const gap = Math.min(Math.abs(a - b), chairs.length - Math.abs(a - b));
+      const isStar = gap === 2; // skip-one pairs are the pentagram
+      const alpha = isStar ? (completed ? 0.85 : 0.6) : (completed ? 0.4 : 0.26);
+      ring.moveTo(ca.hx, ca.hy).lineTo(cb.hx, cb.hy)
+        .stroke({ width: isStar ? 5 : 3, color: 0xff2030, alpha });
+      if (completed && isStar) {
+        // A brighter inner thread pulses over the star edges.
+        const a2 = 0.4 + 0.35 * Math.sin(now * 4);
+        ring.moveTo(ca.hx, ca.hy).lineTo(cb.hx, cb.hy).stroke({ width: 2, color: 0xffe0a0, alpha: a2 });
+      }
+    }
+  }
+
+  // Completed-sigil flourishes.
+  if (completed) {
+    // Spark racing around the star path (one full lap every ~5s).
+    const lap = (now * 0.2) % 1;
+    const seg = Math.floor(lap * SIGIL_EDGES.length);
+    const segT = lap * SIGIL_EDGES.length - seg;
+    const [ea, eb] = SIGIL_EDGES[seg];
+    const ca = chairs[ea], cb = chairs[eb];
+    if (ca?.occupied && cb?.occupied) {
+      const sx = ca.hx + (cb.hx - ca.hx) * segT;
+      const sy = ca.hy + (cb.hy - ca.hy) * segT;
+      ring.circle(sx, sy, 16).fill({ color: 0xffe6b0, alpha: 0.9 });
+      ring.circle(sx, sy, 30).fill({ color: 0xff8030, alpha: 0.35 });
+    }
+    // One-shot shockwave expanding from the centre the moment it completes.
+    if (compAge < 1.6) {
+      const r = innerRadius + compAge * 900;
+      ring.circle(center.x, center.y, r).stroke({ width: 7, color: 0xffd060, alpha: (1 - compAge / 1.6) * 0.9 });
+    }
+  }
+
+  // Chair discs + labels.
+  const cg = ctx.soulChairGfx;
+  cg.clear();
+  for (const chair of chairs) {
+    const { hx, hy, occupied, index } = chair;
+    // Dark base disc with a rim that lights up when bound.
+    cg.circle(hx, hy, chairRadius).fill({ color: 0x140306, alpha: 0.92 });
+    cg.circle(hx, hy, chairRadius).stroke({
+      width: 3,
+      color: occupied ? 0xff4a30 : 0x6a2024,
+      alpha: occupied ? 0.95 : 0.6,
+    });
+    if (occupied) {
+      // Glowing ember core. Once complete, the pulse phase is offset per chair
+      // so a wave of brightening chases around the ring.
+      const pulse = completed
+        ? 0.55 + 0.45 * Math.sin(now * 4 - index * 1.4)
+        : 0.5 + 0.25 * Math.sin(now * 2.5);
+      cg.circle(hx, hy, chairRadius * 0.55).fill({ color: 0xff5a2a, alpha: 0.5 * pulse + 0.2 });
+      cg.circle(hx, hy, chairRadius * 0.28).fill({ color: 0xffd6a0, alpha: 0.45 * pulse + 0.25 });
+    }
+    // Selection ring — matches the gold highlight other selected things get.
+    if (chair.selected) {
+      cg.circle(hx, hy, chairRadius + 8).stroke({ width: 3, color: 0xffd96b, alpha: 0.95 });
+    }
+    // Seat-in burst: a quick expanding ring when the soul first lands.
+    if (chair.filledAt !== undefined) {
+      const age = now - chair.filledAt;
+      if (age >= 0 && age < 0.9) {
+        cg.circle(hx, hy, chairRadius + age * 240).stroke({
+          width: 3, color: 0xff8040, alpha: (1 - age / 0.9) * 0.85,
+        });
+      }
+    }
+
+    // "needs 1 soul" label sat just above the chair, the way building name
+    // tags ride above their footprint.
+    let label = ctx.soulChairLabels.get(chair.id);
+    if (!label) {
+      label = new Text({
+        text: 'needs 1 soul',
+        style: {
+          fontFamily: fontFamilyById(getOptions().fonts.buildingLabel.family).css,
+          fontSize: 30,
+          fill: 0xff8a7a,
+          fontWeight: 'bold',
+        },
+      });
+      label.anchor.set(0.5, 1);
+      ctx.soulSigilLayer.addChild(label);
+      ctx.soulChairLabels.set(chair.id, label);
+    }
+    label.position.set(hx, hy - chairRadius - 6);
+    label.visible = !occupied;
+  }
+}
+
 function makeWaterView(w: WaterSource): WaterView {
   const c = new Container();
   const body = new Graphics();
@@ -1324,10 +1464,7 @@ function makeBuildingView(b: Building): BuildingView {
   const labelCfg: FontConfig = o.fonts.buildingLabel;
   const warningCfg: FontConfig = o.fonts.buildingWarning;
   const gs = o.globalFontScale;
-  // Hell Portal's display name is the deliberately-ominous '???' — but echoing
-  // that literal on the map ground reads as a debug placeholder. Keep the
-  // sidebar/build-menu name intact and just blank the on-building label.
-  const labelText = b.kind === 'hell_portal' ? '' : def.short;
+  const labelText = def.short;
   const label = new Text({
     text: labelText,
     style: {
@@ -2329,6 +2466,8 @@ export function render(state: GameState, ctx: RenderContext) {
       (hy) => hellOriginY + hy * scale,
     );
   }
+  // Soul sigil: inner ring, chairs, pentagram edges + ritual VFX.
+  syncSoulSigil(ctx, state);
   // Sync ghost views with state.ghosts. Each ghost drifts downward at
   // hellGhostFallSpeed (px/sec) from its hell-mapped spawn point; the sim
   // tick prunes ghosts whose y has crossed HELL.height so a view that
@@ -2389,9 +2528,10 @@ export function render(state: GameState, ctx: RenderContext) {
     applyRingFlash(v.selectionRing, d.selected, d.commandFlashAt, state.now);
     v.shadow.visible = opts.goblinShadow;
     if (opts.goblinShadow) {
-      // The demon sprite isn't raised the way Minotaurs are, so push the
-      // shadow down to its feet (≈0.55 of its height) rather than 0.32.
-      v.shadow.position.set(0, DEMON.displayPx * 0.55);
+      // The demon sprite isn't raised the way Minotaurs are, so its feet sit
+      // around ≈0.3 of its half-height below centre — park the shadow there
+      // rather than the old 0.55, which floated it well below the hooves.
+      v.shadow.position.set(0, DEMON.displayPx * 0.3);
       const sy = DEMON.displayPx / 64;
       v.shadow.scale.set(sy * 0.75, sy);
     }

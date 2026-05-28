@@ -55,8 +55,22 @@ export function demonRebuke(demon: Demon, text: string): void {
 // A regular goblin can only manage one of these.
 const GIBBERISH = ['gleh', 'goink', 'grah', 'groh', 'gonk'];
 
+// Minotaur souls slur the goblin babble with every letter doubled: "ggrroohh".
+const doubleLetters = (s: string): string => s.replace(/[^ ]/g, (c) => c + c);
+
+// The demon's brush-off when a soul can't speak his tongue — half the time he
+// hints that he wants a goblin specifically (the nudge toward sending Bob).
+function demonNoLanguageLine(): string {
+  return Math.random() < 0.5
+    ? '. . . i need a goblin that speaks my language'
+    : '. . . i do not know this language';
+}
+
 const TYPE_MS_PER_CHAR = 42;
 const POST_LINE_BUFFER_MS = 180;
+// Extra beat held after each "." is typed, so an ellipsis ("...", ". . .")
+// lands with a dramatic trailing-off pause rather than scrolling straight on.
+const ELLIPSIS_PAUSE_MS = 260;
 
 const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
 
@@ -161,10 +175,20 @@ export async function runDemonDialogue(state: GameState, demon: Demon, ghost: Gh
     lineEl.innerHTML = '';
     overlay.classList.add('speaking');
     const segs = parseEmphasis(text);
-    const total = segs.reduce((n, s) => n + s.t.length, 0);
+    const flat = segs.map((s) => s.t).join('');
+    const total = flat.length;
+    // Indices of the final dot of each ellipsis (a run of 2+ dots, allowing the
+    // single spaces of ". . ."). We hold an extra beat there so the demon trails
+    // off before the line continues — the dots still patter out at normal speed.
+    const pauseAfter = new Set<number>();
+    const ell = /\.(?: ?\.)+/g;
+    for (let m = ell.exec(flat); m !== null; m = ell.exec(flat)) {
+      pauseAfter.add(m.index + m[0].length - 1);
+    }
     for (let c = 1; c <= total; c++) {
       lineEl.innerHTML = renderTyped(segs, c);
       await sleep(TYPE_MS_PER_CHAR);
+      if (pauseAfter.has(c - 1)) await sleep(ELLIPSIS_PAUSE_MS);
     }
     speech.classList.add('done');
     await sleep(POST_LINE_BUFFER_MS);
@@ -215,6 +239,8 @@ export async function runDemonDialogue(state: GameState, demon: Demon, ghost: Gh
     if (greet) await say('demon', 'speak to me, damned soul');
 
     if (ghost.bob) {
+      // Bob has actually parlayed — clears the "talking goblins" nudge.
+      state.bobParlayed = true;
       await say('bob', 'hello mate');
       await say('demon', 'a clumsy wield of language');
       await say('demon', 'have you *collected a dragon bone*?', { hold: true });
@@ -235,10 +261,17 @@ export async function runDemonDialogue(state: GameState, demon: Demon, ghost: Gh
         strikeGhostBack(state, ghost);
         resurrectBob(state);
       }
+    } else if (ghost.kind === 'dragon') {
+      // A dragon's soul can only roar at the demon.
+      await say('goblin', 'hhhhffffffffffffffffffff');
+      await say('demon', demonNoLanguageLine());
     } else {
+      // Goblins babble a random word; a minotaur (or tinytaur) soul mangles the
+      // same word with every letter doubled — a lumbering "ggrroohh".
       const gib = GIBBERISH[Math.floor(Math.random() * GIBBERISH.length)];
-      await say('goblin', gib);
-      await say('demon', '. . . i do not know this language');
+      const word = ghost.kind === 'minotaur' ? doubleLetters(gib) : gib;
+      await say('goblin', word);
+      await say('demon', demonNoLanguageLine());
     }
   } finally {
     parlaySpeaker = null;

@@ -822,6 +822,12 @@
         transition: background 0.1s, border-color 0.1s,
                     opacity var(--title-fade-dur) ease calc(var(--fade-step, 0) * var(--title-fade-step));
       }
+      /* The Spawn button lands an extra 1.5s after the rest of the title, so a
+         new player reads the scene before the call to action surfaces. */
+      #title-screen.shown #title-play.build-button.fade-item {
+        transition: background 0.1s, border-color 0.1s,
+                    opacity var(--title-fade-dur) ease calc(var(--fade-step, 0) * var(--title-fade-step) + 1500ms);
+      }
       /* Keep the dimmed look while a button is disabled (during the fill). */
       #title-screen.shown .build-button.fade-item:disabled { opacity: 0.55; }
       #title-screen h1 {
@@ -1127,7 +1133,7 @@
       /* The spoken line picks up a per-voice hue; the default covers the unset
          state before the first line. */
       #demon-line { color: #e8d8c0; }
-      #demon-speech.demon #demon-line { color: #ffb6a4; }
+      #demon-speech.demon #demon-line { color: #ff2a22; text-shadow: 0 0 14px rgba(255, 40, 30, 0.6); }
       #demon-speech.goblin #demon-line { color: #d6ecc4; }
       #demon-speech.bob #demon-line { color: #ffe7ad; }
       /* Emphasised phrase inside a demon line — the *slain two dragons* bit. */
