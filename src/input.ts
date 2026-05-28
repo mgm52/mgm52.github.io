@@ -1138,7 +1138,7 @@ function maybeTriggerBobCutscene(state: GameState, b: Building, kindName: string
     if (res === 'yes') {
       state.bobCheatPending = false;
       state.bobPickingHole = true;
-      appendLog(state, 'Bob is waiting — click any Goblin Hole to summon him.');
+      appendLog(state, 'choose a spawning hole');
       playSound('select', 0.5);
     }
   });
