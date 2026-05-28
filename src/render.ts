@@ -1624,9 +1624,12 @@ function positionParlaySpeech(
 
 // Duration (seconds) of the one-shot "you commanded a unit onto me" ring flash.
 const COMMAND_FLASH_S = 0.6;
+// Peak opacity of the command flash — kept below full so it reads as a brief
+// pulse rather than a solid selection ring.
+const COMMAND_FLASH_PEAK = 0.75;
 // Drive a selection ring from the entity's `selected` flag plus an optional
 // one-shot command flash. A selected ring stays solid; otherwise, if the entity
-// was commanded onto within COMMAND_FLASH_S, the ring pulses 0→1→0 once so the
+// was commanded onto within COMMAND_FLASH_S, the ring pulses 0→0.75→0 once so the
 // player can see exactly what they targeted.
 function applyRingFlash(ring: Graphics, selected: boolean, flashAt: number | undefined, now: number): void {
   if (selected) {
@@ -1638,7 +1641,7 @@ function applyRingFlash(ring: Graphics, selected: boolean, flashAt: number | und
     const t = (now - flashAt) / COMMAND_FLASH_S;
     if (t >= 0 && t < 1) {
       ring.visible = true;
-      ring.alpha = Math.sin(t * Math.PI);
+      ring.alpha = Math.sin(t * Math.PI) * COMMAND_FLASH_PEAK;
       return;
     }
   }
