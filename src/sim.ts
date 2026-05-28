@@ -5,7 +5,7 @@ import {
   ALL_DIRS, Building, Cell, DX, DY, Demon, Dir, Dragon, GameState, Goblin, HOLE_SIZE, Minotaur, SpaceBuilding, WaterSource,
   appendLog, buildingAtCell, buildingCenter, buildingFootprint, buildingPerimeter,
   cellCenter, cellKey, constructedDragonBeacon, currentPowerBoost, defOf, destroyBuilding, dragonTargetBuilding,
-  earnBlood, earnDragonBone, earnMoney, findFreeCellNear,
+  earnBlood, earnDragonBone, earnMoney, findHoleEmergenceCell,
   getSpawnCapacity, holeBlockedByBuilding, holeCenter, isCellBlocked, isCellInBuilding, isCellInWaterSource,
   isInBounds, maintainerCount, nearestCellInWaterSource, occupyCell, pushDeathEffect, pushFloater,
   pushLightningBolt, recordGhost, releaseCell, removeDragon, removeGoblin, waterCarrierCount,
@@ -365,15 +365,15 @@ function spawnGoblin(state: GameState) {
     holeCells.push({ cx: b.cell.cx, cy: b.cell.cy });
     isMain.push(false);
   }
-  // Try each hole starting at the rotation index; pick the first that yields
-  // a free perimeter cell. Bump rotation regardless so spawns spread out.
+  // Try each hole starting at the rotation index; pick the first that yields a
+  // reachable free emergence cell (one a goblin could actually walk out to — a
+  // hole walled over yields none). Bump rotation regardless so spawns spread out.
   const start = state.spawnHoleRotation % holeCells.length;
   let cell: Cell | null = null;
   for (let i = 0; i < holeCells.length; i++) {
     const idx = (start + i) % holeCells.length;
     if (isMain[idx] && holeBlockedByBuilding(state)) continue;
-    cell = pickHolePerimeterCellAt(state, holeCells[idx])
-        ?? findFreeCellNear(state, holeCells[idx].cx, holeCells[idx].cy);
+    cell = findHoleEmergenceCell(state, holeCells[idx].cx, holeCells[idx].cy);
     if (cell) {
       state.spawnHoleRotation = idx + 1;
       break;
@@ -413,8 +413,7 @@ function spawnGoblin(state: GameState) {
 // cell is reachable around the hole; the caller stays in bobPickingHole so the
 // player can try a different hole.
 export function spawnBob(state: GameState, holeCell: Cell): boolean {
-  const cell = pickHolePerimeterCellAt(state, holeCell)
-    ?? findFreeCellNear(state, holeCell.cx, holeCell.cy);
+  const cell = findHoleEmergenceCell(state, holeCell.cx, holeCell.cy);
   if (!cell) {
     playSound('error');
     appendLog(state, 'No room to summon Bob — try a different Goblin Hole.');
@@ -1418,8 +1417,9 @@ function nearestFreeNeighbor(state: GameState, cell: Cell, hunter: Goblin): Cell
 
 // Cells on the ring just outside the 2×2 hole footprint, sorted with a
 // strong rightward bias and a mild "stay near the centerline" tiebreak.
-// Same ring as `pickHolePerimeterCell` but the spawn-blocked check ignores
-// goblin occupancy (a fresh minotaur can crowd onto a goblin's cell — it'll
+// Minotaurs spawn straight onto the hole ring (no reachability flood — they're
+// summoned, not hatched) but the spawn-blocked check ignores goblin occupancy
+// (a fresh minotaur can crowd onto a goblin's cell — it'll
 // just kill them on the next tick) and rejects cells already held by another
 // minotaur. Used at summon time to prevent two minotaurs sharing a square.
 function pickMinotaurSpawnCell(state: GameState): Cell | null {
@@ -1443,32 +1443,6 @@ function pickMinotaurSpawnCell(state: GameState): Cell | null {
     if (minotaurWalkable(state, c.cx, c.cy)) return c;
   }
   return null;
-}
-
-function pickHolePerimeterCellAt(state: GameState, h: Cell): Cell | null {
-  const cx0 = h.cx + (HOLE_SIZE - 1) / 2;
-  const cy0 = h.cy + (HOLE_SIZE - 1) / 2;
-  const ring: Cell[] = [];
-  for (let dx = -1; dx <= HOLE_SIZE; dx++) {
-    for (let dy = -1; dy <= HOLE_SIZE; dy++) {
-      const inHole = dx >= 0 && dx < HOLE_SIZE && dy >= 0 && dy < HOLE_SIZE;
-      if (inHole) continue;
-      ring.push({ cx: h.cx + dx, cy: h.cy + dy });
-    }
-  }
-  ring.sort((a, b) => {
-    const sa = (a.cx - cx0) - 0.25 * Math.abs(a.cy - cy0);
-    const sb = (b.cx - cx0) - 0.25 * Math.abs(b.cy - cy0);
-    return sb - sa;
-  });
-  for (const c of ring) {
-    if (!isCellBlocked(state, c.cx, c.cy)) return c;
-  }
-  return null;
-}
-
-function pickHolePerimeterCell(state: GameState): Cell | null {
-  return pickHolePerimeterCellAt(state, state.hole.cell);
 }
 
 // ─── Goblin update ──────────────────────────────────────────────────

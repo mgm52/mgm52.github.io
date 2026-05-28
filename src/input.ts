@@ -757,12 +757,19 @@ function handleRightClick(state: GameState, x: number, y: number) {
   if (selectedMinotaurs.length > 0) playMinotaurCommand(selectedMinotaurs.length);
   if (selectedDragons.length > 0) playDragonRoarBurst(selectedDragons.length);
 
-  const targetGoblin = goblinAt(state, x, y);
-  const targetMinotaur = targetGoblin ? null : minotaurAt(state, x, y);
+  let targetGoblin = goblinAt(state, x, y);
+  // A goblin standing inside a building footprint (a worker/maintainer) shouldn't
+  // shadow the building it's in — a command aimed at such a goblin targets the
+  // building underneath instead.
+  const goblinHostBuilding = targetGoblin
+    ? buildingAtCell(state, targetGoblin.cell.cx, targetGoblin.cell.cy)
+    : null;
+  if (goblinHostBuilding) targetGoblin = null;
+  const targetMinotaur = (targetGoblin || goblinHostBuilding) ? null : minotaurAt(state, x, y);
   // A dragon target for fratricide: any non-selected dragon under the cursor.
   // Only meaningful when dragons are selected; skip the scan otherwise.
   let targetDragon: Dragon | null = null;
-  if (!targetGoblin && !targetMinotaur && selectedDragons.length > 0) {
+  if (!targetGoblin && !targetMinotaur && !goblinHostBuilding && selectedDragons.length > 0) {
     const selIds = new Set(selectedDragons.map((d) => d.id));
     for (const d of state.dragons.values()) {
       if (selIds.has(d.id)) continue;
@@ -772,7 +779,7 @@ function handleRightClick(state: GameState, x: number, y: number) {
   const targetCell = pixelToCell(x, y);
   const targetBuilding = (targetGoblin || targetMinotaur || targetDragon)
     ? null
-    : buildingAtCell(state, targetCell.cx, targetCell.cy);
+    : (goblinHostBuilding ?? buildingAtCell(state, targetCell.cx, targetCell.cy));
   const targetWater = (!targetGoblin && !targetMinotaur && !targetDragon && !targetBuilding)
     ? waterSourceAt(state, targetCell)
     : null;
