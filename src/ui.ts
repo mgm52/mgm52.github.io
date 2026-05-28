@@ -729,7 +729,12 @@ export function refreshUI(state: GameState) {
   if (!firstRefreshDone) {
     firstRefreshDone = true;
     for (const t of TASKS) {
-      if (t.isDone(state)) {
+      // Same DAG guard as the live loop below: don't auto-complete a task from
+      // isDone alone unless its prereqs are too, so an early-satisfiable task
+      // (earn_30_blood) can't reveal its unlock out of order on load. Genuinely
+      // persisted progress is restored separately by the hydration step below.
+      const prereqsDone = !t.prereq || t.prereq.every(id => completedTaskIds.has(id));
+      if (prereqsDone && t.isDone(state)) {
         completedTaskIds.add(t.id);
         previouslyCompletedTaskIds.add(t.id);
         revealedTaskIds.add(t.id);
@@ -885,7 +890,14 @@ export function refreshUI(state: GameState) {
   // black-out and then fade in.
   const unlocked = new Set<BuildingKind>();
   for (const t of TASKS) {
-    if (completedTaskIds.has(t.id) || t.isDone(state)) {
+    // A task can only complete once its prereqs have. Without this guard an
+    // isDone that's satisfiable from turn one — earn_30_blood, met just by
+    // killing goblins (1 blood each) — fires out of DAG order and unlocks its
+    // building (the Goblin Hole) before the Phone Farm/Gas Turbine it follows.
+    // Safe as a single forward pass: prereqs precede their dependents in TASKS,
+    // so they're added to completedTaskIds earlier in this same loop.
+    const prereqsDone = !t.prereq || t.prereq.every(id => completedTaskIds.has(id));
+    if (completedTaskIds.has(t.id) || (prereqsDone && t.isDone(state))) {
       completedTaskIds.add(t.id);
       if (revealedTaskIds.has(t.id)) {
         for (const k of t.unlocks) unlocked.add(k);
