@@ -7,7 +7,7 @@ import { RenderContext, ambientDragonAt, clampCamera, clampHellCamera, clampSpac
 import { autoAssignAllIdle, lightningStrike, spawnBob } from './sim';
 import {
   Building, Cell, Dragon, GameState, Ghost, Goblin, Minotaur, WaterSource,
-  appendLog, buildingAtCell, cellKey, defOf, findFreeCellNear,
+  appendLog, buildingAtCell, cellKey, defOf, demonAtHell, findFreeCellNear,
   holeAtCell, isInBounds, nextBuildingDisplayNum, pixelToCell, spaceBuildingAt,
   waterCarrierCount, waterSourceAtCell,
 } from './state';
@@ -291,9 +291,13 @@ export function setupInput(
         if (state.view === 'hell') {
           if (moved < SPACE_DRAG_TOL) {
             const hp = e.getLocalPosition(ctx.hellLayer);
+            // A small precise ghost wins over the giant demon hit box behind it,
+            // so a soul standing on the demon can still be picked.
             const gh = ghostAtHell(state, hp.x, hp.y);
+            const dm = gh ? null : demonAtHell(state, hp.x, hp.y);
             if (!e.shiftKey) clearSelection(state);
             if (gh) { selectGhost(state, gh); playSound('select', 0.33); }
+            else if (dm) { dm.selected = true; playSound('select', 0.33); }
           } else {
             const a = e.getLocalPosition(ctx.hellLayer);
             const b = ctx.hellLayer.toLocal({ x: start.x, y: start.y });
@@ -629,6 +633,7 @@ function clearSelection(state: GameState) {
   for (const w of state.waterSources.values()) w.selected = false;
   for (const sb of state.spaceBuildings.values()) sb.selected = false;
   for (const gh of state.ghosts) gh.selected = false;
+  for (const d of state.demons.values()) d.selected = false;
   state.hole.selected = false;
   state.selectedAmbientDragonId = null;
 }
@@ -651,10 +656,38 @@ function selectGhost(state: GameState, g: Ghost) {
 function handleHellRightClick(state: GameState, hx: number, hy: number) {
   const selected = state.ghosts.filter((g) => g.selected);
   if (selected.length === 0) { playSound('error'); return; }
+
+  // Right-clicking on (or near) a demon sends the group to it, but only the
+  // first soul that can actually speak — a goblin/Bob ghost — parlays. The
+  // rest just gather nearby. The demon also has to be free (one soul at a time).
+  const demon = demonAtHell(state, hx, hy);
+  if (demon) {
+    const speaker = demon.busyWith === null
+      ? selected.find((g) => g.kind === 'goblin') ?? null
+      : null;
+    for (const g of selected) {
+      const dx = (Math.random() - 0.5) * HELL.ghostHitRadius;
+      const dy = (Math.random() - 0.5) * HELL.ghostHitRadius;
+      g.goal = { x: demon.hx + dx, y: demon.hy + dy };
+      if (g.hx === undefined || g.hy === undefined) {
+        const p = ghostHellPos(state, g);
+        g.hx = p.x;
+        g.hy = p.y;
+      }
+      g.parlayDemonId = g === speaker ? demon.id : undefined;
+    }
+    playSound('select', 0.4);
+    if (speaker) appendLog(state, 'A soul shuffles forth to parlay with the demon.');
+    else if (demon.busyWith !== null) appendLog(state, 'The demon is already locked in parlay.');
+    else appendLog(state, 'These souls have no tongue for the demon.');
+    return;
+  }
+
   for (const g of selected) {
     const dx = (Math.random() - 0.5) * HELL.ghostHitRadius;
     const dy = (Math.random() - 0.5) * HELL.ghostHitRadius;
     g.goal = { x: hx + dx, y: hy + dy };
+    g.parlayDemonId = undefined; // redirecting cancels any pending parlay
     if (g.hx === undefined || g.hy === undefined) {
       const p = ghostHellPos(state, g);
       g.hx = p.x;

@@ -184,6 +184,17 @@ export const HELL = {
   ghostWalkSpeed: 40,
 };
 
+// Demons — uncommandable denizens of hell. For now a single giant Minotaur
+// that paces slowly up and down the abyss. The player can't order one around;
+// a goblin ghost can only be walked up to it to "parlay" (see demon-dialogue.ts).
+export const DEMON = {
+  speed: 16,          // hell-px/sec — a slow, ponderous patrol
+  displayPx: 300,     // giant, ~3x a summoned Minotaur
+  patrolHalf: 360,    // hell-px travelled either side of the spawn centre
+  parlayRadius: 120,  // a ghost within this (hell-px) of the demon starts a parlay
+  hitRadius: 130,     // click radius (hell-px) for selecting the demon
+};
+
 // One-shot Ritual upgrades. Autocommand + Goldblins unlock once a Phone
 // Farm has been built; Autospawn unlocks once a Gas Turbine has been built.
 // "Autocommand": newly-hatched goblins route themselves to understaffed

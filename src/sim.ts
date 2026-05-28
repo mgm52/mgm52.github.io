@@ -1,8 +1,8 @@
 import { playDecayingGoblinDeath, playDecayingGoblinSpawn, playDecayingGoldKillCash, playSound } from './audio';
-import { BUILDING_DEFS, CELL, COLS, DRAGON, DRAGON_KILL_REWARD, GOBLIN, GOLD_GOBLIN_CHANCE, GOLD_KILL_REWARD, HELL, KILL_REWARD, LIGHTNING, MINOTAUR_KILL_REWARD, SPACE, SUMMON_UPGRADES, TICK_S, MINOTAUR, TINYTAUR, WATER_DEPLETION_PP_PER_SEC, WATER_METER_MAX, WORLD, formatPower } from './config';
+import { BUILDING_DEFS, CELL, COLS, DEMON, DRAGON, DRAGON_KILL_REWARD, GOBLIN, GOLD_GOBLIN_CHANCE, GOLD_KILL_REWARD, HELL, KILL_REWARD, LIGHTNING, MINOTAUR_KILL_REWARD, SPACE, SUMMON_UPGRADES, TICK_S, MINOTAUR, TINYTAUR, WATER_DEPLETION_PP_PER_SEC, WATER_METER_MAX, WORLD, formatPower } from './config';
 import { getOptions } from './options';
 import {
-  ALL_DIRS, Building, Cell, DX, DY, Dir, Dragon, GameState, Goblin, HOLE_SIZE, Minotaur, SpaceBuilding, WaterSource,
+  ALL_DIRS, Building, Cell, DX, DY, Demon, Dir, Dragon, GameState, Goblin, HOLE_SIZE, Minotaur, SpaceBuilding, WaterSource,
   appendLog, buildingAtCell, buildingCenter, buildingFootprint, buildingPerimeter,
   cellCenter, cellKey, constructedDragonBeacon, currentPowerBoost, defOf, destroyBuilding, dragonTargetBuilding,
   earnBlood, earnDragonBone, earnMoney, findFreeCellNear,
@@ -102,6 +102,9 @@ export function tick(state: GameState) {
   for (const d of [...state.dragons.values()]) updateDragon(state, d);
   // Floating space buildings drift within their bounds.
   for (const sb of state.spaceBuildings.values()) updateSpaceBuilding(sb);
+
+  // ── 2d. Demon updates (hell pacing + parlay arrivals) ─────────────────
+  for (const d of state.demons.values()) updateDemon(state, d);
 
   // Sticky: the Tinytaur summon reveals itself once the player has fielded
   // enough Minotaurs at once to pay its sacrifice cost.
@@ -279,6 +282,7 @@ export function lightningStrike(state: GameState, x: number, y: number): boolean
       killed++;
     }
   }
+  let dragonsKilled = 0;
   for (const d of [...state.dragons.values()]) {
     if (within(d.pos.x, d.pos.y)) {
       const tx = d.pos.x, ty = d.pos.y;
@@ -288,11 +292,14 @@ export function lightningStrike(state: GameState, x: number, y: number): boolean
       recordGhost(state, 'dragon', tx, ty, d.facing);
       removeDragon(state, d.id);
       killed++;
+      dragonsKilled++;
     }
   }
 
   // Stat: remember the biggest single-strike cull (sticky).
   if (killed > state.maxStruckAtOnce) state.maxStruckAtOnce = killed;
+  // Sticky truth the demons weigh: two-plus dragons gored in one bolt.
+  if (dragonsKilled >= 2) state.slewTwoDragonsInOneStrike = true;
 
   // White blood over every cell whose center falls inside the blast.
   const span = Math.ceil(LIGHTNING.cellsWide / 2);
@@ -758,6 +765,43 @@ function applyMinotaurStuckCheck(state: GameState, t: Minotaur): boolean {
     return true;
   }
   return false;
+}
+
+// Demons pace slowly up and down their patrol band. While a soul is mid-parlay
+// (busyWith set) they stand still and face the speaker. Any ghost commanded to
+// parlay (parlayDemonId === this demon) is steered toward the demon's live
+// position; the conversation opens — and main.ts freezes the world to run it —
+// once the ghost is within DEMON.parlayRadius. Only one soul may speak at once.
+function updateDemon(state: GameState, d: Demon) {
+  // Drop a stale lock if the soul vanished (drifted off-screen, resurrected).
+  if (d.busyWith !== null && !state.ghosts.some((g) => g.id === d.busyWith)) {
+    d.busyWith = null;
+  }
+  if (d.busyWith !== null) {
+    const g = state.ghosts.find((x) => x.id === d.busyWith);
+    if (g && g.hx !== undefined && g.hy !== undefined) {
+      d.facing = Math.atan2(g.hy - d.hy, g.hx - d.hx);
+    }
+    return;
+  }
+  // Slow vertical patrol, reversing at the band edges.
+  d.hy += d.dir * DEMON.speed * TICK_S;
+  if (d.hy >= d.y1) { d.hy = d.y1; d.dir = -1; }
+  else if (d.hy <= d.y0) { d.hy = d.y0; d.dir = 1; }
+  d.facing = d.dir > 0 ? Math.PI / 2 : -Math.PI / 2;
+  // Steer any approaching soul and open a parlay once one is close enough.
+  for (const g of state.ghosts) {
+    if (g.parlayDemonId !== d.id) continue;
+    if (g.hx === undefined || g.hy === undefined) continue;
+    g.goal = { x: d.hx, y: d.hy };
+    if (Math.hypot(g.hx - d.hx, g.hy - d.hy) <= DEMON.parlayRadius) {
+      d.busyWith = g.id;
+      g.parlayDemonId = undefined;
+      g.goal = undefined;
+      d.facing = Math.atan2(g.hy - d.hy, g.hx - d.hx);
+      break;
+    }
+  }
 }
 
 function updateMinotaur(state: GameState, t: Minotaur, autoTargets: Map<number, number>) {

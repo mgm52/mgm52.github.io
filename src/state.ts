@@ -1,8 +1,8 @@
 import {
   BASE_SPAWN_CAPACITY, BUILDING_DEFS, BuildingDef, BuildingKind, CELL, COLS,
-  DIG_GROWTH_CELLS, GOBLIN_HOLE_CAPACITY_PER_BUILDING, ROWS,
+  DEMON, DIG_GROWTH_CELLS, GOBLIN_HOLE_CAPACITY_PER_BUILDING, HELL, ROWS,
   INITIAL_PLAY_COLS, INITIAL_PLAY_ROWS, INITIAL_PLAY_X0, INITIAL_PLAY_Y0,
-  START_CELL, START_GOBLINS, START_MONEY, WALL_BORDER, formatPower,
+  START_CELL, START_GOBLINS, START_MONEY, WALL_BORDER, WORLD, formatPower,
 } from './config';
 
 export type Vec2 = { x: number; y: number };
@@ -93,6 +93,25 @@ export function nearestCellInWaterSource(w: WaterSource, from: Cell): Cell {
   const cy = Math.min(w.y1 - 1, Math.max(w.y0, from.cy));
   return { cx, cy };
 }
+
+// A demon — an uncommandable denizen of hell. For now a single giant Minotaur
+// that paces slowly up and down. Lives entirely in hell coordinates (no grid).
+// The player can only "parlay" with one by walking a goblin ghost up to it.
+export type Demon = {
+  id: number;
+  kind: 'minotaur';
+  hx: number; hy: number;   // absolute hell coordinates
+  facing: number;           // radians (south = pacing downward)
+  dir: 1 | -1;              // +1 pacing down, -1 pacing up
+  y0: number; y1: number;   // patrol bounds (hell-y)
+  selected: boolean;
+  // The "speak to me, damned soul" greeting only plays the very first time any
+  // soul parlays with this demon; it's skipped on every parlay afterwards.
+  greeted: boolean;
+  // Id of the ghost currently mid-parlay, or null. Only one soul may speak at a
+  // time; while set the demon stands still and faces the speaker.
+  busyWith: number | null;
+};
 
 export type Minotaur = {
   id: number;
@@ -262,6 +281,11 @@ export type Ghost = {
   hx?: number;
   hy?: number;
   goal?: { x: number; y: number };
+  // When commanded to parlay, the id of the target demon. The ghost is steered
+  // toward the demon's live position each tick; the conversation opens once it's
+  // within DEMON.parlayRadius. Cleared the instant the parlay begins. Ephemeral
+  // — reset on load so a half-issued command never auto-triggers on resume.
+  parlayDemonId?: number;
 };
 
 // One-shot jagged white bolt drawn from above down to a strike point. The
@@ -320,6 +344,9 @@ export type GameState = {
   goblins: Map<number, Goblin>;
   minotaurs: Map<number, Minotaur>;
   dragons: Map<number, Dragon>;
+  // Uncommandable hell denizens. Persisted so a demon's patrol position and
+  // whether it has already greeted a soul survive a reload.
+  demons: Map<number, Demon>;
   waterSources: Map<number, WaterSource>;
   buildings: Map<number, Building>;
   // Buildings hauled into space by dragons — keyed by the original building id.
@@ -338,6 +365,9 @@ export type GameState = {
   // Stat: the most units ever killed by a single Lightning Strike. Sticky
   // (only ever increases).
   maxStruckAtOnce: number;
+  // Sticky: flips true once the player has vaporised two or more dragons with a
+  // single Lightning Strike. The truth a demon weighs in Bob's parlay.
+  slewTwoDragonsInOneStrike: boolean;
   // Number of Minotaurs summoned this run — drives the doubling summon cost.
   minotaursBought: number;
   // Multiplier applied to a gold goblin's GOLD_KILL_REWARD.money on death.
@@ -693,6 +723,7 @@ export function createInitialState(): GameState {
     goblins: new Map(),
     minotaurs: new Map(),
     dragons: new Map(),
+    demons: new Map(),
     waterSources: new Map(),
     buildings: new Map(),
     spaceBuildings: new Map(),
@@ -706,6 +737,7 @@ export function createInitialState(): GameState {
     goldgoblinsEnabled: false,
     tinytaurUnlocked: false,
     maxStruckAtOnce: 0,
+    slewTwoDragonsInOneStrike: false,
     goldgoblinMultiplier: 1,
     autoSpawnTimer: 0,
     autoSpawnMultiplier: 0,
@@ -747,6 +779,7 @@ export function createInitialState(): GameState {
     view: 'ground',
   };
   state.walls = rebuildWalls(state);
+  state.demons = createDemons(state);
   let placed = 0;
   let radius = 0;
   while (placed < START_GOBLINS && radius < 12) {
@@ -778,6 +811,67 @@ export function createInitialState(): GameState {
 export function appendLog(state: GameState, msg: string) {
   state.log.push({ time: state.now, msg });
   if (state.log.length > 60) state.log.shift();
+}
+
+// Seed the hell denizens. For now a single giant Minotaur that paces up and
+// down, offset to one side of the landing zone (the centre of hell, where the
+// player arrives) so the player spots it without it sitting on the portal beam.
+export function createDemons(state: GameState): Map<number, Demon> {
+  const demons = new Map<number, Demon>();
+  const cx = HELL.width / 2 + 420;
+  const cy = HELL.height / 2;
+  const id = state.nextId++;
+  demons.set(id, {
+    id, kind: 'minotaur',
+    hx: cx, hy: cy,
+    facing: Math.PI / 2, dir: 1,
+    y0: cy - DEMON.patrolHalf, y1: cy + DEMON.patrolHalf,
+    selected: false, greeted: false, busyWith: null,
+  });
+  return demons;
+}
+
+// Topmost demon within DEMON.hitRadius of a hell-coord point, or null.
+export function demonAtHell(state: GameState, hx: number, hy: number): Demon | null {
+  let best: Demon | null = null;
+  let bestD = DEMON.hitRadius * DEMON.hitRadius;
+  for (const d of state.demons.values()) {
+    const dx = d.hx - hx, dy = d.hy - hy;
+    const dd = dx * dx + dy * dy;
+    if (dd <= bestD) { bestD = dd; best = d; }
+  }
+  return best;
+}
+
+// World coordinates that map (via worldToHell) to a hell-coord point — the
+// inverse of the offset baked into render.ts's worldToHellX/Y. Used to place a
+// hell-flagged effect at a given hell position.
+export function hellToWorld(hx: number, hy: number): Vec2 {
+  return {
+    x: hx - (HELL.width - WORLD.width) / 2,
+    y: hy - (HELL.height - WORLD.height) / 2,
+  };
+}
+
+// Cast Bob back to the overworld as a living goblin — the demon's "untruth"
+// punishment. Drops him at a free cell near the Goblin Hole.
+export function resurrectBob(state: GameState): void {
+  const h = state.hole.cell;
+  const cell = findFreeCellNear(state, h.cx, h.cy);
+  if (!cell) {
+    appendLog(state, 'Bob claws at the overworld but finds no room to land.');
+    return;
+  }
+  const id = state.nextId++;
+  const g: Goblin = {
+    id, pos: cellCenter(cell), cell, target: null, goal: null,
+    path: [], facing: Math.PI / 2,
+    state: { kind: 'idle' }, selected: false, idleSince: state.now, lastCellChangedAt: state.now,
+    bob: true,
+  };
+  state.goblins.set(id, g);
+  occupyCell(state, cell.cx, cell.cy, id);
+  appendLog(state, 'A bolt of lightning hurls Bob back to the overworld.');
 }
 
 // Credit a gain (income or kill reward) to a resource. Tracks the cumulative

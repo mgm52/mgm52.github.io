@@ -1042,6 +1042,108 @@
          after the intro releases the hold. */
       body.intro-hold #spawn-hint { display: none !important; }
       body.intro-hold #drag-select-hint { display: none !important; }
+
+      /* ─── Demon parlay overlay ─────────────────────────────────────────
+         Modal conversation shown when a goblin ghost reaches a demon in hell.
+         Sits above the info-panel (z-index 50) so it reads as a full takeover.
+         Driven by demon-dialogue.ts via .visible / .speaking / .click-armed /
+         .show-buttons (mirroring the intro overlay's class protocol). */
+      #demon-overlay {
+        position: absolute; inset: 0;
+        pointer-events: none;
+        z-index: 55;
+        opacity: 0;
+        transition: opacity 400ms ease;
+      }
+      #demon-overlay.visible { opacity: 1; }
+      /* Dim the abyss behind the text so the speech stays legible. */
+      #demon-overlay::before {
+        content: "";
+        position: absolute; inset: 0;
+        background: radial-gradient(ellipse at center, rgba(28, 3, 4, 0.35), rgba(6, 1, 1, 0.86));
+      }
+      #demon-clickwall {
+        position: absolute; inset: 0;
+        pointer-events: none;
+      }
+      #demon-overlay.visible #demon-clickwall { pointer-events: auto; }
+      #demon-overlay.click-armed #demon-clickwall {
+        cursor: url('assets/GloveCursor-24.png') 9 1, pointer;
+      }
+      #demon-speech {
+        position: absolute;
+        left: 50%; top: 40%;
+        transform: translate(-50%, -50%);
+        max-width: min(680px, 84vw);
+        text-align: center;
+        font-family: var(--font-dialogue, var(--font-display));
+        font-size: calc(clamp(16px, 2.8vh, 28px) * var(--font-dialogue-scale, 1));
+        letter-spacing: 0.04em;
+        line-height: 1.3;
+        text-shadow:
+          0 0 12px rgba(0, 0, 0, 0.95),
+          0 2px 6px rgba(0, 0, 0, 0.9);
+        opacity: 0;
+        transition: opacity 200ms ease;
+        pointer-events: none;
+      }
+      #demon-overlay.speaking #demon-speech { opacity: 1; }
+      /* Speaker label, coloured per voice; the spoken line picks up a matching
+         (lighter) hue. Defaults cover the unset state before the first line. */
+      #demon-speaker { font-weight: 400; opacity: 0.95; }
+      #demon-speaker::after { content: ":\00a0"; }
+      #demon-line { color: #e8d8c0; }
+      #demon-speech.demon #demon-speaker { color: #ff5a44; text-shadow: 0 0 16px rgba(255, 70, 40, 0.7); }
+      #demon-speech.demon #demon-line { color: #ffb6a4; }
+      #demon-speech.goblin #demon-speaker { color: #9fe06a; }
+      #demon-speech.goblin #demon-line { color: #d6ecc4; }
+      #demon-speech.bob #demon-speaker { color: #ffd96b; }
+      #demon-speech.bob #demon-line { color: #ffe7ad; }
+      /* Emphasised phrase inside a demon line — the *slayed two dragons* bit. */
+      .demon-em {
+        font-style: italic;
+        font-weight: 600;
+        color: #ff5a44;
+        text-shadow: 0 0 18px rgba(255, 80, 40, 0.9);
+      }
+      /* Blinking caret, hidden once the line finishes (.done). Reuses the
+         intro-caret keyframes. */
+      #demon-line::after {
+        content: "▍";
+        display: inline-block;
+        margin-left: 3px;
+        color: inherit;
+        animation: intro-caret 0.9s steps(2, end) infinite;
+        opacity: 0.8;
+      }
+      #demon-speech.done #demon-line::after { visibility: hidden; }
+      #demon-buttons {
+        position: absolute;
+        left: 50%; top: 60%;
+        transform: translate(-50%, -50%);
+        display: flex;
+        gap: 18px;
+        opacity: 0;
+        pointer-events: none;
+        transition: opacity 400ms ease;
+        z-index: 11;
+      }
+      #demon-overlay.show-buttons #demon-buttons {
+        opacity: 1;
+        pointer-events: auto;
+      }
+      #demon-buttons .build-button {
+        width: 130px;
+        box-shadow:
+          0 6px 18px rgba(0, 0, 0, 0.55),
+          0 2px 6px rgba(0, 0, 0, 0.45);
+      }
+      #demon-buttons .build-name {
+        font-family: var(--font-display);
+        font-size: 22px;
+        letter-spacing: 0.2em;
+        text-align: center;
+      }
     </style>
   </head>
   <body>
@@ -1143,6 +1245,22 @@
             </button>
           </div>
           <div id="intro-clickwall"></div>
+        </div>
+        <div id="demon-overlay">
+          <div id="demon-speech"><span id="demon-speaker"></span><span id="demon-line"></span></div>
+          <div id="demon-buttons">
+            <button id="demon-yes" class="build-button" type="button">
+              <div class="build-content">
+                <div class="build-name">YES</div>
+              </div>
+            </button>
+            <button id="demon-no" class="build-button" type="button">
+              <div class="build-content">
+                <div class="build-name">NO</div>
+              </div>
+            </button>
+          </div>
+          <div id="demon-clickwall"></div>
         </div>
         <div id="info-panel">
           <div class="info-portrait" id="info-portrait"></div>
