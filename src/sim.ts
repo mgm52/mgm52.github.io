@@ -205,7 +205,9 @@ export function tick(state: GameState) {
         const dx = g.goal.x - g.hx;
         const dy = g.goal.y - g.hy;
         const dist = Math.hypot(dx, dy);
-        const step = HELL.ghostWalkSpeed * TICK_S;
+        // Commanded souls hustle: 2x the base walk speed, 3x for Bob.
+        const speedMult = g.bob ? 3 : 2;
+        const step = HELL.ghostWalkSpeed * speedMult * TICK_S;
         if (dist <= step) {
           g.hx = g.goal.x;
           g.hy = g.goal.y;

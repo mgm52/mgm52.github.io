@@ -120,8 +120,13 @@ export function setInHellView(b: boolean) { inHellView = b; }
 // loudness-normalised offline (-14 LUFS); the music slider attenuates it
 // further on top of the master volume.
 let musicEl: HTMLAudioElement | null = null;
+// Flat boost on the music quartet only (not the crackle). The music had been
+// riding at master×music = 0.49 since the music slider was split out from
+// master, which read noticeably softer than the older master-only default.
+// This pulls it back up by 50%; the result is still clamped to 1.
+const MUSIC_GAIN = 1.5;
 function effectiveMusicVolume(): number {
-  return Math.max(0, Math.min(1, masterVolume * musicVolume * musicAttenuation));
+  return Math.max(0, Math.min(1, masterVolume * musicVolume * musicAttenuation * MUSIC_GAIN));
 }
 
 // Live multiplier on the music layer (NOT the crackle, which is ambient and

@@ -57,6 +57,9 @@ export type Goblin = {
   // exactly like a normal goblin. Dies once like any goblin; his ghost in
   // hell stays still rather than drifting.
   bob?: boolean;
+  // state.now when another unit was last commanded onto this one. The renderer
+  // flashes the selection ring once so the player sees their command target.
+  commandFlashAt?: number;
 };
 
 export type MinotaurState =
@@ -111,6 +114,8 @@ export type Demon = {
   // Id of the ghost currently mid-parlay, or null. Only one soul may speak at a
   // time; while set the demon stands still and faces the speaker.
   busyWith: number | null;
+  // state.now when a soul was last commanded onto this demon — flashes its ring.
+  commandFlashAt?: number;
 };
 
 export type Minotaur = {
@@ -132,6 +137,8 @@ export type Minotaur = {
   // Tinytaur variant: a tiny, much faster Minotaur. Shares all Minotaur
   // behaviour except movement/attack speed and render scale.
   tiny?: boolean;
+  // state.now when another unit was last commanded onto this one — flashes its ring.
+  commandFlashAt?: number;
 };
 
 // Dragon — a flying, grid-free creature summoned from a Dragon Beacon. See
@@ -169,6 +176,8 @@ export type Dragon = {
   carrying: Building | null;
   selected: boolean;
   spawnAt: number;       // wing-flap phase offset / entry timing
+  // state.now when another unit was last commanded onto this one — flashes its ring.
+  commandFlashAt?: number;
 };
 
 // A building a dragon has hauled into space. No longer on the grid: it drifts
@@ -213,6 +222,8 @@ export type Building = {
   // WATER_DEPLETION_PP_PER_SEC; each carrier delivery bumps it by the def's
   // delivery amount. The building counts as "watered" while > 0.
   waterMeter?: number;
+  // state.now when a unit was last commanded onto this building — flashes its ring.
+  commandFlashAt?: number;
 };
 
 export type PendingBuild = { kind: BuildingKind } | null;

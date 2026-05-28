@@ -189,10 +189,10 @@ export const HELL = {
 // a goblin ghost can only be walked up to it to "parlay" (see demon-dialogue.ts).
 export const DEMON = {
   speed: 16,          // hell-px/sec — a slow, ponderous patrol
-  displayPx: 300,     // giant, ~3x a summoned Minotaur
+  displayPx: 900,     // colossal, ~9x a summoned Minotaur
   patrolHalf: 360,    // hell-px travelled either side of the spawn centre
-  parlayRadius: 120,  // a ghost within this (hell-px) of the demon starts a parlay
-  hitRadius: 130,     // click radius (hell-px) for selecting the demon
+  parlayRadius: 360,  // a ghost within this (hell-px) of the demon starts a parlay
+  hitRadius: 390,     // click radius (hell-px) for selecting the demon
 };
 
 // One-shot Ritual upgrades. Autocommand + Goldblins unlock once a Phone
