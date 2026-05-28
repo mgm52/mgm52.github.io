@@ -368,6 +368,10 @@ export type RenderContext = {
   buildingViews: Map<number, BuildingView>;
   camera: Camera;
   viewport: { width: number; height: number };
+  // Visual zoom applied to the world/space/hell layers. RENDER_SCALE on a
+  // desktop-sized viewport; smaller on phone-sized ones so more of the world
+  // fits on screen. Recomputed in syncViewport on resize/orientation change.
+  renderScale: number;
   // ─── Space scene + climb transition ───
   // Floating-building diorama. Scaled + camera-panned like worldLayer.
   spaceLayer: Container;
@@ -465,6 +469,7 @@ export async function createRender(parent: HTMLElement, state: GameState): Promi
   await Promise.all([loadGoblinSheets(), loadBuildingTextures()]);
   const initW = parent.clientWidth || window.innerWidth || WORLD.width;
   const initH = parent.clientHeight || window.innerHeight || WORLD.height;
+  const initScale = computeRenderScale(initW, initH);
   const app = new Application();
   await app.init({
     background: '#000000',
@@ -538,7 +543,7 @@ export async function createRender(parent: HTMLElement, state: GameState): Promi
   worldLayer.addChild(floatersLayer);
   worldLayer.addChild(lightningGfx);
   worldLayer.addChild(uiLayer);
-  worldLayer.scale.set(RENDER_SCALE);
+  worldLayer.scale.set(initScale);
   app.stage.addChild(worldLayer);
   dragonLayer.cullableChildren = true;
 
@@ -552,7 +557,7 @@ export async function createRender(parent: HTMLElement, state: GameState): Promi
   // which are added to spaceLayer later (during render) and so stack on top.
   const spaceAmbientLayer = new Container();
   spaceLayer.addChild(spaceAmbientLayer);
-  spaceLayer.scale.set(RENDER_SCALE);
+  spaceLayer.scale.set(initScale);
   spaceLayer.visible = false;
   app.stage.addChild(spaceLayer);
 
@@ -585,7 +590,7 @@ export async function createRender(parent: HTMLElement, state: GameState): Promi
   hellLayer.addChild(hellEffectsLayer);
   const hellSideBeamGfx = new Graphics();
   hellLayer.addChild(hellSideBeamGfx);
-  hellLayer.scale.set(RENDER_SCALE);
+  hellLayer.scale.set(initScale);
   hellLayer.visible = false;
   // Hell sits between the ground and the sky/space stack so the descent's
   // black overlay can cover it during the transition. The space scene
@@ -662,6 +667,7 @@ export async function createRender(parent: HTMLElement, state: GameState): Promi
     buildingViews: new Map(),
     camera: { x: 0, y: 0 },
     viewport: { width: initW, height: initH },
+    renderScale: initScale,
     spaceLayer, spaceBg, spaceBuildingViews: new Map(),
     spaceCamera: { x: 0, y: 0 },
     spaceAmbientLayer, ambientDragons: [], nextAmbientSpawnAt: 0, ambientIdSeq: 1,
@@ -716,6 +722,12 @@ export async function createRender(parent: HTMLElement, state: GameState): Promi
     app.renderer.resize(w, h);
     ctx.viewport.width = w;
     ctx.viewport.height = h;
+    // Re-derive the zoom for the new size (e.g. a phone rotating between
+    // portrait and landscape) and re-apply it to the ground + space layers.
+    // The hell layer's scale is set every frame from currentHellScale.
+    ctx.renderScale = computeRenderScale(w, h);
+    ctx.worldLayer.scale.set(ctx.renderScale);
+    ctx.spaceLayer.scale.set(ctx.renderScale);
     clampCamera(ctx);
   };
   syncViewport();
@@ -729,15 +741,15 @@ export async function createRender(parent: HTMLElement, state: GameState): Promi
 }
 
 export function clampCamera(ctx: RenderContext) {
-  const maxX = Math.max(0, WORLD.width - ctx.viewport.width / RENDER_SCALE);
-  const maxY = Math.max(0, WORLD.height - ctx.viewport.height / RENDER_SCALE);
+  const maxX = Math.max(0, WORLD.width - ctx.viewport.width / ctx.renderScale);
+  const maxY = Math.max(0, WORLD.height - ctx.viewport.height / ctx.renderScale);
   ctx.camera.x = Math.max(0, Math.min(maxX, ctx.camera.x));
   ctx.camera.y = Math.max(0, Math.min(maxY, ctx.camera.y));
 }
 
 export function centerCameraOn(ctx: RenderContext, x: number, y: number) {
-  ctx.camera.x = x - ctx.viewport.width / (2 * RENDER_SCALE);
-  ctx.camera.y = y - ctx.viewport.height / (2 * RENDER_SCALE);
+  ctx.camera.x = x - ctx.viewport.width / (2 * ctx.renderScale);
+  ctx.camera.y = y - ctx.viewport.height / (2 * ctx.renderScale);
   clampCamera(ctx);
 }
 
@@ -1765,19 +1777,19 @@ function smoothstep(a: number, b: number, x: number): number {
 
 // Clamp the space camera to the SPACE bounds (mirrors clampCamera for ground).
 export function clampSpaceCamera(ctx: RenderContext) {
-  const maxX = Math.max(0, SPACE.width - ctx.viewport.width / RENDER_SCALE);
-  const maxY = Math.max(0, SPACE.height - ctx.viewport.height / RENDER_SCALE);
+  const maxX = Math.max(0, SPACE.width - ctx.viewport.width / ctx.renderScale);
+  const maxY = Math.max(0, SPACE.height - ctx.viewport.height / ctx.renderScale);
   ctx.spaceCamera.x = Math.max(0, Math.min(maxX, ctx.spaceCamera.x));
   ctx.spaceCamera.y = Math.max(0, Math.min(maxY, ctx.spaceCamera.y));
 }
 export function centerSpaceCamera(ctx: RenderContext) {
-  ctx.spaceCamera.x = SPACE.width / 2 - ctx.viewport.width / (2 * RENDER_SCALE);
-  ctx.spaceCamera.y = SPACE.height / 2 - ctx.viewport.height / (2 * RENDER_SCALE);
+  ctx.spaceCamera.x = SPACE.width / 2 - ctx.viewport.width / (2 * ctx.renderScale);
+  ctx.spaceCamera.y = SPACE.height / 2 - ctx.viewport.height / (2 * ctx.renderScale);
   clampSpaceCamera(ctx);
 }
 // True extent the space camera can pan (so main can detect "at the bottom").
 export function spaceCameraMaxY(ctx: RenderContext): number {
-  return Math.max(0, SPACE.height - ctx.viewport.height / RENDER_SCALE);
+  return Math.max(0, SPACE.height - ctx.viewport.height / ctx.renderScale);
 }
 
 // Clamp the hell camera to HELL bounds. `scale` is the live hell-layer scale
@@ -1842,7 +1854,19 @@ export function currentHellScale(ctx: RenderContext): number {
   // hellZoom ramps 0 (overworld zoom) → 1 (fully zoomed out).
   const k = Math.max(0, Math.min(1, ctx.hellZoom));
   const factor = 1 + (HELL.zoomedOutScale - 1) * k;
-  return RENDER_SCALE * factor;
+  return ctx.renderScale * factor;
+}
+
+// Visual zoom for the world/space/hell layers, keyed off the smaller viewport
+// dimension. Desktop/tablet keep the authored RENDER_SCALE; phone-sized
+// viewports zoom out proportionally so more of the world is visible at once,
+// floored so goblins/buildings stay legible and tappable.
+export function computeRenderScale(viewportW: number, viewportH: number): number {
+  const minDim = Math.min(viewportW, viewportH);
+  const REFERENCE = 720;
+  const FLOOR = 0.72;
+  if (minDim >= REFERENCE) return RENDER_SCALE;
+  return Math.max(FLOOR, RENDER_SCALE * (minDim / REFERENCE));
 }
 
 function drawTransition(ctx: RenderContext, a: number, now: number) {
@@ -1899,10 +1923,10 @@ function drawTransition(ctx: RenderContext, a: number, now: number) {
 
 export function render(state: GameState, ctx: RenderContext) {
   // Apply camera by translating the world layer (UI overlays in DOM stay fixed).
-  // Camera is in world units; multiply by RENDER_SCALE to get screen pixels.
+  // Camera is in world units; multiply by ctx.renderScale to get screen pixels.
   // When the viewport is larger than the scaled world, center the world.
-  const scaledW = WORLD.width * RENDER_SCALE;
-  const scaledH = WORLD.height * RENDER_SCALE;
+  const scaledW = WORLD.width * ctx.renderScale;
+  const scaledH = WORLD.height * ctx.renderScale;
   const offsetX = Math.max(0, (ctx.viewport.width - scaledW) / 2);
   const offsetY = Math.max(0, (ctx.viewport.height - scaledH) / 2);
   // As the climb begins, slide the whole ground scene downward (and back up
@@ -1914,8 +1938,8 @@ export function render(state: GameState, ctx: RenderContext) {
   const climbDrop = smoothstep(0.02, 0.22, ctx.altitude) * ctx.viewport.height * 0.35;
   const descendLift = -smoothstep(0.02, 0.22, ctx.depth) * ctx.viewport.height * 0.35;
   ctx.worldLayer.position.set(
-    Math.round(offsetX - ctx.camera.x * RENDER_SCALE),
-    Math.round(offsetY - ctx.camera.y * RENDER_SCALE + climbDrop + descendLift),
+    Math.round(offsetX - ctx.camera.x * ctx.renderScale),
+    Math.round(offsetY - ctx.camera.y * ctx.renderScale + climbDrop + descendLift),
   );
 
   const opts = getOptions();
@@ -2225,8 +2249,8 @@ export function render(state: GameState, ctx: RenderContext) {
   // Position spaceLayer exactly like the world layer, but panned by spaceCamera
   // across the SPACE bounds.
   {
-    const scaledW = SPACE.width * RENDER_SCALE;
-    const scaledH = SPACE.height * RENDER_SCALE;
+    const scaledW = SPACE.width * ctx.renderScale;
+    const scaledH = SPACE.height * ctx.renderScale;
     const offX = Math.max(0, (ctx.viewport.width - scaledW) / 2);
     const offY = Math.max(0, (ctx.viewport.height - scaledH) / 2);
     // Mirror the ground's climb-slide: as the ground drops away beneath you on
@@ -2235,8 +2259,8 @@ export function render(state: GameState, ctx: RenderContext) {
     // fully in orbit; lifts back up off the top on descent.
     const spaceSlide = -(1 - smoothstep(0.82, 1.0, ctx.altitude)) * ctx.viewport.height * 0.4;
     ctx.spaceLayer.position.set(
-      Math.round(offX - ctx.spaceCamera.x * RENDER_SCALE),
-      Math.round(offY - ctx.spaceCamera.y * RENDER_SCALE + spaceSlide),
+      Math.round(offX - ctx.spaceCamera.x * ctx.renderScale),
+      Math.round(offY - ctx.spaceCamera.y * ctx.renderScale + spaceSlide),
     );
   }
   updateAmbientDragons(ctx);
@@ -2470,7 +2494,7 @@ function drawHellBeams(ctx: RenderContext, state: GameState): void {
     // at the world boundary mid-frame and read as a visibly cut-off red stub.
     const downStartY = c.y + def.size / 2;
     const animSpan = WORLD.height - downStartY;
-    const overshoot = ctx.viewport.height / RENDER_SCALE; // enough to clear any descent lift
+    const overshoot = ctx.viewport.height / ctx.renderScale; // enough to clear any descent lift
     if (animSpan > 0) {
       const animEnd = downStartY + animSpan * drawFrac;
       // Once the line has drawn the full animSpan, extend past WORLD.height
