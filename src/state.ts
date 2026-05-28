@@ -1,6 +1,6 @@
 import {
   BASE_SPAWN_CAPACITY, BUILDING_DEFS, BuildingDef, BuildingKind, CELL, COLS,
-  DEMON, DIG_GROWTH_CELLS, GOBLIN_HOLE_CAPACITY_PER_BUILDING, HELL, ROWS,
+  DEMON, DIG_GROWTH_CELLS, GOBLIN_HOLE_CAPACITY_PER_BUILDING, HELL, ROWS, SOUL_SIGIL,
   INITIAL_PLAY_COLS, INITIAL_PLAY_ROWS, INITIAL_PLAY_X0, INITIAL_PLAY_Y0,
   START_CELL, START_GOBLINS, START_MONEY, WALL_BORDER, WORLD, formatPower,
 } from './config';
@@ -297,6 +297,23 @@ export type Ghost = {
   // within DEMON.parlayRadius. Cleared the instant the parlay begins. Ephemeral
   // — reset on load so a half-issued command never auto-triggers on resume.
   parlayDemonId?: number;
+  // When commanded onto a soul chair, the id of that chair. The ghost walks to
+  // it and is consumed (seated) on arrival. Ephemeral — reset on load.
+  targetChairId?: number;
+};
+
+// A "soul chair" in the abyssal sigil. Five sit ringed around the central inner
+// ring; seating a soul in one powers it. With all five filled the pentagram is
+// complete and the chairs feed the grid. See SOUL_SIGIL in config.
+export type SoulChair = {
+  id: number;
+  index: number;        // 0..4 position around the ring (drives the pentagram edges)
+  hx: number; hy: number;
+  occupied: boolean;
+  filledAt?: number;    // state.now when seated — drives the seat-in VFX
+  // Ephemeral: id of the soul currently walking to claim this chair, so a crowd
+  // command only ever sends a single soul. Reset on load.
+  claimedBy?: number;
 };
 
 // One-shot jagged white bolt drawn from above down to a strike point. The
@@ -358,6 +375,18 @@ export type GameState = {
   // Uncommandable hell denizens. Persisted so a demon's patrol position and
   // whether it has already greeted a soul survive a reload.
   demons: Map<number, Demon>;
+  // The five soul chairs of the abyssal sigil. Persisted so seated souls stick.
+  soulChairs: SoulChair[];
+  // state.now when the fifth chair was seated and the pentagram lit; undefined
+  // until then. Drives the completed-sigil VFX and unlocks the +25 GW payout.
+  soulSigilCompletedAt?: number;
+  // state.now of the first time the player entered hell; undefined until then.
+  // Anchors the "demons parlay with talking goblins" nudge.
+  firstHellVisitAt?: number;
+  // Set once Bob has actually parlayed with a demon — gates the hint above.
+  bobParlayed: boolean;
+  // Set once the "talking goblins" hint has fired, so it only shows once.
+  hellHintShown: boolean;
   waterSources: Map<number, WaterSource>;
   buildings: Map<number, Building>;
   // Buildings hauled into space by dragons — keyed by the original building id.
@@ -784,6 +813,9 @@ export function createInitialState(): GameState {
     minotaurs: new Map(),
     dragons: new Map(),
     demons: new Map(),
+    soulChairs: createSoulChairs(),
+    bobParlayed: false,
+    hellHintShown: false,
     waterSources: new Map(),
     buildings: new Map(),
     spaceBuildings: new Map(),
@@ -880,7 +912,7 @@ export function appendLog(state: GameState, msg: string) {
 // player arrives) so the player spots it without it sitting on the portal beam.
 export function createDemons(state: GameState): Map<number, Demon> {
   const demons = new Map<number, Demon>();
-  const cx = HELL.width / 2 + 420;
+  const cx = HELL.width / 2 + DEMON.spawnOffsetX;
   const cy = HELL.height / 2;
   const id = state.nextId++;
   demons.set(id, {
@@ -891,6 +923,38 @@ export function createDemons(state: GameState): Map<number, Demon> {
     selected: false, greeted: false, busyWith: null,
   });
   return demons;
+}
+
+// Build the five soul chairs as a point-up pentagon around the sigil centre.
+// The chair index drives both its place on the ring and the pentagram edges
+// (each chair links to the one two steps around), so a clean five-pointed star
+// emerges as they fill.
+export function createSoulChairs(): SoulChair[] {
+  const { count, center, ringRadius } = SOUL_SIGIL;
+  const chairs: SoulChair[] = [];
+  for (let i = 0; i < count; i++) {
+    const a = -Math.PI / 2 + (i * 2 * Math.PI) / count; // first chair at the top
+    chairs.push({
+      id: i,
+      index: i,
+      hx: center.x + Math.cos(a) * ringRadius,
+      hy: center.y + Math.sin(a) * ringRadius,
+      occupied: false,
+    });
+  }
+  return chairs;
+}
+
+// Nearest soul chair within SOUL_SIGIL.chairRadius of a hell-coord point, or null.
+export function soulChairAt(state: GameState, hx: number, hy: number): SoulChair | null {
+  let best: SoulChair | null = null;
+  let bestD = SOUL_SIGIL.chairRadius * SOUL_SIGIL.chairRadius;
+  for (const c of state.soulChairs) {
+    const dx = c.hx - hx, dy = c.hy - hy;
+    const dd = dx * dx + dy * dy;
+    if (dd <= bestD) { bestD = dd; best = c; }
+  }
+  return best;
 }
 
 // Topmost demon within DEMON.hitRadius of a hell-coord point, or null.

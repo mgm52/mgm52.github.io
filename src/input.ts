@@ -9,7 +9,7 @@ import { autoAssignAllIdle, lightningStrike, spawnBob } from './sim';
 import {
   Building, Cell, Dragon, GameState, Ghost, Goblin, Minotaur, WaterSource,
   appendLog, buildingAtCell, buildingMoneyCost, cellKey, defOf, demonAtHell, findFreeCellNear,
-  hellPortalAt, holeAtCell, isInBounds, nextBuildingDisplayNum, pixelToCell, spaceBuildingAt,
+  hellPortalAt, holeAtCell, isInBounds, nextBuildingDisplayNum, pixelToCell, soulChairAt, spaceBuildingAt,
   waterCarrierCount, waterSourceAtCell,
 } from './state';
 
@@ -650,6 +650,44 @@ function handleHellRightClick(state: GameState, hx: number, hy: number) {
   const selected = state.ghosts.filter((g) => g.selected);
   if (selected.length === 0) { playSound('error'); return; }
 
+  // Right-clicking a soul chair seats a single soul in it. Sending a whole
+  // selection at one chair would just pile them up, so only the NEAREST
+  // eligible soul of the group actually walks over; the rest keep their orders.
+  // Bob is exempt — he's no fuel for the sigil.
+  const chair = soulChairAt(state, hx, hy);
+  if (chair) {
+    if (chair.occupied) {
+      playSound('error');
+      appendLog(state, 'That chair is already bound to a soul.');
+      return;
+    }
+    let nearest: Ghost | null = null;
+    let nearestD = Infinity;
+    for (const g of selected) {
+      if (g.bob) continue;
+      if (g.hx === undefined || g.hy === undefined) {
+        const p = ghostHellPos(state, g);
+        g.hx = p.x; g.hy = p.y;
+      }
+      const d = Math.hypot(g.hx - chair.hx, g.hy - chair.hy);
+      if (d < nearestD) { nearestD = d; nearest = g; }
+    }
+    if (!nearest) {
+      playSound('error');
+      appendLog(state, 'No soul here will take the chair.');
+      return;
+    }
+    // Release any prior chair this soul was claiming, then bind it to this one.
+    for (const c of state.soulChairs) if (c.claimedBy === nearest.id) c.claimedBy = undefined;
+    nearest.goal = { x: chair.hx, y: chair.hy };
+    nearest.parlayDemonId = undefined;
+    nearest.targetChairId = chair.id;
+    chair.claimedBy = nearest.id;
+    playSound('select', 0.4);
+    appendLog(state, 'A soul shuffles toward the sigil.');
+    return;
+  }
+
   // Right-clicking on (or near) a demon sends the group to it, but only the
   // first soul that can actually speak — a goblin/Bob ghost — parlays. The
   // rest just gather nearby. The demon also has to be free (one soul at a time).
@@ -665,7 +703,10 @@ function handleHellRightClick(state: GameState, hx: number, hy: number) {
     }
     demon.commandFlashAt = state.now;
     const g = selected[0];
-    const canSpeak = demon.busyWith === null && g.kind === 'goblin';
+    // Any soul may now approach to parlay — goblins, minotaurs and dragons all
+    // get their say (most just babble). The demon still only frees up one at a
+    // time.
+    const canSpeak = demon.busyWith === null;
     const dx = (Math.random() - 0.5) * HELL.ghostHitRadius;
     const dy = (Math.random() - 0.5) * HELL.ghostHitRadius;
     g.goal = { x: demon.hx + dx, y: demon.hy + dy };
@@ -674,11 +715,13 @@ function handleHellRightClick(state: GameState, hx: number, hy: number) {
       g.hx = p.x;
       g.hy = p.y;
     }
+    // Approaching the demon cancels any chair the soul was bound for.
+    g.targetChairId = undefined;
+    for (const c of state.soulChairs) if (c.claimedBy === g.id) c.claimedBy = undefined;
     g.parlayDemonId = canSpeak ? demon.id : undefined;
     playSound('select', 0.4);
     if (canSpeak) appendLog(state, 'A soul shuffles forth to parlay with the demon.');
-    else if (demon.busyWith !== null) appendLog(state, 'The demon is already locked in parlay.');
-    else appendLog(state, 'This soul has no tongue for the demon.');
+    else appendLog(state, 'The demon is already locked in parlay.');
     return;
   }
 
@@ -687,6 +730,12 @@ function handleHellRightClick(state: GameState, hx: number, hy: number) {
     const dy = (Math.random() - 0.5) * HELL.ghostHitRadius;
     g.goal = { x: hx + dx, y: hy + dy };
     g.parlayDemonId = undefined; // redirecting cancels any pending parlay
+    // …and any pending chair binding, so the soul actually heads for the cursor
+    // instead of being yanked back to its chair each tick.
+    if (g.targetChairId !== undefined) {
+      for (const c of state.soulChairs) if (c.claimedBy === g.id) c.claimedBy = undefined;
+      g.targetChairId = undefined;
+    }
     if (g.hx === undefined || g.hy === undefined) {
       const p = ghostHellPos(state, g);
       g.hx = p.x;

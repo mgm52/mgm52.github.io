@@ -1,8 +1,8 @@
 import { playDecayingGoblinDeath, playDecayingGoblinSpawn, playDecayingGoldKillCash, playSound } from './audio';
-import { BUILDING_DEFS, CELL, COLS, DEMON, DRAGON, DRAGON_KILL_REWARD, GOBLIN, GOLD_GOBLIN_CHANCE, GOLD_KILL_REWARD, HELL, KILL_REWARD, LIGHTNING, MINOTAUR_KILL_REWARD, SPACE, SUMMON_UPGRADES, TICK_S, MINOTAUR, TINYTAUR, WATER_DEPLETION_PP_PER_SEC, WATER_METER_MAX, WORLD, formatPower } from './config';
+import { BUILDING_DEFS, CELL, COLS, DEMON, DRAGON, DRAGON_KILL_REWARD, GOBLIN, GOLD_GOBLIN_CHANCE, GOLD_KILL_REWARD, HELL, KILL_REWARD, LIGHTNING, MINOTAUR_KILL_REWARD, SOUL_SIGIL, SPACE, SUMMON_UPGRADES, TICK_S, MINOTAUR, TINYTAUR, WATER_DEPLETION_PP_PER_SEC, WATER_METER_MAX, WORLD, formatPower } from './config';
 import { getOptions } from './options';
 import {
-  ALL_DIRS, Building, Cell, DX, DY, Demon, Dir, Dragon, GameState, Goblin, HOLE_SIZE, Minotaur, SpaceBuilding, WaterSource,
+  ALL_DIRS, Building, Cell, DX, DY, Demon, Dir, Dragon, GameState, Goblin, HOLE_SIZE, Minotaur, SoulChair, SpaceBuilding, WaterSource,
   appendLog, buildingAtCell, buildingCenter, buildingFootprint, buildingPerimeter,
   cellCenter, cellKey, constructedDragonBeacon, currentPowerBoost, defOf, destroyBuilding, dragonTargetBuilding,
   earnBlood, earnDragonBone, earnMoney, findHoleEmergenceCell,
@@ -27,6 +27,19 @@ const POWER_FLOATER_Y_OFFSET = 26;
 
 export function tick(state: GameState) {
   state.now += TICK_S;
+
+  // Track the first descent into hell, then nudge a player who still hasn't
+  // had Bob parlay with a demon five minutes on — the demon only talks to a
+  // goblin that can speak (i.e. Bob).
+  if (state.view === 'hell' && state.firstHellVisitAt === undefined) {
+    state.firstHellVisitAt = state.now;
+  }
+  if (!state.hellHintShown && !state.bobParlayed
+      && state.firstHellVisitAt !== undefined
+      && state.now - state.firstHellVisitAt >= 300) {
+    state.hellHintShown = true;
+    appendLog(state, 'Hint: demons parlay with talking goblins.');
+  }
 
   if (state.autoAssignEnabled && state.now >= nextAutoAssignAt) {
     autoAssignAllIdle(state);
@@ -223,11 +236,46 @@ export function tick(state: GameState) {
       } else if (fall > 0) {
         g.hy += fall * driftMult * TICK_S;
       }
+      // A soul commanded onto a chair keeps steering to it (chairs are static)
+      // and is consumed the instant it arrives. If the chair filled up first,
+      // the command is silently dropped and the soul resumes its drift.
+      if (g.targetChairId !== undefined) {
+        const chair = state.soulChairs.find((c) => c.id === g.targetChairId);
+        if (!chair || chair.occupied) {
+          g.targetChairId = undefined;
+          g.goal = undefined;
+        } else {
+          g.goal = { x: chair.hx, y: chair.hy };
+          if (Math.hypot(g.hx - chair.hx, g.hy - chair.hy) <= SOUL_SIGIL.arriveRadius) {
+            seatSoulInChair(state, chair);
+            state.ghosts.splice(i, 1);
+            continue;
+          }
+        }
+      }
       if (g.hy > HELL.height) state.ghosts.splice(i, 1);
     } else if (fall > 0) {
       const hellY = g.y + (g.offY ?? 0) + hellYOffset + (state.now - g.spawnAt) * fall * driftMult;
       if (hellY > HELL.height) state.ghosts.splice(i, 1);
     }
+  }
+}
+
+// Bind a soul into a chair: light it, clear its pending claim, and — if it was
+// the fifth — fire the completion (sound + log + VFX timestamp). The +25 GW
+// payout itself is read off the chairs each tick in the power pass below.
+function seatSoulInChair(state: GameState, chair: SoulChair) {
+  chair.occupied = true;
+  chair.claimedBy = undefined;
+  chair.filledAt = state.now;
+  playSound('ritual', 0.6, 0.85);
+  const filled = state.soulChairs.filter((c) => c.occupied).length;
+  appendLog(state, `A soul takes its chair in the sigil (${filled}/${SOUL_SIGIL.count}).`);
+  if (filled === SOUL_SIGIL.count && state.soulSigilCompletedAt === undefined) {
+    state.soulSigilCompletedAt = state.now;
+    playSound('ritual', 0.95, 0.5);
+    const total = SOUL_SIGIL.count * SOUL_SIGIL.powerPerChair;
+    appendLog(state, `The pentagram blazes to life — the sigil floods the grid with ${formatPower(total)}!`);
   }
 }
 
@@ -2099,6 +2147,12 @@ function resolvePowerAndState(state: GameState) {
   // strike can flick power-starved buildings online for the few seconds it
   // takes the surge to decay back to nothing.
   production += currentPowerBoost(state);
+
+  // The soul sigil feeds the grid only once every chair is filled — then each
+  // of the five chairs contributes its powerPerChair (25 GW total).
+  if (state.soulChairs.length === SOUL_SIGIL.count && state.soulChairs.every((c) => c.occupied)) {
+    production += SOUL_SIGIL.count * SOUL_SIGIL.powerPerChair;
+  }
 
   let consumed = 0;
   for (const b of buildings) {

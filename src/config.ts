@@ -199,6 +199,26 @@ export const DEMON = {
   patrolHalf: 360,    // hell-px travelled either side of the spawn centre
   parlayRadius: 360,  // a ghost within this (hell-px) of the demon starts a parlay
   hitRadius: 390,     // click radius (hell-px) for selecting the demon
+  // Hell-x offset from the map centre where the demon spawns + paces. Nudged
+  // right so it stands clear of the soul sigil at the centre of the abyss.
+  spawnOffsetX: 620,
+};
+
+// The soul sigil — five "soul chairs" (dark circles) ringed around a central
+// inner ring in the abyss. Walking a soul (goblin ghost) onto a chair seats it;
+// lines spring between filled chairs so a five-pointed pentagram is drawn as
+// they power up. Once all five are filled, each chair feeds +5 GW to the grid
+// (25 GW total) and the completed sigil erupts in a looping ritual VFX.
+export const SOUL_SIGIL = {
+  count: 5,
+  // Centre of the sigil in hell-coords. Sat left of the map centre so the
+  // colossal demon (which paces just right of centre) clears the chairs.
+  center: { x: HELL.width * 0.34, y: HELL.height / 2 },
+  ringRadius: 660,      // hell-px from the centre out to each chair
+  innerRadius: 150,     // the central "inner ring" the chairs surround
+  chairRadius: 80,      // chair disc radius + click hit radius
+  arriveRadius: 92,     // a commanded soul seats once this close to its chair
+  powerPerChair: 5_000_000_000, // +5 GW each — paid only while all five are filled
 };
 
 // One-shot Ritual upgrades. Autobuild + Autospawn unlock once a Phone
