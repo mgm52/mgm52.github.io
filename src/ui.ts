@@ -13,9 +13,10 @@ import {
 import { spawnMinotaur } from './sim';
 import { unlockOptionsCog } from './options-ui';
 
-// Build buttons appear in this fixed order. Mostly cheapest-first, with
-// goblin_hole slotted next to the datacentre it now unlocks alongside (it's an
-// auxiliary capacity expander, not a late-game item).
+// Build buttons appear in this fixed order, mostly cheapest-first. goblin_hole
+// is the exception: it's an auxiliary spawn-capacity expander rendered in the
+// Ritual section (see the creation loop), not the Build list — its slot here
+// only governs the order refreshUI walks it in.
 const SORTED_KINDS: BuildingKind[] = [
   // Wall sits at the top of the build list once unlocked — it's a quick
   // utility the player drops constantly, so keeping it within reach helps.
@@ -165,9 +166,13 @@ function playTaskCompleteAnimation(taskId: string): void {
   const overlay = document.getElementById('task-complete-overlay');
   if (!overlay) return;
   // Optional side-tasks read "OPTIONAL COMPLETE" rather than "WORK COMPLETE".
-  const isOptional = TASKS.find(t => t.id === taskId)?.optional ?? false;
+  const task = TASKS.find(t => t.id === taskId);
+  const isOptional = task?.optional ?? false;
   const textEl = overlay.querySelector('.task-complete-text');
   if (textEl) textEl.innerHTML = `${isOptional ? 'OPTIONAL' : 'WORK'}<br>COMPLETE`;
+  // Subtitle recalls what the finished task actually was.
+  const subtitleEl = overlay.querySelector('.task-complete-subtitle');
+  if (subtitleEl) subtitleEl.textContent = task?.text ?? '';
   overlay.classList.add('shown');
   // "Level Up/Mission Complete (Resistance)" by Dylan Kelk (freesound 672801).
   playSound('task_complete', 1);
@@ -186,9 +191,9 @@ function playTaskCompleteAnimation(taskId: string): void {
 type Task = {
   id: string;
   text: string;
-  // Optional per-frame label override (for tasks whose goal is computed at
-  // runtime, e.g. the Earn-blood task's dynamic blood target). Falls back to
-  // `text` when absent.
+  // Optional per-frame label override for tasks whose goal is computed at
+  // runtime (e.g. a target that scales with live state). Falls back to `text`
+  // when absent.
   dynamicText?: (s: GameState) => string;
   unlocks: BuildingKind[];
   isDone: (s: GameState) => boolean;
@@ -197,13 +202,6 @@ type Task = {
   optional?: boolean;
 };
 
-// The Earn-blood side-task's goal scales with how much blood the player is
-// sitting on the moment it appears: double it, rounded to the nearest ten, and
-// floored at 30. Stops the task from being already-satisfied for a player who
-// has stockpiled blood by the time they reach Phase 3.
-function bloodTaskGoal(currentBlood: number): number {
-  return Math.max(30, Math.round((2 * currentBlood) / 10) * 10);
-}
 // Tasks are sticky: once a task's isDone has ever returned true in this session,
 // we treat it as permanently complete. Stops unlocks/build buttons from
 // regressing if e.g. the only Goblin Wheel gets destroyed.
@@ -286,15 +284,13 @@ const TASKS: Task[] = [
   },
   {
     // Optional side-task: unlocks after Phase 3 (build_gas_engine). Grants the
-    // Goblin Hole (buildable) plus the Goldblins ritual (gated in refreshUI).
-    // The goal is snapshot the frame the task appears (bloodTaskGoal of the
-    // player's live blood, captured in refreshUI) and judged against current
-    // blood held — spend blood and the goal slides out of reach again.
+    // Goblin Hole (a Ritual purchase) plus the Goldblins ritual (gated in
+    // refreshUI). minotaursBought is cumulative for the run, so this stays
+    // complete once reached even if those Minotaurs later die.
     id: 'earn_30_blood',
-    text: 'Hoard 30 blood',
-    dynamicText: (s) => `Hoard ${s.bloodTaskTarget ?? 30} blood`,
+    text: 'Summon 2 Minotaurs',
     unlocks: ['goblin_hole'],
-    isDone: (s) => s.bloodTaskTarget != null && s.blood >= s.bloodTaskTarget,
+    isDone: (s) => s.minotaursBought >= 2,
     prereq: ['build_gas_engine'],
     optional: true,
   },
@@ -566,13 +562,19 @@ export function setupUI(state: GameState, callbacks: UICallbacks) {
   let prevTaskId: string | null = null;
   for (const kind of SORTED_KINDS) {
     const taskId = kindToTaskId[kind] ?? '';
-    if (prevTaskId !== null && taskId !== prevTaskId) {
-      const sep = document.createElement('div');
-      sep.className = 'build-separator';
-      buildList.appendChild(sep);
-      buildSeparators.push({ el: sep, afterTaskId: taskId });
+    // The Goblin Hole renders inside the Ritual section rather than the Build
+    // list, so it neither emits a build-list separator nor breaks the run of
+    // build kinds around it.
+    const inRitual = kind === 'goblin_hole';
+    if (!inRitual) {
+      if (prevTaskId !== null && taskId !== prevTaskId) {
+        const sep = document.createElement('div');
+        sep.className = 'build-separator';
+        buildList.appendChild(sep);
+        buildSeparators.push({ el: sep, afterTaskId: taskId });
+      }
+      prevTaskId = taskId;
     }
-    prevTaskId = taskId;
     const def = BUILDING_DEFS[kind];
     const btn = document.createElement('button');
     btn.className = 'build-button';
@@ -611,7 +613,7 @@ export function setupUI(state: GameState, callbacks: UICallbacks) {
       </div>
     `;
     btn.addEventListener('click', () => { playSound('click', 1, 0.75); callbacks.onBuildBuilding(kind); });
-    buildList.appendChild(btn);
+    (inRitual ? ritualList : buildList).appendChild(btn);
   }
 
   // Destroy button on the info panel — instead of instantly tearing down the
@@ -762,7 +764,8 @@ export function refreshUI(state: GameState) {
     for (const t of TASKS) {
       // Same DAG guard as the live loop below: don't auto-complete a task from
       // isDone alone unless its prereqs are too, so an early-satisfiable task
-      // (earn_30_blood) can't reveal its unlock out of order on load. Genuinely
+      // (the optional Summon-2-Minotaurs side-task) can't reveal its unlock out
+      // of order on load. Genuinely
       // persisted progress is restored separately by the hydration step below.
       const prereqsDone = !t.prereq || t.prereq.every(id => completedTaskIds.has(id));
       if (prereqsDone && t.isDone(state)) {
@@ -923,8 +926,8 @@ export function refreshUI(state: GameState) {
   for (const t of TASKS) {
     // A task can only complete once its prereqs have, so an isDone satisfiable
     // out of DAG order can't fire its unlock early (the Goblin Hole's
-    // earn_30_blood task, gated behind build_gas_engine, would otherwise pop the
-    // moment blood crossed its goal). Safe as a single forward pass: prereqs
+    // Summon-2-Minotaurs task, gated behind build_gas_engine, would otherwise
+    // pop the instant a Minotaur count crossed 2). Safe as a single forward pass: prereqs
     // precede their dependents in TASKS, so they're added to completedTaskIds
     // earlier in this same loop.
     const prereqsDone = !t.prereq || t.prereq.every(id => completedTaskIds.has(id));
@@ -942,14 +945,6 @@ export function refreshUI(state: GameState) {
       previouslyCompletedTaskIds.add(id);
       playTaskCompleteAnimation(id);
     }
-  }
-  // Snapshot the Earn-blood task's dynamic goal the first frame it appears —
-  // i.e. its prereq (build_gas_engine) is done but it isn't yet. Frozen
-  // thereafter and persisted on state, so the goal can't drift as blood moves.
-  if (state.bloodTaskTarget == null
-      && completedTaskIds.has('build_gas_engine')
-      && !completedTaskIds.has('earn_30_blood')) {
-    state.bloodTaskTarget = bloodTaskGoal(state.blood);
   }
   const activeTasks: Task[] = [];
   for (const t of TASKS) {
@@ -973,7 +968,7 @@ export function refreshUI(state: GameState) {
   //   collect_dragon_bone  → Lightning Strike
   const phaseRunPhoneFarm = revealedTaskIds.has('run_phone_farm');
   const phaseGasTurbine = revealedTaskIds.has('build_gas_engine');
-  const blood30Done = revealedTaskIds.has('earn_30_blood');
+  const minotaurTaskDone = revealedTaskIds.has('earn_30_blood');
   const dragonBoneDone = revealedTaskIds.has('collect_dragon_bone');
 
   // Lightning Strike — a ritual unlocked once the Collect-a-Dragon-Bone task is
@@ -995,7 +990,7 @@ export function refreshUI(state: GameState) {
   // Minotaur (also rewarded around Phase 3), so a "needs Minotaur" banner covers
   // the row until one is summoned; see the dig-overlay below.
   const digUnlocked = phaseGasTurbine;
-  const ritualVisible = phaseRunPhoneFarm || phaseGasTurbine || blood30Done || dragonBoneDone;
+  const ritualVisible = phaseRunPhoneFarm || phaseGasTurbine || minotaurTaskDone || dragonBoneDone;
   const ritualSection = document.getElementById('ritual-section')!;
   ritualSection.style.display = ritualVisible ? '' : 'none';
   // Now that the panel renders as a bordered card, an empty container shows
@@ -1025,11 +1020,11 @@ export function refreshUI(state: GameState) {
   refreshAutospawnButton(state, phaseRunPhoneFarm);
   // Goldblins → Goldblins x10 form a replace chain (like Autospawn): base
   // button hides once owned, x10 takes its place; x10 hides once owned.
-  // Base Goldblins unlocks via the optional Earn-30-blood side-task; x10
+  // Base Goldblins unlocks via the optional Summon-2-Minotaurs side-task; x10
   // follows once base Goldblins is owned.
   refreshRitualButton(
     'btn-buy-goldgoblins', 'cost-buy-goldgoblins',
-    blood30Done && !state.goldgoblinsEnabled, false,
+    minotaurTaskDone && !state.goldgoblinsEnabled, false,
     state.blood >= SUMMON_UPGRADES.goldgoblins.bloodCost,
     `${SUMMON_UPGRADES.goldgoblins.bloodCost} blood`,
   );

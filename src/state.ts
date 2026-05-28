@@ -444,12 +444,6 @@ export type GameState = {
   // has 2+ goblins queued to spawn concurrently; gates the "queue several
   // goblins at once" nudge in refreshUI.
   multiSpawnSeen: boolean;
-  // The optional Earn-blood side-task (gates the Goblin Hole) snapshots the
-  // player's live blood the frame it first appears and freezes a goal of
-  // max(30, round-to-tens(2×snapshot)). Null until that snapshot is taken;
-  // persisted so the goal stays fixed across reloads. Pass/fail is judged on
-  // *current* blood held, not lifetime earnings — spending blood lowers it.
-  bloodTaskTarget: number | null;
   // In production builds the options cog is hidden until the player completes
   // the final task (collect_dragon_bone) — that's the demo-end gag, so the
   // secret-settings reveal gates on getting that far. Sticky once flipped.
@@ -791,7 +785,6 @@ export function createInitialState(): GameState {
     waterSeen: false,
     multiSelectSeen: false,
     multiSpawnSeen: false,
-    bloodTaskTarget: null,
     optionsUnlocked: false,
     spaceUnlocked: false,
     hellUnlocked: false,

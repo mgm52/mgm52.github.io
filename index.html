@@ -132,7 +132,7 @@
       #task-complete-overlay {
         position: absolute; inset: 0;
         background: #000;
-        display: flex; align-items: center; justify-content: center;
+        display: flex; flex-direction: column; align-items: center; justify-content: center;
         z-index: 50;
         opacity: 0;
         pointer-events: none;
@@ -148,6 +148,17 @@
         letter-spacing: 0.18em;
         text-align: center;
         line-height: 1.1;
+      }
+      /* Subtitle under the headline — recalls the task that was just finished,
+         e.g. "Run a Phone Farm". Dimmer + smaller so the headline still leads. */
+      #task-complete-overlay .task-complete-subtitle {
+        color: #b8bec6;
+        font-family: var(--font-body);
+        font-size: calc(15px * var(--font-body-scale));
+        letter-spacing: 0.06em;
+        text-align: center;
+        margin-top: 12px;
+        max-width: 80%;
       }
       /* Build panel hugs its content while there's room (so the task line
          sits right under the last button) but caps at the remaining vertical
@@ -1352,6 +1363,7 @@
       <div id="sidebar">
         <div id="task-complete-overlay">
           <div class="task-complete-text">WORK<br>COMPLETE</div>
+          <div class="task-complete-subtitle"></div>
         </div>
         <div class="panel panel-resources">
           <!-- The leading R is a secret unlock for the dev cog: shift-click
@@ -1370,18 +1382,18 @@
           <div id="summon-list"></div>
         </div>
         <div class="panel" id="panel-build">
-          <!-- Rituals + Build share one scroll container so they can overflow
-               together. Each subsection has its own title, and Ritual hides
-               itself before any of its content unlocks. The task text sits
-               at the end so it always tucks directly under the last button
-               instead of pinning to the sidebar floor. -->
-          <div id="ritual-section" style="display:none">
-            <div class="panel-title">Ritual</div>
-            <div id="ritual-list"></div>
-          </div>
+          <!-- Build + Rituals share one scroll container so they can overflow
+               together. Each subsection has its own title; Build sits on top,
+               Ritual hides itself before any of its content unlocks. The task
+               text sits at the end so it always tucks directly under the last
+               button instead of pinning to the sidebar floor. -->
           <div id="build-section" style="display:none">
             <div class="panel-title">Build</div>
             <div id="build-list"></div>
+          </div>
+          <div id="ritual-section" style="display:none">
+            <div class="panel-title">Ritual</div>
+            <div id="ritual-list"></div>
           </div>
         </div>
         <div id="task-text" class="task-text"></div>
