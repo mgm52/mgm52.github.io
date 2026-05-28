@@ -4,6 +4,7 @@ import {
   SUMMON_UPGRADES, TICK_MS, MINOTAUR, WORLD, digBloodCost, minotaurBloodCost,
 } from './config';
 import { setupInput } from './input';
+import { runDemonDialogue } from './demon-dialogue';
 import { playIntroSequence, setIntroPaused, skipIntro } from './intro';
 import { getOptions, onOptionsChange } from './options';
 import { relockOptionsCog, setupOptionsUI } from './options-ui';
@@ -507,6 +508,13 @@ async function main() {
   let acc = 0;
   let last = performance.now();
 
+  // ─── Demon parlay ──────────────────────────────────────────────────
+  // When a soul reaches a demon, the sim sets demon.busyWith. We freeze the
+  // world (demon-parlay-hold, folded into introActive above) and run the modal
+  // conversation. parlayActive guards against launching a second overlay while
+  // one is in flight.
+  let parlayActive = false;
+
   // ─── Pause ────────────────────────────────────────────────────────
   // Paused state freezes the tick loop (state.now stops advancing, so all
   // sprite animations also freeze). Render keeps running so the overlay can
@@ -572,6 +580,7 @@ async function main() {
     // line up the summon without the rest of the colony advancing.
     const introActive = document.body.classList.contains('intro-hold')
       || document.body.classList.contains('bob-cutscene-hold')
+      || document.body.classList.contains('demon-parlay-hold')
       || state.bobPickingHole;
     if (!paused && !introActive) {
       acc += dt;
@@ -586,6 +595,22 @@ async function main() {
       // Drop any pending accumulator so the post-intro/unpause frame
       // doesn't dump a burst of ticks into the world.
       acc = 0;
+    }
+    // Launch a demon parlay overlay the moment a soul has reached a demon.
+    if (!parlayActive) {
+      for (const demon of state.demons.values()) {
+        if (demon.busyWith === null) continue;
+        const ghost = state.ghosts.find((g) => g.id === demon.busyWith);
+        if (!ghost) { demon.busyWith = null; continue; }
+        parlayActive = true;
+        document.body.classList.add('demon-parlay-hold');
+        void runDemonDialogue(state, demon, ghost).finally(() => {
+          demon.busyWith = null;
+          parlayActive = false;
+          document.body.classList.remove('demon-parlay-hold');
+        });
+        break;
+      }
     }
     // Held pan vector.
     let dx = 0, dy = 0;

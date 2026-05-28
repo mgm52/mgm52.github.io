@@ -5,7 +5,7 @@ import {
   SPAWN_HINT_NO_TASK_SEC, SUMMON_UPGRADES, WATER_HINT_DELAY_SEC, digBloodCost, MINOTAUR, minotaurBloodCost, TINYTAUR, formatPower,
 } from './config';
 import {
-  Building, Cell, DragonState, GameState, Goblin, GoblinState, SpaceBuilding, WaterSource,
+  Building, Cell, Demon, DragonState, GameState, Goblin, GoblinState, SpaceBuilding, WaterSource,
   appendLog, buildingCenter, buildingLabel, cellCenter, cellKey, countIdle, defOf, digDirection,
   earnDragonBone, getSpawnCapacity, holeBlockedByBuilding, isCellBlocked, isInBounds,
   maintainerCount, nextBuildingDisplayNum, occupyCell, waterCarrierCount,
@@ -148,6 +148,12 @@ let finalGameAlertsFired = false;
 function triggerFinalGameAlerts(state: GameState): void {
   if (finalGameAlertsFired) return;
   finalGameAlertsFired = true;
+  revealSecretSettings(state);
+}
+
+// The "demo just stops" pair of alerts + the secret options-cog unlock. Shared
+// by the dragon-bone task payoff and the demon's gift to a truthful Bob.
+export function revealSecretSettings(state: GameState): void {
   window.alert(
     "congrats the game is incomplete!!!!! It's unfinished!!!! "
     + "There should be something here next happening but it's not!!!!"
@@ -1166,7 +1172,10 @@ function refreshInfoPanel(state: GameState) {
   const killBtn = document.getElementById('info-kill')!;
   destroyBtn.style.display = 'none';
   killBtn.style.display = 'none';
-  if (selectedSpace.length === 1) {
+  const selectedDemon = [...state.demons.values()].find((d) => d.selected) ?? null;
+  if (selectedDemon) {
+    showDemon(state, selectedDemon, panel, portrait, name, stateEl, extra);
+  } else if (selectedSpace.length === 1) {
     showSpaceBuilding(state, selectedSpace[0], panel, portrait, name, stateEl, extra);
   } else if (selectedSpace.length > 1) {
     panel.classList.add('visible');
@@ -1258,6 +1267,15 @@ function describeMinotaurState(state: GameState, s: import('./state').MinotaurSt
     case 'going_to_kill_minotaur': return `Charging Minotaur #${s.targetId}`;
     case 'going_to_destroy': return `Smashing ${buildingLabel(state, s.buildingId)}`;
   }
+}
+
+function showDemon(_state: GameState, d: Demon, panel: HTMLElement, portrait: HTMLElement,
+                   name: HTMLElement, stateEl: HTMLElement, extra: HTMLElement) {
+  panel.classList.add('visible');
+  portrait.innerHTML = `<div class="portrait-goblin" style="background:#2a0606;border-color:#ff5a4a;color:#ff8a6a">☠</div>`;
+  name.textContent = 'Minotaur of the Pit';
+  stateEl.textContent = d.busyWith !== null ? 'Locked in parlay' : 'Pacing the abyss';
+  extra.innerHTML = `<span style="color:#ff4a4a">You cannot command this creature, only parlay</span>`;
 }
 
 function showHole(state: GameState, panel: HTMLElement, portrait: HTMLElement,

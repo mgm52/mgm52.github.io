@@ -9,9 +9,9 @@ extensions.add(GifAsset);
 // game seconds. Used as a manual sprite-sheet — we pick the frame ourselves
 // each tick based on (state.now - spawnAt) so playback always starts at frame 0.
 type DeathFrames = { textures: Texture[]; ends: number[]; duration: number };
-import { AMBIENT_DRAGON, BUILDING_DEFS, BuildingKind, CELL, COLS, DRAGON, GOBLIN, HELL, RENDER_SCALE, ROWS, MINOTAUR, SPACE, TINYTAUR, WORLD } from './config';
+import { AMBIENT_DRAGON, BUILDING_DEFS, BuildingKind, CELL, COLS, DEMON, DRAGON, GOBLIN, HELL, RENDER_SCALE, ROWS, MINOTAUR, SPACE, TINYTAUR, WORLD } from './config';
 import { ensureFontLoaded, fontFamilyById, getOptions, onOptionsChange, type FontConfig, type Options } from './options';
-import { Building, Dragon, GameState, Ghost, Goblin, HOLE_SIZE, Minotaur, SpaceBuilding, WaterSource, buildingCenter, cellCenter, defOf, holeCenter, isInPlayCell, maintainerCount } from './state';
+import { Building, Demon, Dragon, GameState, Ghost, Goblin, HOLE_SIZE, Minotaur, SpaceBuilding, WaterSource, buildingCenter, cellCenter, defOf, holeCenter, isInPlayCell, maintainerCount } from './state';
 
 export type Camera = { x: number; y: number };
 
@@ -266,6 +266,14 @@ type MinotaurView = {
   selectionRing: Graphics;
 };
 
+// A demon in the hell scene — currently the giant patrolling Minotaur. Lives in
+// hellDemonLayer, positioned at the demon's absolute hell coordinates.
+type DemonView = {
+  container: Container;
+  sprite: Sprite;
+  selectionRing: Graphics;
+};
+
 type DragonView = {
   container: Container;   // positioned at the dragon's world pos
   glow: Sprite;           // soft radial behind the block
@@ -389,6 +397,10 @@ export type RenderContext = {
   // background. Ghosts of every killed unit are scattered across hellLayer.
   hellLayer: Container;
   hellBg: Graphics;
+  // Giant demons pacing the abyss. Sits below the ghost layer so a soul walking
+  // up to a demon renders in front of it.
+  demonLayer: Container;
+  demonViews: Map<number, DemonView>;
   hellGhostLayer: Container;
   ghostViews: Map<number, GhostView>;
   hellCamera: Camera;
@@ -558,6 +570,9 @@ export async function createRender(parent: HTMLElement, state: GameState): Promi
   const hellBg = new Graphics();
   drawHellBackground(hellBg, getOptions());
   hellLayer.addChild(hellBg);
+  const demonLayer = new Container();
+  demonLayer.cullableChildren = true;
+  hellLayer.addChild(demonLayer);
   const hellGhostLayer = new Container();
   hellGhostLayer.cullableChildren = true;
   hellLayer.addChild(hellGhostLayer);
@@ -652,7 +667,7 @@ export async function createRender(parent: HTMLElement, state: GameState): Promi
     blackOverlay, skyLayer, skyGfx, cloudGfx, starGfx,
     transStars, transClouds,
     altitude: 0,
-    hellLayer, hellBg, hellGhostLayer, ghostViews: new Map(),
+    hellLayer, hellBg, demonLayer, demonViews: new Map(), hellGhostLayer, ghostViews: new Map(),
     hellCamera: { x: 0, y: 0 },
     depth: 0,
     hellZoom: 0,
@@ -950,6 +965,20 @@ function makeMinotaurView(): MinotaurView {
   c.addChild(ring);
   c.addChild(sprite);
   return { container: c, shadow, sprite, selectionRing: ring };
+}
+
+function makeDemonView(): DemonView {
+  const container = new Container();
+  const ring = new Graphics();
+  ring.circle(0, 0, DEMON.displayPx * 0.4).stroke({ width: 3, color: 0xff5a4a });
+  ring.visible = false;
+  const startTex = minotaurWalkSheet?.frames[0][0] ?? Texture.EMPTY;
+  const sprite = new Sprite(startTex);
+  sprite.anchor.set(0.5);
+  sprite.tint = 0x7a2014; // deep infernal red — bigger and darker than a Minotaur
+  container.addChild(ring);
+  container.addChild(sprite);
+  return { container, sprite, selectionRing: ring };
 }
 
 // No dragon sprite sheet ships, so the dragon is a placeholder tile: an orange
@@ -2220,6 +2249,36 @@ export function render(state: GameState, ctx: RenderContext) {
     if (!seenGh.has(id)) {
       v.container.destroy({ children: true });
       ctx.ghostViews.delete(id);
+    }
+  }
+
+  // Sync demon views — the giant patrolling Minotaur. Sass-walks while pacing;
+  // freezes on frame 0 while locked in a parlay.
+  const seenDe = new Set<number>();
+  for (const d of state.demons.values()) {
+    seenDe.add(d.id);
+    let v = ctx.demonViews.get(d.id);
+    if (!v) {
+      v = makeDemonView();
+      v.container.cullable = true;
+      ctx.demonLayer.addChild(v.container);
+      ctx.demonViews.set(d.id, v);
+    }
+    v.container.position.set(d.hx, d.hy);
+    v.selectionRing.visible = d.selected;
+    const sheet = minotaurWalkSheet;
+    if (sheet) {
+      const dir = dirIndex(sheet.meta, d.facing);
+      const fpd = sheet.meta.framesPerDirection;
+      const frame = d.busyWith !== null ? 0 : Math.floor(state.now * sheet.fps) % fpd;
+      v.sprite.texture = sheet.frames[dir][frame];
+      v.sprite.scale.set(DEMON.displayPx / sheet.meta.spriteSize);
+    }
+  }
+  for (const [id, v] of ctx.demonViews) {
+    if (!seenDe.has(id)) {
+      v.container.destroy({ children: true });
+      ctx.demonViews.delete(id);
     }
   }
 

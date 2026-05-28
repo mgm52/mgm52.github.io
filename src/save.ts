@@ -1,7 +1,7 @@
 import * as devalue from 'devalue';
 import { compressToUTF16, decompressFromUTF16 } from 'lz-string';
 import {
-  Building, GameState, emptyBuildingCounts, pruneAllAssignedGoblins, rebuildWalls,
+  Building, GameState, createDemons, emptyBuildingCounts, pruneAllAssignedGoblins, rebuildWalls,
 } from './state';
 
 const STORAGE_KEY = 'rts.savegame.v1';
@@ -102,7 +102,17 @@ export function loadGame(): { state: GameState; savedAt: number } | null {
     // than appearing already past the bottom.
     for (const g of env.state.ghosts) {
       if (g.spawnAt === undefined) g.spawnAt = env.state.now;
+      // A parlay command in flight is ephemeral — never auto-trigger on resume.
+      g.parlayDemonId = undefined;
     }
+    // Demons — added with the hell parlay system. Seed them for older saves,
+    // and always resume with no parlay in progress (the overlay is live-only).
+    env.state.demons ??= createDemons(env.state);
+    for (const d of env.state.demons.values()) {
+      d.busyWith = null;
+      d.selected = false;
+    }
+    env.state.slewTwoDragonsInOneStrike ??= false;
     // Pre-existing Hell Portals from saves predating activatedAt get one set
     // to a time well before now, so the beam draw-in animation has already
     // completed when the player loads in — they expect to see the beam.
