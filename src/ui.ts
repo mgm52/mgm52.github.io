@@ -164,6 +164,10 @@ export function revealSecretSettings(state: GameState): void {
 function playTaskCompleteAnimation(taskId: string): void {
   const overlay = document.getElementById('task-complete-overlay');
   if (!overlay) return;
+  // Optional side-tasks read "OPTIONAL COMPLETE" rather than "WORK COMPLETE".
+  const isOptional = TASKS.find(t => t.id === taskId)?.optional ?? false;
+  const textEl = overlay.querySelector('.task-complete-text');
+  if (textEl) textEl.innerHTML = `${isOptional ? 'OPTIONAL' : 'WORK'}<br>COMPLETE`;
   overlay.classList.add('shown');
   // "Level Up/Mission Complete (Resistance)" by Dylan Kelk (freesound 672801).
   playSound('task_complete', 1);
