@@ -267,8 +267,8 @@ const TASKS: Task[] = [
   {
     id: 'build_hypercentre',
     text: 'Build a Hypercentre',
-    // The Hell Portal ("???") opens up alongside the Dragon Beacon — no longer
-    // gated behind ascending.
+    // The Hell Portal ("Weird power source") opens up alongside the Dragon
+    // Beacon — no longer gated behind ascending.
     unlocks: ['dragon_beacon', 'hell_portal'],
     isDone: (s) => {
       for (const b of s.buildings.values()) {
@@ -1399,7 +1399,7 @@ function showGhost(g: Ghost, panel: HTMLElement, portrait: HTMLElement,
 }
 
 // The Hell Portal seen from below — its hell-side mirror. Named for what it is
-// down here; the overworld build menu keeps the ominous "???".
+// down here; the portrait keeps an ominous "???" glyph.
 function showHellPortal(b: Building, panel: HTMLElement, portrait: HTMLElement,
                         name: HTMLElement, stateEl: HTMLElement, extra: HTMLElement) {
   panel.classList.add('visible');

@@ -493,21 +493,20 @@ export const BUILDING_DEFS = {
     },
   }),
   // Hell Portal — unlocked by the Ascend task. A
-  // 2×2 portal that doubles as a (modest) power source AND opens the way
+  // 2×2 portal that opens the way
   // down to Hell. Once placed, a red beam animates from the portal toward
   // the abyss below and the player can hold ↓ at the bottom of the map to
-  // descend. Display name is literally "???" — its true nature is left
-  // ominous in the build menu.
+  // descend. Display name is "Weird power source".
   hell_portal: def(2, {
-    name: '???',
-    short: '???',
+    name: 'Weird power source',
+    short: 'WPS',
     cost: 10_000_000,
     bloodCost: 1000,
     buildersRequired: 4,
     buildTime: 12,
     maintainersRequired: 0,
     income: 0,
-    powerOutput: 1_000_000_000, // 1 GW — "a power source, of sorts"
+    powerOutput: 0, // +0W
     wanderInterval: 1.0,
     wanderJitter: 0.2,
     colors: {

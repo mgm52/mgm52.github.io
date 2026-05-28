@@ -1038,7 +1038,7 @@ function dragonLift(state: GameState, d: Dragon, b: Building) {
   // (income-based) picker, but kept here as defense in depth.
   if (b.kind === 'hell_portal') {
     d.state = { kind: 'seeking' };
-    appendLog(state, `Dragon #${d.id} cannot pry the ??? from the ground.`);
+    appendLog(state, `Dragon #${d.id} cannot pry the ${BUILDING_DEFS.hell_portal.name} from the ground.`);
     return;
   }
   for (const gid of b.assignedGoblins) {

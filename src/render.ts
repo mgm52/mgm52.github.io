@@ -1324,10 +1324,7 @@ function makeBuildingView(b: Building): BuildingView {
   const labelCfg: FontConfig = o.fonts.buildingLabel;
   const warningCfg: FontConfig = o.fonts.buildingWarning;
   const gs = o.globalFontScale;
-  // Hell Portal's display name is the deliberately-ominous '???' — but echoing
-  // that literal on the map ground reads as a debug placeholder. Keep the
-  // sidebar/build-menu name intact and just blank the on-building label.
-  const labelText = b.kind === 'hell_portal' ? '' : def.short;
+  const labelText = def.short;
   const label = new Text({
     text: labelText,
     style: {
