@@ -1263,7 +1263,7 @@ function refreshInfoPanel(state: GameState) {
       name.textContent = `${selectedDragons.length} dragons`;
       stateEl.textContent = '';
     }
-    extra.innerHTML = `<span style="color:#6a7080">Right click a building, unit, or spot to command (or space)</span>`;
+    extra.innerHTML = `<span style="color:#6a7080">${commandHintText('target')}</span>`;
   } else {
     const selectedMinotaurs = [...state.minotaurs.values()].filter((m) => m.selected);
     if (selectedMinotaurs.length === 1 && selectedGoblins.length === 0 && selectedBuildings.length === 0) {
@@ -1274,13 +1274,13 @@ function refreshInfoPanel(state: GameState) {
         : `<div class="portrait-goblin" style="background:#6a1a1a;border-color:#a06aff;color:#ffe0a0">M</div>`;
       name.textContent = m.tiny ? `Tinytaur #${m.id}` : `Minotaur #${m.id}`;
       stateEl.textContent = describeMinotaurState(state, m.state);
-      extra.innerHTML = `<span style="color:#6a7080">Right click anywhere to command (or space)</span>`;
+      extra.innerHTML = `<span style="color:#6a7080">${commandHintText('anywhere')}</span>`;
     } else if (selectedMinotaurs.length > 1) {
       panel.classList.add('visible');
       portrait.innerHTML = `<div class="portrait-goblin" style="background:#6a1a1a;border-color:#a06aff;color:#ffe0a0">M</div>`;
       name.textContent = `${selectedMinotaurs.length} minotaurs`;
       stateEl.textContent = '';
-      extra.innerHTML = `<span style="color:#6a7080">Right click anywhere to command (or space)</span>`;
+      extra.innerHTML = `<span style="color:#6a7080">${commandHintText('anywhere')}</span>`;
     } else {
       panel.classList.remove('visible');
     }
@@ -1360,6 +1360,18 @@ function showGoblin(state: GameState, g: Goblin, panel: HTMLElement, portrait: H
   setCommandHint(extra, state);
 }
 
+// On a touch-primary device a long-press stands in for a right-click (see the
+// long-press handler in input.ts) and there's no spacebar, so reword the
+// command hints from "Right click … (or space)" to "Long tap …".
+const TOUCH_PRIMARY = window.matchMedia('(pointer: coarse)').matches;
+
+function commandHintText(scope: 'anywhere' | 'target'): string {
+  const where = scope === 'anywhere' ? 'anywhere' : 'a building, unit, or spot';
+  return TOUCH_PRIMARY
+    ? `Long tap ${where} to command`
+    : `Right click ${where} to command (or space)`;
+}
+
 // Persist the hint span across frames so its pulse animation keeps running —
 // refreshInfoPanel ticks every rAF, and replacing innerHTML each time would
 // reset the animation to 0% and freeze the colour at the base hue.
@@ -1369,7 +1381,7 @@ function setCommandHint(extra: HTMLElement, state: GameState): void {
     extra.textContent = '';
     span = document.createElement('span');
     span.className = 'command-hint';
-    span.textContent = 'Right click anywhere to command (or space)';
+    span.textContent = commandHintText('anywhere');
     extra.appendChild(span);
   }
   span.classList.toggle('command-hint-pulse', !state.bloodUnlocked);
