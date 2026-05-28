@@ -140,9 +140,9 @@ function rebuildPublicPanel(panel: HTMLElement): void {
 
 const SECRET_UNLOCK_KEY = 'gs.optionsCog.secretUnlocked';
 
-// Reveals the options cog. Used in prod once the player completes the final
-// task (collect_dragon_bone) — see triggerFinalGameAlerts in ui.ts. Persists in
-// localStorage so the unlock survives reloads.
+// Reveals the options cog. In prod it's revealed by the demon's gift to a
+// truthful Bob (revealSecretSettings in ui.ts) or the secret shift-click /
+// long-press R gesture below. Persists in localStorage so it survives reloads.
 export function unlockOptionsCog(): void {
   try { localStorage.setItem(SECRET_UNLOCK_KEY, '1'); } catch { /* no-op */ }
   const cog = document.getElementById('options-cog');
@@ -161,9 +161,21 @@ export function relockOptionsCog(): void {
 }
 
 // ─── Panel construction ─────────────────────────────────────────────
+// Reminder of the unlock gesture in case the player hides the cog (via Erase
+// Data) and forgets how to get it back. Shown at both the top and bottom of the
+// admin panel so it's visible without scrolling either way.
+function unlockHint(): HTMLElement {
+  const hint = document.createElement('div');
+  hint.className = 'options-flavor';
+  hint.textContent = 'shift-click (or long-press) the R in Resources to re-unlock';
+  return hint;
+}
+
 function rebuildPanel(panel: HTMLElement, callbacks: OptionsUICallbacks, refreshPublic?: () => void): void {
   panel.innerHTML = '';
   const o = getOptions();
+
+  panel.appendChild(unlockHint());
 
   panel.appendChild(section('Background', [
     select('Pattern', o.bgPattern, [
@@ -306,12 +318,7 @@ function rebuildPanel(panel: HTMLElement, callbacks: OptionsUICallbacks, refresh
   });
   panel.appendChild(reset);
 
-  // Reminder of the unlock gesture in case the player hides the cog (via
-  // Erase Data) and forgets how to get it back.
-  const unlockHint = document.createElement('div');
-  unlockHint.className = 'options-flavor';
-  unlockHint.textContent = 'shift-click the R in Resources to re-unlock';
-  panel.appendChild(unlockHint);
+  panel.appendChild(unlockHint());
 }
 
 function fontsSection(o: Options): HTMLElement {

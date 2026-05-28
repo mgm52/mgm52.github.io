@@ -155,44 +155,6 @@
          is the magic combo. The rest of the sidebar stays static. */
       #panel-build { flex: 0 1 auto; min-height: 0; overflow-y: auto; -webkit-overflow-scrolling: touch; }
 
-      /* ───────── Portrait warning (mobile only) ───────── */
-      #portrait-warning {
-        display: none;
-        position: fixed; inset: 0;
-        background: #1a1d21; color: #eee;
-        align-items: center; justify-content: center;
-        flex-direction: column;
-        text-align: center; padding: 24px;
-        z-index: 1000;
-      }
-      #portrait-warning .icon {
-        font-family: var(--font-display);
-        font-size: calc(56px * var(--font-display-scale)); margin-bottom: 18px; color: #8acfff;
-        animation: rotate-hint 2.4s ease-in-out infinite;
-        transform-origin: center;
-      }
-      #portrait-warning h1 {
-        font-family: var(--font-display);
-        font-size: calc(22px * var(--font-display-scale)); margin: 0 0 12px; letter-spacing: 1.5px;
-        color: var(--sidebar-accent);
-      }
-      #portrait-warning p {
-        font-family: var(--font-body);
-        font-size: calc(14px * var(--font-body-scale)); color: #aab2bd; max-width: 320px; line-height: 1.5;
-        margin: 0;
-      }
-      @keyframes rotate-hint {
-        0%, 40% { transform: rotate(0deg); }
-        60%, 100% { transform: rotate(-90deg); }
-      }
-      /* Only show the rotate-device prompt on phone-sized portrait viewports
-         (max-width: 600px). Desktop windows dragged narrow technically count
-         as `orientation: portrait` but should keep the landscape layout. */
-      @media (orientation: portrait) and (max-width: 600px) {
-        #app { display: none; }
-        #portrait-warning { display: flex; }
-      }
-
       /* ───────── Compact landscape (mobile phones) ───────── */
       @media (orientation: landscape) and (max-height: 500px) {
         #sidebar {
@@ -1182,6 +1144,61 @@
         letter-spacing: 0.2em;
         text-align: center;
       }
+
+      /* ───────── Portrait phones — stacked layout ─────────
+         Held upright, the side-by-side layout has nowhere to put a 280px
+         sidebar, so we stack: the game canvas docks to the top and the
+         controls become a scrollable tray beneath it. Only targets
+         phone-width portrait viewports — a narrow desktop window technically
+         reports `orientation: portrait` but keeps the side-by-side layout.
+         Placed last in the stylesheet so its equal-specificity overrides win
+         over the base rules above (e.g. .panel, #intro-goblin). */
+      @media (orientation: portrait) and (max-width: 600px) {
+        #app { flex-direction: column; }
+        #game { flex: 1 1 auto; min-height: 0; width: 100%; }
+        #sidebar {
+          width: 100%;
+          flex: 0 1 auto;
+          max-height: 44dvh;
+          zoom: 1;
+          padding: 8px 10px;
+          border-left: none;
+          border-top: 1px solid var(--sidebar-border);
+          overflow-x: hidden; overflow-y: auto;
+        }
+        /* The whole tray scrolls as one, so let each panel flow at its natural
+           height instead of the desktop build-panel-only inner scroll. */
+        #panel-build { overflow: visible; flex: 0 0 auto; }
+        .panel { margin-bottom: 8px; padding: 7px 10px; }
+        .panel-title { font-size: calc(10px * var(--font-display-scale)); margin-bottom: 6px; }
+        /* Resources flow as a horizontal wrap so Cash/Blood/Bones/Power share
+           the width instead of stacking into four tall rows. */
+        .panel-resources .resource-row {
+          display: inline-flex; width: auto;
+          gap: 6px; margin-right: 16px; padding: 1px 0;
+        }
+        .build-button { padding: 8px 10px; margin-bottom: 5px; }
+        .task-text { font-size: calc(11px * var(--font-body-scale)); padding: 6px 8px; }
+        /* The selection popover's desktop zoom is too big for a phone-width
+           game pane; shrink + cap width like the landscape-compact rules. */
+        #info-panel {
+          zoom: 1; padding: 7px; gap: 8px; left: 8px; bottom: 8px;
+          max-width: min(72vw, 260px);
+          font-size: calc(11px * var(--font-body-scale));
+        }
+        .info-portrait { width: 52px; height: 52px; }
+        /* Keep the options popovers inside the (now shorter) game pane. */
+        #options-panel, #options-panel-public { max-height: 46dvh; }
+        /* The intro goblin + speech are sized/positioned in `vh`, which assumes
+           the game pane fills the viewport. In the stacked layout the pane is
+           only ~56dvh tall, so the 90vh goblin overflows and the bottom:71vh
+           speech lands off the top. Scale the goblin down and re-anchor the
+           speech with pane-relative percentages so the cutscene fits. (The
+           demon overlay already positions with %, so it needs no override.) */
+        #intro-goblin { --goblin-size: 50vh; bottom: -12vh; }
+        #intro-overlay.faced #intro-goblin { bottom: -8vh; }
+        #intro-speech { bottom: 66%; max-width: 86vw; }
+      }
     </style>
   </head>
   <body>
@@ -1237,11 +1254,6 @@
           </div>
         </button>
       </div>
-    </div>
-    <div id="portrait-warning">
-      <div class="icon">⟳</div>
-      <h1>Phone considered harmful</h1>
-      <p>Goblin Scaling doesn’t work well mobile. BUT the functionality is sort of technically there - you can use two fingers to scroll and long press to command. But only in landscape. Turn your phone sideways or enjoy mental sanity by playing on a PC.</p>
     </div>
     <div id="app">
       <div id="game">

@@ -140,19 +140,11 @@ function emanateAtCursor(x: number, y: number, variant?: 'white'): void {
   el.addEventListener('animationend', () => el.remove(), { once: true });
 }
 
-// Demo-end gag: once the final task (collect_dragon_bone) is completed, pop a
-// pair of "the game just stops here" alerts and unlock the secret options cog.
-// Guarded against double-firing so re-triggers (e.g. refreshUI re-entries) stay
-// idempotent.
-let finalGameAlertsFired = false;
-function triggerFinalGameAlerts(state: GameState): void {
-  if (finalGameAlertsFired) return;
-  finalGameAlertsFired = true;
-  revealSecretSettings(state);
-}
-
-// The "demo just stops" pair of alerts + the secret options-cog unlock. Shared
-// by the dragon-bone task payoff and the demon's gift to a truthful Bob.
+// The "demo just stops" pair of alerts + the secret options-cog unlock. Fired
+// only by the demon's gift to a truthful Bob (see demon-dialogue.ts) — the
+// dragon-bone task no longer triggers it. The cog can also be revealed silently
+// (no alerts) by the shift-click / long-press R gesture in options-ui.ts.
+// Idempotency is handled at the demon call site via `!state.optionsUnlocked`.
 export function revealSecretSettings(state: GameState): void {
   window.alert(
     "congrats the game is incomplete!!!!! It's unfinished!!!! "
@@ -222,7 +214,7 @@ let currentTaskCached: Task | null = null;
 //   run_phone_farm       → Autocommand, Dig
 //   build_gas_engine     → Minotaur, Autospawn
 //   earn_30_blood        → Goldblins
-//   collect_dragon_bone  → Lightning Strike + demo-end alerts + secret options cog
+//   collect_dragon_bone  → Lightning Strike
 // The Dragon summon is special-cased: it has no gating task. Its button shows
 // whenever at least one Dragon Beacon is `active`, and the simultaneous-dragon
 // cap (live + queued) equals the active-beacon count.
@@ -325,6 +317,13 @@ export function setupUI(state: GameState, callbacks: UICallbacks) {
   const summonList = document.getElementById('summon-list')!;
   const ritualList = document.getElementById('ritual-list')!;
   const buildList = document.getElementById('build-list')!;
+
+  // The pan hint defaults to the keyboard controls; on a touch-primary device
+  // there are no arrow keys, so swap in the two-finger gesture instead.
+  const panHintEl = document.getElementById('pan-hint');
+  if (panHintEl && window.matchMedia('(pointer: coarse)').matches) {
+    panHintEl.textContent = 'drag two fingers to look around';
+  }
 
   // Spawn Goblin button (Summon section).
   const spawnBtn = document.createElement('button');
@@ -926,11 +925,6 @@ export function refreshUI(state: GameState) {
     if (!previouslyCompletedTaskIds.has(id)) {
       previouslyCompletedTaskIds.add(id);
       playTaskCompleteAnimation(id);
-      // Final task: hold for the celebration overlay (~2.8s), then pop the
-      // demo-end alerts and unlock the secret options cog.
-      if (id === 'collect_dragon_bone') {
-        window.setTimeout(() => triggerFinalGameAlerts(state), 2800);
-      }
     }
   }
   // Snapshot the Earn-blood task's dynamic goal the first frame it appears —
@@ -1575,8 +1569,7 @@ export function executeTaskSkip(state: GameState): void {
       // — the Dragon summon button surfaces the moment any beacon goes active,
       // which makes the post-skip world look like a normal playthrough rather
       // than just handing over the bone. Then hand the bone outright so
-      // dragonBoneEarned satisfies isDone and the unlock side-effects
-      // (Lightning Strike + final-game gag) fire.
+      // dragonBoneEarned satisfies isDone and the Lightning Strike unlock fires.
       ensureBuildingCount(state, 'dragon_beacon', 1);
       earnDragonBone(state, 1);
       state.dragonBoneUnlocked = true;
@@ -1591,9 +1584,6 @@ export function executeTaskSkip(state: GameState): void {
   previouslyCompletedTaskIds.add(skipped.id);
   revealedTaskIds.add(skipped.id);
   appendLog(state, `Work skip: "${skipped.text}" marked complete.`);
-  // Final task carries the demo-end gag; fire the alerts immediately on skip
-  // (no celebration overlay was played, so no need to wait).
-  if (skipped.id === 'collect_dragon_bone') triggerFinalGameAlerts(state);
 }
 
 function ensureGoblins(state: GameState, count: number): void {
