@@ -321,8 +321,20 @@ export function setupUI(state: GameState, callbacks: UICallbacks) {
   // The pan hint defaults to the keyboard controls; on a touch-primary device
   // there are no arrow keys, so swap in the two-finger gesture instead.
   const panHintEl = document.getElementById('pan-hint');
-  if (panHintEl && window.matchMedia('(pointer: coarse)').matches) {
-    panHintEl.textContent = 'drag two fingers to look around';
+  if (window.matchMedia('(pointer: coarse)').matches) {
+    if (panHintEl) panHintEl.textContent = 'drag two fingers to look around';
+    // No arrow keys to hold on touch — the hints are tappable instead (wired
+    // up in main.ts), so reword them from "Hold ↑/↓" to "Tap".
+    const tapText: Record<string, string> = {
+      'ascend-hint': 'Tap to rise into space',
+      'descend-hint': 'Tap to return to the surface',
+      'descend-hell-hint': 'Tap to descend into hell',
+      'ascend-hell-hint': 'Tap to return to the surface',
+    };
+    for (const [id, text] of Object.entries(tapText)) {
+      const el = document.getElementById(id);
+      if (el) el.textContent = text;
+    }
   }
 
   // Spawn Goblin button (Summon section).

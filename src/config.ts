@@ -321,7 +321,7 @@ export const BUILDING_DEFS = {
   phone_farm: def(3, {
     name: 'Phone Farm',
     short: 'PF',
-    cost: 150,
+    cost: 100,
     buildersRequired: 3,
     buildTime: 4,
     maintainersRequired: 3,
@@ -338,7 +338,7 @@ export const BUILDING_DEFS = {
   goblin_wheel: def(2, {
     name: 'Goblin Wheel',
     short: 'GW',
-    cost: 75,
+    cost: 50,
     buildersRequired: 1,
     buildTime: 5,
     maintainersRequired: 1,
