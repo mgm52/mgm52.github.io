@@ -12,6 +12,7 @@ type DeathFrames = { textures: Texture[]; ends: number[]; duration: number };
 import { AMBIENT_DRAGON, BUILDING_DEFS, BuildingKind, CELL, COLS, DEMON, DRAGON, GOBLIN, HELL, RENDER_SCALE, ROWS, MINOTAUR, SPACE, TINYTAUR, WORLD } from './config';
 import { ensureFontLoaded, fontFamilyById, getOptions, onOptionsChange, type FontConfig, type Options } from './options';
 import { Building, Demon, Dragon, GameState, Ghost, Goblin, HOLE_SIZE, Minotaur, SpaceBuilding, WaterSource, buildingCenter, cellCenter, defOf, holeCenter, isInPlayCell, maintainerCount } from './state';
+import { getParlaySpeaker } from './demon-dialogue';
 
 export type Camera = { x: number; y: number };
 
@@ -1554,6 +1555,85 @@ function drawSelectionRing(g: Graphics, size: number) {
   g.rect(-half, -half, half * 2, half * 2).stroke({ width: 2, color: 0xffd96b });
 }
 
+// Cached handle to the demon-parlay speech bubble (an HTML overlay element).
+// Resolved lazily and reused so we don't getElementById every frame.
+let demonSpeechEl: HTMLElement | null | undefined;
+let demonSpeechAnchored = false;
+
+// Float the parlay speech bubble above the current speaker's head. `screenOf`
+// maps a hell coordinate to a screen pixel using the live hell-layer transform.
+// Called once per frame; resets to the CSS-default centre position when no one
+// is speaking.
+function positionParlaySpeech(
+  ctx: RenderContext,
+  scale: number,
+  screenX: (hx: number) => number,
+  screenY: (hy: number) => number,
+): void {
+  if (demonSpeechEl === undefined) demonSpeechEl = document.getElementById('demon-speech');
+  const el = demonSpeechEl;
+  if (!el) return;
+  const sp = getParlaySpeaker();
+  if (!sp) {
+    if (demonSpeechAnchored) {
+      el.style.left = ''; el.style.top = ''; el.style.transform = '';
+      demonSpeechAnchored = false;
+    }
+    return;
+  }
+  let hx: number;
+  let headTopHy: number;
+  if (sp.kind === 'demon') {
+    hx = sp.demon.hx;
+    headTopHy = sp.demon.hy - DEMON.displayPx * 0.5;
+  } else {
+    const g = sp.ghost;
+    hx = g.hx ?? worldToHellX(g.x + (g.offX ?? 0));
+    const hy = g.hy ?? worldToHellY(g.y + (g.offY ?? 0));
+    headTopHy = hy - getOptions().goblinDisplayPx * 0.5;
+  }
+  // Bubble is anchored bottom-centre (translate(-50%,-100%)), so it grows up
+  // and out from (sx, sy). Park it just above the head, then clamp against the
+  // viewport so a tall/wide line (or the colossal demon whose head sits near the
+  // top edge) never rides off-screen.
+  const pad = 8;
+  const halfW = el.offsetWidth / 2;
+  const h = el.offsetHeight;
+  const vw = ctx.viewport.width;
+  let sx = screenX(hx);
+  let sy = screenY(headTopHy) - 12 * scale;
+  sx = Math.max(halfW + pad, Math.min(vw - halfW - pad, sx));
+  sy = Math.max(h + pad, sy);
+  el.style.left = `${Math.round(sx)}px`;
+  el.style.top = `${Math.round(sy)}px`;
+  el.style.transform = 'translate(-50%, -100%)';
+  demonSpeechAnchored = true;
+}
+
+// Duration (seconds) of the one-shot "you commanded a unit onto me" ring flash.
+const COMMAND_FLASH_S = 0.6;
+// Drive a selection ring from the entity's `selected` flag plus an optional
+// one-shot command flash. A selected ring stays solid; otherwise, if the entity
+// was commanded onto within COMMAND_FLASH_S, the ring pulses 0→1→0 once so the
+// player can see exactly what they targeted.
+function applyRingFlash(ring: Graphics, selected: boolean, flashAt: number | undefined, now: number): void {
+  if (selected) {
+    ring.visible = true;
+    ring.alpha = 1;
+    return;
+  }
+  if (flashAt !== undefined) {
+    const t = (now - flashAt) / COMMAND_FLASH_S;
+    if (t >= 0 && t < 1) {
+      ring.visible = true;
+      ring.alpha = Math.sin(t * Math.PI);
+      return;
+    }
+  }
+  ring.visible = false;
+  ring.alpha = 1;
+}
+
 function drawBuildingBody(g: Graphics, b: Building, o: Options) {
   const def = defOf(b);
   const half = def.size / 2;
@@ -1880,7 +1960,7 @@ export function render(state: GameState, ctx: RenderContext) {
       ctx.goblinViews.set(g.id, v);
     }
     v.container.position.set(g.pos.x, g.pos.y);
-    v.selectionRing.visible = g.selected;
+    applyRingFlash(v.selectionRing, g.selected, g.commandFlashAt, state.now);
     // Shadow under the feet — anchored at sprite center, offset down to feet.
     v.shadow.visible = opts.goblinShadow;
     if (opts.goblinShadow) {
@@ -1957,7 +2037,7 @@ export function render(state: GameState, ctx: RenderContext) {
     // Tinytaurs render at a fraction of a full Minotaur's size.
     const dispPx = t.tiny ? minotaurDisplayPx * TINYTAUR.scale : minotaurDisplayPx;
     v.container.position.set(t.pos.x, t.pos.y);
-    v.selectionRing.visible = t.selected;
+    applyRingFlash(v.selectionRing, t.selected, t.commandFlashAt, state.now);
     v.shadow.visible = opts.goblinShadow;
     if (opts.goblinShadow) {
       v.shadow.position.set(0, dispPx * 0.32);
@@ -2004,7 +2084,7 @@ export function render(state: GameState, ctx: RenderContext) {
     v.label.y = bob;
     v.block.tint = breathing ? 0xff5a2a : 0xffffff;
     v.glow.alpha = breathing ? 0.85 : 0.35 + 0.12 * Math.sin(state.now * 3);
-    v.selectionRing.visible = d.selected;
+    applyRingFlash(v.selectionRing, d.selected, d.commandFlashAt, state.now);
     if (d.carrying) {
       const def = defOf(d.carrying);
       const tex = buildingTextures[d.carrying.kind];
@@ -2056,7 +2136,7 @@ export function render(state: GameState, ctx: RenderContext) {
     const def = defOf(b);
     const ctr = buildingCenter(b);
     v.container.position.set(ctr.x, ctr.y);
-    v.selectionRing.visible = b.selected;
+    applyRingFlash(v.selectionRing, b.selected, b.commandFlashAt, state.now);
     // Redraw the colored body when state changes OR when any of the body-affecting
     // option toggles flip. bodyKey collapses both into a single string compare.
     const key = bodyKey(b, opts);
@@ -2203,9 +2283,14 @@ export function render(state: GameState, ctx: RenderContext) {
     // Mirror the space slide-in but in the opposite direction: as the ground
     // drops away, hell rises into view from below.
     const hellSlide = (1 - smoothstep(0.82, 1.0, ctx.depth)) * ctx.viewport.height * 0.4;
-    ctx.hellLayer.position.set(
-      Math.round(offX - ctx.hellCamera.x * scale),
-      Math.round(offY - ctx.hellCamera.y * scale + hellSlide),
+    const hellOriginX = offX - ctx.hellCamera.x * scale;
+    const hellOriginY = offY - ctx.hellCamera.y * scale + hellSlide;
+    ctx.hellLayer.position.set(Math.round(hellOriginX), Math.round(hellOriginY));
+    // Keep the demon-parlay speech bubble pinned over the speaker's head.
+    positionParlaySpeech(
+      ctx, scale,
+      (hx) => hellOriginX + hx * scale,
+      (hy) => hellOriginY + hy * scale,
     );
   }
   // Sync ghost views with state.ghosts. Each ghost drifts downward at
@@ -2265,7 +2350,7 @@ export function render(state: GameState, ctx: RenderContext) {
       ctx.demonViews.set(d.id, v);
     }
     v.container.position.set(d.hx, d.hy);
-    v.selectionRing.visible = d.selected;
+    applyRingFlash(v.selectionRing, d.selected, d.commandFlashAt, state.now);
     const sheet = minotaurWalkSheet;
     if (sheet) {
       const dir = dirIndex(sheet.meta, d.facing);

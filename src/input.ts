@@ -1,6 +1,7 @@
 import { Application, Container, FederatedPointerEvent, Graphics } from 'pixi.js';
 import { playSound } from './audio';
 import { flashCursor } from './cursor-fx';
+import { demonRebuke } from './demon-dialogue';
 import { BUILDABLE_KINDS, BUILDING_DEFS, BuildingKind, CELL, DRAGON, GOBLIN, HELL, LIGHTNING, MINOTAUR, RENDER_SCALE, WORLD, formatPower } from './config';
 import { runBobCutscene } from './intro';
 import { RenderContext, ambientDragonAt, clampCamera, clampHellCamera, clampSpaceCamera, currentHellScale, ghostAtHell, ghostHellPos } from './render';
@@ -662,24 +663,30 @@ function handleHellRightClick(state: GameState, hx: number, hy: number) {
   // rest just gather nearby. The demon also has to be free (one soul at a time).
   const demon = demonAtHell(state, hx, hy);
   if (demon) {
-    const speaker = demon.busyWith === null
-      ? selected.find((g) => g.kind === 'goblin') ?? null
-      : null;
-    for (const g of selected) {
-      const dx = (Math.random() - 0.5) * HELL.ghostHitRadius;
-      const dy = (Math.random() - 0.5) * HELL.ghostHitRadius;
-      g.goal = { x: demon.hx + dx, y: demon.hy + dy };
-      if (g.hx === undefined || g.hy === undefined) {
-        const p = ghostHellPos(state, g);
-        g.hx = p.x;
-        g.hy = p.y;
-      }
-      g.parlayDemonId = g === speaker ? demon.id : undefined;
+    // Only one soul may approach the demon at a time. Sending a crowd is
+    // refused outright — nobody is commanded and the demon barks them back.
+    if (selected.length > 1) {
+      playSound('error');
+      demonRebuke(demon, 'one at a time please');
+      appendLog(state, 'The demon rumbles: one soul at a time.');
+      return;
     }
+    demon.commandFlashAt = state.now;
+    const g = selected[0];
+    const canSpeak = demon.busyWith === null && g.kind === 'goblin';
+    const dx = (Math.random() - 0.5) * HELL.ghostHitRadius;
+    const dy = (Math.random() - 0.5) * HELL.ghostHitRadius;
+    g.goal = { x: demon.hx + dx, y: demon.hy + dy };
+    if (g.hx === undefined || g.hy === undefined) {
+      const p = ghostHellPos(state, g);
+      g.hx = p.x;
+      g.hy = p.y;
+    }
+    g.parlayDemonId = canSpeak ? demon.id : undefined;
     playSound('select', 0.4);
-    if (speaker) appendLog(state, 'A soul shuffles forth to parlay with the demon.');
+    if (canSpeak) appendLog(state, 'A soul shuffles forth to parlay with the demon.');
     else if (demon.busyWith !== null) appendLog(state, 'The demon is already locked in parlay.');
-    else appendLog(state, 'These souls have no tongue for the demon.');
+    else appendLog(state, 'This soul has no tongue for the demon.');
     return;
   }
 
@@ -802,16 +809,19 @@ function handleRightClick(state: GameState, x: number, y: number) {
 
     if (freeDragons.length > 0) {
       if (targetGoblin) {
+        targetGoblin.commandFlashAt = state.now;
         for (const d of freeDragons) {
           d.state = { kind: 'going_to_kill', targetKind: 'goblin', targetId: targetGoblin.id };
         }
         appendLog(state, `${freeDragons.length} dragon(s) diving on goblin #${targetGoblin.id}.`);
       } else if (targetMinotaur) {
+        targetMinotaur.commandFlashAt = state.now;
         for (const d of freeDragons) {
           d.state = { kind: 'going_to_kill', targetKind: 'minotaur', targetId: targetMinotaur.id };
         }
         appendLog(state, `${freeDragons.length} dragon(s) diving on Minotaur #${targetMinotaur.id}.`);
       } else if (targetDragon) {
+        targetDragon.commandFlashAt = state.now;
         for (const d of freeDragons) {
           if (d.id === targetDragon.id) continue;
           d.state = { kind: 'going_to_kill', targetKind: 'dragon', targetId: targetDragon.id };
@@ -823,6 +833,7 @@ function handleRightClick(state: GameState, x: number, y: number) {
           playSound('error');
           appendLog(state, `${defOf(targetBuilding).name} is rooted to the abyss — dragons cannot move it.`);
         } else {
+          targetBuilding.commandFlashAt = state.now;
           for (const d of freeDragons) {
             d.state = { kind: 'going_to_building', buildingId: targetBuilding.id };
           }
@@ -879,9 +890,11 @@ function handleRightClick(state: GameState, x: number, y: number) {
         resetMinotaurStuck(m, state.now);
       }
       if (attackers.length > 0) {
+        targetMinotaur.commandFlashAt = state.now;
         appendLog(state, `${attackers.length} minotaur(s) ordered to gore Minotaur #${targetMinotaur.id}.`);
       }
     } else if (targetBuilding) {
+      targetBuilding.commandFlashAt = state.now;
       for (const m of selectedMinotaurs) {
         m.target = null;
         m.state = { kind: 'going_to_destroy', buildingId: targetBuilding.id };
@@ -907,6 +920,7 @@ function handleRightClick(state: GameState, x: number, y: number) {
   if (targetGoblin) {
     const attackers = selectedGoblins.filter(g => g.id !== targetGoblin.id);
     if (attackers.length > 0) {
+      targetGoblin.commandFlashAt = state.now;
       for (const g of attackers) {
         releaseFromBuilding(state, g);
         g.goal = null;
@@ -919,6 +933,7 @@ function handleRightClick(state: GameState, x: number, y: number) {
   }
 
   if (targetBuilding) {
+    targetBuilding.commandFlashAt = state.now;
     assignToBuilding(state, selectedGoblins, targetBuilding);
   } else {
     const reserved = new Set<string>();

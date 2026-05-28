@@ -1103,6 +1103,9 @@ export function refreshUI(state: GameState) {
 
   // Placement hint
   const hint = document.getElementById('placement-hint')!;
+  // The Bob summon prompt gets a larger, centred treatment (.bob-summon); the
+  // build/strike prompts keep the small top-left corner style.
+  hint.classList.toggle('bob-summon', state.bobPickingHole);
   if (state.bobPickingHole) {
     hint.style.display = 'block';
     hint.textContent = 'Bob is waiting — click any Goblin Hole to summon him · time is frozen';
