@@ -1076,7 +1076,8 @@ function placeBuilding(state: GameState, x: number, y: number) {
   // the active portal rather than the moment the placement is paid for.
   if (kind === 'hell_portal') state.hellUnlocked = true;
   playSound('place', 1.6);
-  appendLog(state, `${def.name} #${b.displayNum} construction started — right-click goblins onto it to staff the build.`);
+  const staffGesture = window.matchMedia('(pointer: coarse)').matches ? 'long tap' : 'right-click';
+  appendLog(state, `${def.name} #${b.displayNum} construction started — ${staffGesture} goblins onto it to staff the build.`);
   autoAssignAllIdle(state);
   maybeTriggerBobCutscene(state, b, def.name);
 }
