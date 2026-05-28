@@ -9,7 +9,7 @@ import { autoAssignAllIdle, lightningStrike, spawnBob } from './sim';
 import {
   Building, Cell, Dragon, GameState, Ghost, Goblin, Minotaur, WaterSource,
   appendLog, buildingAtCell, buildingMoneyCost, cellKey, defOf, demonAtHell, findFreeCellNear,
-  holeAtCell, isInBounds, nextBuildingDisplayNum, pixelToCell, spaceBuildingAt,
+  hellPortalAt, holeAtCell, isInBounds, nextBuildingDisplayNum, pixelToCell, spaceBuildingAt,
   waterCarrierCount, waterSourceAtCell,
 } from './state';
 
@@ -293,11 +293,15 @@ export function setupInput(
           if (moved < SPACE_DRAG_TOL) {
             const hp = e.getLocalPosition(ctx.hellLayer);
             // A small precise ghost wins over the giant demon hit box behind it,
-            // so a soul standing on the demon can still be picked.
+            // so a soul standing on the demon can still be picked. The Hell
+            // Beacon (portal mirror) is likewise a small target that beats the
+            // demon, but a soul on top of it still takes priority.
             const gh = ghostAtHell(state, hp.x, hp.y);
-            const dm = gh ? null : demonAtHell(state, hp.x, hp.y);
+            const portal = gh ? null : hellPortalAt(state, hp.x, hp.y);
+            const dm = (gh || portal) ? null : demonAtHell(state, hp.x, hp.y);
             if (!e.shiftKey) clearSelection(state);
             if (gh) { selectGhost(state, gh); playSound('select', 0.33); }
+            else if (portal) { portal.selected = true; playSound('select', 0.33); }
             else if (dm) { dm.selected = true; playSound('select', 0.33); }
           } else {
             const a = e.getLocalPosition(ctx.hellLayer);

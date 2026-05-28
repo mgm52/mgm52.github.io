@@ -84,7 +84,7 @@ await page.evaluate(() => {
   const worldX = cx * 32;
   const worldY = cy * 32;
   // worldToHell offsets are (HELL.width - WORLD.width)/2 etc, baked in render.
-  const hellW = 4800, hellH = 3200;
+  const hellW = 2400, hellH = 3200;
   const worldW = 44 * 32, worldH = 44 * 32;
   const hx = worldX + (hellW - worldW) / 2;
   const hy = worldY + (hellH - worldH) / 2;

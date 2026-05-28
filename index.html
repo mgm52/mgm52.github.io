@@ -1121,18 +1121,16 @@
         pointer-events: none;
       }
       #demon-overlay.speaking #demon-speech { opacity: 1; }
-      /* Speaker label, coloured per voice; the spoken line picks up a matching
-         (lighter) hue. Defaults cover the unset state before the first line. */
-      #demon-speaker { font-weight: 400; opacity: 0.95; }
-      #demon-speaker::after { content: ":\00a0"; }
+      /* No speaker nametag — the line floats above whoever's talking, so the
+         voice is conveyed by position + colour rather than a "Demon:" label. */
+      #demon-speaker { display: none; }
+      /* The spoken line picks up a per-voice hue; the default covers the unset
+         state before the first line. */
       #demon-line { color: #e8d8c0; }
-      #demon-speech.demon #demon-speaker { color: #ff5a44; text-shadow: 0 0 16px rgba(255, 70, 40, 0.7); }
       #demon-speech.demon #demon-line { color: #ffb6a4; }
-      #demon-speech.goblin #demon-speaker { color: #9fe06a; }
       #demon-speech.goblin #demon-line { color: #d6ecc4; }
-      #demon-speech.bob #demon-speaker { color: #ffd96b; }
       #demon-speech.bob #demon-line { color: #ffe7ad; }
-      /* Emphasised phrase inside a demon line — the *slayed two dragons* bit. */
+      /* Emphasised phrase inside a demon line — the *slain two dragons* bit. */
       .demon-em {
         font-style: italic;
         font-weight: 600;

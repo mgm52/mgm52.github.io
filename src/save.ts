@@ -113,6 +113,7 @@ export function loadGame(): { state: GameState; savedAt: number } | null {
       d.selected = false;
     }
     env.state.slewTwoDragonsInOneStrike ??= false;
+    env.state.lightningUnlocked ??= false;
     // Pre-existing Hell Portals from saves predating activatedAt get one set
     // to a time well before now, so the beam draw-in animation has already
     // completed when the player loads in — they expect to see the beam.

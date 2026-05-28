@@ -377,8 +377,11 @@ export type GameState = {
   // (only ever increases).
   maxStruckAtOnce: number;
   // Sticky: flips true once the player has vaporised two or more dragons with a
-  // single Lightning Strike. The truth a demon weighs in Bob's parlay.
+  // single Lightning Strike. (Legacy: no longer read by the demon parlay.)
   slewTwoDragonsInOneStrike: boolean;
+  // Sticky: the Lightning Strike ritual. Granted solely by a truthful demon
+  // parlay (Bob owning a dragon bone); never unlocked any other way.
+  lightningUnlocked: boolean;
   // Number of Minotaurs summoned this run — drives the doubling summon cost.
   minotaursBought: number;
   // Multiplier applied to a gold goblin's GOLD_KILL_REWARD.money on death.
@@ -795,6 +798,7 @@ export function createInitialState(): GameState {
     tinytaurUnlocked: false,
     maxStruckAtOnce: 0,
     slewTwoDragonsInOneStrike: false,
+    lightningUnlocked: false,
     goldgoblinMultiplier: 1,
     autoSpawnTimer: 0,
     autoSpawnMultiplier: 0,
@@ -899,6 +903,24 @@ export function demonAtHell(state: GameState, hx: number, hy: number): Demon | n
     if (dd <= bestD) { bestD = dd; best = d; }
   }
   return best;
+}
+
+// Topmost Hell Portal whose hell-side mirror covers a hell-coord point, or
+// null. The mirror sits at the portal's world centre mapped into hell space
+// (matching render.ts's worldToHell offset); we treat its footprint as a
+// generous square so the beacon is easy to tap in the abyss.
+export function hellPortalAt(state: GameState, hx: number, hy: number): Building | null {
+  const offX = (HELL.width - WORLD.width) / 2;
+  const offY = (HELL.height - WORLD.height) / 2;
+  for (const b of state.buildings.values()) {
+    if (b.kind !== 'hell_portal') continue;
+    const ctr = buildingCenter(b);
+    const reach = defOf(b).size;
+    if (Math.abs(ctr.x + offX - hx) <= reach && Math.abs(ctr.y + offY - hy) <= reach) {
+      return b;
+    }
+  }
+  return null;
 }
 
 // World coordinates that map (via worldToHell) to a hell-coord point — the

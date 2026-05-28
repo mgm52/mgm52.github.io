@@ -5,9 +5,9 @@ import {
   SPAWN_HINT_NO_TASK_SEC, SUMMON_UPGRADES, WATER_HINT_DELAY_SEC, digBloodCost, MINOTAUR, minotaurBloodCost, TINYTAUR, formatPower,
 } from './config';
 import {
-  Building, Cell, Demon, DragonState, GameState, Goblin, GoblinState, SpaceBuilding, WaterSource,
+  Building, Cell, Demon, DragonState, GameState, Ghost, Goblin, GoblinState, SpaceBuilding, WaterSource,
   appendLog, buildingCenter, buildingLabel, buildingMoneyCost, cellCenter, cellKey, countIdle, defOf, digDirection,
-  getSpawnCapacity, holeBlockedByBuilding, isCellBlocked, isInBounds,
+  earnDragonBone, getSpawnCapacity, holeBlockedByBuilding, isCellBlocked, isInBounds,
   maintainerCount, nextBuildingDisplayNum, occupyCell, waterCarrierCount,
 } from './state';
 import { spawnMinotaur } from './sim';
@@ -142,10 +142,10 @@ function emanateAtCursor(x: number, y: number, variant?: 'white'): void {
 }
 
 // The "demo just stops" pair of alerts + the secret options-cog unlock. Fired
-// only by the demon's gift to a truthful Bob (see demon-dialogue.ts) — the
-// dragon-bone task no longer triggers it. The cog can also be revealed silently
-// (no alerts) by the shift-click / long-press R gesture in options-ui.ts.
-// Idempotency is handled at the demon call site via `!state.optionsUnlocked`.
+// once the Collect-5-dragon-bones task reveals (gated in refreshUI). The cog
+// can also be revealed silently (no alerts) by the shift-click / long-press R
+// gesture in options-ui.ts. Idempotency is handled at the call site via
+// `!state.optionsUnlocked`.
 export function revealSecretSettings(state: GameState): void {
   window.alert(
     "congrats the game is incomplete!!!!! It's unfinished!!!! "
@@ -216,7 +216,8 @@ let currentTaskCached: Task | null = null;
 //   run_phone_farm       → Autobuild, Autospawn
 //   build_gas_engine     → Minotaur, Dig
 //   earn_30_blood        → Goldblins
-//   ascend               → Lightning Strike
+// Lightning Strike is special: it's granted by a truthful demon parlay, not a
+// task (see state.lightningUnlocked).
 // The Dragon summon is special-cased: it has no gating task. Its button shows
 // whenever at least one Dragon Beacon is `active`, and the simultaneous-dragon
 // cap (live + queued) equals the active-beacon count.
@@ -266,7 +267,9 @@ const TASKS: Task[] = [
   {
     id: 'build_hypercentre',
     text: 'Build a Hypercentre',
-    unlocks: ['dragon_beacon'],
+    // The Hell Portal ("???") opens up alongside the Dragon Beacon — no longer
+    // gated behind ascending.
+    unlocks: ['dragon_beacon', 'hell_portal'],
     isDone: (s) => {
       for (const b of s.buildings.values()) {
         if (b.kind === 'hypercentre') return true;
@@ -278,10 +281,11 @@ const TASKS: Task[] = [
   {
     // Final task: complete the first time the player rises into the space view.
     // Sticky completion means a momentary visit is enough — view resets to
-    // 'ground' on reload, but the completed flag persists.
+    // 'ground' on reload, but the completed flag persists. Grants no building;
+    // it's a milestone (Lightning now comes from the demon's parlay instead).
     id: 'ascend',
     text: 'Ascend',
-    unlocks: ['hell_portal'],
+    unlocks: [],
     isDone: (s) => s.view === 'space',
     prereq: ['build_hypercentre'],
   },
@@ -295,6 +299,19 @@ const TASKS: Task[] = [
     unlocks: ['goblin_hole'],
     isDone: (s) => s.minotaursBought >= 2,
     prereq: ['build_gas_engine'],
+    optional: true,
+  },
+  {
+    // Optional easter-egg side-task: collecting five dragon bones (cumulative)
+    // fires the demo's "game's incomplete" alerts and unlocks the secret
+    // settings menu (see the revealSecretSettings gate in refreshUI). Dragon
+    // bones drop when one dragon incinerates another, so this needs the Dragon
+    // Beacon (build_hypercentre) first. Grants no building.
+    id: 'collect_dragon_bones',
+    text: 'Collect 5 dragon bones',
+    unlocks: [],
+    isDone: (s) => s.dragonBoneEarned >= 5,
+    prereq: ['build_hypercentre'],
     optional: true,
   },
 ];
@@ -970,16 +987,23 @@ export function refreshUI(state: GameState) {
   //   run_phone_farm       → Autobuild, Autospawn
   //   build_gas_engine     → Dig (+ Minotaur, handled above)
   //   earn_30_blood        → Goldblins
-  //   ascend               → Lightning Strike
+  // (Lightning Strike is granted by the demon parlay, not a task.)
   const phaseRunPhoneFarm = revealedTaskIds.has('run_phone_farm');
   const phaseGasTurbine = revealedTaskIds.has('build_gas_engine');
   const minotaurTaskDone = revealedTaskIds.has('earn_30_blood');
-  const ascendTaskDone = revealedTaskIds.has('ascend');
 
-  // Lightning Strike — a ritual unlocked once the Ascend task is done. Disabled
-  // when the player can't cover the blood cost; lit while armed.
+  // Collecting 5 dragon bones is the demo's closing easter egg: once that task
+  // reveals, fire the "game's incomplete" alerts and unlock the secret settings
+  // menu. revealSecretSettings is guarded so it only runs once.
+  if (revealedTaskIds.has('collect_dragon_bones') && !state.optionsUnlocked) {
+    revealSecretSettings(state);
+  }
+
+  // Lightning Strike — a ritual granted only by a truthful demon parlay (see
+  // demon-dialogue.ts). Disabled when the player can't cover the blood cost;
+  // lit while armed.
   const lightningBtn = document.getElementById('btn-lightning-strike') as HTMLButtonElement;
-  if (ascendTaskDone) {
+  if (state.lightningUnlocked) {
     lightningBtn.style.display = '';
     applyFadeInOnFirstShow('btn-lightning-strike');
     const canAffordLightning = state.blood >= LIGHTNING.bloodCost;
@@ -995,7 +1019,7 @@ export function refreshUI(state: GameState) {
   // Minotaur (also rewarded around Phase 3), so a "needs Minotaur" banner covers
   // the row until one is summoned; see the dig-overlay below.
   const digUnlocked = phaseGasTurbine;
-  const ritualVisible = phaseRunPhoneFarm || phaseGasTurbine || minotaurTaskDone || ascendTaskDone;
+  const ritualVisible = phaseRunPhoneFarm || phaseGasTurbine || minotaurTaskDone || state.lightningUnlocked;
   const ritualSection = document.getElementById('ritual-section')!;
   ritualSection.style.display = ritualVisible ? '' : 'none';
   // Now that the panel renders as a bordered card, an empty container shows
@@ -1231,6 +1255,13 @@ function refreshInfoPanel(state: GameState) {
   const selectedBuildings = [...state.buildings.values()].filter((b) => b.selected);
   const selectedWater = [...state.waterSources.values()].find((w) => w.selected) ?? null;
   const selectedSpace = [...state.spaceBuildings.values()].filter((sb) => sb.selected);
+  const selectedGhosts = state.ghosts.filter((g) => g.selected);
+  // In hell a tap on the portal mirror selects the underlying Hell Portal
+  // building. Show it its own beacon panel (no ground-only Destroy/commands)
+  // rather than the regular building card.
+  const selectedHellPortal = state.view === 'hell'
+    ? (selectedBuildings.find((b) => b.kind === 'hell_portal') ?? null)
+    : null;
 
   const destroyBtn = document.getElementById('info-destroy')!;
   const killBtn = document.getElementById('info-kill')!;
@@ -1239,6 +1270,16 @@ function refreshInfoPanel(state: GameState) {
   const selectedDemon = [...state.demons.values()].find((d) => d.selected) ?? null;
   if (selectedDemon) {
     showDemon(state, selectedDemon, panel, portrait, name, stateEl, extra);
+  } else if (selectedHellPortal) {
+    showHellPortal(selectedHellPortal, panel, portrait, name, stateEl, extra);
+  } else if (selectedGhosts.length === 1) {
+    showGhost(selectedGhosts[0], panel, portrait, name, stateEl, extra);
+  } else if (selectedGhosts.length > 1) {
+    panel.classList.add('visible');
+    portrait.innerHTML = `<div class="portrait-goblin" style="background:#0c1018;border-color:#8fa6cc;color:#c6d4ee">☁</div>`;
+    name.textContent = `${selectedGhosts.length} souls`;
+    stateEl.textContent = '';
+    extra.innerHTML = `<span style="color:#6a7080">${hellCommandHint()}</span>`;
   } else if (selectedSpace.length === 1) {
     showSpaceBuilding(state, selectedSpace[0], panel, portrait, name, stateEl, extra);
   } else if (selectedSpace.length > 1) {
@@ -1340,6 +1381,43 @@ function showDemon(_state: GameState, d: Demon, panel: HTMLElement, portrait: HT
   name.textContent = 'Minotaur of the Pit';
   stateEl.textContent = d.busyWith !== null ? 'Locked in parlay' : 'Pacing the abyss';
   extra.innerHTML = `<span style="color:#ff4a4a">You cannot command this creature, only parlay</span>`;
+}
+
+// A drifting soul in the hell view. No commands list — the hint covers how to
+// steer it (walk, or onto the demon to parlay).
+function showGhost(g: Ghost, panel: HTMLElement, portrait: HTMLElement,
+                   name: HTMLElement, stateEl: HTMLElement, extra: HTMLElement) {
+  panel.classList.add('visible');
+  const glyph = g.bob ? 'B' : g.kind === 'minotaur' ? 'M' : g.kind === 'dragon' ? 'D' : 'G';
+  portrait.innerHTML = `<div class="portrait-goblin" style="background:#0c1018;border-color:#8fa6cc;color:#c6d4ee">${glyph}</div>`;
+  const kindLabel = g.kind === 'minotaur' ? 'Minotaur' : g.kind === 'dragon' ? 'Dragon' : 'Goblin';
+  name.textContent = g.bob ? "Bob's soul" : `${kindLabel} soul`;
+  stateEl.textContent = g.parlayDemonId !== undefined
+    ? 'Drawn toward the demon'
+    : g.goal ? 'Trudging through the abyss' : 'Adrift in the abyss';
+  extra.innerHTML = `<span style="color:#6a7080">${hellCommandHint()}</span>`;
+}
+
+// The Hell Portal seen from below — its hell-side mirror. Named for what it is
+// down here; the overworld build menu keeps the ominous "???".
+function showHellPortal(b: Building, panel: HTMLElement, portrait: HTMLElement,
+                        name: HTMLElement, stateEl: HTMLElement, extra: HTMLElement) {
+  panel.classList.add('visible');
+  const cls = b.state === 'constructing' ? 'constructing' : 'active';
+  portrait.innerHTML = `<div class="portrait-building hell_portal ${cls}">???</div>`;
+  name.textContent = 'Hell Beacon';
+  stateEl.textContent = b.state === 'constructing'
+    ? 'A rift tearing open above'
+    : 'A rift torn between worlds';
+  extra.innerHTML = `<span style="color:#ff8a6a">Its light pierces down into the abyss</span>`;
+}
+
+// Hint for steering souls in the hell view — long-tap on touch, right-click
+// (or space) otherwise, mirroring the ground command hints.
+function hellCommandHint(): string {
+  return TOUCH_PRIMARY
+    ? 'Long tap to send souls walking (or onto the demon to parlay)'
+    : 'Right click to send souls walking (or onto the demon to parlay)';
 }
 
 function showHole(state: GameState, panel: HTMLElement, portrait: HTMLElement,
@@ -1614,6 +1692,13 @@ export function executeTaskSkip(state: GameState): void {
       // force-completes the task regardless of the live `view`.
       ensureBuildingCount(state, 'dragon_beacon', 1);
       state.spaceUnlocked = true;
+      break;
+    }
+    case 'collect_dragon_bones': {
+      // Grant the five bones so the resource row + count match the completed
+      // task; revealing it then fires the secret-menu alerts in refreshUI.
+      if (state.dragonBoneEarned < 5) earnDragonBone(state, 5 - state.dragonBoneEarned);
+      state.dragonBoneUnlocked = true;
       break;
     }
   }

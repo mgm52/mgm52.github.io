@@ -12,7 +12,6 @@ import {
   Demon, GameState, Ghost,
   appendLog, hellToWorld, pushDeathEffect, resurrectBob,
 } from './state';
-import { revealSecretSettings } from './ui';
 
 type Speaker = 'demon' | 'goblin' | 'bob';
 type Seg = { t: string; em: boolean };
@@ -36,12 +35,11 @@ const REBUKE_MS = 1700;
 export function demonRebuke(demon: Demon, text: string): void {
   const els = getEls();
   if (!els) return;
-  const { overlay, speech, speaker, lineEl } = els;
+  const { overlay, speech, lineEl } = els;
   if (overlay.classList.contains('visible') && !overlay.classList.contains('rebuke')) return;
   if (rebukeTimer !== null) { clearTimeout(rebukeTimer); rebukeTimer = null; }
   parlaySpeaker = { kind: 'demon', demon };
   speech.className = 'demon';
-  speaker.textContent = LABEL.demon;
   lineEl.textContent = text;
   speech.classList.add('done');               // no caret — it's an instant bark
   overlay.classList.add('visible', 'speaking', 'rebuke');
@@ -54,7 +52,6 @@ export function demonRebuke(demon: Demon, text: string): void {
   }, REBUKE_MS);
 }
 
-const LABEL: Record<Speaker, string> = { demon: 'Demon', goblin: 'Goblin', bob: 'Bob' };
 // A regular goblin can only manage one of these.
 const GIBBERISH = ['gleh', 'goink', 'grah', 'groh', 'gonk'];
 
@@ -151,7 +148,7 @@ function strikeGhostBack(state: GameState, ghost: Ghost): void {
 export async function runDemonDialogue(state: GameState, demon: Demon, ghost: Ghost): Promise<void> {
   const els = getEls();
   if (!els) return;
-  const { overlay, speech, speaker, lineEl, yesBtn, noBtn, clickWall } = els;
+  const { overlay, speech, lineEl, yesBtn, noBtn, clickWall } = els;
 
   // autoMs: auto-advance after typing instead of waiting for a click.
   // hold: leave the line on screen (no click/auto, speech stays visible) — used
@@ -161,7 +158,6 @@ export async function runDemonDialogue(state: GameState, demon: Demon, ghost: Gh
     // the approaching soul for goblin/bob lines.
     parlaySpeaker = who === 'demon' ? { kind: 'demon', demon } : { kind: 'ghost', ghost };
     speech.className = who;            // colour by speaker (also clears prior state)
-    speaker.textContent = LABEL[who];
     lineEl.innerHTML = '';
     overlay.classList.add('speaking');
     const segs = parseEmphasis(text);
@@ -195,6 +191,13 @@ export async function runDemonDialogue(state: GameState, demon: Demon, ghost: Gh
     return yes;
   }
 
+  // The demon trailing off in thought: spaced-out dots that linger, then a
+  // beat of real silence (empty bubble) before he speaks again.
+  async function ellipsisBeat(): Promise<void> {
+    await say('demon', '. . .', { autoMs: 1200 });
+    await sleep(650);
+  }
+
   // Reset any leftover state and reveal the overlay. Cancel a lingering rebuke
   // bark so its timer can't tear down this parlay's overlay mid-conversation.
   if (rebukeTimer !== null) { clearTimeout(rebukeTimer); rebukeTimer = null; }
@@ -214,22 +217,20 @@ export async function runDemonDialogue(state: GameState, demon: Demon, ghost: Gh
     if (ghost.bob) {
       await say('bob', 'hello mate');
       await say('demon', 'a clumsy wield of language');
-      await say('demon', 'have you *slayed two dragons in one strike*?', { hold: true });
+      await say('demon', 'have you *collected a dragon bone*?', { hold: true });
       const yes = await ask();
       if (!yes) {
         await say('demon', 'begone and be useful');
-      } else if (state.slewTwoDragonsInOneStrike) {
-        await say('demon', '…', { autoMs: 900 });
-        await say('demon', '…', { autoMs: 900 });
+      } else if (state.dragonBone >= 1) {
+        await ellipsisBeat();
         playSound('ritual', 0.85, 0.55);
         await say('demon', 'mmm');
         await say('demon', 'delicious. thank you my child');
         await say('demon', 'be witness to my gift');
-        appendLog(state, 'The demon bestows a gift upon Bob.');
-        if (!state.optionsUnlocked) revealSecretSettings(state);
+        state.lightningUnlocked = true;
+        appendLog(state, 'The demon grants Bob the power of lightning.');
       } else {
-        await say('demon', '…', { autoMs: 900 });
-        await say('demon', '…', { autoMs: 900 });
+        await ellipsisBeat();
         await say('demon', 'untruth');
         strikeGhostBack(state, ghost);
         resurrectBob(state);
@@ -237,7 +238,7 @@ export async function runDemonDialogue(state: GameState, demon: Demon, ghost: Gh
     } else {
       const gib = GIBBERISH[Math.floor(Math.random() * GIBBERISH.length)];
       await say('goblin', gib);
-      await say('demon', '… i do not know this language');
+      await say('demon', '. . . i do not know this language');
     }
   } finally {
     parlaySpeaker = null;
