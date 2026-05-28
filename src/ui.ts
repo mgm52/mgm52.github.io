@@ -7,7 +7,7 @@ import {
 import {
   Building, Cell, Demon, DragonState, GameState, Ghost, Goblin, GoblinState, SpaceBuilding, WaterSource,
   appendLog, buildingCenter, buildingLabel, buildingMoneyCost, cellCenter, cellKey, countIdle, defOf, digDirection,
-  getSpawnCapacity, holeBlockedByBuilding, isCellBlocked, isInBounds,
+  earnDragonBone, getSpawnCapacity, holeBlockedByBuilding, isCellBlocked, isInBounds,
   maintainerCount, nextBuildingDisplayNum, occupyCell, waterCarrierCount,
 } from './state';
 import { spawnMinotaur } from './sim';
@@ -142,10 +142,10 @@ function emanateAtCursor(x: number, y: number, variant?: 'white'): void {
 }
 
 // The "demo just stops" pair of alerts + the secret options-cog unlock. Fired
-// only by the demon's gift to a truthful Bob (see demon-dialogue.ts) — the
-// dragon-bone task no longer triggers it. The cog can also be revealed silently
-// (no alerts) by the shift-click / long-press R gesture in options-ui.ts.
-// Idempotency is handled at the demon call site via `!state.optionsUnlocked`.
+// once the Collect-5-dragon-bones task reveals (gated in refreshUI). The cog
+// can also be revealed silently (no alerts) by the shift-click / long-press R
+// gesture in options-ui.ts. Idempotency is handled at the call site via
+// `!state.optionsUnlocked`.
 export function revealSecretSettings(state: GameState): void {
   window.alert(
     "congrats the game is incomplete!!!!! It's unfinished!!!! "
@@ -299,6 +299,19 @@ const TASKS: Task[] = [
     unlocks: ['goblin_hole'],
     isDone: (s) => s.minotaursBought >= 2,
     prereq: ['build_gas_engine'],
+    optional: true,
+  },
+  {
+    // Optional easter-egg side-task: collecting five dragon bones (cumulative)
+    // fires the demo's "game's incomplete" alerts and unlocks the secret
+    // settings menu (see the revealSecretSettings gate in refreshUI). Dragon
+    // bones drop when one dragon incinerates another, so this needs the Dragon
+    // Beacon (build_hypercentre) first. Grants no building.
+    id: 'collect_dragon_bones',
+    text: 'Collect 5 dragon bones',
+    unlocks: [],
+    isDone: (s) => s.dragonBoneEarned >= 5,
+    prereq: ['build_hypercentre'],
     optional: true,
   },
 ];
@@ -978,6 +991,13 @@ export function refreshUI(state: GameState) {
   const phaseRunPhoneFarm = revealedTaskIds.has('run_phone_farm');
   const phaseGasTurbine = revealedTaskIds.has('build_gas_engine');
   const minotaurTaskDone = revealedTaskIds.has('earn_30_blood');
+
+  // Collecting 5 dragon bones is the demo's closing easter egg: once that task
+  // reveals, fire the "game's incomplete" alerts and unlock the secret settings
+  // menu. revealSecretSettings is guarded so it only runs once.
+  if (revealedTaskIds.has('collect_dragon_bones') && !state.optionsUnlocked) {
+    revealSecretSettings(state);
+  }
 
   // Lightning Strike — a ritual granted only by a truthful demon parlay (see
   // demon-dialogue.ts). Disabled when the player can't cover the blood cost;
@@ -1672,6 +1692,13 @@ export function executeTaskSkip(state: GameState): void {
       // force-completes the task regardless of the live `view`.
       ensureBuildingCount(state, 'dragon_beacon', 1);
       state.spaceUnlocked = true;
+      break;
+    }
+    case 'collect_dragon_bones': {
+      // Grant the five bones so the resource row + count match the completed
+      // task; revealing it then fires the secret-menu alerts in refreshUI.
+      if (state.dragonBoneEarned < 5) earnDragonBone(state, 5 - state.dragonBoneEarned);
+      state.dragonBoneUnlocked = true;
       break;
     }
   }
