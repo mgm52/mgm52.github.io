@@ -179,6 +179,35 @@ export function startBackgroundMusic(url: string): void {
   });
   a.play().catch(() => {/* gated until next gesture; caller should retry */});
   musicEl = a;
+  ensurePlaybackWatchdog();
+}
+
+// ─── Playback watchdog ──────────────────────────────────────────────
+// The `ended` listener above only catches a loop hiccup at the track's end —
+// but that's the rare case. The common way background audio "disappears"
+// mid-session is the OS/browser silently *pausing* the element, which never
+// fires `ended`: headphones or a Bluetooth device unplugged (OS pauses media
+// to avoid blasting the speakers), an interruption grabbing audio focus (a
+// call, another tab), or the tab being backgrounded / the device sleeping on a
+// long session. None of these restart on their own. A cheap heartbeat re-kicks
+// any background layer that *should* be playing but has fallen paused, and we
+// also resume the moment a backgrounded tab becomes visible again rather than
+// waiting out the next tick.
+const WATCHDOG_MS = 1000;
+let watchdogInterval: number | null = null;
+function resumeStalledAudio(): void {
+  // We never intentionally pause the music, so any paused state is a stall to
+  // recover from. Crackle, by contrast, is paused on purpose when disabled —
+  // only resume it while it's meant to be on.
+  if (musicEl && musicEl.paused) musicEl.play().catch(() => {});
+  if (crackleEl && crackleEnabled && crackleEl.paused) crackleEl.play().catch(() => {});
+}
+function ensurePlaybackWatchdog(): void {
+  if (watchdogInterval !== null) return;
+  watchdogInterval = window.setInterval(resumeStalledAudio, WATCHDOG_MS);
+  document.addEventListener('visibilitychange', () => {
+    if (!document.hidden) resumeStalledAudio();
+  });
 }
 
 // ─── Vinyl crackle (second background layer) ───────────────────────
@@ -240,6 +269,7 @@ export function startBackgroundCrackle(url: string): void {
   if (crackleRampInterval === null) {
     crackleRampInterval = window.setInterval(tickCrackleRamp, 50);
   }
+  ensurePlaybackWatchdog();
 }
 export function setCrackleEnabled(enabled: boolean): void {
   crackleEnabled = enabled;
