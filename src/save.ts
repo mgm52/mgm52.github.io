@@ -108,6 +108,16 @@ export function loadGame(): { state: GameState; savedAt: number } | null {
     // Demons — added with the hell parlay system. Seed them for older saves,
     // and always resume with no parlay in progress (the overlay is live-only).
     env.state.demons ??= createDemons(env.state);
+    // Self-heal: a save can carry an empty demons map, or (from a pre-current
+    // schema) a demon with a non-finite hx/hy. Pixi silently refuses to draw a
+    // sprite at a NaN position, so such a demon is invisible everywhere — even
+    // when the player pans the whole abyss. Reseed from scratch if anything's off.
+    const demonsValid = env.state.demons.size > 0 &&
+      [...env.state.demons.values()].every(
+        (d) => Number.isFinite(d.hx) && Number.isFinite(d.hy) &&
+               Number.isFinite(d.y0) && Number.isFinite(d.y1),
+      );
+    if (!demonsValid) env.state.demons = createDemons(env.state);
     for (const d of env.state.demons.values()) {
       d.busyWith = null;
       d.selected = false;
