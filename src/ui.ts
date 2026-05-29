@@ -1451,12 +1451,10 @@ function showSoulChair(state: GameState, c: SoulChair, panel: HTMLElement, portr
   extra.innerHTML = lines.join('<br>');
 }
 
-// Hint for steering souls in the hell view — long-tap on touch, right-click
-// (or space) otherwise, mirroring the ground command hints.
+// Hint for steering souls in the hell view — the usual command line, just like
+// the ground view (long-tap on touch, right-click or space otherwise).
 function hellCommandHint(): string {
-  return TOUCH_PRIMARY
-    ? 'Long tap to send souls walking (or onto the demon to parlay)'
-    : 'Right click to send souls walking (or onto the demon to parlay)';
+  return commandHintText('anywhere');
 }
 
 function showHole(state: GameState, panel: HTMLElement, portrait: HTMLElement,
