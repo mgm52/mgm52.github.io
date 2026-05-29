@@ -204,20 +204,18 @@ export const DEMON = {
   spawnOffsetX: 620,
 };
 
-// The soul sigil — five "soul chairs" (dark circles) ringed around a central
-// inner ring in the abyss. Walking a soul (goblin ghost) onto a chair seats it;
-// lines spring between filled chairs so a five-pointed pentagram is drawn as
-// they power up. Once all five are filled, each chair feeds +5 GW to the grid
-// (25 GW total) and the completed sigil erupts in a looping ritual VFX.
+// The soul sigil — five "soul chairs" (dark circles) ringed around a Hell
+// Portal's abyssal mirror (the "beacon"). Every portal gets its own sigil.
+// Walking a soul (goblin ghost) onto a chair seats it; lines spring between
+// filled chairs so a five-pointed pentagram is drawn as they power up. Once all
+// five of a sigil are filled, each chair feeds +5 GW to the grid (25 GW per
+// sigil) and the completed sigil erupts in a looping ritual VFX.
 export const SOUL_SIGIL = {
   count: 5,
-  // Centre of the sigil in hell-coords. Sat left of the map centre so the
-  // colossal demon (which paces just right of centre) clears the chairs.
-  center: { x: HELL.width * 0.34, y: HELL.height / 2 },
-  ringRadius: 660,      // hell-px from the centre out to each chair
-  innerRadius: 150,     // the central "inner ring" the chairs surround
-  chairRadius: 80,      // chair disc radius + click hit radius
-  arriveRadius: 92,     // a commanded soul seats once this close to its chair
+  ringRadius: 290,      // hell-px from a portal's mirror out to each chair
+  innerRadius: 110,     // the central ring drawn at the mirror, inside the chairs
+  chairRadius: 28,      // chair disc radius + click hit radius
+  arriveRadius: 40,     // a commanded soul seats once this close to its chair
   powerPerChair: 5_000_000_000, // +5 GW each — paid only while all five are filled
 };
 
@@ -275,7 +273,7 @@ export const WATER_DEPLETION_PP_PER_SEC = 10;
 export const BASE_SPAWN_CAPACITY = 5;
 export const GOBLIN_HOLE_CAPACITY_PER_BUILDING = 5;
 
-// Lightning Strike — a ritual unlocked once the Ascend task is done. Aim it at
+// Lightning Strike — a ritual granted by a truthful demon parlay. Aim it at
 // the map: it kills every unit inside a circular blast —
 // goblins, minotaurs, and dragons — granting their usual kill rewards, and
 // powers a temporary surge that decays linearly to zero.
@@ -512,7 +510,7 @@ export const BUILDING_DEFS = {
       constructing: 0x3a3f47, constructingBorder: 0x808890,
     },
   }),
-  // Hell Portal — unlocked by the Ascend task. A
+  // Hell Portal — unlocked by the Build a Hypercentre task. A
   // 2×2 portal that opens the way
   // down to Hell. Once placed, a red beam animates from the portal toward
   // the abyss below and the player can hold ↓ at the bottom of the map to

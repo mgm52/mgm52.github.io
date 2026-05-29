@@ -302,11 +302,12 @@ export type Ghost = {
   targetChairId?: number;
 };
 
-// A "soul chair" in the abyssal sigil. Five sit ringed around the central inner
-// ring; seating a soul in one powers it. With all five filled the pentagram is
-// complete and the chairs feed the grid. See SOUL_SIGIL in config.
+// A "soul chair" in an abyssal sigil. Five sit ringed around a Hell Portal's
+// mirror; seating a soul in one powers it. With all five of that portal's chairs
+// filled the pentagram is complete and they feed the grid. See SOUL_SIGIL.
 export type SoulChair = {
   id: number;
+  portalId: number;     // the hell_portal building this chair's sigil rings
   index: number;        // 0..4 position around the ring (drives the pentagram edges)
   hx: number; hy: number;
   occupied: boolean;
@@ -377,11 +378,13 @@ export type GameState = {
   // Uncommandable hell denizens. Persisted so a demon's patrol position and
   // whether it has already greeted a soul survive a reload.
   demons: Map<number, Demon>;
-  // The five soul chairs of the abyssal sigil. Persisted so seated souls stick.
+  // Soul chairs across every portal's sigil (five per Hell Portal). Persisted so
+  // seated souls stick. Reconciled with the live portals via syncSoulChairs.
   soulChairs: SoulChair[];
-  // state.now when the fifth chair was seated and the pentagram lit; undefined
-  // until then. Drives the completed-sigil VFX and unlocks the +25 GW payout.
-  soulSigilCompletedAt?: number;
+  // Per-portal completion: state.now when a portal's fifth chair was seated and
+  // its pentagram lit, keyed by portalId. Drives the completed-sigil VFX and the
+  // +25 GW-per-sigil payout. Absent until that portal's sigil completes.
+  soulSigilCompletedAt: Map<number, number>;
   // state.now of the first time the player entered hell; undefined until then.
   // Anchors the "demons parlay with talking goblins" nudge.
   firstHellVisitAt?: number;
@@ -815,7 +818,8 @@ export function createInitialState(): GameState {
     minotaurs: new Map(),
     dragons: new Map(),
     demons: new Map(),
-    soulChairs: createSoulChairs(),
+    soulChairs: [],
+    soulSigilCompletedAt: new Map(),
     bobParlayed: false,
     hellHintShown: false,
     waterSources: new Map(),
@@ -931,20 +935,50 @@ export function createDemons(state: GameState): Map<number, Demon> {
 // The chair index drives both its place on the ring and the pentagram edges
 // (each chair links to the one two steps around), so a clean five-pointed star
 // emerges as they fill.
-export function createSoulChairs(): SoulChair[] {
-  const { count, center, ringRadius } = SOUL_SIGIL;
-  const chairs: SoulChair[] = [];
-  for (let i = 0; i < count; i++) {
-    const a = -Math.PI / 2 + (i * 2 * Math.PI) / count; // first chair at the top
-    chairs.push({
-      id: i,
-      index: i,
-      hx: center.x + Math.cos(a) * ringRadius,
-      hy: center.y + Math.sin(a) * ringRadius,
-      occupied: false,
-    });
+// Hell-coord centre of a Hell Portal's abyssal mirror — the portal's world
+// centre mapped into hell space (same offset render.ts uses). Each sigil rings
+// this point.
+export function hellMirrorCenter(b: Building): Vec2 {
+  const ctr = buildingCenter(b);
+  return {
+    x: ctr.x + (HELL.width - WORLD.width) / 2,
+    y: ctr.y + (HELL.height - WORLD.height) / 2,
+  };
+}
+
+// Reconcile soul chairs with the live Hell Portals: every built portal gets one
+// ring of `count` chairs around its mirror, and chairs whose portal is gone (or
+// still constructing) are dropped. Cheap to run each tick — there are rarely
+// more than a handful of portals. Also prunes stale completion timestamps.
+export function syncSoulChairs(state: GameState): void {
+  const { count, ringRadius } = SOUL_SIGIL;
+  const livePortals = new Set<number>();
+  for (const b of state.buildings.values()) {
+    if (b.kind === 'hell_portal' && b.state !== 'constructing') livePortals.add(b.id);
   }
-  return chairs;
+  // Drop chairs (and completion marks) belonging to portals that no longer exist.
+  state.soulChairs = state.soulChairs.filter((c) => livePortals.has(c.portalId));
+  for (const portalId of state.soulSigilCompletedAt.keys()) {
+    if (!livePortals.has(portalId)) state.soulSigilCompletedAt.delete(portalId);
+  }
+  // Add a ring for any portal that doesn't have one yet.
+  const haveChairs = new Set(state.soulChairs.map((c) => c.portalId));
+  for (const b of state.buildings.values()) {
+    if (b.kind !== 'hell_portal' || b.state === 'constructing') continue;
+    if (haveChairs.has(b.id)) continue;
+    const center = hellMirrorCenter(b);
+    for (let i = 0; i < count; i++) {
+      const a = -Math.PI / 2 + (i * 2 * Math.PI) / count; // first chair at the top
+      state.soulChairs.push({
+        id: state.nextId++,
+        portalId: b.id,
+        index: i,
+        hx: center.x + Math.cos(a) * ringRadius,
+        hy: center.y + Math.sin(a) * ringRadius,
+        occupied: false,
+      });
+    }
+  }
 }
 
 // Nearest soul chair within SOUL_SIGIL.chairRadius of a hell-coord point, or null.

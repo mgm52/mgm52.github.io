@@ -822,11 +822,11 @@
         transition: background 0.1s, border-color 0.1s,
                     opacity var(--title-fade-dur) ease calc(var(--fade-step, 0) * var(--title-fade-step));
       }
-      /* The Spawn button lands an extra 1.5s after the rest of the title, so a
+      /* The Spawn button lands an extra 1s after the rest of the title, so a
          new player reads the scene before the call to action surfaces. */
       #title-screen.shown #title-play.build-button.fade-item {
         transition: background 0.1s, border-color 0.1s,
-                    opacity var(--title-fade-dur) ease calc(var(--fade-step, 0) * var(--title-fade-step) + 1500ms);
+                    opacity var(--title-fade-dur) ease calc(var(--fade-step, 0) * var(--title-fade-step) + 1000ms);
       }
       /* Keep the dimmed look while a button is disabled (during the fill). */
       #title-screen.shown .build-button.fade-item:disabled { opacity: 0.55; }
