@@ -244,6 +244,9 @@ export type Floater = {
   // Floaters over space buildings live in the space scene (panned by the space
   // camera) rather than the ground world layer.
   space?: boolean;
+  // Floaters in the hell scene (the soul-chair power surge) carry hell
+  // coordinates and ride the hell transform rather than the ground layer.
+  hell?: boolean;
 };
 
 // One-shot blood-explosion GIF effect played at a world position. The Lightning
@@ -1129,6 +1132,7 @@ export function pushFloater(
   lifetime = 1.4,
   powerCountdownWatts?: number,
   space = false,
+  hell = false,
 ) {
   state.floaters.push({
     id: state.nextId++,
@@ -1137,6 +1141,7 @@ export function pushFloater(
     lifetime,
     powerCountdownWatts,
     space,
+    hell,
   });
 }
 

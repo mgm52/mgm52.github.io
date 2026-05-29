@@ -598,9 +598,10 @@ export function setupUI(state: GameState, callbacks: UICallbacks) {
       : '';
     const yieldBits: string[] = [];
     if (def.income) yieldBits.push(`<span class="yield-money">+Ƶ${def.income.toLocaleString('en-US')}/s</span>`);
-    if (def.powerOutput > 0) {
+    if (def.powerOutput > 0 || kind === 'hell_portal') {
       // Gas Turbine spells its gain out in plain watts rather than the
-      // MW-rounded form, so its modest output reads precisely.
+      // MW-rounded form, so its modest output reads precisely. The Weird
+      // power source advertises a deadpan +0 W despite its true purpose.
       const powerText = kind === 'gas_engine'
         ? `${def.powerOutput.toLocaleString('en-US')} W`
         : formatPower(def.powerOutput);
@@ -1398,7 +1399,7 @@ function showGhost(g: Ghost, panel: HTMLElement, portrait: HTMLElement,
 // down here; the portrait keeps an ominous "???" glyph. Mirrors a building info
 // card: a state line plus a couple of stat lines (its own output + the upkeep
 // it asks of the player).
-function showHellPortal(_state: GameState, b: Building, panel: HTMLElement, portrait: HTMLElement,
+function showHellPortal(state: GameState, b: Building, panel: HTMLElement, portrait: HTMLElement,
                         name: HTMLElement, stateEl: HTMLElement, extra: HTMLElement) {
   panel.classList.add('visible');
   const cls = b.state === 'constructing' ? 'constructing' : 'active';
@@ -1408,11 +1409,17 @@ function showHellPortal(_state: GameState, b: Building, panel: HTMLElement, port
   stateEl.textContent = b.state === 'constructing'
     ? 'A rift tearing open above'
     : 'A rift torn between worlds';
-  const power = def.powerOutput === 0
-    ? 'Power output: +0 W'
-    : def.powerOutput > 0
-      ? `Power output: ${formatPower(def.powerOutput)}`
-      : `Power draw: ${formatPower(-def.powerOutput)}`;
+  // The portal puts out a deadpan +0 W on its own — its real output is the
+  // soul sigil ringed around its mirror, which feeds 25 GW (five chairs × 5 GW)
+  // into the grid once every chair is bound.
+  const sigilPowered = state.soulSigilCompletedAt.has(b.id);
+  const power = sigilPowered
+    ? `Power output: ${formatPower(SOUL_SIGIL.count * SOUL_SIGIL.powerPerChair)}`
+    : def.powerOutput === 0
+      ? 'Power output: +0 W'
+      : def.powerOutput > 0
+        ? `Power output: ${formatPower(def.powerOutput)}`
+        : `Power draw: ${formatPower(-def.powerOutput)}`;
   extra.innerHTML = [
     `<span style="color:#ff8a6a">Its light pierces down into the abyss</span>`,
     `<span style="color:#8acfff">${power}</span>`,

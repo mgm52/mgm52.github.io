@@ -385,7 +385,7 @@ export async function runBobCutscene(ordinal: string, kindName: string): Promise
   await runSpeak(overlay, speechEl, clickWall, 'oh my!');
   await runSpeak(overlay, speechEl, clickWall, 'oh my word!');
   await runSpeak(overlay, speechEl, clickWall, `you've come so far! you're placing your ${ordinal} ${kindName}!`);
-  await runSpeak(overlay, speechEl, clickWall, 'tag me in boss?');
+  await runSpeak(overlay, speechEl, clickWall, 'tag me in, boss?');
 
   yesBtn.querySelector('.build-name')!.textContent = 'OKAY';
   noBtn.querySelector('.build-name')!.textContent = 'NO';

@@ -281,6 +281,12 @@ function seatSoulInChair(state: GameState, chair: SoulChair) {
     playSound('ritual', 0.95, 0.5);
     const total = SOUL_SIGIL.count * SOUL_SIGIL.powerPerChair;
     appendLog(state, `The pentagram blazes to life — the sigil floods the grid with ${formatPower(total)}!`);
+    // Each chair only feeds the grid once the whole ring is lit, so the moment
+    // the fifth soul lands every chair powers up at once — float a "+5 GW"
+    // surge over each one, the hell-scene twin of a building coming online.
+    for (const c of sigil) {
+      pushFloater(state, c.hx, c.hy - SOUL_SIGIL.chairRadius, `+${formatPower(SOUL_SIGIL.powerPerChair)}`, 0x8acfff, 1.6, undefined, false, true);
+    }
   }
 }
 

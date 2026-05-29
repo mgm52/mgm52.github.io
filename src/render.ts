@@ -440,6 +440,10 @@ export type RenderContext = {
   // appearance of a ghost). Drawn from the same DeathEffect entries flagged
   // hell:true; the renderer maps their world coords into hell coords.
   hellEffectsLayer: Container;
+  // Floating-text overlay for the hell scene (the "+5 GW" surge above each soul
+  // chair when its sigil powers up). Mirrors floatersLayer but rides the hell
+  // transform so the text tracks its chair's hell coordinates.
+  hellFloatersLayer: Container;
   // Goblin Hole: a fixed pit-graphic plus its selection ring. Drawn between
   // the grid and buildings so a building placed on top covers it.
   holeGfx: Graphics;
@@ -596,6 +600,8 @@ export async function createRender(parent: HTMLElement, state: GameState): Promi
   soulSigilLayer.addChild(soulChairGfx);  // …the chair discs
   const hellEffectsLayer = new Container();
   hellEffectsLayer.cullableChildren = true;
+  const hellFloatersLayer = new Container();
+  hellFloatersLayer.cullableChildren = true;
   const hellSideBeamGfx = new Graphics();
   // z-order (back → front): background, then the portal-mirror beacons (their
   // halo rings sit under everyone), then the drifting ghosts/units, then the
@@ -608,6 +614,7 @@ export async function createRender(parent: HTMLElement, state: GameState): Promi
   hellLayer.addChild(demonLayer);
   hellLayer.addChild(hellEffectsLayer);
   hellLayer.addChild(hellSideBeamGfx);
+  hellLayer.addChild(hellFloatersLayer);
   hellLayer.scale.set(initScale);
   hellLayer.visible = false;
   // Hell sits between the ground and the sky/space stack so the descent's
@@ -702,6 +709,7 @@ export async function createRender(parent: HTMLElement, state: GameState): Promi
     hellPortalMirrors: new Map(),
     soulSigilLayer, soulSigilGfx, soulChairGfx, soulChairLabels: new Map(),
     hellEffectsLayer,
+    hellFloatersLayer,
     holeGfx, holeRing, bobPickerGfx,
     floatersLayer, floaterViews: new Map(),
     effectsLayer, deathViews: new Map(),
@@ -966,13 +974,14 @@ function makeGoblinView(g: Goblin): GoblinView {
 // Yellow "bob" label above the head — shared between live Bob and hell Bob,
 // styled to match the gold-goblin tint so it reads as a name-plate rather
 // than a UI label. Drawn at half-pixel anchor so position.set(0, y) hangs
-// the label centered over the sprite.
-function makeBobNametag(): Text {
+// the label centered over the sprite. `sizeMult` doubles the type for the
+// hell Bob, whose tag reads at twice the overworld size.
+function makeBobNametag(sizeMult = 1): Text {
   const t = new Text({
     text: 'bob',
     style: {
       fontFamily: fontFamilyById(getOptions().fonts.buildingLabel.family).css,
-      fontSize: 12,
+      fontSize: 12 * sizeMult,
       fill: 0xffd96b,
       fontWeight: 'bold',
       stroke: { color: 0x000000, width: 3 },
@@ -1209,7 +1218,7 @@ function makeGhostView(g: Ghost): GhostView | null {
     container.addChild(selectionRing);
     container.addChild(sprite);
     if (g.bob) {
-      const tag = makeBobNametag();
+      const tag = makeBobNametag(2);
       tag.y = -px * 0.55;
       container.addChild(tag);
     }
@@ -1691,8 +1700,9 @@ function drawFloaters(ctx: RenderContext, state: GameState) {
       t.anchor.set(0.5, 1);
       t.cullable = true;
       // Space-building floaters live in the orbit scene (panned by the space
-      // camera); everything else rides the ground world layer.
-      (f.space ? ctx.spaceLayer : ctx.floatersLayer).addChild(t);
+      // camera); hell floaters (the soul-chair power surge) ride the hell
+      // transform; everything else rides the ground world layer.
+      (f.hell ? ctx.hellFloatersLayer : f.space ? ctx.spaceLayer : ctx.floatersLayer).addChild(t);
       ctx.floaterViews.set(f.id, t);
     }
     const age = state.now - f.spawnAt;
