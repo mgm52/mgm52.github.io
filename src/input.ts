@@ -434,15 +434,22 @@ export function setupInput(
       return;
     }
     // Space = "give a command" at the cursor, mirroring a desktop right-click.
+    // Works in the ground view (unit orders) and the hell view (steering souls);
+    // the space view has no command, so it's ignored there.
     if (e.code === 'Space') {
       const ae = document.activeElement as HTMLElement | null;
       if (ae && (ae.tagName === 'INPUT' || ae.tagName === 'TEXTAREA' || ae.isContentEditable)) return;
       e.preventDefault();
       const lp = input.lastPointer;
       if (!lp) return;
-      const world = worldLayer.toLocal({ x: lp.global.x, y: lp.global.y });
       flashCursor(lp.client.x, lp.client.y);
-      handleRightClick(state, world.x, world.y);
+      if (state.view === 'hell') {
+        const hp = ctx.hellLayer.toLocal({ x: lp.global.x, y: lp.global.y });
+        handleHellRightClick(state, hp.x, hp.y);
+      } else if (state.view === 'ground') {
+        const world = worldLayer.toLocal({ x: lp.global.x, y: lp.global.y });
+        handleRightClick(state, world.x, world.y);
+      }
     }
   });
 

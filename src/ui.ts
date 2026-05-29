@@ -215,7 +215,7 @@ let currentTaskCached: Task | null = null;
 // refreshUI on the reveal of the task that grants it:
 //   run_phone_farm       → Autobuild, Autospawn
 //   build_gas_engine     → Minotaur, Dig
-//   earn_30_blood        → Goldblins
+//   summon_minotaurs     → Goldblins
 // Lightning Strike is special: it's granted by a truthful demon parlay, not a
 // task (see state.lightningUnlocked).
 // The Dragon summon is special-cased: it has no gating task. Its button shows
@@ -279,22 +279,11 @@ const TASKS: Task[] = [
     prereq: ['run_datacentre'],
   },
   {
-    // Final task: complete the first time the player rises into the space view.
-    // Sticky completion means a momentary visit is enough — view resets to
-    // 'ground' on reload, but the completed flag persists. Grants no building;
-    // it's a milestone (Lightning now comes from the demon's parlay instead).
-    id: 'ascend',
-    text: 'Ascend',
-    unlocks: [],
-    isDone: (s) => s.view === 'space',
-    prereq: ['build_hypercentre'],
-  },
-  {
     // Optional side-task: unlocks after Phase 3 (build_gas_engine). Grants the
     // Goblin Hole (a Ritual purchase) plus the Goldblins ritual (gated in
     // refreshUI). minotaursBought is cumulative for the run, so this stays
     // complete once reached even if those Minotaurs later die.
-    id: 'earn_30_blood',
+    id: 'summon_minotaurs',
     text: 'Summon 2 Minotaurs',
     unlocks: ['goblin_hole'],
     isDone: (s) => s.minotaursBought >= 2,
@@ -553,7 +542,7 @@ export function setupUI(state: GameState, callbacks: UICallbacks) {
   digRow.appendChild(digOverlay);
   ritualList.appendChild(digRow);
 
-  // Lightning Strike — an aimed ritual unlocked once the Ascend task is done.
+  // Lightning Strike — an aimed ritual granted by a truthful demon parlay.
   // Sits at the bottom of the Ritual list. Clicking arms it; the
   // next map click calls the bolt down, killing every unit in the blast
   // (goblins, minotaurs, dragons) for their kill rewards.
@@ -799,6 +788,11 @@ export function refreshUI(state: GameState) {
     // from isDone — e.g. the building that completed a task was since destroyed).
     const u = state.unlocks;
     if (u) {
+      // Migrate the legacy task id: 'earn_30_blood' was renamed to
+      // 'summon_minotaurs' (it always tracked summoning 2 Minotaurs). Map the
+      // old id onto the new one so an in-progress save keeps Goldblins unlocked.
+      if (u.completed.has('earn_30_blood')) u.completed.add('summon_minotaurs');
+      if (u.revealed.has('earn_30_blood')) u.revealed.add('summon_minotaurs');
       for (const id of u.completed) { completedTaskIds.add(id); previouslyCompletedTaskIds.add(id); }
       for (const id of u.revealed) revealedTaskIds.add(id);
       for (const k of u.obsoleted) obsoletedKinds.add(k);
@@ -985,11 +979,11 @@ export function refreshUI(state: GameState) {
   // fades, letting the fade-in animation play.
   //   run_phone_farm       → Autobuild, Autospawn
   //   build_gas_engine     → Dig (+ Minotaur, handled above)
-  //   earn_30_blood        → Goldblins
+  //   summon_minotaurs     → Goldblins
   // (Lightning Strike is granted by the demon parlay, not a task.)
   const phaseRunPhoneFarm = revealedTaskIds.has('run_phone_farm');
   const phaseGasTurbine = revealedTaskIds.has('build_gas_engine');
-  const minotaurTaskDone = revealedTaskIds.has('earn_30_blood');
+  const minotaurTaskDone = revealedTaskIds.has('summon_minotaurs');
 
   // Collecting 5 dragon bones is the demo's closing easter egg: once that task
   // reveals, fire the "game's incomplete" alerts and unlock the secret settings
@@ -1425,28 +1419,20 @@ function showHellPortal(_state: GameState, b: Building, panel: HTMLElement, port
   ].join('<br>');
 }
 
-// A soul chair in the abyssal sigil — an info card in the style of a building's.
-// Shows whether it's bound, what it's worth, and how close the sigil is to its
-// 25 GW payout.
+// A soul chair in the abyssal sigil — a deliberately minimal info card: its
+// bound state plus the sigil's chair count, and a one-line command hint while
+// it's still empty.
 function showSoulChair(state: GameState, c: SoulChair, panel: HTMLElement, portrait: HTMLElement,
                        name: HTMLElement, stateEl: HTMLElement, extra: HTMLElement) {
   panel.classList.add('visible');
   const cls = c.occupied ? 'active' : 'constructing';
   portrait.innerHTML = `<div class="portrait-building hell_portal ${cls}">${c.occupied ? '✦' : '○'}</div>`;
   const filled = state.soulChairs.filter((sc) => sc.occupied).length;
-  const complete = filled === SOUL_SIGIL.count;
-  name.textContent = `Soul Chair #${c.index + 1}`;
-  stateEl.textContent = c.occupied
-    ? (complete ? 'Bound — the sigil is complete' : 'Bound to a soul')
-    : c.claimedBy !== undefined ? 'A soul approaches' : 'Empty — needs 1 soul';
-  const per = formatPower(SOUL_SIGIL.powerPerChair);
-  const total = formatPower(SOUL_SIGIL.count * SOUL_SIGIL.powerPerChair);
-  const lines = [
-    `<span style="color:#8acfff">Output: ${per} (only while all ${SOUL_SIGIL.count} are bound)</span>`,
-    `<span style="color:#ff8a6a">Sigil: ${filled}/${SOUL_SIGIL.count} chairs bound${complete ? ` — ${total} flowing` : ''}</span>`,
-  ];
+  name.textContent = 'Soul Chair';
+  stateEl.textContent = c.occupied ? 'Bound' : 'Empty';
+  const lines = [`<span style="color:#ff8a6a">${filled}/${SOUL_SIGIL.count} bound</span>`];
   if (!c.occupied) {
-    lines.push(`<span style="color:#6a7080">${TOUCH_PRIMARY ? 'Long tap' : 'Right click'} the chair to send a soul to it</span>`);
+    lines.push(`<span style="color:#6a7080">${TOUCH_PRIMARY ? 'Long tap' : 'Right click'} to bind a soul</span>`);
   }
   extra.innerHTML = lines.join('<br>');
 }
@@ -1721,31 +1707,20 @@ export function executeTaskSkip(state: GameState): void {
       state.bloodUnlocked = true;
       break;
     }
-    case 'ascend': {
-      // Reaching space means a Dragon flew a building into orbit, which only
-      // happens once a Beacon is *powered* and summoning. Stand up the full rig
-      // — a powered Beacon + the reactors to feed it — and one live dragon, so
-      // the post-skip world matches a real ascent instead of leaving a dormant
-      // Beacon that could never have lifted anything. The skip force-completes
-      // the task regardless of the live `view`.
-      ensureDragonRig(state, 1, 1);
-      state.money = Math.max(state.money, 50_000_000);
-      state.blood = Math.max(state.blood, 3000);
-      state.bloodUnlocked = true;
-      state.spaceUnlocked = true;
-      break;
-    }
     case 'collect_dragon_bones': {
       // Bones only drop from dragon-on-dragon fratricide, so a real player has
       // a powered Beacon and at least two live dragons circling by now. A single
       // Beacon draws 5 GW, so the Hypercentre's lone reactor is nowhere near
       // enough — the rig adds the nuclear plants needed to actually keep the
-      // Beacon lit. Then grant the five bones so the resource row + count match
-      // the completed task; revealing it fires the secret-menu alerts in refreshUI.
+      // Beacon lit. By this point a real player would also have flown a building
+      // to space, so unlock the ascent affordance too. Then grant the five bones
+      // so the resource row + count match the completed task; revealing it fires
+      // the secret-menu alerts in refreshUI.
       ensureDragonRig(state, 1, 2);
       state.money = Math.max(state.money, 50_000_000);
       state.blood = Math.max(state.blood, 3000);
       state.bloodUnlocked = true;
+      state.spaceUnlocked = true;
       if (state.dragonBoneEarned < 5) earnDragonBone(state, 5 - state.dragonBoneEarned);
       state.dragonBoneUnlocked = true;
       break;

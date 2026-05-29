@@ -59,11 +59,12 @@ const GIBBERISH = ['gleh', 'goink', 'grah', 'groh', 'gonk'];
 const doubleLetters = (s: string): string => s.replace(/[^ ]/g, (c) => c + c);
 
 // The demon's brush-off when a soul can't speak his tongue — half the time he
-// hints that he wants a goblin specifically (the nudge toward sending Bob).
+// hints that he wants a more articulate soul (the nudge toward sending Bob).
+// The trailing ". . ." beat is spoken as its own line first (see call sites).
 function demonNoLanguageLine(): string {
   return Math.random() < 0.5
-    ? '. . . i need a goblin that speaks my language'
-    : '. . . i do not know this language';
+    ? 'i need a soul of learned vocabulary'
+    : 'i do not know this language';
 }
 
 const TYPE_MS_PER_CHAR = 42;
@@ -264,6 +265,7 @@ export async function runDemonDialogue(state: GameState, demon: Demon, ghost: Gh
     } else if (ghost.kind === 'dragon') {
       // A dragon's soul can only roar at the demon.
       await say('goblin', 'hhhhffffffffffffffffffff');
+      await say('demon', '. . .');
       await say('demon', demonNoLanguageLine());
     } else {
       // Goblins babble a random word; a minotaur (or tinytaur) soul mangles the
@@ -271,6 +273,7 @@ export async function runDemonDialogue(state: GameState, demon: Demon, ghost: Gh
       const gib = GIBBERISH[Math.floor(Math.random() * GIBBERISH.length)];
       const word = ghost.kind === 'minotaur' ? doubleLetters(gib) : gib;
       await say('goblin', word);
+      await say('demon', '. . .');
       await say('demon', demonNoLanguageLine());
     }
   } finally {

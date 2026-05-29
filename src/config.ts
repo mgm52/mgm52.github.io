@@ -275,7 +275,7 @@ export const WATER_DEPLETION_PP_PER_SEC = 10;
 export const BASE_SPAWN_CAPACITY = 5;
 export const GOBLIN_HOLE_CAPACITY_PER_BUILDING = 5;
 
-// Lightning Strike — a ritual unlocked once the Ascend task is done. Aim it at
+// Lightning Strike — a ritual granted by a truthful demon parlay. Aim it at
 // the map: it kills every unit inside a circular blast —
 // goblins, minotaurs, and dragons — granting their usual kill rewards, and
 // powers a temporary surge that decays linearly to zero.
@@ -512,7 +512,7 @@ export const BUILDING_DEFS = {
       constructing: 0x3a3f47, constructingBorder: 0x808890,
     },
   }),
-  // Hell Portal — unlocked by the Ascend task. A
+  // Hell Portal — unlocked by the Build a Hypercentre task. A
   // 2×2 portal that opens the way
   // down to Hell. Once placed, a red beam animates from the portal toward
   // the abyss below and the player can hold ↓ at the bottom of the map to
