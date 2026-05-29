@@ -10,7 +10,7 @@ import {
   earnDragonBone, getSpawnCapacity, holeBlockedByBuilding, isCellBlocked, isInBounds,
   maintainerCount, nextBuildingDisplayNum, occupyCell, waterCarrierCount,
 } from './state';
-import { spawnMinotaur } from './sim';
+import { spawnDragon, spawnMinotaur } from './sim';
 import { unlockOptionsCog } from './options-ui';
 
 // Build buttons appear in this fixed order, mostly cheapest-first. goblin_hole
@@ -1724,18 +1724,30 @@ export function executeTaskSkip(state: GameState): void {
       break;
     }
     case 'ascend': {
-      // A real player would have built a Beacon and flown a building up to get
-      // here, so place a beacon (the Dragon summon button surfaces once any
-      // beacon is active) and flag space unlocked, so the post-skip world looks
-      // like a normal playthrough with the ascend affordance available. The skip
-      // force-completes the task regardless of the live `view`.
-      ensureBuildingCount(state, 'dragon_beacon', 1);
+      // Reaching space means a Dragon flew a building into orbit, which only
+      // happens once a Beacon is *powered* and summoning. Stand up the full rig
+      // — a powered Beacon + the reactors to feed it — and one live dragon, so
+      // the post-skip world matches a real ascent instead of leaving a dormant
+      // Beacon that could never have lifted anything. The skip force-completes
+      // the task regardless of the live `view`.
+      ensureDragonRig(state, 1, 1);
+      state.money = Math.max(state.money, 50_000_000);
+      state.blood = Math.max(state.blood, 3000);
+      state.bloodUnlocked = true;
       state.spaceUnlocked = true;
       break;
     }
     case 'collect_dragon_bones': {
-      // Grant the five bones so the resource row + count match the completed
-      // task; revealing it then fires the secret-menu alerts in refreshUI.
+      // Bones only drop from dragon-on-dragon fratricide, so a real player has
+      // a powered Beacon and at least two live dragons circling by now. A single
+      // Beacon draws 5 GW, so the Hypercentre's lone reactor is nowhere near
+      // enough — the rig adds the nuclear plants needed to actually keep the
+      // Beacon lit. Then grant the five bones so the resource row + count match
+      // the completed task; revealing it fires the secret-menu alerts in refreshUI.
+      ensureDragonRig(state, 1, 2);
+      state.money = Math.max(state.money, 50_000_000);
+      state.blood = Math.max(state.blood, 3000);
+      state.bloodUnlocked = true;
       if (state.dragonBoneEarned < 5) earnDragonBone(state, 5 - state.dragonBoneEarned);
       state.dragonBoneUnlocked = true;
       break;
@@ -1887,6 +1899,24 @@ function ensureBuildingCount(state: GameState, kind: BuildingKind, count: number
     have++;
   }
   return have;
+}
+
+// Stand up a working dragon-summoning rig for the task-skip: `beacons` Dragon
+// Beacons backed by enough Nuclear Reactors to keep them lit, plus `dragons`
+// live dragons. Each Beacon draws 5 GW and the Hypercentre another 1 GW (a
+// reactor yields 1 GW), so without the matching plants the Beacons sit dormant
+// and never summon — exactly the unrealistic state we're avoiding. Two reactors
+// of headroom cover the Datacentre/Phone Farm and a little slack, like a real
+// player would over-provision. Goblins are topped up first so the reactors can
+// grab maintainers (4 each) the instant they're placed.
+function ensureDragonRig(state: GameState, beacons: number, dragons: number): void {
+  const reactors = beacons * 5 + 2; // 5 GW/beacon + 1 GW Hypercentre + headroom
+  ensureGoblins(state, 100 + reactors * 4);
+  ensureBuildingCount(state, 'nuclear_reactor', reactors);
+  ensureBuildingCount(state, 'dragon_beacon', beacons);
+  while (state.dragons.size < dragons) {
+    if (!spawnDragon(state)) break;
+  }
 }
 
 function findFreeFootprint(state: GameState, cellSize: number): Cell | null {
