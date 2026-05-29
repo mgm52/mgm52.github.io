@@ -1,7 +1,7 @@
 import * as devalue from 'devalue';
 import { compressToUTF16, decompressFromUTF16 } from 'lz-string';
 import {
-  Building, GameState, createDemons, createSoulChairs, emptyBuildingCounts, pruneAllAssignedGoblins, rebuildWalls,
+  Building, GameState, createDemons, emptyBuildingCounts, pruneAllAssignedGoblins, rebuildWalls,
 } from './state';
 
 const STORAGE_KEY = 'rts.savegame.v1';
@@ -112,11 +112,16 @@ export function loadGame(): { state: GameState; savedAt: number } | null {
       d.busyWith = null;
       d.selected = false;
     }
-    // Soul sigil — added with the soul-chair mechanic. Seed for older saves; a
-    // pending claim is ephemeral, so clear it (the seated `occupied` flag and
-    // `soulSigilCompletedAt` persist).
-    env.state.soulChairs ??= createSoulChairs();
+    // Soul sigil — now one ring of chairs per Hell Portal. Drop any legacy
+    // fixed-position chairs (they predate `portalId`) and the old single
+    // completion timestamp; syncSoulChairs rebuilds the per-portal rings from the
+    // live portals on the first tick. A pending claim is ephemeral, so clear it.
+    if (!Array.isArray(env.state.soulChairs) ||
+        env.state.soulChairs.some((c) => (c as { portalId?: number }).portalId === undefined)) {
+      env.state.soulChairs = [];
+    }
     for (const c of env.state.soulChairs) { c.claimedBy = undefined; c.selected = false; }
+    if (!(env.state.soulSigilCompletedAt instanceof Map)) env.state.soulSigilCompletedAt = new Map();
     env.state.bobParlayed ??= false;
     env.state.hellHintShown ??= false;
     env.state.slewTwoDragonsInOneStrike ??= false;

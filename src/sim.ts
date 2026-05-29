@@ -8,7 +8,7 @@ import {
   earnBlood, earnDragonBone, earnMoney, findHoleEmergenceCell,
   getSpawnCapacity, holeBlockedByBuilding, holeCenter, isCellBlocked, isCellInBuilding, isCellInWaterSource,
   isInBounds, maintainerCount, nearestCellInWaterSource, occupyCell, pushDeathEffect, pushFloater,
-  pushLightningBolt, recordGhost, releaseCell, removeDragon, removeGoblin, waterCarrierCount,
+  pushLightningBolt, recordGhost, releaseCell, removeDragon, removeGoblin, syncSoulChairs, waterCarrierCount,
 } from './state';
 
 // Auto-assign normally only runs on discrete events (a spawn, a manual command,
@@ -143,6 +143,9 @@ export function tick(state: GameState) {
   }
 
   // ── 4. Power balance + active/dormant resolution ──────────────────
+  // Keep each portal's soul sigil in step with the live portals first, so a
+  // freshly-built or destroyed portal's chairs feed into the power pass below.
+  syncSoulChairs(state);
   resolvePowerAndState(state);
 
   // ── 5. Income ─────────────────────────────────────────────────────
@@ -262,17 +265,19 @@ export function tick(state: GameState) {
 }
 
 // Bind a soul into a chair: light it, clear its pending claim, and — if it was
-// the fifth — fire the completion (sound + log + VFX timestamp). The +25 GW
-// payout itself is read off the chairs each tick in the power pass below.
+// the fifth of ITS portal's sigil — fire the completion (sound + log + VFX
+// timestamp). The +25 GW payout itself is read off the chairs each tick in the
+// power pass below.
 function seatSoulInChair(state: GameState, chair: SoulChair) {
   chair.occupied = true;
   chair.claimedBy = undefined;
   chair.filledAt = state.now;
   playSound('ritual', 0.6, 0.85);
-  const filled = state.soulChairs.filter((c) => c.occupied).length;
+  const sigil = state.soulChairs.filter((c) => c.portalId === chair.portalId);
+  const filled = sigil.filter((c) => c.occupied).length;
   appendLog(state, `A soul takes its chair in the sigil (${filled}/${SOUL_SIGIL.count}).`);
-  if (filled === SOUL_SIGIL.count && state.soulSigilCompletedAt === undefined) {
-    state.soulSigilCompletedAt = state.now;
+  if (filled === SOUL_SIGIL.count && !state.soulSigilCompletedAt.has(chair.portalId)) {
+    state.soulSigilCompletedAt.set(chair.portalId, state.now);
     playSound('ritual', 0.95, 0.5);
     const total = SOUL_SIGIL.count * SOUL_SIGIL.powerPerChair;
     appendLog(state, `The pentagram blazes to life — the sigil floods the grid with ${formatPower(total)}!`);
@@ -2148,10 +2153,15 @@ function resolvePowerAndState(state: GameState) {
   // takes the surge to decay back to nothing.
   production += currentPowerBoost(state);
 
-  // The soul sigil feeds the grid only once every chair is filled — then each
-  // of the five chairs contributes its powerPerChair (25 GW total).
-  if (state.soulChairs.length === SOUL_SIGIL.count && state.soulChairs.every((c) => c.occupied)) {
-    production += SOUL_SIGIL.count * SOUL_SIGIL.powerPerChair;
+  // Each portal's soul sigil feeds the grid only once all five of its chairs are
+  // filled — then every chair contributes its powerPerChair (25 GW per sigil).
+  // Count occupied chairs per portal and pay out for each completed ring.
+  const occupiedPerPortal = new Map<number, number>();
+  for (const c of state.soulChairs) {
+    if (c.occupied) occupiedPerPortal.set(c.portalId, (occupiedPerPortal.get(c.portalId) ?? 0) + 1);
+  }
+  for (const filled of occupiedPerPortal.values()) {
+    if (filled === SOUL_SIGIL.count) production += SOUL_SIGIL.count * SOUL_SIGIL.powerPerChair;
   }
 
   let consumed = 0;

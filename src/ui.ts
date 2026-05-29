@@ -1427,7 +1427,7 @@ function showSoulChair(state: GameState, c: SoulChair, panel: HTMLElement, portr
   panel.classList.add('visible');
   const cls = c.occupied ? 'active' : 'constructing';
   portrait.innerHTML = `<div class="portrait-building hell_portal ${cls}">${c.occupied ? '✦' : '○'}</div>`;
-  const filled = state.soulChairs.filter((sc) => sc.occupied).length;
+  const filled = state.soulChairs.filter((sc) => sc.portalId === c.portalId && sc.occupied).length;
   name.textContent = 'Soul Chair';
   stateEl.textContent = c.occupied ? 'Bound' : 'Empty';
   const lines = [`<span style="color:#ff8a6a">${filled}/${SOUL_SIGIL.count} bound</span>`];

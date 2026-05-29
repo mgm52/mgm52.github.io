@@ -11,7 +11,7 @@ extensions.add(GifAsset);
 type DeathFrames = { textures: Texture[]; ends: number[]; duration: number };
 import { AMBIENT_DRAGON, BUILDING_DEFS, BuildingKind, CELL, COLS, DEMON, DRAGON, GOBLIN, HELL, RENDER_SCALE, ROWS, MINOTAUR, SOUL_SIGIL, SPACE, TINYTAUR, WORLD } from './config';
 import { ensureFontLoaded, fontFamilyById, getOptions, onOptionsChange, type FontConfig, type Options } from './options';
-import { Building, Demon, Dragon, GameState, Ghost, Goblin, HOLE_SIZE, Minotaur, SpaceBuilding, WaterSource, buildingCenter, cellCenter, defOf, holeCenter, isInPlayCell, maintainerCount } from './state';
+import { Building, Demon, Dragon, GameState, Ghost, Goblin, HOLE_SIZE, Minotaur, SoulChair, SpaceBuilding, WaterSource, buildingCenter, cellCenter, defOf, holeCenter, isInPlayCell, maintainerCount } from './state';
 import { getParlaySpeaker } from './demon-dialogue';
 
 export type Camera = { x: number; y: number };
@@ -1299,117 +1299,143 @@ const SIGIL_EDGES: readonly [number, number][] = [[0, 2], [2, 4], [4, 1], [1, 3]
 // a one-shot shockwave on completion). The "needs 1 soul" labels are toggled
 // here too.
 function syncSoulSigil(ctx: RenderContext, state: GameState): void {
-  const chairs = state.soulChairs;
-  if (!chairs || chairs.length === 0) return;
   const now = state.now;
-  const { center, innerRadius, chairRadius } = SOUL_SIGIL;
-  const completed = state.soulSigilCompletedAt !== undefined;
-  const compAge = completed ? now - (state.soulSigilCompletedAt as number) : 0;
-
+  const { innerRadius, chairRadius } = SOUL_SIGIL;
   const ring = ctx.soulSigilGfx;
-  ring.clear();
-  // Central inner ring the chairs surround — a doubled occult outline that
-  // brightens once the sigil is complete.
-  const ringGlow = completed ? 0.55 + 0.25 * Math.sin(now * 3) : 0.4;
-  ring.circle(center.x, center.y, innerRadius).stroke({ width: 4, color: 0xff2030, alpha: ringGlow });
-  ring.circle(center.x, center.y, innerRadius - 7).stroke({ width: 2, color: 0xff6048, alpha: ringGlow * 0.7 });
-
-  // A line links every pair of filled chairs (the complete graph), sketched in
-  // progressively as souls are seated. The five "inner" lines that skip a chair
-  // form the pentagram star and stay bright; the five "outer" perimeter lines
-  // between adjacent chairs are drawn thinner + fainter so the star reads on top.
-  for (let a = 0; a < chairs.length; a++) {
-    for (let b = a + 1; b < chairs.length; b++) {
-      const ca = chairs[a], cb = chairs[b];
-      if (!ca.occupied || !cb.occupied) continue;
-      const gap = Math.min(Math.abs(a - b), chairs.length - Math.abs(a - b));
-      const isStar = gap === 2; // skip-one pairs are the pentagram
-      const alpha = isStar ? (completed ? 0.85 : 0.6) : (completed ? 0.4 : 0.26);
-      ring.moveTo(ca.hx, ca.hy).lineTo(cb.hx, cb.hy)
-        .stroke({ width: isStar ? 5 : 3, color: 0xff2030, alpha });
-      if (completed && isStar) {
-        // A brighter inner thread pulses over the star edges.
-        const a2 = 0.4 + 0.35 * Math.sin(now * 4);
-        ring.moveTo(ca.hx, ca.hy).lineTo(cb.hx, cb.hy).stroke({ width: 2, color: 0xffe0a0, alpha: a2 });
-      }
-    }
-  }
-
-  // Completed-sigil flourishes.
-  if (completed) {
-    // Spark racing around the star path (one full lap every ~5s).
-    const lap = (now * 0.2) % 1;
-    const seg = Math.floor(lap * SIGIL_EDGES.length);
-    const segT = lap * SIGIL_EDGES.length - seg;
-    const [ea, eb] = SIGIL_EDGES[seg];
-    const ca = chairs[ea], cb = chairs[eb];
-    if (ca?.occupied && cb?.occupied) {
-      const sx = ca.hx + (cb.hx - ca.hx) * segT;
-      const sy = ca.hy + (cb.hy - ca.hy) * segT;
-      ring.circle(sx, sy, 16).fill({ color: 0xffe6b0, alpha: 0.9 });
-      ring.circle(sx, sy, 30).fill({ color: 0xff8030, alpha: 0.35 });
-    }
-    // One-shot shockwave expanding from the centre the moment it completes.
-    if (compAge < 1.6) {
-      const r = innerRadius + compAge * 900;
-      ring.circle(center.x, center.y, r).stroke({ width: 7, color: 0xffd060, alpha: (1 - compAge / 1.6) * 0.9 });
-    }
-  }
-
-  // Chair discs + labels.
   const cg = ctx.soulChairGfx;
+  ring.clear();
   cg.clear();
-  for (const chair of chairs) {
-    const { hx, hy, occupied, index } = chair;
-    // Dark base disc with a rim that lights up when bound.
-    cg.circle(hx, hy, chairRadius).fill({ color: 0x140306, alpha: 0.92 });
-    cg.circle(hx, hy, chairRadius).stroke({
-      width: 3,
-      color: occupied ? 0xff4a30 : 0x6a2024,
-      alpha: occupied ? 0.95 : 0.6,
-    });
-    if (occupied) {
-      // Glowing ember core. Once complete, the pulse phase is offset per chair
-      // so a wave of brightening chases around the ring.
-      const pulse = completed
-        ? 0.55 + 0.45 * Math.sin(now * 4 - index * 1.4)
-        : 0.5 + 0.25 * Math.sin(now * 2.5);
-      cg.circle(hx, hy, chairRadius * 0.55).fill({ color: 0xff5a2a, alpha: 0.5 * pulse + 0.2 });
-      cg.circle(hx, hy, chairRadius * 0.28).fill({ color: 0xffd6a0, alpha: 0.45 * pulse + 0.25 });
-    }
-    // Selection ring — matches the gold highlight other selected things get.
-    if (chair.selected) {
-      cg.circle(hx, hy, chairRadius + 8).stroke({ width: 3, color: 0xffd96b, alpha: 0.95 });
-    }
-    // Seat-in burst: a quick expanding ring when the soul first lands.
-    if (chair.filledAt !== undefined) {
-      const age = now - chair.filledAt;
-      if (age >= 0 && age < 0.9) {
-        cg.circle(hx, hy, chairRadius + age * 240).stroke({
-          width: 3, color: 0xff8040, alpha: (1 - age / 0.9) * 0.85,
-        });
-      }
+
+  const seenLabels = new Set<number>();
+  const chairs = state.soulChairs;
+  if (chairs && chairs.length > 0) {
+    // Each Hell Portal owns one ring of chairs around its mirror — group the
+    // chairs by portal and draw a self-contained sigil for each.
+    const groups = new Map<number, SoulChair[]>();
+    for (const c of chairs) {
+      const arr = groups.get(c.portalId);
+      if (arr) arr.push(c); else groups.set(c.portalId, [c]);
     }
 
-    // "needs 1 soul" label sat just above the chair, the way building name
-    // tags ride above their footprint.
-    let label = ctx.soulChairLabels.get(chair.id);
-    if (!label) {
-      label = new Text({
-        text: 'needs 1 soul',
-        style: {
-          fontFamily: fontFamilyById(getOptions().fonts.buildingLabel.family).css,
-          fontSize: 30,
-          fill: 0xff8a7a,
-          fontWeight: 'bold',
-        },
-      });
-      label.anchor.set(0.5, 1);
-      ctx.soulSigilLayer.addChild(label);
-      ctx.soulChairLabels.set(chair.id, label);
+    for (const [portalId, group] of groups) {
+      const portal = state.buildings.get(portalId);
+      if (!portal) continue;
+      const ctr = buildingCenter(portal);
+      const center = { x: worldToHellX(ctr.x), y: worldToHellY(ctr.y) };
+      const completedAt = state.soulSigilCompletedAt.get(portalId);
+      const completed = completedAt !== undefined;
+      const compAge = completed ? now - completedAt : 0;
+      // Chairs ordered by ring index so the pentagram edges read cleanly.
+      const ordered = [...group].sort((a, b) => a.index - b.index);
+
+      // Central inner ring at the mirror — a doubled occult outline that
+      // brightens once the sigil is complete.
+      const ringGlow = completed ? 0.55 + 0.25 * Math.sin(now * 3) : 0.4;
+      ring.circle(center.x, center.y, innerRadius).stroke({ width: 4, color: 0xff2030, alpha: ringGlow });
+      ring.circle(center.x, center.y, innerRadius - 7).stroke({ width: 2, color: 0xff6048, alpha: ringGlow * 0.7 });
+
+      // A line links every pair of filled chairs (the complete graph), sketched
+      // in as souls are seated. Skip-one pairs form the bright pentagram star;
+      // adjacent perimeter lines are thinner + fainter so the star reads on top.
+      for (let a = 0; a < ordered.length; a++) {
+        for (let b = a + 1; b < ordered.length; b++) {
+          const ca = ordered[a], cb = ordered[b];
+          if (!ca.occupied || !cb.occupied) continue;
+          const gap = Math.min(Math.abs(a - b), ordered.length - Math.abs(a - b));
+          const isStar = gap === 2; // skip-one pairs are the pentagram
+          const alpha = isStar ? (completed ? 0.85 : 0.6) : (completed ? 0.4 : 0.26);
+          ring.moveTo(ca.hx, ca.hy).lineTo(cb.hx, cb.hy)
+            .stroke({ width: isStar ? 5 : 3, color: 0xff2030, alpha });
+          if (completed && isStar) {
+            const a2 = 0.4 + 0.35 * Math.sin(now * 4);
+            ring.moveTo(ca.hx, ca.hy).lineTo(cb.hx, cb.hy).stroke({ width: 2, color: 0xffe0a0, alpha: a2 });
+          }
+        }
+      }
+
+      // Completed-sigil flourishes.
+      if (completed) {
+        // Spark racing around the star path (one full lap every ~5s).
+        const lap = (now * 0.2) % 1;
+        const seg = Math.floor(lap * SIGIL_EDGES.length);
+        const segT = lap * SIGIL_EDGES.length - seg;
+        const [ea, eb] = SIGIL_EDGES[seg];
+        const ca = ordered[ea], cb = ordered[eb];
+        if (ca?.occupied && cb?.occupied) {
+          const sx = ca.hx + (cb.hx - ca.hx) * segT;
+          const sy = ca.hy + (cb.hy - ca.hy) * segT;
+          ring.circle(sx, sy, 16).fill({ color: 0xffe6b0, alpha: 0.9 });
+          ring.circle(sx, sy, 30).fill({ color: 0xff8030, alpha: 0.35 });
+        }
+        // One-shot shockwave expanding from the centre the moment it completes.
+        if (compAge < 1.6) {
+          const r = innerRadius + compAge * 900;
+          ring.circle(center.x, center.y, r).stroke({ width: 7, color: 0xffd060, alpha: (1 - compAge / 1.6) * 0.9 });
+        }
+      }
+
+      // Chair discs + labels.
+      for (const chair of ordered) {
+        const { hx, hy, occupied, index } = chair;
+        // Dark base disc with a rim that lights up when bound.
+        cg.circle(hx, hy, chairRadius).fill({ color: 0x140306, alpha: 0.92 });
+        cg.circle(hx, hy, chairRadius).stroke({
+          width: 3,
+          color: occupied ? 0xff4a30 : 0x6a2024,
+          alpha: occupied ? 0.95 : 0.6,
+        });
+        if (occupied) {
+          // Glowing ember core. Once complete, the pulse phase is offset per
+          // chair so a wave of brightening chases around the ring.
+          const pulse = completed
+            ? 0.55 + 0.45 * Math.sin(now * 4 - index * 1.4)
+            : 0.5 + 0.25 * Math.sin(now * 2.5);
+          cg.circle(hx, hy, chairRadius * 0.55).fill({ color: 0xff5a2a, alpha: 0.5 * pulse + 0.2 });
+          cg.circle(hx, hy, chairRadius * 0.28).fill({ color: 0xffd6a0, alpha: 0.45 * pulse + 0.25 });
+        }
+        // Selection ring — matches the gold highlight other selected things get.
+        if (chair.selected) {
+          cg.circle(hx, hy, chairRadius + 8).stroke({ width: 3, color: 0xffd96b, alpha: 0.95 });
+        }
+        // Seat-in burst: a quick expanding ring when the soul first lands.
+        if (chair.filledAt !== undefined) {
+          const age = now - chair.filledAt;
+          if (age >= 0 && age < 0.9) {
+            cg.circle(hx, hy, chairRadius + age * 240).stroke({
+              width: 3, color: 0xff8040, alpha: (1 - age / 0.9) * 0.85,
+            });
+          }
+        }
+
+        // Small "needs a soul" tag above an empty chair.
+        let label = ctx.soulChairLabels.get(chair.id);
+        if (!label) {
+          label = new Text({
+            text: 'needs a soul',
+            style: {
+              fontFamily: fontFamilyById(getOptions().fonts.buildingLabel.family).css,
+              fontSize: 16,
+              fill: 0xff8a7a,
+              fontWeight: 'bold',
+            },
+          });
+          label.anchor.set(0.5, 1);
+          ctx.soulSigilLayer.addChild(label);
+          ctx.soulChairLabels.set(chair.id, label);
+        }
+        label.position.set(hx, hy - chairRadius - 6);
+        label.visible = !occupied;
+        seenLabels.add(chair.id);
+      }
     }
-    label.position.set(hx, hy - chairRadius - 6);
-    label.visible = !occupied;
+  }
+
+  // Drop labels whose chair is gone (portal destroyed, or no chairs at all).
+  for (const [id, label] of ctx.soulChairLabels) {
+    if (!seenLabels.has(id)) {
+      label.destroy();
+      ctx.soulChairLabels.delete(id);
+    }
   }
 }
 
