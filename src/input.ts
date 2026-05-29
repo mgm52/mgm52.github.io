@@ -106,6 +106,12 @@ export function setupInput(
       const singlePrimary = e.button === 0 && input.pointers.size < 2;
       if (singlePrimary) {
         input.spaceTapStart = { x: e.global.x, y: e.global.y };
+        // Touch has no right-click. In hell, a long-press is the command
+        // gesture (mirroring the ground view) — without this, touch players
+        // can select souls but have no way to order them around.
+        if (e.pointerType === 'touch' && state.view === 'hell') {
+          scheduleLongPress(input, e.pointerId, state, ctx, worldLayer);
+        }
       } else {
         // A non-primary press (right-click) or a second finger cancels any
         // pending select; a genuine second finger also starts a two-finger pan.
@@ -185,7 +191,7 @@ export function setupInput(
     }
     // Schedule long-press → "right-click" on touch.
     if (e.pointerType === 'touch') {
-      scheduleLongPress(input, e.pointerId, state, worldLayer);
+      scheduleLongPress(input, e.pointerId, state, ctx, worldLayer);
     }
     input.isDragging = true;
     input.dragStart = { x: local.x, y: local.y };
@@ -232,6 +238,12 @@ export function setupInput(
     // Space view: a single-pointer drag draws a rubber-band selection box once
     // it travels past the tap threshold. Resolved into a selection on pointerup.
     if (state.view !== 'ground') {
+      // Dragging far enough to start a selection box cancels the pending hell
+      // command long-press (it's a drag, not a press-and-hold).
+      if (input.longPressPointerId === e.pointerId && tracked) {
+        const moved = Math.hypot(tracked.x - tracked.startX, tracked.y - tracked.startY);
+        if (moved > LONG_PRESS_MOVE_TOL) cancelLongPress(input);
+      }
       if (input.spaceTapStart && input.pointers.has(e.pointerId)) {
         const moved = Math.hypot(e.global.x - input.spaceTapStart.x, e.global.y - input.spaceTapStart.y);
         if (moved >= SPACE_DRAG_TOL) {
@@ -284,6 +296,15 @@ export function setupInput(
     // drag rubber-band selects every building inside the box. Shift adds to the
     // current selection; otherwise a tap/drag on empty void clears it.
     if (state.view !== 'ground') {
+      // A hell command long-press already fired on this pointer — swallow the
+      // release so it doesn't double as a tap-select on top of the command.
+      if (input.longPressPointerId === e.pointerId) cancelLongPress(input);
+      if (input.longPressFired) {
+        input.longPressFired = false;
+        input.spaceTapStart = null;
+        input.spaceSelectionGfx.clear();
+        return;
+      }
       const start = input.spaceTapStart;
       input.spaceTapStart = null;
       input.spaceSelectionGfx.clear();
@@ -551,6 +572,7 @@ function scheduleLongPress(
   input: InputState,
   pointerId: number,
   state: GameState,
+  ctx: RenderContext,
   worldLayer: Container,
 ) {
   cancelLongPress(input);
@@ -563,18 +585,29 @@ function scheduleLongPress(
     const moved = Math.hypot(tracked.x - tracked.startX, tracked.y - tracked.startY);
     if (moved > LONG_PRESS_MOVE_TOL) return;
     input.longPressFired = true;
-    // Cancel any in-progress drag-select; long-press has taken over.
+    // Cancel any in-progress drag-select; long-press has taken over. Also drop
+    // the pending tap-select so the upcoming pointerup doesn't re-select on top
+    // of the command (hell view resolves taps from spaceTapStart on pointerup).
     input.isDragging = false;
     input.selectionGfx.clear();
+    input.spaceTapStart = null;
     if (state.pendingBuild) {
       // No keyboard ESC on touch — long-press cancels pending placement.
       state.pendingBuild = null;
       input.placementGhost.clear();
       return;
     }
-    const world = worldLayer.toLocal({ x: tracked.x, y: tracked.y });
     flashCursor(tracked.x, tracked.y);
-    handleRightClick(state, world.x, world.y);
+    // Touch has no right-click, so long-press is the "command" gesture. In hell
+    // the command target lives in hell-layer space (souls, the demon, soul
+    // chairs); on the ground it's the world layer.
+    if (state.view === 'hell') {
+      const hp = ctx.hellLayer.toLocal({ x: tracked.x, y: tracked.y });
+      handleHellRightClick(state, hp.x, hp.y);
+    } else {
+      const world = worldLayer.toLocal({ x: tracked.x, y: tracked.y });
+      handleRightClick(state, world.x, world.y);
+    }
   }, LONG_PRESS_MS);
 }
 
