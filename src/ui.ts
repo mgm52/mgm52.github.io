@@ -302,17 +302,16 @@ const TASKS: Task[] = [
     optional: true,
   },
   {
-    // Optional easter-egg side-task: collecting five dragon bones (cumulative)
-    // fires the demo's "game's incomplete" alerts and unlocks the secret
-    // settings menu (see the revealSecretSettings gate in refreshUI). Dragon
-    // bones drop when one dragon incinerates another, so this needs the Dragon
-    // Beacon (build_hypercentre) first. Grants no building.
+    // Main closing task: collecting five dragon bones (cumulative) fires the
+    // demo's "game's incomplete" alerts and unlocks the secret settings menu
+    // (see the revealSecretSettings gate in refreshUI). Dragon bones drop when
+    // one dragon incinerates another, so this needs the Dragon Beacon
+    // (build_hypercentre) first. Grants no building.
     id: 'collect_dragon_bones',
     text: 'Collect 5 dragon bones',
     unlocks: [],
     isDone: (s) => s.dragonBoneEarned >= 5,
     prereq: ['build_hypercentre'],
-    optional: true,
   },
 ];
 
