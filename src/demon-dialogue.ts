@@ -63,7 +63,7 @@ const doubleLetters = (s: string): string => s.replace(/[^ ]/g, (c) => c + c);
 // The trailing ". . ." beat is spoken as its own line first (see call sites).
 function demonNoLanguageLine(): string {
   return Math.random() < 0.5
-    ? 'i need a soul of learned vocabulary'
+    ? 'i need a soul of more learned vocabulary'
     : 'i do not know this language';
 }
 
