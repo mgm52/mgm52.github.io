@@ -7,7 +7,7 @@ import {
   cellCenter, cellKey, constructedDragonBeacon, currentPowerBoost, defOf, destroyBuilding, dragonTargetBuilding,
   earnBlood, earnDragonBone, earnMoney, findHoleEmergenceCell,
   getSpawnCapacity, holeBlockedByBuilding, holeCenter, isCellBlocked, isCellInBuilding, isCellInWaterSource,
-  isInBounds, maintainerCount, nearestCellInWaterSource, occupyCell, pushDeathEffect, pushFloater,
+  isInBounds, maintainerCount, markBuildingsChanged, nearestCellInWaterSource, occupyCell, pushDeathEffect, pushFloater,
   pushLightningBolt, recordGhost, releaseCell, removeDragon, removeGoblin, syncSoulChairs, waterCarrierCount,
 } from './state';
 
@@ -1110,6 +1110,7 @@ function dragonLift(state: GameState, d: Dragon, b: Building) {
   b.assignedGoblins = [];
   b.selected = false;
   state.buildings.delete(b.id);
+  markBuildingsChanged(state);
   d.carrying = b;
   d.state = { kind: 'carrying' };
   appendLog(state, `Dragon #${d.id} hoists ${defOf(b).name} #${b.displayNum} skyward.`);
@@ -1159,6 +1160,7 @@ function dragonDropAt(state: GameState, d: Dragon, goal: { x: number; y: number 
   b.nextIncomeAt = undefined;     // re-anchor income cadence
   b.waterMeter = 0;
   state.buildings.set(b.id, b);
+  markBuildingsChanged(state);
   d.carrying = null;
   d.state = { kind: 'seeking' };
   appendLog(state, `Dragon #${d.id} sets ${def.name} #${b.displayNum} back down.`);

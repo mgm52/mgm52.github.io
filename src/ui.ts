@@ -8,7 +8,7 @@ import {
   Building, Cell, Demon, DragonState, GameState, Ghost, Goblin, GoblinState, SoulChair, SpaceBuilding, WaterSource,
   appendLog, buildingCenter, buildingLabel, buildingMoneyCost, cellCenter, cellKey, countIdle, defOf, digDirection,
   earnDragonBone, getSpawnCapacity, holeBlockedByBuilding, isCellBlocked, isInBounds,
-  maintainerCount, nextBuildingDisplayNum, occupyCell, waterCarrierCount,
+  maintainerCount, markBuildingsChanged, nextBuildingDisplayNum, occupyCell, waterCarrierCount,
 } from './state';
 import { spawnDragon, spawnMinotaur } from './sim';
 import { unlockOptionsCog } from './options-ui';
@@ -1837,6 +1837,7 @@ function placeOneBuilding(state: GameState, kind: BuildingKind, opts: PlaceOpts 
     selected: false,
   };
   state.buildings.set(b.id, b);
+  markBuildingsChanged(state);
 
   // Snap idle goblins straight into 'maintaining' inside the footprint so
   // resolvePowerAndState marks the building active on the very next tick.

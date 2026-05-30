@@ -397,6 +397,12 @@ export type GameState = {
   hellHintShown: boolean;
   waterSources: Map<number, WaterSource>;
   buildings: Map<number, Building>;
+  // Monotonic counter bumped whenever the set of buildings — or any building's
+  // footprint cell — changes. The cell→building spatial index (buildingAtCell)
+  // rebuilds lazily when this moves, so the index never goes stale. Always go
+  // through markBuildingsChanged() when mutating `buildings` or a building's
+  // `cell`, never touch the Map directly.
+  buildingsVersion: number;
   // Buildings hauled into space by dragons — keyed by the original building id.
   spaceBuildings: Map<number, SpaceBuilding>;
   hole: Hole;
@@ -594,18 +600,52 @@ export function isCellInBuilding(b: Building, cx: number, cy: number): boolean {
          cy >= b.cell.cy && cy < b.cell.cy + n;
 }
 
-export function buildingAtCell(state: GameState, cx: number, cy: number): Building | null {
-  // Goblin Holes sit at "ground level" — like the original hole, other
-  // buildings can be placed on top of them. When a cell is shared, return the
-  // building stacked above so selection / right-click / blocking target it,
-  // and only fall back to the hole when nothing else covers the cell.
-  let hole: Building | null = null;
+// ─── Cell→building spatial index ────────────────────────────────────
+// buildingAtCell used to scan every building on every call. It sits in the
+// pathfinding hot loop (canStep → isCellBlocked → buildingAtCell), so with a
+// busy late-game map — many buildings, plus a Hypercentre's swarm of water
+// carriers each re-running BFS — that linear scan dominated tick time. We now
+// keep a cell→building lookup, rebuilt lazily only when buildingsVersion moves.
+//
+// Module-scoped (not on GameState) so it never serializes into a save. Tagged
+// with the owning state + its buildingsVersion so a fresh state from load, or
+// any building add/remove/move, transparently triggers a rebuild.
+let biCache: Map<number, Building> | null = null;
+let biState: GameState | null = null;
+let biVersion = -1;
+
+// Bump after any change to `state.buildings` or a building's footprint `cell`.
+// The next buildingAtCell call rebuilds the index from scratch.
+export function markBuildingsChanged(state: GameState): void {
+  state.buildingsVersion++;
+}
+
+function buildingIndex(state: GameState): Map<number, Building> {
+  if (biCache && biState === state && biVersion === state.buildingsVersion) return biCache;
+  const idx = new Map<number, Building>();
   for (const b of state.buildings.values()) {
-    if (!isCellInBuilding(b, cx, cy)) continue;
-    if (b.kind === 'goblin_hole') hole = b;
-    else return b;
+    const n = defOf(b).cellSize;
+    for (let dx = 0; dx < n; dx++) {
+      for (let dy = 0; dy < n; dy++) {
+        const k = (b.cell.cy + dy) * COLS + (b.cell.cx + dx);
+        const existing = idx.get(k);
+        // Goblin Holes sit at "ground level" — other buildings can be placed on
+        // top of them. A non-hole building stacked on a hole wins the cell;
+        // the hole only shows through where nothing else covers it.
+        if (!existing || (existing.kind === 'goblin_hole' && b.kind !== 'goblin_hole')) {
+          idx.set(k, b);
+        }
+      }
+    }
   }
-  return hole;
+  biCache = idx;
+  biState = state;
+  biVersion = state.buildingsVersion;
+  return idx;
+}
+
+export function buildingAtCell(state: GameState, cx: number, cy: number): Building | null {
+  return buildingIndex(state).get(cy * COLS + cx) ?? null;
 }
 
 export function isCellBlocked(
@@ -827,6 +867,7 @@ export function createInitialState(): GameState {
     hellHintShown: false,
     waterSources: new Map(),
     buildings: new Map(),
+    buildingsVersion: 0,
     spaceBuildings: new Map(),
     hole: {
       cell: { cx: START_CELL.cx, cy: START_CELL.cy },
@@ -1245,6 +1286,7 @@ export function destroyBuilding(state: GameState, buildingId: number) {
     g.path = [];
   }
   state.buildings.delete(buildingId);
+  markBuildingsChanged(state);
 }
 
 // The building a default (seeking) dragon will haul to space: the single most

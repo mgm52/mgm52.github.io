@@ -9,7 +9,7 @@ import { autoAssignAllIdle, lightningStrike, spawnBob } from './sim';
 import {
   Building, Cell, Dragon, GameState, Ghost, Goblin, Minotaur, WaterSource,
   appendLog, buildingAtCell, buildingMoneyCost, cellKey, defOf, demonAtHell, findFreeCellNear,
-  hellPortalAt, holeAtCell, isInBounds, nextBuildingDisplayNum, pixelToCell, soulChairAt, spaceBuildingAt,
+  hellPortalAt, holeAtCell, isInBounds, markBuildingsChanged, nextBuildingDisplayNum, pixelToCell, soulChairAt, spaceBuildingAt,
   waterCarrierCount, waterSourceAtCell,
 } from './state';
 
@@ -1163,6 +1163,7 @@ function placeBuilding(state: GameState, x: number, y: number) {
     selected: false,
   };
   state.buildings.set(b.id, b);
+  markBuildingsChanged(state);
   state.pendingBuild = null;
   // Hell Portal: placing one (sticky) unlocks the descent affordance. The
   // red beam is drawn per-portal and gated on the building actually finishing
@@ -1200,6 +1201,7 @@ function tryPlaceWallAt(state: GameState, cx: number, cy: number, silent: boolea
     selected: false,
   };
   state.buildings.set(b.id, b);
+  markBuildingsChanged(state);
   maybeTriggerBobCutscene(state, b, BUILDING_DEFS.wall.name);
   return true;
 }
