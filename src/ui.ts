@@ -59,11 +59,21 @@ let minotaurEverSummoned = false;
 // appearance gets a soft fade-in via the .fade-in CSS animation.
 const everVisibleButtonIds = new Set<string>();
 
-// Scroll-cue bookkeeping. lastScrollHeight lets us notice when fresh content
-// has grown the scroll container while it's off-screen, so the arrow gives a
-// louder "new stuff below" pulse for a few seconds (scrollCueNewUntil).
-let lastScrollHeight = 0;
-let scrollCueNewUntil = 0;
+// Element ids of buttons/tasks that have just unlocked during play and that the
+// player hasn't yet scrolled into view. The scroll cue points at these and the
+// entry is dropped the moment the item enters the visible band (see refreshUI),
+// so the arrow only ever nudges toward genuinely-unseen new content.
+const pendingNewItemIds = new Set<string>();
+// Flips true at the end of the first refresh. Buttons already present on load
+// (a resumed save) shouldn't be flagged as "newly unlocked" — only ones that
+// appear afterwards do.
+let initialButtonsSeeded = false;
+// Joined ids of the currently-active tasks, so a change (a fresh task surfacing
+// at the bottom of the sidebar) can flag the task line as new content.
+let lastActiveTaskKey = '';
+// True while the player is dragging the custom scrollbar thumb — keeps the bar
+// pinned visible and stops refreshUI from fighting the drag.
+let scrollbarDragging = false;
 
 // The build/ritual panel scrolls internally on desktop/landscape, but in phone
 // portrait the panel is overflow:visible and the whole sidebar scrolls instead.
@@ -77,10 +87,55 @@ function buildScrollContainer(): HTMLElement {
 function applyFadeInOnFirstShow(btnId: string): void {
   if (everVisibleButtonIds.has(btnId)) return;
   everVisibleButtonIds.add(btnId);
+  // A genuinely new button (one that appears during play, not on the initial
+  // load seed) is unseen content the scroll cue should point toward.
+  if (initialButtonsSeeded) pendingNewItemIds.add(btnId);
   const btn = document.getElementById(btnId);
   if (!btn) return;
   btn.classList.add('fade-in');
   window.setTimeout(() => btn.classList.remove('fade-in'), 700);
+}
+
+// Vertical position of the active scroll container's visible bottom edge, in
+// viewport coordinates — the cutoff below which content sits "below the fold".
+// Elements outside the build panel (e.g. the task line, which on desktop lives
+// below the internally-scrolling panel) clip to the window instead, so they
+// don't read as below-the-fold while plainly visible on screen.
+function scrollViewBottom(el: HTMLElement): number {
+  const scroller = buildScrollContainer();
+  let bottom = window.innerHeight;
+  if (scroller.contains(el)) bottom = Math.min(bottom, scroller.getBoundingClientRect().bottom);
+  return bottom;
+}
+
+// Draws the custom grey scrollbar over the active scroll container. Always
+// visible while the area overflows (never fades like the native iOS bar);
+// hidden when the panel is closed or fits. Runs every refreshUI frame, so the
+// thumb tracks momentum scrolling smoothly.
+function updateCustomScrollbar(panelVisible: boolean): void {
+  const bar = document.getElementById('sidebar-scrollbar');
+  const thumb = document.getElementById('sidebar-scrollbar-thumb');
+  if (!bar || !thumb) return;
+  const scroller = buildScrollContainer();
+  const scrollH = scroller.scrollHeight;
+  const clientH = scroller.clientHeight;
+  const range = scrollH - clientH;
+  if (!panelVisible || range <= 4) { bar.classList.remove('visible'); return; }
+
+  const rect = scroller.getBoundingClientRect();
+  const margin = 3;
+  const barWidth = 6;
+  const trackHeight = rect.height - margin * 2;
+  bar.style.top = `${rect.top + margin}px`;
+  bar.style.left = `${rect.right - barWidth - margin}px`;
+  bar.style.height = `${trackHeight}px`;
+
+  const thumbH = Math.max(24, (clientH / scrollH) * trackHeight);
+  const usable = trackHeight - thumbH;
+  const thumbTop = usable > 0 ? Math.min(usable, (scroller.scrollTop / range) * usable) : 0;
+  thumb.style.height = `${thumbH}px`;
+  thumb.style.top = `${Math.max(0, thumbTop)}px`;
+  bar.classList.add('visible');
 }
 
 // Income/blood rate readouts ("+X/s"). Sampled on a fixed cadence and shown as
@@ -348,6 +403,39 @@ export function setupUI(state: GameState, callbacks: UICallbacks) {
     const sc = buildScrollContainer();
     sc.scrollBy({ top: sc.clientHeight * 0.8, behavior: 'smooth' });
   });
+
+  // Custom scrollbar thumb drag — map vertical thumb travel onto the active
+  // container's scrollTop. Pointer events cover mouse, touch and pen in one go.
+  const scrollbar = document.getElementById('sidebar-scrollbar')!;
+  const scrollThumb = document.getElementById('sidebar-scrollbar-thumb')!;
+  let dragStartY = 0;
+  let dragStartScrollTop = 0;
+  scrollThumb.addEventListener('pointerdown', (e: PointerEvent) => {
+    e.preventDefault();
+    scrollbarDragging = true;
+    scrollbar.classList.add('dragging');
+    dragStartY = e.clientY;
+    dragStartScrollTop = buildScrollContainer().scrollTop;
+    scrollThumb.setPointerCapture(e.pointerId);
+  });
+  scrollThumb.addEventListener('pointermove', (e: PointerEvent) => {
+    if (!scrollbarDragging) return;
+    const sc = buildScrollContainer();
+    const range = sc.scrollHeight - sc.clientHeight;
+    const trackHeight = sc.getBoundingClientRect().height - 6;
+    const thumbH = Math.max(24, (sc.clientHeight / sc.scrollHeight) * trackHeight);
+    const usable = trackHeight - thumbH;
+    if (usable <= 0 || range <= 0) return;
+    sc.scrollTop = dragStartScrollTop + ((e.clientY - dragStartY) / usable) * range;
+  });
+  const endScrollDrag = (e: PointerEvent) => {
+    if (!scrollbarDragging) return;
+    scrollbarDragging = false;
+    scrollbar.classList.remove('dragging');
+    try { scrollThumb.releasePointerCapture(e.pointerId); } catch { /* already released */ }
+  };
+  scrollThumb.addEventListener('pointerup', endScrollDrag);
+  scrollThumb.addEventListener('pointercancel', endScrollDrag);
 
   // The pan hint defaults to the keyboard controls; on a touch-primary device
   // there are no arrow keys, so swap in the two-finger gesture instead.
@@ -1046,19 +1134,33 @@ export function refreshUI(state: GameState) {
   const panelBuildVisible = firstTaskDone || ritualVisible;
   panelBuild.style.display = panelBuildVisible ? '' : 'none';
 
-  // Scroll cue — surface the bouncing gold arrow when there's more build/ritual
-  // content below the fold. iOS/macOS hide overlay scrollbars, so without a cue
-  // players don't realise the panel scrolls. We measure whichever element is
-  // currently the scroll container (panel vs whole sidebar; see media query).
+  // Scroll cue — a minimal chevron pointing at a newly-unlocked button or task
+  // that's currently sitting below the fold, since iOS/macOS hide overlay
+  // scrollbars and players otherwise miss fresh content. We also keep the custom
+  // grey scrollbar in sync here. Both measure whichever element is the scroll
+  // container right now (build panel vs whole sidebar; see media query).
   const scrollCue = document.getElementById('scroll-cue')!;
-  const scroller = buildScrollContainer();
-  const moreBelow = scroller.scrollHeight - scroller.scrollTop - scroller.clientHeight > 4;
-  // A freshly grown scroll height while content is off-screen means new stuff
-  // just unlocked below the fold — flag a louder pulse for a few seconds.
-  if (moreBelow && scroller.scrollHeight > lastScrollHeight + 1) scrollCueNewUntil = state.now + 3;
-  lastScrollHeight = scroller.scrollHeight;
-  scrollCue.classList.toggle('visible', panelBuildVisible && moreBelow);
-  scrollCue.classList.toggle('new', panelBuildVisible && moreBelow && state.now < scrollCueNewUntil);
+
+  // A fresh task surfacing at the bottom of the sidebar is new content too.
+  const activeTaskKey = activeTasks.map(t => t.id).join('|');
+  if (initialButtonsSeeded && activeTaskKey && activeTaskKey !== lastActiveTaskKey) {
+    pendingNewItemIds.add('task-text');
+  }
+  lastActiveTaskKey = activeTaskKey;
+
+  // Walk the pending-new items: drop any that have scrolled into view (their top
+  // edge cleared the fold) or whose element is gone, and note whether at least
+  // one is still waiting below — that's the only thing that surfaces the cue.
+  let newBelow = false;
+  for (const id of [...pendingNewItemIds]) {
+    const el = document.getElementById(id);
+    if (!el || el.offsetParent === null) { pendingNewItemIds.delete(id); continue; }
+    if (el.getBoundingClientRect().top >= scrollViewBottom(el) - 6) newBelow = true;
+    else pendingNewItemIds.delete(id);
+  }
+  scrollCue.classList.toggle('visible', panelBuildVisible && newBelow);
+
+  updateCustomScrollbar(panelBuildVisible);
 
   // Autobuild → Autowater replace chain: Autowater needs Autobuild owned
   // AND a water source dug (so the upgrade has something to act on). The
@@ -1274,6 +1376,11 @@ export function refreshUI(state: GameState) {
   };
 
   refreshInfoPanel(state);
+
+  // Every button/task shown this first frame is the baseline (a resumed save
+  // shouldn't nag about content the player already had). From the next frame on,
+  // a first-show is a genuine new unlock the scroll cue can point at.
+  initialButtonsSeeded = true;
 }
 
 function refreshInfoPanel(state: GameState) {
