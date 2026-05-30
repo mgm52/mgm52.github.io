@@ -58,6 +58,22 @@ let minotaurEverSummoned = false;
 // Build/ritual buttons that have already been visible at least once. First
 // appearance gets a soft fade-in via the .fade-in CSS animation.
 const everVisibleButtonIds = new Set<string>();
+
+// Scroll-cue bookkeeping. lastScrollHeight lets us notice when fresh content
+// has grown the scroll container while it's off-screen, so the arrow gives a
+// louder "new stuff below" pulse for a few seconds (scrollCueNewUntil).
+let lastScrollHeight = 0;
+let scrollCueNewUntil = 0;
+
+// The build/ritual panel scrolls internally on desktop/landscape, but in phone
+// portrait the panel is overflow:visible and the whole sidebar scrolls instead.
+// This returns whichever element is actually the scroll container right now.
+function buildScrollContainer(): HTMLElement {
+  const panel = document.getElementById('panel-build')!;
+  return getComputedStyle(panel).overflowY === 'visible'
+    ? document.getElementById('sidebar')!
+    : panel;
+}
 function applyFadeInOnFirstShow(btnId: string): void {
   if (everVisibleButtonIds.has(btnId)) return;
   everVisibleButtonIds.add(btnId);
@@ -325,6 +341,13 @@ export function setupUI(state: GameState, callbacks: UICallbacks) {
   const summonList = document.getElementById('summon-list')!;
   const ritualList = document.getElementById('ritual-list')!;
   const buildList = document.getElementById('build-list')!;
+
+  // Tapping the scroll-cue arrow nudges the panel down by most of a page so it
+  // doubles as a control, not just an indicator.
+  document.getElementById('scroll-cue')!.addEventListener('click', () => {
+    const sc = buildScrollContainer();
+    sc.scrollBy({ top: sc.clientHeight * 0.8, behavior: 'smooth' });
+  });
 
   // The pan hint defaults to the keyboard controls; on a touch-primary device
   // there are no arrow keys, so swap in the two-finger gesture instead.
@@ -1020,7 +1043,22 @@ export function refreshUI(state: GameState) {
   // up as a thin empty bar — hide the outer panel until either subsection
   // unlocks.
   const panelBuild = document.getElementById('panel-build')!;
-  panelBuild.style.display = (firstTaskDone || ritualVisible) ? '' : 'none';
+  const panelBuildVisible = firstTaskDone || ritualVisible;
+  panelBuild.style.display = panelBuildVisible ? '' : 'none';
+
+  // Scroll cue — surface the bouncing gold arrow when there's more build/ritual
+  // content below the fold. iOS/macOS hide overlay scrollbars, so without a cue
+  // players don't realise the panel scrolls. We measure whichever element is
+  // currently the scroll container (panel vs whole sidebar; see media query).
+  const scrollCue = document.getElementById('scroll-cue')!;
+  const scroller = buildScrollContainer();
+  const moreBelow = scroller.scrollHeight - scroller.scrollTop - scroller.clientHeight > 4;
+  // A freshly grown scroll height while content is off-screen means new stuff
+  // just unlocked below the fold — flag a louder pulse for a few seconds.
+  if (moreBelow && scroller.scrollHeight > lastScrollHeight + 1) scrollCueNewUntil = state.now + 3;
+  lastScrollHeight = scroller.scrollHeight;
+  scrollCue.classList.toggle('visible', panelBuildVisible && moreBelow);
+  scrollCue.classList.toggle('new', panelBuildVisible && moreBelow && state.now < scrollCueNewUntil);
 
   // Autobuild → Autowater replace chain: Autowater needs Autobuild owned
   // AND a water source dug (so the upgrade has something to act on). The

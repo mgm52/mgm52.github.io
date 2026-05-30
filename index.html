@@ -166,6 +166,58 @@
          is the magic combo. The rest of the sidebar stays static. */
       #panel-build { flex: 0 1 auto; min-height: 0; overflow-y: auto; -webkit-overflow-scrolling: touch; }
 
+      /* iOS/macOS hide overlay scrollbars unless you're actively dragging, so
+         players couldn't tell the build/ritual panel was scrollable. Force a
+         slim, always-visible gold scrollbar on the two containers that scroll:
+         the build panel (desktop/landscape) and the whole sidebar (phone
+         portrait, where the panel itself is overflow:visible). iOS still hides
+         these during momentum scroll — the #scroll-cue arrow below covers it. */
+      #panel-build, #sidebar { scrollbar-width: thin; scrollbar-color: rgba(255,217,107,0.5) rgba(255,255,255,0.05); }
+      #panel-build::-webkit-scrollbar, #sidebar::-webkit-scrollbar { width: 8px; height: 8px; }
+      #panel-build::-webkit-scrollbar-track, #sidebar::-webkit-scrollbar-track {
+        background: rgba(255,255,255,0.05); border-radius: 8px;
+      }
+      #panel-build::-webkit-scrollbar-thumb, #sidebar::-webkit-scrollbar-thumb {
+        background: rgba(255,217,107,0.45); border-radius: 8px;
+        border: 2px solid transparent; background-clip: padding-box;
+      }
+      #panel-build::-webkit-scrollbar-thumb:hover, #sidebar::-webkit-scrollbar-thumb:hover {
+        background: rgba(255,217,107,0.75); background-clip: padding-box;
+      }
+
+      /* Bouncing gold arrow that surfaces when there's more build/ritual
+         content below the fold (refreshUI toggles .visible). Lives as the last
+         child of #panel-build; the negative margin cancels its own height so it
+         never adds to the scroll length, while position:sticky pins it to the
+         bottom of whichever container is scrolling. Clickable: nudges the panel
+         down. .new adds a louder pulse for a few seconds after fresh content
+         grows the panel off-screen. */
+      #scroll-cue {
+        position: sticky; bottom: 6px; z-index: 40;
+        width: 28px; height: 28px; margin: -28px auto 0;
+        display: flex; align-items: center; justify-content: center;
+        border-radius: 50%;
+        background: radial-gradient(circle at 50% 35%, #ffe9a0 0%, var(--sidebar-accent) 55%, #f0b62e 100%);
+        color: #3a2a00; font-size: 17px; line-height: 1;
+        box-shadow: 0 0 12px rgba(255,217,107,0.7), 0 2px 5px rgba(0,0,0,0.45);
+        cursor: pointer;
+        opacity: 0; pointer-events: none;
+        transition: opacity 240ms ease;
+      }
+      #scroll-cue.visible { opacity: 0.96; pointer-events: auto; animation: scroll-cue-bounce 1.4s ease-in-out infinite; }
+      #scroll-cue.new { animation: scroll-cue-attention 0.85s ease-in-out infinite; }
+      @keyframes scroll-cue-bounce {
+        0%, 100% { transform: translateY(0); }
+        50%      { transform: translateY(4px); }
+      }
+      @keyframes scroll-cue-attention {
+        0%, 100% { transform: translateY(0) scale(1);     box-shadow: 0 0 12px rgba(255,217,107,0.7), 0 2px 5px rgba(0,0,0,0.45); }
+        50%      { transform: translateY(5px) scale(1.14); box-shadow: 0 0 22px rgba(255,233,160,0.95), 0 2px 5px rgba(0,0,0,0.45); }
+      }
+      @media (prefers-reduced-motion: reduce) {
+        #scroll-cue.visible, #scroll-cue.new { animation: none; }
+      }
+
       /* ───────── Compact landscape (mobile phones) ───────── */
       @media (orientation: landscape) and (max-height: 500px) {
         #sidebar {
@@ -1399,6 +1451,9 @@
             <div class="panel-title">Ritual</div>
             <div id="ritual-list"></div>
           </div>
+          <!-- Scroll affordance: bouncing arrow shown when more build/ritual
+               content sits below the fold (toggled in refreshUI). -->
+          <div id="scroll-cue" aria-hidden="true">▾</div>
         </div>
         <div id="task-text" class="task-text"></div>
       </div>
