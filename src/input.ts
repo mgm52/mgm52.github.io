@@ -161,6 +161,11 @@ export function setupInput(
         if (spawnBob(state, target)) {
           state.bobPickingHole = false;
           state.bobSpawned = true;
+          // Beat of stillness so Bob's arrival registers before the colony
+          // resumes. The frame loop honours bob-spawn-hold the same way as the
+          // other holds; setTimeout clears it after ~1s of wall-clock time.
+          document.body.classList.add('bob-spawn-hold');
+          window.setTimeout(() => document.body.classList.remove('bob-spawn-hold'), 1000);
         }
       } else {
         playSound('error');
