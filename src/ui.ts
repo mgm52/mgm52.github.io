@@ -247,8 +247,16 @@ function playTaskCompleteAnimation(taskId: string): void {
   overlay.classList.add('shown');
   // "Level Up/Mission Complete (Resistance)" by Dylan Kelk (freesound 672801).
   playSound('task_complete', 1);
-  // Hold the overlay for ~2s, then fade out (CSS handles the 600ms fade).
-  window.setTimeout(() => overlay.classList.remove('shown'), 2200);
+  // Hold the overlay for ~2s, then fade out (CSS handles the 600ms fade). As it
+  // starts fading we snap the build panel back to the top: the task's unlocks
+  // are about to fade in below, and the scroll cue only ever points *down*, so
+  // putting the player at the top guarantees fresh content reads as "more below"
+  // rather than scrolling in off-screen above the fold. The jump happens behind
+  // the still-opaque overlay, so it isn't visible as a lurch.
+  window.setTimeout(() => {
+    overlay.classList.remove('shown');
+    buildScrollContainer().scrollTo({ top: 0, behavior: 'auto' });
+  }, 2200);
   // Only after the overlay clears do the task's unlocks take effect — that
   // gives newly-revealed buttons a moment to be hidden and then fade in
   // properly via the .fade-in animation, rather than flashing on screen
