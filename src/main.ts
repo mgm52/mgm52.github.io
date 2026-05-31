@@ -643,10 +643,12 @@ async function main() {
     // during the intro's preamble + dialog. Once the intro releases the
     // hold, ticks resume from 0 and the hint gets its full 30s/90s grace.
     // Bob's hole-picker freezes the world the same way so the player can
-    // line up the summon without the rest of the colony advancing.
+    // line up the summon without the rest of the colony advancing; bob-spawn-hold
+    // then holds it for a beat right after he emerges (set in input.ts).
     const introActive = document.body.classList.contains('intro-hold')
       || document.body.classList.contains('bob-cutscene-hold')
       || document.body.classList.contains('demon-parlay-hold')
+      || document.body.classList.contains('bob-spawn-hold')
       || state.bobPickingHole;
     if (!paused && !introActive) {
       acc += dt;
