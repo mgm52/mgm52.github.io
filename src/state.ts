@@ -501,7 +501,7 @@ export type GameState = {
   // "hold ↓ at the bottom of the map to descend into hell" affordance.
   hellUnlocked: boolean;
   // Sticky once the player has accepted the Bob cutscene (the "tag me in
-  // boss?" prompt that fires after the 15th building). Stays true even after
+  // boss?" prompt that fires after the 20th building). Stays true even after
   // Bob dies, so the cutscene never re-offers.
   bobSpawned: boolean;
   // True between the player clicking "Okay" in the cutscene and clicking a
@@ -509,7 +509,7 @@ export type GameState = {
   // a click on one summons Bob.
   bobPickingHole: boolean;
   // Dev cheat: when true, the next building placement triggers the Bob
-  // cutscene regardless of the 15-building threshold or bobSpawned state.
+  // cutscene regardless of the 20-building threshold or bobSpawned state.
   // Self-clearing once the cutscene fires.
   bobCheatPending: boolean;
   // Ghosts of every unit the player has killed (goblin, minotaur, dragon),

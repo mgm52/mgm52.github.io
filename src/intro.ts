@@ -347,14 +347,19 @@ export async function runIntro(): Promise<void> {
 }
 
 // Mid-game cutscene: same goblin, slides back up after the player places their
-// 15th building. Reuses the entire intro DOM and animation, but with a Bob-
+// 20th building. Reuses the entire intro DOM and animation, but with a Bob-
 // specific script that names the building ordinal/type and surfaces an
 // Okay/No choice. Returns 'yes' when the player accepts (caller seats Bob via
 // the hole picker), 'no' when they decline. Designed to be called outside of
 // playIntroSequence: it doesn't touch introActive/introAborted, so skipIntro()
 // stays a no-op while this runs. The pausable sleep + intro-paused class still
 // apply, so pressing P during the Bob cutscene freezes it correctly.
-export async function runBobCutscene(ordinal: string, kindName: string): Promise<'yes' | 'no'> {
+//
+// The world keeps running (and the player keeps full input) through the
+// slide-up — only once the goblin has turned around to address the player
+// does the cutscene freeze the tick loop and arm the click wall. `onHold`
+// fires at that moment so the caller can clear any in-flight cursor state.
+export async function runBobCutscene(ordinal: string, kindName: string, onHold?: () => void): Promise<'yes' | 'no'> {
   const overlay = document.getElementById('intro-overlay');
   const goblinEl = document.getElementById('intro-goblin');
   const speechEl = document.getElementById('intro-speech');
@@ -363,16 +368,17 @@ export async function runBobCutscene(ordinal: string, kindName: string): Promise
   const clickWall = document.getElementById('intro-clickwall');
   if (!overlay || !goblinEl || !speechEl || !yesBtn || !noBtn || !clickWall) return 'no';
 
-  // bob-cutscene-hold suspends the tick loop (see main.ts) so the world
-  // freezes underneath the overlay — the "game pauses" part of the spec —
-  // without surfacing the regular pause overlay.
-  document.body.classList.add('bob-cutscene-hold');
   // Reset the goblin to back-facing so the slide-up + turn-around plays from
   // the same starting pose as the original intro.
   goblinEl.style.setProperty('--row', '0');
   overlay.classList.remove('faced', 'exit', 'speaking', 'click-armed', 'show-buttons');
   speechEl.textContent = '';
   speechEl.classList.remove('done');
+
+  // Keep the click wall transparent while the goblin rises — the inline
+  // style overrides the `.visible` CSS rule that would otherwise absorb
+  // every click the moment the overlay shows.
+  clickWall.style.pointerEvents = 'none';
 
   overlay.classList.add('visible');
   await sleep(50);
@@ -381,6 +387,14 @@ export async function runBobCutscene(ordinal: string, kindName: string): Promise
   await sleep(POST_SLIDE_BEAT_MS);
   overlay.classList.add('faced');
   await turnGoblinAround(goblinEl);
+
+  // The goblin is now facing the player: freeze the world and start blocking
+  // input. bob-cutscene-hold suspends the tick loop (see main.ts) without
+  // surfacing the regular pause overlay; restoring the click wall's
+  // pointer-events lets the `.visible` rule absorb clicks again.
+  document.body.classList.add('bob-cutscene-hold');
+  clickWall.style.pointerEvents = '';
+  onHold?.();
 
   await runSpeak(overlay, speechEl, clickWall, 'oh my!');
   await runSpeak(overlay, speechEl, clickWall, 'oh my word!');
