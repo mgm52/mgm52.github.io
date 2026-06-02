@@ -732,6 +732,7 @@ function handleHellRightClick(state: GameState, hx: number, hy: number) {
     nearest.goal = { x: chair.hx, y: chair.hy };
     nearest.parlayDemonId = undefined;
     nearest.targetChairId = chair.id;
+    nearest.commanded = true;
     chair.claimedBy = nearest.id;
     playSound('select', 0.4);
     appendLog(state, 'A soul shuffles toward the sigil.');
@@ -769,6 +770,7 @@ function handleHellRightClick(state: GameState, hx: number, hy: number) {
     g.targetChairId = undefined;
     for (const c of state.soulChairs) if (c.claimedBy === g.id) c.claimedBy = undefined;
     g.parlayDemonId = canSpeak ? demon.id : undefined;
+    g.commanded = true;
     playSound('select', 0.4);
     if (canSpeak) appendLog(state, 'A soul shuffles forth to parlay with the demon.');
     else appendLog(state, 'The demon is already locked in parlay.');
@@ -791,6 +793,7 @@ function handleHellRightClick(state: GameState, hx: number, hy: number) {
       g.hx = p.x;
       g.hy = p.y;
     }
+    g.commanded = true;
   }
   playSound('select', 0.4);
   appendLog(state, `${selected.length} ghost(s) drift toward the cursor.`);

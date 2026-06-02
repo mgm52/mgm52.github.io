@@ -188,6 +188,12 @@ export const HELL = {
   ghostHitRadius: 24,
   // Speed (hell-px / sec) a ghost walks toward a commanded destination.
   ghostWalkSpeed: 40,
+  // Idle pacing for Bob's ghost: until his first player command he wanders
+  // left and right this far (hell-px) around his arrival spot, at this speed,
+  // pausing this long (sec) at each end before turning back.
+  bobPaceRange: 90,
+  bobPaceSpeed: 20,
+  bobPacePauseSec: 3,
 };
 
 // Demons — uncommandable denizens of hell. For now a single giant Minotaur
@@ -199,6 +205,10 @@ export const DEMON = {
   patrolHalf: 360,    // hell-px travelled either side of the spawn centre
   parlayRadius: 360,  // a ghost within this (hell-px) of the demon starts a parlay
   hitRadius: 390,     // click radius (hell-px) for selecting the demon
+  // The demon is solid: no soul may stand within this (hell-px) of his centre —
+  // any that ends up inside is shoved back out to the rim. Kept well under
+  // parlayRadius so a commanded soul opens its parlay before it ever collides.
+  bodyRadius: 240,
   // Hell-x offset from the map centre where the demon spawns + paces. Nudged
   // right so it stands clear of the soul sigil at the centre of the abyss.
   spawnOffsetX: 620,

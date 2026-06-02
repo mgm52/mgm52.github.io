@@ -111,6 +111,9 @@ export type Demon = {
   // The "speak to me, damned soul" greeting only plays the very first time any
   // soul parlays with this demon; it's skipped on every parlay afterwards.
   greeted: boolean;
+  // Set after this demon's first failed parlay, when his brush-off ends with an
+  // extra "try another" nudge. The extra line only ever plays once.
+  hintedTryAnother: boolean;
   // Id of the ghost currently mid-parlay, or null. Only one soul may speak at a
   // time; while set the demon stands still and faces the speaker.
   busyWith: number | null;
@@ -279,8 +282,8 @@ export type Ghost = {
   gold?: boolean;
   tiny?: boolean;
   // True for the ghost of the cutscene-summoned Bob. Hell Bob doesn't drift
-  // downward and ignores walk commands — he just stands where he died with
-  // his yellow nametag intact.
+  // downward — until his first player command he idly paces left and right
+  // around where he died (see paceBobGhost in sim.ts), yellow nametag intact.
   bob?: boolean;
   // Small per-ghost jitter so a cluster of ghosts doesn't render exactly stacked
   // and doesn't all drift at the same speed. Set once at spawn; persisted.
@@ -303,6 +306,15 @@ export type Ghost = {
   // When commanded onto a soul chair, the id of that chair. The ghost walks to
   // it and is consumed (seated) on arrival. Ephemeral — reset on load.
   targetChairId?: number;
+  // Set the first time the player issues this ghost any command (walk, parlay,
+  // chair). Bob's ghost idle-paces only until then; selection alone (which also
+  // seeds hx/hy) doesn't count as a command and leaves him pacing.
+  commanded?: boolean;
+  // Bob's idle-pacing state (see paceBobGhost in sim.ts): the hell-x he paces
+  // around, the leg direction, and when the end-of-leg pause finishes.
+  paceAnchorX?: number;
+  paceDir?: 1 | -1;
+  pacePauseUntil?: number;
 };
 
 // A "soul chair" in an abyssal sigil. Five sit ringed around a Hell Portal's
@@ -970,7 +982,7 @@ export function createDemons(state: GameState): Map<number, Demon> {
     hx: cx, hy: cy,
     facing: Math.PI / 2, dir: 1,
     y0: cy - DEMON.patrolHalf, y1: cy + DEMON.patrolHalf,
-    selected: false, greeted: false, busyWith: null,
+    selected: false, greeted: false, hintedTryAnother: false, busyWith: null,
   });
   return demons;
 }
