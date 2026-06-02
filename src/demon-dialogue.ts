@@ -64,7 +64,8 @@ const doubleLetters = (s: string): string => s.replace(/[^ ]/g, (c) => c + c);
 const DEMON_NO_LANGUAGE_LINES = [
   'i need a soul of more learned vocabulary',
   'i do not know this language',
-  'bring me a goblin that can talk',
+  'bring me a goblin that knows of speech',
+  'not this one',
 ];
 function demonNoLanguageLine(): string {
   return DEMON_NO_LANGUAGE_LINES[Math.floor(Math.random() * DEMON_NO_LANGUAGE_LINES.length)];

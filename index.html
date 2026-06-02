@@ -458,6 +458,18 @@
       .build-bone-cost { color: #eae0c0; }
       .build-cost.met { color: #6fbf73; }
       .build-cost.owned { color: #6a7080; }
+      /* Unaffordable costs also carry a thin red outline (8-direction
+         text-shadow — there's no true text-outline primitive that renders
+         outside the glyph) so the shortfall still reads as "red = missing"
+         now that the text itself tints per resource. Met/owned costs drop it. */
+      .build-cost:not(.met):not(.owned),
+      .build-power-cost:not(.met) {
+        text-shadow:
+          -1px -1px 0 #9c2b2b, 1px -1px 0 #9c2b2b,
+          -1px  1px 0 #9c2b2b, 1px  1px 0 #9c2b2b,
+          -1px  0   0 #9c2b2b, 1px  0   0 #9c2b2b,
+           0   -1px 0 #9c2b2b, 0    1px 0 #9c2b2b;
+      }
       .build-button-compact { padding: 5px 10px; }
       .build-button-compact .build-name { margin-bottom: 0; }
       .build-cost-side { font-family: var(--font-mono); font-size: calc(13px * var(--font-mono-scale)); white-space: nowrap; font-variant-numeric: tabular-nums; }
