@@ -2540,6 +2540,13 @@ export function render(state: GameState, ctx: RenderContext) {
     v.container.position.set(hx, hy);
     v.container.alpha = ghostAlpha;
     v.selectionRing.visible = !!gh.selected;
+    // Keep the silhouette's facing frame live — pacing Bob and commanded
+    // walkers turn to face their direction of travel. (The frame used to be
+    // baked once at creation.) Dragon ghosts mirror via container scale instead.
+    if (gh.kind === 'goblin' || gh.kind === 'minotaur') {
+      const sheet = gh.kind === 'goblin' ? (goblinIdleSheet ?? goblinWalkSheet) : minotaurWalkSheet;
+      if (sheet) v.sprite.texture = sheet.frames[dirIndex(sheet.meta, gh.facing)][0];
+    }
   }
   for (const [id, v] of ctx.ghostViews) {
     if (!seenGh.has(id)) {

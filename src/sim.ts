@@ -2,7 +2,7 @@ import { playDecayingGoblinDeath, playDecayingGoblinSpawn, playDecayingGoldKillC
 import { BUILDING_DEFS, CELL, COLS, DEMON, DRAGON, DRAGON_KILL_REWARD, GOBLIN, GOLD_GOBLIN_CHANCE, GOLD_KILL_REWARD, HELL, KILL_REWARD, LIGHTNING, MINOTAUR_KILL_REWARD, SOUL_SIGIL, SPACE, SUMMON_UPGRADES, TICK_S, MINOTAUR, TINYTAUR, WATER_DEPLETION_PP_PER_SEC, WATER_METER_MAX, WORLD, formatPower } from './config';
 import { getOptions } from './options';
 import {
-  ALL_DIRS, Building, Cell, DX, DY, Demon, Dir, Dragon, GameState, Goblin, HOLE_SIZE, Minotaur, SoulChair, SpaceBuilding, WaterSource,
+  ALL_DIRS, Building, Cell, DX, DY, Demon, Dir, Dragon, GameState, Ghost, Goblin, HOLE_SIZE, Minotaur, SoulChair, SpaceBuilding, WaterSource,
   appendLog, buildingAtCell, buildingCenter, buildingFootprint, buildingPerimeter,
   cellCenter, cellKey, constructedDragonBeacon, currentPowerBoost, defOf, destroyBuilding, dragonTargetBuilding,
   earnBlood, earnDragonBone, earnMoney, findHoleEmergenceCell,
@@ -211,6 +211,7 @@ export function tick(state: GameState) {
   // commanded goal at HELL.ghostWalkSpeed, then resuming the downward drift
   // from the new position.
   const fall = getOptions().hellGhostFallSpeed;
+  const hellXOffset = (HELL.width - WORLD.width) / 2;
   const hellYOffset = (HELL.height - WORLD.height) / 2;
   for (let i = state.ghosts.length - 1; i >= 0; i--) {
     const g = state.ghosts[i];
@@ -219,6 +220,12 @@ export function tick(state: GameState) {
     // at HELL.ghostWalkSpeed for everyone — including Bob (drift mult 0) —
     // so the player can still drag him around the underworld on command.
     const driftMult = g.speedMult ?? 1;
+    // Bob's idle pacing needs an explicit position, so materialise him from
+    // the lazy formula on first sight (his drift mult is 0, so it's static).
+    if (g.bob && !g.commanded && (g.hx === undefined || g.hy === undefined)) {
+      g.hx = g.x + (g.offX ?? 0) + hellXOffset;
+      g.hy = g.y + (g.offY ?? 0) + hellYOffset + (state.now - g.spawnAt) * fall * driftMult;
+    }
     if (g.hx !== undefined && g.hy !== undefined) {
       if (g.goal) {
         const dx = g.goal.x - g.hx;
@@ -236,9 +243,12 @@ export function tick(state: GameState) {
           g.hy += (dy / dist) * step;
           g.facing = Math.atan2(dy, dx);
         }
+      } else if (g.bob && !g.commanded) {
+        paceBobGhost(state, g);
       } else if (fall > 0) {
         g.hy += fall * driftMult * TICK_S;
       }
+      shoveGhostOffDemons(state, g);
       // A soul commanded onto a chair keeps steering to it (chairs are static)
       // and is consumed the instant it arrives. If the chair filled up first,
       // the command is silently dropped and the soul resumes its drift.
@@ -257,11 +267,77 @@ export function tick(state: GameState) {
         }
       }
       if (g.hy > HELL.height) state.ghosts.splice(i, 1);
-    } else if (fall > 0) {
+    } else {
       const hellY = g.y + (g.offY ?? 0) + hellYOffset + (state.now - g.spawnAt) * fall * driftMult;
-      if (hellY > HELL.height) state.ghosts.splice(i, 1);
+      if (hellY > HELL.height) { state.ghosts.splice(i, 1); continue; }
+      // A passively drifting soul that floats into a demon — or that a pacing
+      // demon walks over — gets materialised (hx/hy set) so the shove can route
+      // it around the body; from there it keeps drifting from its explicit
+      // position like any interacted ghost.
+      const hellX = g.x + (g.offX ?? 0) + hellXOffset;
+      for (const d of state.demons.values()) {
+        if (Math.hypot(hellX - d.hx, hellY - d.hy) < DEMON.bodyRadius) {
+          g.hx = hellX;
+          g.hy = hellY;
+          shoveGhostOffDemons(state, g);
+          break;
+        }
+      }
     }
   }
+}
+
+// Bob's ghost idles by pacing: until the player gives him his first command he
+// wanders HELL.bobPaceRange either side of his arrival spot, pausing for a few
+// seconds at the end of each leg before turning back. Selection alone doesn't
+// stop it — only a real command (g.commanded) does, permanently.
+function paceBobGhost(state: GameState, g: Ghost): void {
+  if (g.hx === undefined || g.hy === undefined) return;
+  g.paceAnchorX ??= g.hx;
+  g.paceDir ??= 1;
+  if (g.pacePauseUntil !== undefined && state.now < g.pacePauseUntil) return;
+  g.pacePauseUntil = undefined;
+  const target = g.paceAnchorX + g.paceDir * HELL.bobPaceRange;
+  const step = HELL.bobPaceSpeed * TICK_S;
+  g.facing = g.paceDir > 0 ? 0 : Math.PI;
+  if (Math.abs(target - g.hx) <= step) {
+    g.hx = target;
+    g.paceDir = g.paceDir > 0 ? -1 : 1;
+    g.pacePauseUntil = state.now + HELL.bobPacePauseSec;
+  } else {
+    g.hx += Math.sign(target - g.hx) * step;
+  }
+}
+
+// Demons are solid. A soul that ends up inside DEMON.bodyRadius of a demon's
+// centre is shoved radially back out to the rim, so commanded walkers slide
+// naturally around him and drifters part past his legs — no soul can come to
+// rest right under the colossus. (Goblin AI never plans around this; the
+// per-tick shove is the whole collision model.)
+function shoveGhostOffDemons(state: GameState, g: Ghost): void {
+  if (g.hx === undefined || g.hy === undefined) return;
+  let hx = g.hx;
+  let hy = g.hy;
+  for (const d of state.demons.values()) {
+    const dx = hx - d.hx;
+    const dy = hy - d.hy;
+    const dist = Math.hypot(dx, dy);
+    if (dist >= DEMON.bodyRadius) continue;
+    if (dist < 1e-6) {
+      hx = d.hx + DEMON.bodyRadius;  // dead-centre overlap: eject sideways
+    } else {
+      hx = d.hx + (dx / dist) * DEMON.bodyRadius;
+      hy = d.hy + (dy / dist) * DEMON.bodyRadius;
+    }
+    // A walk goal buried inside the demon can never be reached — drop it the
+    // moment the soul is pressed against him so it doesn't shuffle at the rim
+    // forever. (Chair- and parlay-bound souls re-acquire their goals each tick.)
+    if (g.goal && Math.hypot(g.goal.x - d.hx, g.goal.y - d.hy) < DEMON.bodyRadius) {
+      g.goal = undefined;
+    }
+  }
+  g.hx = hx;
+  g.hy = hy;
 }
 
 // Bind a soul into a chair: light it, clear its pending claim, and — if it was

@@ -227,6 +227,14 @@ export async function runDemonDialogue(state: GameState, demon: Demon, ghost: Gh
     await sleep(650);
   }
 
+  // The very first failed parlay ends with one extra nudge toward sending a
+  // soul that can actually speak. Once per demon, ever (persisted).
+  async function tryAnotherOnce(): Promise<void> {
+    if (demon.hintedTryAnother) return;
+    demon.hintedTryAnother = true;
+    await say('demon', 'try another');
+  }
+
   // Reset any leftover state and reveal the overlay. Cancel a lingering rebuke
   // bark so its timer can't tear down this parlay's overlay mid-conversation.
   if (rebukeTimer !== null) { clearTimeout(rebukeTimer); rebukeTimer = null; }
@@ -271,6 +279,7 @@ export async function runDemonDialogue(state: GameState, demon: Demon, ghost: Gh
       await say('goblin', 'hhhhffffffffffffffffffff');
       await say('demon', '. . .');
       await say('demon', demonNoLanguageLine());
+      await tryAnotherOnce();
     } else {
       // Goblins babble a random word; a minotaur (or tinytaur) soul mangles the
       // same word with every letter doubled — a lumbering "ggrroohh".
@@ -279,6 +288,7 @@ export async function runDemonDialogue(state: GameState, demon: Demon, ghost: Gh
       await say('goblin', word);
       await say('demon', '. . .');
       await say('demon', demonNoLanguageLine());
+      await tryAnotherOnce();
     }
   } finally {
     parlaySpeaker = null;

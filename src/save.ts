@@ -125,6 +125,7 @@ export function loadGame(): { state: GameState; savedAt: number } | null {
     for (const d of env.state.demons.values()) {
       d.busyWith = null;
       d.selected = false;
+      d.hintedTryAnother ??= false;
     }
     // Soul sigil — now one ring of chairs per Hell Portal. Drop any legacy
     // fixed-position chairs (they predate `portalId`) and the old single
