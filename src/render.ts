@@ -1045,8 +1045,8 @@ function makeDragonView(d: Dragon): DragonView {
   const glow = new Sprite(getGlowTexture());
   glow.anchor.set(0.5);
   glow.tint = 0xff8a3a;
-  glow.scale.set(DRAGON.displayPx * 1.7 / 128);
-  glow.alpha = 0.35;
+  glow.scale.set(DRAGON.displayPx * 1.3 / 128);
+  glow.alpha = 0.18;
 
   const sprite = new Sprite(Texture.EMPTY);
   sprite.anchor.set(0.5);
@@ -1088,8 +1088,8 @@ function spawnAmbientDragon(ctx: RenderContext, midScene: boolean): void {
   const glow = new Sprite(getGlowTexture());
   glow.anchor.set(0.5);
   glow.tint = 0xff8a3a;
-  glow.scale.set(DRAGON.displayPx * 1.4 / 128);
-  glow.alpha = 0.16;
+  glow.scale.set(DRAGON.displayPx * 1.1 / 128);
+  glow.alpha = 0.08;
 
   const sprite = new Sprite(Texture.EMPTY);
   sprite.anchor.set(0.5);
@@ -2303,7 +2303,7 @@ export function render(state: GameState, ctx: RenderContext) {
       v.sprite.texture = sheet.frames[dir][frame];
       v.sprite.scale.set(DRAGON.displayPx / sheet.meta.spriteSize);
     }
-    v.glow.alpha = breathing ? 0.85 : 0.35 + 0.12 * Math.sin(state.now * 3);
+    v.glow.alpha = breathing ? 0.6 : 0.18 + 0.06 * Math.sin(state.now * 3);
     applyRingFlash(v.selectionRing, d.selected, d.commandFlashAt, state.now);
     if (d.carrying) {
       const def = defOf(d.carrying);
