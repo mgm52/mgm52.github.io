@@ -734,7 +734,7 @@ export function setupUI(state: GameState, callbacks: UICallbacks) {
         <div class="build-text">
           <div class="build-name">${def.name}</div>
           <div class="build-meta">
-            <span class="build-cost" id="cost-${kind}">Ƶ${def.cost.toLocaleString('en-US')}</span>${powerCostBit}${bloodCostBit}${dragonBoneCostBit}
+            <span class="build-cost build-gold-cost" id="cost-${kind}">Ƶ${def.cost.toLocaleString('en-US')}</span>${powerCostBit}${bloodCostBit}${dragonBoneCostBit}
           </div>
         </div>
         ${yieldHtml}

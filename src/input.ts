@@ -1211,11 +1211,18 @@ function tryPlaceWallAt(state: GameState, cx: number, cy: number, silent: boolea
   return true;
 }
 
-// Trigger the Bob cutscene if the player just placed their 15th-or-later
+// Trigger the Bob cutscene if the player just placed their 20th-or-later
 // building and Bob hasn't been spawned yet. Walls count. The cutscene fires
-// async (no await) — paused-mode is enforced by the bob-cutscene-hold body
-// class — and on "yes" the picker takes over the next ground click.
+// async (no await) — the world keeps running while the goblin rises, and
+// only freezes (bob-cutscene-hold) once he turns around — and on "yes" the
+// picker takes over the next ground click.
+//
+// Because input stays live during the rise, the player can keep placing
+// buildings while the cutscene is already on its way up; this flag stops
+// those placements from kicking off a second, overlapping cutscene.
+let bobCutsceneRunning = false;
 function maybeTriggerBobCutscene(state: GameState, b: Building, kindName: string) {
+  if (bobCutsceneRunning) return;
   if (state.bobPickingHole) return;
   // Goblin Holes are the seat target for Bob, so it would be confusing to
   // have the cutscene fire on top of one — defer until the next non-hole
@@ -1229,14 +1236,19 @@ function maybeTriggerBobCutscene(state: GameState, b: Building, kindName: string
     if (state.bobSpawned) return;
     let total = 0;
     for (const k in state.buildingCounts) total += state.buildingCounts[k as BuildingKind];
-    if (total < 15) return;
+    if (total < 20) return;
   }
   const ord = ordinalWord(b.displayNum);
-  // Bail out of any pending build/strike — both surface a cursor ghost that
-  // would still follow the mouse during the cutscene if left armed.
-  state.pendingBuild = null;
-  state.pendingStrike = false;
-  void runBobCutscene(ord, kindName).then((res) => {
+  bobCutsceneRunning = true;
+  // Once the goblin turns around and the cutscene freezes the world, bail out
+  // of any pending build/strike — both surface a cursor ghost that would
+  // otherwise still follow the mouse during the dialogue.
+  const onHold = () => {
+    state.pendingBuild = null;
+    state.pendingStrike = false;
+  };
+  void runBobCutscene(ord, kindName, onHold).then((res) => {
+    bobCutsceneRunning = false;
     if (res === 'yes') {
       state.bobCheatPending = false;
       state.bobPickingHole = true;

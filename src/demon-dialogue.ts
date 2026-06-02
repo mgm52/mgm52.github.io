@@ -58,13 +58,17 @@ const GIBBERISH = ['gleh', 'goink', 'grah', 'groh', 'gonk'];
 // Minotaur souls slur the goblin babble with every letter doubled: "ggrroohh".
 const doubleLetters = (s: string): string => s.replace(/[^ ]/g, (c) => c + c);
 
-// The demon's brush-off when a soul can't speak his tongue — half the time he
-// hints that he wants a more articulate soul (the nudge toward sending Bob).
+// The demon's brush-off when a soul can't speak his tongue — most of the time
+// he hints that he wants a more articulate soul (the nudge toward sending Bob).
 // The trailing ". . ." beat is spoken as its own line first (see call sites).
+const DEMON_NO_LANGUAGE_LINES = [
+  'i need a soul of more learned vocabulary',
+  'i do not know this language',
+  'bring me a goblin that knows of speech',
+  'not this one',
+];
 function demonNoLanguageLine(): string {
-  return Math.random() < 0.5
-    ? 'i need a soul of more learned vocabulary'
-    : 'i do not know this language';
+  return DEMON_NO_LANGUAGE_LINES[Math.floor(Math.random() * DEMON_NO_LANGUAGE_LINES.length)];
 }
 
 const TYPE_MS_PER_CHAR = 42;
