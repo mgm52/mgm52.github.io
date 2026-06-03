@@ -190,6 +190,9 @@ export const HELL = {
   ghostHitRadius: 24,
   // Speed (hell-px / sec) a ghost walks toward a commanded destination.
   ghostWalkSpeed: 40,
+  // A soul commanded onto another soul opens their chat once within this
+  // (hell-px) of it — just outside arm's reach, so the two don't overlap.
+  chatRadius: 60,
   // Idle pacing for Bob's ghost: until his first player command he wanders
   // left and right this far (hell-px) around his arrival spot, at this speed,
   // pausing this long (sec) at each end before turning back.

@@ -110,9 +110,13 @@ export function loadGame(): { state: GameState; savedAt: number } | null {
     // than appearing already past the bottom.
     for (const g of env.state.ghosts) {
       if (g.spawnAt === undefined) g.spawnAt = env.state.now;
-      // A parlay command in flight is ephemeral — never auto-trigger on resume.
+      // A parlay or chat command in flight is ephemeral — never auto-trigger
+      // on resume.
       g.parlayDemonId = undefined;
+      g.chatTargetId = undefined;
     }
+    // Same for a chat that arrived but hadn't launched its overlay yet.
+    env.state.pendingGhostChat = null;
     // Demons — added with the hell parlay system. Seed them for older saves,
     // and always resume with no parlay in progress (the overlay is live-only).
     env.state.demons ??= createDemons(env.state);

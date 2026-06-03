@@ -306,6 +306,14 @@ export type Ghost = {
   // When commanded onto a soul chair, the id of that chair. The ghost walks to
   // it and is consumed (seated) on arrival. Ephemeral — reset on load.
   targetChairId?: number;
+  // When commanded onto another soul, the id of that ghost. The walker is
+  // steered toward the target's live position each tick; a gibberish chat
+  // (see runGhostChat) opens once it's within HELL.chatRadius. Cleared the
+  // instant the chat begins. Ephemeral — reset on load.
+  chatTargetId?: number;
+  // state.now when another soul was last commanded onto this one — drives the
+  // one-shot ring pulse (applyRingFlash), same as overworld command targets.
+  commandFlashAt?: number;
   // Set the first time the player issues this ghost any command (walk, parlay,
   // chair). Bob's ghost idle-paces only until then; selection alone (which also
   // seeds hx/hy) doesn't count as a command and leaves him pacing.
@@ -534,6 +542,10 @@ export type GameState = {
   // Ghosts of every unit the player has killed (goblin, minotaur, dragon),
   // displayed in Hell as static silhouettes at the world-x/y where they died.
   ghosts: Ghost[];
+  // A soul-to-soul chat that just came within range (set by the sim when a
+  // chatTargetId walker arrives) and is waiting for main.ts to run the
+  // overlay. Ephemeral — reset on load, like the parlay machinery.
+  pendingGhostChat?: { aId: number; bId: number } | null;
   // Which scene the player is currently looking at. Ephemeral — always reset to
   // 'ground' on load; scene transitions live entirely in the renderer.
   view: 'ground' | 'space' | 'hell';

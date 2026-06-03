@@ -4,7 +4,7 @@ import {
   SUMMON_UPGRADES, TICK_MS, MINOTAUR, WORLD, digBloodCost, minotaurBloodCost,
 } from './config';
 import { setupInput } from './input';
-import { runDemonDialogue } from './demon-dialogue';
+import { runDemonDialogue, runGhostChat } from './demon-dialogue';
 import { playIntroSequence, setIntroPaused, skipIntro } from './intro';
 import { getOptions, onOptionsChange } from './options';
 import { relockOptionsCog, setupOptionsUI } from './options-ui';
@@ -678,6 +678,23 @@ async function main() {
           document.body.classList.remove('demon-parlay-hold');
         });
         break;
+      }
+    }
+    // Likewise for a soul-to-soul chat (one ghost commanded onto another).
+    // Shares parlayActive so a chat and a parlay can't overlap on the one
+    // speech bubble.
+    if (!parlayActive && state.pendingGhostChat) {
+      const { aId, bId } = state.pendingGhostChat;
+      state.pendingGhostChat = null;
+      const a = state.ghosts.find((g) => g.id === aId);
+      const b = state.ghosts.find((g) => g.id === bId);
+      if (a && b) {
+        parlayActive = true;
+        document.body.classList.add('demon-parlay-hold');
+        void runGhostChat(state, a, b).finally(() => {
+          parlayActive = false;
+          document.body.classList.remove('demon-parlay-hold');
+        });
       }
     }
     // Held pan vector.

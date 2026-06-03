@@ -9,7 +9,7 @@
 
 import { playSound } from './audio';
 import {
-  Demon, GameState, Ghost,
+  Demon, GameState, Ghost, Goblin,
   appendLog, hellToWorld, pushDeathEffect, resurrectBob,
 } from './state';
 
@@ -18,10 +18,12 @@ type Seg = { t: string; em: boolean };
 
 // Who is currently speaking in the live parlay, so the renderer can float the
 // speech bubble above their head. Holds the live demon/ghost object (its hell
-// coordinates are read each frame) or null when no line is on screen.
+// coordinates are read each frame) or null when no line is on screen. The
+// 'goblin' kind anchors to a living overworld goblin instead (Bob's barks).
 export type ParlaySpeaker =
   | { kind: 'demon'; demon: Demon }
-  | { kind: 'ghost'; ghost: Ghost };
+  | { kind: 'ghost'; ghost: Ghost }
+  | { kind: 'goblin'; goblin: Goblin };
 let parlaySpeaker: ParlaySpeaker | null = null;
 export function getParlaySpeaker(): ParlaySpeaker | null { return parlaySpeaker; }
 
@@ -52,8 +54,67 @@ export function demonRebuke(demon: Demon, text: string): void {
   }, REBUKE_MS);
 }
 
+// How long a Bob bark lingers after the last character has typed out.
+const BOB_BARK_HOLD_MS = 2200;
+// Monotonic token so a newer bark supersedes an in-flight one — the older
+// bark's typing/hold loop bails as soon as it's no longer the latest.
+let bobBarkGen = 0;
+
+// A quick, non-modal Bob bark in the overworld — same typed-out feel as the
+// hell parlay, anchored above his head, but it never freezes the world or
+// captures clicks (reusing the .rebuke class for the transparent click-wall
+// and dropped dimmer). No-op while a real parlay is on screen; a newer bark
+// simply replaces the current one mid-type.
+export async function bobOverworldBark(state: GameState, bob: Goblin, text: string): Promise<void> {
+  const els = getEls();
+  if (!els) return;
+  const { overlay, speech, lineEl } = els;
+  if (overlay.classList.contains('visible') && !overlay.classList.contains('rebuke')) return;
+  if (rebukeTimer !== null) { clearTimeout(rebukeTimer); rebukeTimer = null; }
+  const gen = ++bobBarkGen;
+  parlaySpeaker = { kind: 'goblin', goblin: bob };
+  speech.className = 'bob';
+  lineEl.innerHTML = '';
+  overlay.classList.add('visible', 'speaking', 'rebuke');
+  const segs = parseEmphasis(text);
+  const total = segs.map((s) => s.t).join('').length;
+  // Bail mid-type when superseded: by a newer bark, by a demon rebuke (which
+  // arms rebukeTimer), or by a real parlay (which strips the .rebuke class).
+  // In those cases the new owner drives the overlay, so just abandon it.
+  const superseded = () =>
+    gen !== bobBarkGen || rebukeTimer !== null || !overlay.classList.contains('rebuke');
+  const teardown = () => {
+    overlay.classList.remove('visible', 'speaking', 'rebuke');
+    speech.className = '';
+    lineEl.innerHTML = '';
+    if (parlaySpeaker?.kind === 'goblin' && parlaySpeaker.goblin === bob) parlaySpeaker = null;
+  };
+  // Bob dying mid-bark removes him from state.goblins — nobody else owns the
+  // overlay then, so tear it down rather than leaving a bubble pinned over
+  // his corpse (or over a stale object if he's since been resurrected anew).
+  const bobGone = () => state.goblins.get(bob.id) !== bob;
+  for (let c = 1; c <= total; c++) {
+    lineEl.innerHTML = renderTyped(segs, c);
+    await sleep(TYPE_MS_PER_CHAR);
+    if (superseded()) return;
+    if (bobGone()) { teardown(); return; }
+  }
+  speech.classList.add('done');
+  await sleep(BOB_BARK_HOLD_MS);
+  if (superseded()) return;
+  teardown();
+}
+
 // A regular goblin can only manage one of these.
 const GIBBERISH = ['gleh', 'goink', 'grah', 'groh', 'gonk'];
+
+// Non-bob, non-demon souls punctuate their babble at random — an excited "!",
+// a flat ".", or a trailing "..." (which also earns the typed-out ellipsis
+// hold, so the soul audibly trails off).
+const GIBBERISH_SUFFIXES = ['!', '.', '...'];
+function gibberishSuffix(): string {
+  return GIBBERISH_SUFFIXES[Math.floor(Math.random() * GIBBERISH_SUFFIXES.length)];
+}
 
 // Minotaur souls slur the goblin babble with every letter doubled: "ggrroohh".
 const doubleLetters = (s: string): string => s.replace(/[^ ]/g, (c) => c + c);
@@ -107,6 +168,31 @@ function renderTyped(segs: Seg[], count: number): string {
     remaining -= take;
   }
   return html;
+}
+
+// Type a line into the bubble character-by-character (with the trailing-off
+// hold on any ellipsis), mark it done, and let it breathe for a beat. The
+// shared core of the parlay's say() and the soul-to-soul chat lines.
+async function typeLineText(lineEl: HTMLElement, speech: HTMLElement, text: string): Promise<void> {
+  const segs = parseEmphasis(text);
+  const flat = segs.map((s) => s.t).join('');
+  const total = flat.length;
+  // Indices of the final dot of each ellipsis (a run of 2+ dots, allowing the
+  // single spaces of ". . ."). We hold an extra beat there so the speaker
+  // trails off before the line continues — the dots still patter out at
+  // normal speed.
+  const pauseAfter = new Set<number>();
+  const ell = /\.(?: ?\.)+/g;
+  for (let m = ell.exec(flat); m !== null; m = ell.exec(flat)) {
+    pauseAfter.add(m.index + m[0].length - 1);
+  }
+  for (let c = 1; c <= total; c++) {
+    lineEl.innerHTML = renderTyped(segs, c);
+    await sleep(TYPE_MS_PER_CHAR);
+    if (pauseAfter.has(c - 1)) await sleep(ELLIPSIS_PAUSE_MS);
+  }
+  speech.classList.add('done');
+  await sleep(POST_LINE_BUFFER_MS);
 }
 
 type Els = {
@@ -179,24 +265,7 @@ export async function runDemonDialogue(state: GameState, demon: Demon, ghost: Gh
     speech.className = who;            // colour by speaker (also clears prior state)
     lineEl.innerHTML = '';
     overlay.classList.add('speaking');
-    const segs = parseEmphasis(text);
-    const flat = segs.map((s) => s.t).join('');
-    const total = flat.length;
-    // Indices of the final dot of each ellipsis (a run of 2+ dots, allowing the
-    // single spaces of ". . ."). We hold an extra beat there so the demon trails
-    // off before the line continues — the dots still patter out at normal speed.
-    const pauseAfter = new Set<number>();
-    const ell = /\.(?: ?\.)+/g;
-    for (let m = ell.exec(flat); m !== null; m = ell.exec(flat)) {
-      pauseAfter.add(m.index + m[0].length - 1);
-    }
-    for (let c = 1; c <= total; c++) {
-      lineEl.innerHTML = renderTyped(segs, c);
-      await sleep(TYPE_MS_PER_CHAR);
-      if (pauseAfter.has(c - 1)) await sleep(ELLIPSIS_PAUSE_MS);
-    }
-    speech.classList.add('done');
-    await sleep(POST_LINE_BUFFER_MS);
+    await typeLineText(lineEl, speech, text);
     if (opts.hold) return;            // keep the line up; caller drives what's next
     if (opts.autoMs !== undefined) {
       await sleep(opts.autoMs);
@@ -276,7 +345,7 @@ export async function runDemonDialogue(state: GameState, demon: Demon, ghost: Gh
       }
     } else if (ghost.kind === 'dragon') {
       // A dragon's soul can only roar at the demon.
-      await say('goblin', 'hhhhffffffffffffffffffff');
+      await say('goblin', `hhhhffffffffffffffffffff${gibberishSuffix()}`);
       await say('demon', '. . .');
       await say('demon', demonNoLanguageLine());
       await tryAnotherOnce();
@@ -285,11 +354,65 @@ export async function runDemonDialogue(state: GameState, demon: Demon, ghost: Gh
       // same word with every letter doubled — a lumbering "ggrroohh".
       const gib = GIBBERISH[Math.floor(Math.random() * GIBBERISH.length)];
       const word = ghost.kind === 'minotaur' ? doubleLetters(gib) : gib;
-      await say('goblin', word);
+      await say('goblin', word + gibberishSuffix());
       await say('demon', '. . .');
       await say('demon', demonNoLanguageLine());
       await tryAnotherOnce();
     }
+  } finally {
+    parlaySpeaker = null;
+    overlay.classList.remove('visible', 'speaking', 'click-armed', 'show-buttons');
+    speech.className = '';
+    lineEl.innerHTML = '';
+  }
+}
+
+// Pause held on each chat line after it finishes typing, before the other
+// soul replies. Lines auto-advance — the player is a spectator here, not a
+// participant, so there's nothing to click through.
+const CHAT_LINE_HOLD_MS = 650;
+
+// Two souls commanded together for a chat (walk any ghost onto any other in
+// the hell view). Neither can really talk, so they trade gibberish with the
+// usual per-kind accents — minotaur souls slur, dragon souls roar — except
+// Bob, ever articulate, who just says hello. Same frozen-world overlay
+// machinery as the demon parlay; `a` is the walker and opens the exchange.
+export async function runGhostChat(state: GameState, a: Ghost, b: Ghost): Promise<void> {
+  const els = getEls();
+  if (!els) return;
+  const { overlay, speech, lineEl } = els;
+
+  const lineFor = (g: Ghost): string => {
+    if (g.bob) return 'hello';
+    if (g.kind === 'dragon') return `hhhhffffffff${gibberishSuffix()}`;
+    const gib = GIBBERISH[Math.floor(Math.random() * GIBBERISH.length)];
+    return (g.kind === 'minotaur' ? doubleLetters(gib) : gib) + gibberishSuffix();
+  };
+
+  async function chatLine(g: Ghost): Promise<void> {
+    parlaySpeaker = { kind: 'ghost', ghost: g };
+    speech.className = g.bob ? 'bob' : 'goblin';
+    lineEl.innerHTML = '';
+    overlay.classList.add('speaking');
+    await typeLineText(lineEl, speech, lineFor(g));
+    await sleep(CHAT_LINE_HOLD_MS);
+    overlay.classList.remove('speaking');
+  }
+
+  // Reset any leftover state and reveal the overlay. Cancel a lingering rebuke
+  // bark so its timer can't tear down this chat's overlay mid-conversation.
+  if (rebukeTimer !== null) { clearTimeout(rebukeTimer); rebukeTimer = null; }
+  overlay.classList.remove('speaking', 'click-armed', 'show-buttons', 'rebuke');
+  speech.className = '';
+  lineEl.innerHTML = '';
+  overlay.classList.add('visible');
+  await sleep(60);
+
+  appendLog(state, 'Two souls exchange pleasantries.');
+  try {
+    // One line each, the walker opening.
+    await chatLine(a);
+    await chatLine(b);
   } finally {
     parlaySpeaker = null;
     overlay.classList.remove('visible', 'speaking', 'click-armed', 'show-buttons');

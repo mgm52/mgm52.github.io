@@ -249,6 +249,29 @@ export function tick(state: GameState) {
         g.hy += fall * driftMult * TICK_S;
       }
       shoveGhostOffDemons(state, g);
+      // A soul commanded onto another soul keeps steering toward the target's
+      // live position (it may be drifting) and opens a gibberish chat (see
+      // runGhostChat) once within HELL.chatRadius. Target gone — drifted off
+      // the bottom, seated, resurrected — and the command is silently dropped.
+      // While another chat is pending, keep walking; we'll trigger next tick.
+      if (g.chatTargetId !== undefined) {
+        const t = state.ghosts.find((o) => o.id === g.chatTargetId);
+        if (!t || t.hx === undefined || t.hy === undefined) {
+          g.chatTargetId = undefined;
+          g.goal = undefined;
+        } else {
+          g.goal = { x: t.hx, y: t.hy };
+          if (!state.pendingGhostChat
+              && Math.hypot(g.hx - t.hx, g.hy - t.hy) <= HELL.chatRadius) {
+            g.chatTargetId = undefined;
+            g.goal = undefined;
+            // Square up: the pair face each other for the exchange.
+            g.facing = Math.atan2(t.hy - g.hy, t.hx - g.hx);
+            t.facing = Math.atan2(g.hy - t.hy, g.hx - t.hx);
+            state.pendingGhostChat = { aId: g.id, bId: t.id };
+          }
+        }
+      }
       // A soul commanded onto a chair keeps steering to it (chairs are static)
       // and is consumed the instant it arrives. If the chair filled up first,
       // the command is silently dropped and the soul resumes its drift.

@@ -1754,10 +1754,11 @@ function drawSelectionRing(g: Graphics, size: number) {
 let demonSpeechEl: HTMLElement | null | undefined;
 let demonSpeechAnchored = false;
 
-// Float the parlay speech bubble above the current speaker's head. `screenOf`
-// maps a hell coordinate to a screen pixel using the live hell-layer transform.
-// Called once per frame; resets to the CSS-default centre position when no one
-// is speaking.
+// Float the parlay speech bubble above the current speaker's head. `screenX`/
+// `screenY` map a hell coordinate to a screen pixel using the live hell-layer
+// transform; an overworld goblin speaker (Bob's barks) is mapped through the
+// world layer's transform instead. Called once per frame; resets to the
+// CSS-default centre position when no one is speaking.
 function positionParlaySpeech(
   ctx: RenderContext,
   scale: number,
@@ -1775,16 +1776,30 @@ function positionParlaySpeech(
     }
     return;
   }
-  let hx: number;
-  let headTopHy: number;
-  if (sp.kind === 'demon') {
-    hx = sp.demon.hx;
-    headTopHy = sp.demon.hy - DEMON.displayPx * 0.5;
+  let sx: number;
+  let sy: number;
+  if (sp.kind === 'goblin') {
+    // Bob barking in the overworld — anchor via the world layer's live
+    // transform (camera pan + climb/descend slide) instead of the hell mapping.
+    const g = sp.goblin;
+    const rs = ctx.renderScale;
+    sx = ctx.worldLayer.position.x + g.pos.x * rs;
+    sy = ctx.worldLayer.position.y
+      + (g.pos.y - getOptions().goblinDisplayPx * 0.5) * rs - 12 * rs;
   } else {
-    const g = sp.ghost;
-    hx = g.hx ?? worldToHellX(g.x + (g.offX ?? 0));
-    const hy = g.hy ?? worldToHellY(g.y + (g.offY ?? 0));
-    headTopHy = hy - getOptions().goblinDisplayPx * 0.5;
+    let hx: number;
+    let headTopHy: number;
+    if (sp.kind === 'demon') {
+      hx = sp.demon.hx;
+      headTopHy = sp.demon.hy - DEMON.displayPx * 0.5;
+    } else {
+      const g = sp.ghost;
+      hx = g.hx ?? worldToHellX(g.x + (g.offX ?? 0));
+      const hy = g.hy ?? worldToHellY(g.y + (g.offY ?? 0));
+      headTopHy = hy - getOptions().goblinDisplayPx * 0.5;
+    }
+    sx = screenX(hx);
+    sy = screenY(headTopHy) - 12 * scale;
   }
   // Bubble is anchored bottom-centre (translate(-50%,-100%)), so it grows up
   // and out from (sx, sy). Park it just above the head, then clamp against the
@@ -1794,8 +1809,6 @@ function positionParlaySpeech(
   const halfW = el.offsetWidth / 2;
   const h = el.offsetHeight;
   const vw = ctx.viewport.width;
-  let sx = screenX(hx);
-  let sy = screenY(headTopHy) - 12 * scale;
   sx = Math.max(halfW + pad, Math.min(vw - halfW - pad, sx));
   sy = Math.max(h + pad, sy);
   el.style.left = `${Math.round(sx)}px`;
@@ -2556,7 +2569,7 @@ export function render(state: GameState, ctx: RenderContext) {
     }
     v.container.position.set(hx, hy);
     v.container.alpha = ghostAlpha;
-    v.selectionRing.visible = !!gh.selected;
+    applyRingFlash(v.selectionRing, !!gh.selected, gh.commandFlashAt, state.now);
     // Keep the silhouette's facing frame live — pacing Bob and commanded
     // walkers turn to face their direction of travel. (The frame used to be
     // baked once at creation.) Dragon ghosts mirror via container scale instead.

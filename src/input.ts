@@ -1,7 +1,7 @@
 import { Application, Container, FederatedPointerEvent, Graphics } from 'pixi.js';
 import { playSound, playMinotaurCommand } from './audio';
 import { flashCursor } from './cursor-fx';
-import { demonRebuke } from './demon-dialogue';
+import { bobOverworldBark, demonRebuke } from './demon-dialogue';
 import { BUILDABLE_KINDS, BUILDING_DEFS, BuildingKind, CELL, DRAGON, GOBLIN, HELL, LIGHTNING, MINOTAUR, WORLD, formatPower } from './config';
 import { runBobCutscene } from './intro';
 import { RenderContext, ambientDragonAt, clampCamera, clampHellCamera, clampSpaceCamera, currentHellScale, ghostAtHell, ghostHellPos } from './render';
@@ -731,11 +731,49 @@ function handleHellRightClick(state: GameState, hx: number, hy: number) {
     for (const c of state.soulChairs) if (c.claimedBy === nearest.id) c.claimedBy = undefined;
     nearest.goal = { x: chair.hx, y: chair.hy };
     nearest.parlayDemonId = undefined;
+    nearest.chatTargetId = undefined;
     nearest.targetChairId = chair.id;
     nearest.commanded = true;
     chair.claimedBy = nearest.id;
     playSound('select', 0.4);
     appendLog(state, 'A soul shuffles toward the sigil.');
+    return;
+  }
+
+  // Right-clicking another soul sends one of the selection over for a chat —
+  // two souls meeting can only trade gibberish (see runGhostChat in
+  // demon-dialogue.ts; Bob, ever articulate, says hello). Only the NEAREST
+  // selected soul walks over, like the chair command; the rest keep their
+  // orders. A click on a soul that's part of the selection falls through to
+  // a plain move instead. Checked before the demon so a soul standing inside
+  // the demon's generous hit radius is still chattable.
+  const target = ghostAtHell(state, hx, hy);
+  if (target && !target.selected) {
+    if (target.hx === undefined || target.hy === undefined) {
+      const p = ghostHellPos(state, target);
+      target.hx = p.x; target.hy = p.y;
+    }
+    let nearest: Ghost | null = null;
+    let nearestD = Infinity;
+    for (const g of selected) {
+      if (g.hx === undefined || g.hy === undefined) {
+        const p = ghostHellPos(state, g);
+        g.hx = p.x; g.hy = p.y;
+      }
+      const d = Math.hypot(g.hx - target.hx, g.hy - target.hy);
+      if (d < nearestD) { nearestD = d; nearest = g; }
+    }
+    if (!nearest) { playSound('error'); return; }
+    // Walking over for a chat cancels any chair/parlay the soul was bound for.
+    for (const c of state.soulChairs) if (c.claimedBy === nearest.id) c.claimedBy = undefined;
+    nearest.targetChairId = undefined;
+    nearest.parlayDemonId = undefined;
+    nearest.chatTargetId = target.id;
+    nearest.goal = { x: target.hx, y: target.hy };
+    nearest.commanded = true;
+    target.commandFlashAt = state.now;
+    playSound('select', 0.4);
+    appendLog(state, 'A soul shuffles over for a chat.');
     return;
   }
 
@@ -766,8 +804,9 @@ function handleHellRightClick(state: GameState, hx: number, hy: number) {
       g.hx = p.x;
       g.hy = p.y;
     }
-    // Approaching the demon cancels any chair the soul was bound for.
+    // Approaching the demon cancels any chair/chat the soul was bound for.
     g.targetChairId = undefined;
+    g.chatTargetId = undefined;
     for (const c of state.soulChairs) if (c.claimedBy === g.id) c.claimedBy = undefined;
     g.parlayDemonId = canSpeak ? demon.id : undefined;
     g.commanded = true;
@@ -782,6 +821,7 @@ function handleHellRightClick(state: GameState, hx: number, hy: number) {
     const dy = (Math.random() - 0.5) * HELL.ghostHitRadius;
     g.goal = { x: hx + dx, y: hy + dy };
     g.parlayDemonId = undefined; // redirecting cancels any pending parlay
+    g.chatTargetId = undefined;  // …and any pending soul-to-soul chat
     // …and any pending chair binding, so the soul actually heads for the cursor
     // instead of being yanked back to its chair each tick.
     if (g.targetChairId !== undefined) {
@@ -1183,6 +1223,7 @@ function placeBuilding(state: GameState, x: number, y: number) {
   appendLog(state, `${def.name} #${b.displayNum} construction started — ${staffGesture} goblins onto it to staff the build.`);
   autoAssignAllIdle(state);
   maybeTriggerBobCutscene(state, b, def.name);
+  maybeBobBuildingRemark(state, b);
 }
 
 // Wall placement — Ƶ1 per cell, 1×1 Building entity that goes straight to
@@ -1211,6 +1252,7 @@ function tryPlaceWallAt(state: GameState, cx: number, cy: number, silent: boolea
   state.buildings.set(b.id, b);
   markBuildingsChanged(state);
   maybeTriggerBobCutscene(state, b, BUILDING_DEFS.wall.name);
+  maybeBobBuildingRemark(state, b);
   return true;
 }
 
@@ -1261,6 +1303,34 @@ function maybeTriggerBobCutscene(state: GameState, b: Building, kindName: string
   });
 }
 
+// Bob's running commentary: while he's alive in the overworld, every 5th
+// building placed (lifetime total, walls included — the same counting as the
+// cutscene's 20-building threshold) earns a quick typed bark above his head
+// admiring the building that tipped the count over.
+function maybeBobBuildingRemark(state: GameState, b: Building) {
+  let bob: Goblin | undefined;
+  for (const g of state.goblins.values()) {
+    if (g.bob) { bob = g; break; }
+  }
+  if (!bob) return;
+  let total = 0;
+  for (const k in state.buildingCounts) total += state.buildingCounts[k as BuildingKind];
+  if (total % 5 !== 0) return;
+  const def = BUILDING_DEFS[b.kind];
+  void bobOverworldBark(state, bob, `oh my, your ${ordinalNumber(b.displayNum)} ${def.name}! nice!`);
+}
+
+// "1st" / "2nd" / "3rd" / "11th" — numeric ordinal suffixing.
+function ordinalNumber(n: number): string {
+  const lastTwo = n % 100;
+  if (lastTwo >= 11 && lastTwo <= 13) return `${n}th`;
+  const last = n % 10;
+  if (last === 1) return `${n}st`;
+  if (last === 2) return `${n}nd`;
+  if (last === 3) return `${n}rd`;
+  return `${n}th`;
+}
+
 // Render a positive integer as its English ordinal word ("first", "twenty-
 // fourth", ...). Covers 1–99 by name; falls back to numeric ordinals
 // ("123rd") above that.
@@ -1277,13 +1347,7 @@ function ordinalWord(n: number): string {
     const o = n % 10;
     return o === 0 ? tensOrdinal[t] : `${tensCardinal[t]}-${ones[o]}`;
   }
-  const lastTwo = n % 100;
-  if (lastTwo >= 11 && lastTwo <= 13) return `${n}th`;
-  const last = n % 10;
-  if (last === 1) return `${n}st`;
-  if (last === 2) return `${n}nd`;
-  if (last === 3) return `${n}rd`;
-  return `${n}th`;
+  return ordinalNumber(n);
 }
 
 // Translucent blast preview that follows the cursor while a Lightning Strike
