@@ -1342,9 +1342,9 @@ function maybeTriggerBobCutscene(state: GameState, b: Building, kindName: string
   // they say "okay" below.
   if (!state.bobCheatPending) {
     if (state.bobSpawned) return;
-    let total = 0;
-    for (const k in state.buildingCounts) total += state.buildingCounts[k as BuildingKind];
-    if (total < 20) return;
+    // Time-gated: the first building placed after 10 minutes of (sim-clock)
+    // playtime fires the cutscene.
+    if (state.now < 600) return;
   }
   const ord = ordinalWord(b.displayNum);
   bobCutsceneRunning = true;
@@ -1367,9 +1367,8 @@ function maybeTriggerBobCutscene(state: GameState, b: Building, kindName: string
 }
 
 // Bob's running commentary: while he's alive in the overworld, every 5th
-// building placed (lifetime total, walls included — the same counting as the
-// cutscene's 20-building threshold) earns a quick typed bark above his head
-// admiring the building that tipped the count over.
+// building placed (lifetime total, walls included) earns a quick typed bark
+// above his head admiring the building that tipped the count over.
 function maybeBobBuildingRemark(state: GameState, b: Building) {
   let bob: Goblin | undefined;
   for (const g of state.goblins.values()) {
