@@ -77,6 +77,7 @@ export function loadGame(): { state: GameState; savedAt: number } | null {
     env.state.dragonBoneEarned ??= 0;
     env.state.dragonBoneUnlocked ??= false;
     env.state.pendingStrike = false;
+    env.state.pendingCandle = false;
     // Spatial-index version — absent from saves predating buildingAtCell's
     // cell→building index. Seed it so the first markBuildingsChanged++ doesn't
     // turn undefined into NaN (which would defeat the index's cache tag).
@@ -135,10 +136,11 @@ export function loadGame(): { state: GameState; savedAt: number } | null {
       d.selected = false;
       d.hintedTryAnother ??= false;
     }
-    // Soul sigil — now one ring of chairs per Hell Portal. Drop any legacy
-    // fixed-position chairs (they predate `portalId`) and the old single
-    // completion timestamp; syncSoulChairs rebuilds the per-portal rings from the
-    // live portals on the first tick. A pending claim is ephemeral, so clear it.
+    // Soul sigil — candles/chairs are player-placed, one ring per Hell Portal.
+    // Drop any legacy fixed-position chairs (they predate `portalId`) along
+    // with the old single completion timestamp; pruneSoulChairs sweeps chairs
+    // whose portal is gone on the first tick. A pending claim is ephemeral,
+    // so clear it.
     if (!Array.isArray(env.state.soulChairs) ||
         env.state.soulChairs.some((c) => (c as { portalId?: number }).portalId === undefined)) {
       env.state.soulChairs = [];

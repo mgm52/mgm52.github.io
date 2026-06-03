@@ -1,5 +1,5 @@
 import { playDecayingGoblinDeath, playDecayingGoblinSpawn, playDecayingGoldKillCash, playSound } from './audio';
-import { BUILDING_DEFS, CELL, COLS, DEMON, DRAGON, DRAGON_KILL_REWARD, GOBLIN, GOLD_GOBLIN_CHANCE, GOLD_KILL_REWARD, HELL, KILL_REWARD, LIGHTNING, MINOTAUR_KILL_REWARD, SOUL_SIGIL, SPACE, SUMMON_UPGRADES, TICK_S, MINOTAUR, TINYTAUR, WATER_DEPLETION_PP_PER_SEC, WATER_METER_MAX, WORLD, formatPower } from './config';
+import { BUILDING_DEFS, CELL, COLS, DEMON, DRAGON, DRAGON_KILL_REWARD, GOBLIN, GOLD_GOBLIN_CHANCE, GOLD_KILL_REWARD, HELL, KILL_REWARD, LIGHTNING, MINOTAUR_KILL_REWARD, SOUL_SIGIL, SPACE, SUMMON_UPGRADES, TICK_S, MINOTAUR, TINYTAUR, WATER_DEPLETION_PP_PER_SEC, WATER_METER_MAX, WORLD, formatPower, sigilPortalOutput } from './config';
 import { getOptions } from './options';
 import {
   ALL_DIRS, Building, Cell, DX, DY, Demon, Dir, Dragon, GameState, Ghost, Goblin, HOLE_SIZE, Minotaur, SoulChair, SpaceBuilding, WaterSource,
@@ -8,7 +8,8 @@ import {
   earnBlood, earnDragonBone, earnMoney, findHoleEmergenceCell,
   getSpawnCapacity, holeBlockedByBuilding, holeCenter, isCellBlocked, isCellInBuilding, isCellInWaterSource,
   isInBounds, maintainerCount, markBuildingsChanged, nearestCellInWaterSource, occupyCell, pushDeathEffect, pushFloater,
-  pushLightningBolt, recordGhost, releaseCell, removeDragon, removeGoblin, syncSoulChairs, waterCarrierCount,
+  hellMirrorCenter, pruneSoulChairs, pushLightningBolt, recordGhost, releaseCell, removeDragon, removeGoblin,
+  waterCarrierCount,
 } from './state';
 
 // Auto-assign normally only runs on discrete events (a spawn, a manual command,
@@ -145,7 +146,7 @@ export function tick(state: GameState) {
   // ── 4. Power balance + active/dormant resolution ──────────────────
   // Keep each portal's soul sigil in step with the live portals first, so a
   // freshly-built or destroyed portal's chairs feed into the power pass below.
-  syncSoulChairs(state);
+  pruneSoulChairs(state);
   resolvePowerAndState(state);
 
   // ── 5. Income ─────────────────────────────────────────────────────
@@ -363,10 +364,12 @@ function shoveGhostOffDemons(state: GameState, g: Ghost): void {
   g.hy = hy;
 }
 
-// Bind a soul into a chair: light it, clear its pending claim, and — if it was
-// the fifth of ITS portal's sigil — fire the completion (sound + log + VFX
-// timestamp). The +5 GW payout itself is read off the chairs each tick in the
-// power pass below.
+// Bind a soul into a chair: light it, clear its pending claim, and multiply
+// the portal's power output by SOUL_SIGIL.soulMultiplier — an "x87" surge
+// flashes over the mirror and its wattage readout (drawn in render.ts) jumps.
+// The fifth soul also fires the sigil completion (sound + log + VFX timestamp).
+// The payout itself is read off the seated counts each tick in the power pass
+// below.
 function seatSoulInChair(state: GameState, chair: SoulChair) {
   chair.occupied = true;
   chair.claimedBy = undefined;
@@ -374,18 +377,19 @@ function seatSoulInChair(state: GameState, chair: SoulChair) {
   playSound('ritual', 0.6, 0.85);
   const sigil = state.soulChairs.filter((c) => c.portalId === chair.portalId);
   const filled = sigil.filter((c) => c.occupied).length;
-  appendLog(state, `A soul takes its chair in the sigil (${filled}/${SOUL_SIGIL.count}).`);
+  const portal = state.buildings.get(chair.portalId);
+  const out = portal ? sigilPortalOutput(defOf(portal).powerOutput, filled) : 0;
+  appendLog(state, `A soul takes its chair (${filled}/${SOUL_SIGIL.count}) — the mirror surges to ${formatPower(out)}.`);
+  // The hell-scene twin of a building coming online: an "x87" multiplier
+  // flash over the mirror, whose live wattage label ticks up underneath it.
+  if (portal) {
+    const c = hellMirrorCenter(portal);
+    pushFloater(state, c.x, c.y - SOUL_SIGIL.chairRadius * 1.5, `x${SOUL_SIGIL.soulMultiplier}`, 0x8acfff, 1.6, undefined, false, true);
+  }
   if (filled === SOUL_SIGIL.count && !state.soulSigilCompletedAt.has(chair.portalId)) {
     state.soulSigilCompletedAt.set(chair.portalId, state.now);
     playSound('ritual', 0.95, 0.5);
-    const total = SOUL_SIGIL.count * SOUL_SIGIL.powerPerChair;
-    appendLog(state, `The pentagram blazes to life — the sigil floods the grid with ${formatPower(total)}!`);
-    // Each chair only feeds the grid once the whole ring is lit, so the moment
-    // the fifth soul lands every chair powers up at once — float a "+1 GW"
-    // surge over each one, the hell-scene twin of a building coming online.
-    for (const c of sigil) {
-      pushFloater(state, c.hx, c.hy - SOUL_SIGIL.chairRadius, `+${formatPower(SOUL_SIGIL.powerPerChair)}`, 0x8acfff, 1.6, undefined, false, true);
-    }
+    appendLog(state, `The pentagram blazes to life — the mirror floods the grid with ${formatPower(out)}!`);
   }
 }
 
@@ -2260,15 +2264,18 @@ function resolvePowerAndState(state: GameState) {
   // takes the surge to decay back to nothing.
   production += currentPowerBoost(state);
 
-  // Each portal's soul sigil feeds the grid only once all five of its chairs are
-  // filled — then every chair contributes its powerPerChair (5 GW per sigil).
-  // Count occupied chairs per portal and pay out for each completed ring.
+  // Each seated soul multiplies its portal's base output (1 W) by the sigil
+  // multiplier — 87^n W per portal. The base watt itself was already counted
+  // in the building loop above, so only the surplus is added here.
   const occupiedPerPortal = new Map<number, number>();
   for (const c of state.soulChairs) {
     if (c.occupied) occupiedPerPortal.set(c.portalId, (occupiedPerPortal.get(c.portalId) ?? 0) + 1);
   }
-  for (const filled of occupiedPerPortal.values()) {
-    if (filled === SOUL_SIGIL.count) production += SOUL_SIGIL.count * SOUL_SIGIL.powerPerChair;
+  for (const [portalId, filled] of occupiedPerPortal) {
+    const portal = state.buildings.get(portalId);
+    if (!portal || portal.state === 'constructing') continue;
+    const base = defOf(portal).powerOutput;
+    production += sigilPortalOutput(base, filled) - base;
   }
 
   let consumed = 0;

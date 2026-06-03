@@ -219,20 +219,30 @@ export const DEMON = {
   spawnOffsetX: 620,
 };
 
-// The soul sigil — five "soul chairs" (dark circles) ringed around a Hell
-// Portal's abyssal mirror (the "beacon"). Every portal gets its own sigil.
-// Walking a soul (goblin ghost) onto a chair seats it; lines spring between
-// filled chairs so a five-pointed pentagram is drawn as they power up. Once all
-// five of a sigil are filled, each chair feeds +1 GW to the grid (5 GW per
-// sigil) and the completed sigil erupts in a looping ritual VFX.
+// The soul sigil — up to five candles placed by the player on the outer ring
+// of a Hell Portal's abyssal mirror (the "beacon"). Every portal gets its own
+// ring. Candles cost blood and snap onto the ring; pentagram lines spring
+// between them as they're placed. Once all five stand, each candle becomes a
+// soul chair ("needs soul") — walking a soul (goblin ghost) onto one seats it,
+// and every seated soul multiplies the portal's deadpan 1 W output by
+// `soulMultiplier`. Five souls ≈ 87^5 W ≈ 4.98 GW per portal.
 export const SOUL_SIGIL = {
   count: 5,
-  ringRadius: 290,      // hell-px from a portal's mirror out to each chair
-  innerRadius: 110,     // the central ring drawn at the mirror, inside the chairs
-  chairRadius: 28,      // chair disc radius + click hit radius
+  ringRadius: 290,      // hell-px from a portal's mirror out to each candle
+  innerRadius: 110,     // the central ring drawn at the mirror, inside the candles
+  chairRadius: 28,      // candle disc radius + click hit radius
   arriveRadius: 40,     // a commanded soul seats once this close to its chair
-  powerPerChair: 1_000_000_000, // +1 GW each — paid only while all five are filled
+  candleBloodCost: 9,   // blood per candle placed
+  placeBand: 70,        // hell-px either side of ringRadius where a tap counts as "on the ring"
+  candleMinGap: 64,     // hell-px a new candle must keep from its ring-mates
+  soulMultiplier: 87,   // each seated soul multiplies its portal's power output by this
 };
+
+// A Hell Portal's true output: its deadpan base wattage multiplied by 87 for
+// every soul seated in its sigil. 0 souls → 1 W; 5 souls → ~4.98 GW.
+export function sigilPortalOutput(baseWatts: number, seatedSouls: number): number {
+  return baseWatts * Math.pow(SOUL_SIGIL.soulMultiplier, seatedSouls);
+}
 
 // One-shot Ritual upgrades. Autobuild + Autospawn unlock once a Phone
 // Farm has been run; Goldblins unlocks via the Earn-30-blood side-task. Dig
@@ -526,11 +536,11 @@ export const BUILDING_DEFS = {
     },
   }),
   // Hell Portal — unlocked by the Build a Nuclear Reactor task. A
-  // 2×2 portal that opens the way
+  // 1×1 portal that opens the way
   // down to Hell. Once placed, a red beam animates from the portal toward
   // the abyss below and the player can hold ↓ at the bottom of the map to
   // descend. Display name is "Bad power source?".
-  hell_portal: def(2, {
+  hell_portal: def(1, {
     name: 'Bad power source?',
     short: 'BPS',
     cost: 999_999,

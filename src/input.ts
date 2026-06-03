@@ -2,15 +2,15 @@ import { Application, Container, FederatedPointerEvent, Graphics } from 'pixi.js
 import { playSound, playMinotaurCommand } from './audio';
 import { flashCursor } from './cursor-fx';
 import { bobOverworldBark, demonRebuke } from './demon-dialogue';
-import { BUILDABLE_KINDS, BUILDING_DEFS, BuildingKind, CELL, DRAGON, GOBLIN, HELL, LIGHTNING, MINOTAUR, WORLD, formatPower } from './config';
+import { BUILDABLE_KINDS, BUILDING_DEFS, BuildingKind, CELL, DRAGON, GOBLIN, HELL, LIGHTNING, MINOTAUR, SOUL_SIGIL, WORLD, formatPower } from './config';
 import { runBobCutscene } from './intro';
 import { RenderContext, ambientDragonAt, clampCamera, clampHellCamera, clampSpaceCamera, currentHellScale, ghostAtHell, ghostHellPos } from './render';
 import { autoAssignAllIdle, lightningStrike, spawnBob } from './sim';
 import {
   Building, Cell, Dragon, GameState, Ghost, Goblin, Minotaur, WaterSource,
-  appendLog, buildingAtCell, buildingMoneyCost, cellKey, defOf, demonAtHell, findFreeCellNear,
-  hellPortalAt, holeAtCell, isInBounds, markBuildingsChanged, nextBuildingDisplayNum, pixelToCell, soulChairAt, spaceBuildingAt,
-  waterCarrierCount, waterSourceAtCell,
+  appendLog, buildingAtCell, buildingMoneyCost, candleSpotAt, cellKey, defOf, demonAtHell, findFreeCellNear,
+  hellPortalAt, holeAtCell, isInBounds, markBuildingsChanged, nextBuildingDisplayNum, pixelToCell, placeCandle,
+  soulChairAt, spaceBuildingAt, waterCarrierCount, waterSourceAtCell,
 } from './state';
 
 type ActivePointer = {
@@ -122,9 +122,12 @@ export function setupInput(
           input.panLast = { x: (pts[0].x + pts[1].x) / 2, y: (pts[0].y + pts[1].y) / 2 };
         }
         // Hell view: right-click is a "walk here" command for any selected ghosts.
-        // (Space view has no analogous command; ignored there.)
+        // (Space view has no analogous command; ignored there.) While candle
+        // placement is armed, right-click cancels it instead (mirroring how a
+        // pending strike is cancelled on the ground).
         if (e.button === 2 && state.view === 'hell' && input.pointers.size < 2) {
           flashCursor(e.clientX, e.clientY);
+          if (state.pendingCandle) { state.pendingCandle = false; return; }
           const hp = e.getLocalPosition(ctx.hellLayer);
           handleHellRightClick(state, hp.x, hp.y);
         }
@@ -243,6 +246,12 @@ export function setupInput(
     // Space view: a single-pointer drag draws a rubber-band selection box once
     // it travels past the tap threshold. Resolved into a selection on pointerup.
     if (state.view !== 'ground') {
+      // Candle placement preview: track the cursor in hell coords so the
+      // renderer can draw the snapped candle ghost on the mirror's outer ring.
+      if (state.view === 'hell' && state.pendingCandle) {
+        const hp = e.getLocalPosition(ctx.hellLayer);
+        ctx.candleCursor = { x: hp.x, y: hp.y };
+      }
       // Dragging far enough to start a selection box cancels the pending hell
       // command long-press (it's a drag, not a press-and-hold).
       if (input.longPressPointerId === e.pointerId && tracked) {
@@ -318,6 +327,14 @@ export function setupInput(
         if (state.view === 'hell') {
           if (moved < SPACE_DRAG_TOL) {
             const hp = e.getLocalPosition(ctx.hellLayer);
+            // Candle placement armed: the tap places a candle on a mirror's
+            // outer ring (or beeps) instead of selecting anything. Stays armed
+            // so several candles can be placed in a row; ESC / right-click /
+            // the button toggle it off.
+            if (state.pendingCandle) {
+              tryPlaceCandle(state, hp.x, hp.y);
+              return;
+            }
             // A small precise ghost wins over the giant demon hit box behind it,
             // so a soul standing on the demon can still be picked. The Hell
             // Beacon (portal mirror) is likewise a small target that beats the
@@ -456,6 +473,7 @@ export function setupInput(
     if (e.key === 'Escape') {
       state.pendingBuild = null;
       state.pendingStrike = false;
+      state.pendingCandle = false;
       input.placementGhost.clear();
       return;
     }
@@ -596,9 +614,10 @@ function scheduleLongPress(
     input.isDragging = false;
     input.selectionGfx.clear();
     input.spaceTapStart = null;
-    if (state.pendingBuild) {
+    if (state.pendingBuild || state.pendingCandle) {
       // No keyboard ESC on touch — long-press cancels pending placement.
       state.pendingBuild = null;
+      state.pendingCandle = false;
       input.placementGhost.clear();
       return;
     }
@@ -693,6 +712,39 @@ function selectGhost(state: GameState, g: Ghost) {
   }
 }
 
+// Place a candle at a tapped hell coord while candle mode is armed. Snaps to
+// the nearest mirror's outer ring (candleSpotAt); beeps with a log line when
+// the tap misses every ring, the ring is full/crowded, or blood runs short.
+// Placement mode stays armed afterwards so a run of candles goes down fast.
+function tryPlaceCandle(state: GameState, hx: number, hy: number) {
+  const spot = candleSpotAt(state, hx, hy);
+  if (!spot) {
+    playSound('error');
+    appendLog(state, "Candles only take on a mirror's outer ring.");
+    return;
+  }
+  if (!spot.ok) {
+    playSound('error');
+    appendLog(state, spot.reason ?? 'Cannot place there.');
+    return;
+  }
+  if (state.blood < SOUL_SIGIL.candleBloodCost) {
+    playSound('error');
+    appendLog(state, `Need ${SOUL_SIGIL.candleBloodCost} blood to place a candle.`);
+    return;
+  }
+  state.blood -= SOUL_SIGIL.candleBloodCost;
+  placeCandle(state, spot);
+  playSound('place', 1.3);
+  const placed = state.soulChairs.filter((c) => c.portalId === spot.portal.id).length;
+  if (placed >= SOUL_SIGIL.count) {
+    playSound('ritual', 0.7, 0.7);
+    appendLog(state, 'The fifth candle takes — the pentagram is drawn, and the chairs hunger for souls.');
+  } else {
+    appendLog(state, `A candle gutters to life on the ring (${placed}/${SOUL_SIGIL.count}).`);
+  }
+}
+
 // Right-click in hell view: walk every selected ghost to the clicked hell-coord.
 // Multiple ghosts get a small per-ghost offset so they don't pile up exactly on
 // the same point. No-op (with an error beep) if nothing is selected.
@@ -703,9 +755,17 @@ function handleHellRightClick(state: GameState, hx: number, hy: number) {
   // Right-clicking a soul chair seats a single soul in it. Sending a whole
   // selection at one chair would just pile them up, so only the NEAREST
   // eligible soul of the group actually walks over; the rest keep their orders.
-  // Bob is exempt — he's no fuel for the sigil.
+  // Bob is exempt — he's no fuel for the sigil. Until all five candles stand
+  // on the ring there are no chairs to bind — only waiting candles.
   const chair = soulChairAt(state, hx, hy);
   if (chair) {
+    const ringSize = state.soulChairs.filter((c) => c.portalId === chair.portalId).length;
+    if (ringSize < SOUL_SIGIL.count) {
+      playSound('error');
+      const left = SOUL_SIGIL.count - ringSize;
+      appendLog(state, `The pentagram is unfinished — it needs ${left} more candle${left === 1 ? '' : 's'} before souls can be bound.`);
+      return;
+    }
     if (chair.occupied) {
       playSound('error');
       appendLog(state, 'That chair is already bound to a soul.');

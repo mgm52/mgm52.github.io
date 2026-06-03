@@ -325,15 +325,18 @@ export type Ghost = {
   pacePauseUntil?: number;
 };
 
-// A "soul chair" in an abyssal sigil. Five sit ringed around a Hell Portal's
-// mirror; seating a soul in one powers it. With all five of that portal's chairs
-// filled the pentagram is complete and they feed the grid. See SOUL_SIGIL.
+// A candle in an abyssal sigil — placed by the player (9 blood each) on the
+// outer ring of a Hell Portal's mirror, up to five per ring. Pentagram lines
+// spring between them as they're placed; once all five stand they become soul
+// chairs, and seating a soul in one multiplies the portal's power output by
+// SOUL_SIGIL.soulMultiplier. See SOUL_SIGIL.
 export type SoulChair = {
   id: number;
-  portalId: number;     // the hell_portal building this chair's sigil rings
-  index: number;        // 0..4 position around the ring (drives the pentagram edges)
+  portalId: number;     // the hell_portal building whose outer ring this candle sits on
+  index: number;        // position around the ring by angle (drives the pentagram edges)
   hx: number; hy: number;
   occupied: boolean;
+  placedAt?: number;    // state.now when the candle was placed — drives the place-in VFX
   filledAt?: number;    // state.now when seated — drives the seat-in VFX
   // Ephemeral: id of the soul currently walking to claim this chair, so a crowd
   // command only ever sends a single soul. Reset on load.
@@ -401,12 +404,13 @@ export type GameState = {
   // Uncommandable hell denizens. Persisted so a demon's patrol position and
   // whether it has already greeted a soul survive a reload.
   demons: Map<number, Demon>;
-  // Soul chairs across every portal's sigil (five per Hell Portal). Persisted so
-  // seated souls stick. Reconciled with the live portals via syncSoulChairs.
+  // Player-placed candles (→ soul chairs) across every portal's sigil, up to
+  // five per Hell Portal. Persisted so placed candles and seated souls stick.
+  // Candles whose portal is gone are pruned via pruneSoulChairs.
   soulChairs: SoulChair[];
   // Per-portal completion: state.now when a portal's fifth chair was seated and
-  // its pentagram lit, keyed by portalId. Drives the completed-sigil VFX and the
-  // +5 GW-per-sigil payout. Absent until that portal's sigil completes.
+  // its pentagram lit fully, keyed by portalId. Drives the completed-sigil VFX.
+  // Absent until that portal's sigil completes.
   soulSigilCompletedAt: Map<number, number>;
   // state.now of the first time the player entered hell; undefined until then.
   // Anchors the "demons parlay with talking goblins" nudge.
@@ -487,6 +491,10 @@ export type GameState = {
   minotaurSpawnQueue: { remaining: number }[];
   dragonSpawnQueue: { remaining: number }[];
   pendingBuild: PendingBuild;
+  // True while the player is placing hell candles (the Candle option in the
+  // hell-view Build panel; each tap on a mirror's outer ring places one for
+  // SOUL_SIGIL.candleBloodCost blood). Ephemeral — reset on load.
+  pendingCandle: boolean;
   // Per-kind ordinal counters; incremented at building creation to stamp
   // Building.displayNum. Monotonic — destroying a building does NOT free up its
   // number, so the player sees "#2", "#3", "#4" even if #2 was smashed.
@@ -929,6 +937,7 @@ export function createInitialState(): GameState {
     minotaurSpawnQueue: [],
     dragonSpawnQueue: [],
     pendingBuild: null,
+    pendingCandle: false,
     buildingCounts: emptyBuildingCounts(),
     lightningStrikeCooldown: 0,
     selectedAmbientDragonId: null,
@@ -1007,10 +1016,6 @@ export function createDemons(state: GameState): Map<number, Demon> {
   return demons;
 }
 
-// Build the five soul chairs as a point-up pentagon around the sigil centre.
-// The chair index drives both its place on the ring and the pentagram edges
-// (each chair links to the one two steps around), so a clean five-pointed star
-// emerges as they fill.
 // Hell-coord centre of a Hell Portal's abyssal mirror — the portal's world
 // centre mapped into hell space (same offset render.ts uses). Each sigil rings
 // this point.
@@ -1022,39 +1027,85 @@ export function hellMirrorCenter(b: Building): Vec2 {
   };
 }
 
-// Reconcile soul chairs with the live Hell Portals: every built portal gets one
-// ring of `count` chairs around its mirror, and chairs whose portal is gone (or
-// still constructing) are dropped. Cheap to run each tick — there are rarely
-// more than a handful of portals. Also prunes stale completion timestamps.
-export function syncSoulChairs(state: GameState): void {
-  const { count, ringRadius } = SOUL_SIGIL;
+// Drop candles (and completion marks) belonging to portals that no longer
+// exist or are still constructing. Cheap to run each tick — there are rarely
+// more than a handful of portals.
+export function pruneSoulChairs(state: GameState): void {
   const livePortals = new Set<number>();
   for (const b of state.buildings.values()) {
     if (b.kind === 'hell_portal' && b.state !== 'constructing') livePortals.add(b.id);
   }
-  // Drop chairs (and completion marks) belonging to portals that no longer exist.
   state.soulChairs = state.soulChairs.filter((c) => livePortals.has(c.portalId));
   for (const portalId of state.soulSigilCompletedAt.keys()) {
     if (!livePortals.has(portalId)) state.soulSigilCompletedAt.delete(portalId);
   }
-  // Add a ring for any portal that doesn't have one yet.
-  const haveChairs = new Set(state.soulChairs.map((c) => c.portalId));
+}
+
+// Where a candle would land for a tap at a hell coord: the nearest portal
+// whose outer ring passes within SOUL_SIGIL.placeBand of the point, with the
+// position snapped onto the ring at the tapped angle. `ok` is false (with a
+// player-facing `reason`) when the ring already has its five candles or the
+// snap point crowds an existing one. Null when no ring is anywhere near.
+export type CandleSpot = {
+  portal: Building;
+  x: number; y: number;
+  ok: boolean;
+  reason?: string;
+};
+export function candleSpotAt(state: GameState, hx: number, hy: number): CandleSpot | null {
+  const { count, ringRadius, placeBand, candleMinGap } = SOUL_SIGIL;
+  let best: CandleSpot | null = null;
+  let bestOff = placeBand;
   for (const b of state.buildings.values()) {
     if (b.kind !== 'hell_portal' || b.state === 'constructing') continue;
-    if (haveChairs.has(b.id)) continue;
-    const center = hellMirrorCenter(b);
-    for (let i = 0; i < count; i++) {
-      const a = -Math.PI / 2 + (i * 2 * Math.PI) / count; // first chair at the top
-      state.soulChairs.push({
-        id: state.nextId++,
-        portalId: b.id,
-        index: i,
-        hx: center.x + Math.cos(a) * ringRadius,
-        hy: center.y + Math.sin(a) * ringRadius,
-        occupied: false,
-      });
+    const c = hellMirrorCenter(b);
+    const dx = hx - c.x, dy = hy - c.y;
+    const dist = Math.hypot(dx, dy);
+    const off = Math.abs(dist - ringRadius);
+    if (off > bestOff) continue;
+    bestOff = off;
+    const a = dist < 1e-6 ? -Math.PI / 2 : Math.atan2(dy, dx);
+    const x = c.x + Math.cos(a) * ringRadius;
+    const y = c.y + Math.sin(a) * ringRadius;
+    const ring = state.soulChairs.filter((ch) => ch.portalId === b.id);
+    if (ring.length >= count) {
+      best = { portal: b, x, y, ok: false, reason: 'That ring already bears its five candles.' };
+    } else if (ring.some((ch) => Math.hypot(ch.hx - x, ch.hy - y) < candleMinGap)) {
+      best = { portal: b, x, y, ok: false, reason: 'Too close to another candle.' };
+    } else {
+      best = { portal: b, x, y, ok: true };
     }
   }
+  return best;
+}
+
+// Set a candle down on a valid CandleSpot (blood is the caller's problem).
+// Re-indexes the ring by angle around the mirror so the skip-one pentagram
+// edges always trace a clean five-pointed star no matter the placement order.
+export function placeCandle(state: GameState, spot: CandleSpot): SoulChair {
+  const chair: SoulChair = {
+    id: state.nextId++,
+    portalId: spot.portal.id,
+    index: 0,
+    hx: spot.x, hy: spot.y,
+    occupied: false,
+    placedAt: state.now,
+  };
+  state.soulChairs.push(chair);
+  const c = hellMirrorCenter(spot.portal);
+  const ring = state.soulChairs.filter((ch) => ch.portalId === spot.portal.id);
+  ring.sort((a, b) => Math.atan2(a.hy - c.y, a.hx - c.x) - Math.atan2(b.hy - c.y, b.hx - c.x));
+  ring.forEach((ch, i) => { ch.index = i; });
+  return chair;
+}
+
+// Seated-soul count for a portal's sigil — the exponent in sigilPortalOutput.
+export function sigilSeatedCount(state: GameState, portalId: number): number {
+  let n = 0;
+  for (const c of state.soulChairs) {
+    if (c.portalId === portalId && c.occupied) n++;
+  }
+  return n;
 }
 
 // Nearest soul chair within SOUL_SIGIL.chairRadius of a hell-coord point, or null.
@@ -1091,7 +1142,8 @@ export function hellPortalAt(state: GameState, hx: number, hy: number): Building
   for (const b of state.buildings.values()) {
     if (b.kind !== 'hell_portal') continue;
     const ctr = buildingCenter(b);
-    const reach = defOf(b).size;
+    // 1.5× the (now 1×1) footprint so the small beacon stays an easy tap.
+    const reach = defOf(b).size * 1.5;
     if (Math.abs(ctr.x + offX - hx) <= reach && Math.abs(ctr.y + offY - hy) <= reach) {
       return b;
     }
