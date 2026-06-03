@@ -223,7 +223,7 @@ export const DEMON = {
 // Portal's abyssal mirror (the "beacon"). Every portal gets its own sigil.
 // Walking a soul (goblin ghost) onto a chair seats it; lines spring between
 // filled chairs so a five-pointed pentagram is drawn as they power up. Once all
-// five of a sigil are filled, each chair feeds +5 GW to the grid (25 GW per
+// five of a sigil are filled, each chair feeds +1 GW to the grid (5 GW per
 // sigil) and the completed sigil erupts in a looping ritual VFX.
 export const SOUL_SIGIL = {
   count: 5,
@@ -231,7 +231,7 @@ export const SOUL_SIGIL = {
   innerRadius: 110,     // the central ring drawn at the mirror, inside the chairs
   chairRadius: 28,      // chair disc radius + click hit radius
   arriveRadius: 40,     // a commanded soul seats once this close to its chair
-  powerPerChair: 5_000_000_000, // +5 GW each — paid only while all five are filled
+  powerPerChair: 1_000_000_000, // +1 GW each — paid only while all five are filled
 };
 
 // One-shot Ritual upgrades. Autobuild + Autospawn unlock once a Phone
@@ -539,7 +539,7 @@ export const BUILDING_DEFS = {
     buildTime: 12,
     maintainersRequired: 0,
     income: 0,
-    powerOutput: 0, // +0W
+    powerOutput: 1, // +1W — technically a power source
     wanderInterval: 1.0,
     wanderJitter: 0.2,
     colors: {

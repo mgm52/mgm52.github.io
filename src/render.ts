@@ -9,7 +9,7 @@ extensions.add(GifAsset);
 // game seconds. Used as a manual sprite-sheet — we pick the frame ourselves
 // each tick based on (state.now - spawnAt) so playback always starts at frame 0.
 type DeathFrames = { textures: Texture[]; ends: number[]; duration: number };
-import { AMBIENT_DRAGON, BUILDING_DEFS, BuildingKind, CELL, COLS, DEMON, DRAGON, GOBLIN, HELL, RENDER_SCALE, ROWS, MINOTAUR, SOUL_SIGIL, SPACE, TINYTAUR, WORLD } from './config';
+import { AMBIENT_DRAGON, BUILDING_DEFS, BuildingKind, CELL, COLS, DEMON, DRAGON, GOBLIN, HELL, RENDER_SCALE, ROWS, MINOTAUR, SOUL_SIGIL, SPACE, TINYTAUR, WORLD, formatPower } from './config';
 import { ensureFontLoaded, fontFamilyById, getOptions, onOptionsChange, type FontConfig, type Options } from './options';
 import { Building, Demon, Dragon, GameState, Ghost, Goblin, HOLE_SIZE, Minotaur, SoulChair, SpaceBuilding, WaterSource, buildingCenter, cellCenter, defOf, holeCenter, isInPlayCell, maintainerCount } from './state';
 import { getParlaySpeaker } from './demon-dialogue';
@@ -438,8 +438,9 @@ export type RenderContext = {
   hellPortalMirrors: Map<number, Container>;
   // The soul sigil: a central inner ring + five chairs + the pentagram edges
   // that spring between filled chairs. Two Graphics (lines/ring + chair discs)
-  // are redrawn each frame for the pulse/seat/completion VFX; the "needs 1 soul"
-  // labels are Text objects made once and toggled by occupancy.
+  // are redrawn each frame for the pulse/seat/completion VFX; the chair labels
+  // ("needs a soul" / "+1 GW" once powered) are Text objects made once and
+  // retargeted by occupancy.
   soulSigilLayer: Container;
   soulSigilGfx: Graphics;
   soulChairGfx: Graphics;
@@ -448,7 +449,7 @@ export type RenderContext = {
   // appearance of a ghost). Drawn from the same DeathEffect entries flagged
   // hell:true; the renderer maps their world coords into hell coords.
   hellEffectsLayer: Container;
-  // Floating-text overlay for the hell scene (the "+5 GW" surge above each soul
+  // Floating-text overlay for the hell scene (the "+1 GW" surge above each soul
   // chair when its sigil powers up). Mirrors floatersLayer but rides the hell
   // transform so the text tracks its chair's hell coordinates.
   hellFloatersLayer: Container;
@@ -1297,15 +1298,11 @@ function makeHellPortalMirror(b: Building): Container {
   return c;
 }
 
-// The five pentagram edges, as index pairs. Each chair links to the one two
-// steps around the ring (0-2-4-1-3-0), which is exactly the five-pointed star.
-const SIGIL_EDGES: readonly [number, number][] = [[0, 2], [2, 4], [4, 1], [1, 3], [3, 0]];
-
 // Redraw the soul sigil every frame: the central inner ring, the pentagram
 // edges between filled chairs, the chair discs (dark when empty, glowing when
-// filled), the seat-in burst, and — once all five are bound — a looping ritual
-// VFX (a wave of pulses chasing around the ring + a spark racing the star, plus
-// a one-shot shockwave on completion). The "needs 1 soul" labels are toggled
+// filled), the seat-in burst, and — once all five are bound — a wave of pulses
+// chasing around the ring plus a one-shot shockwave on completion. The chair
+// labels ("needs a soul" / the permanent "+1 GW" once powered) are driven
 // here too.
 function syncSoulSigil(ctx: RenderContext, state: GameState): void {
   const now = state.now;
@@ -1337,11 +1334,10 @@ function syncSoulSigil(ctx: RenderContext, state: GameState): void {
       // Chairs ordered by ring index so the pentagram edges read cleanly.
       const ordered = [...group].sort((a, b) => a.index - b.index);
 
-      // Central inner ring at the mirror — a doubled occult outline that
+      // Central inner ring at the mirror — a single occult outline that
       // brightens once the sigil is complete.
       const ringGlow = completed ? 0.55 + 0.25 * Math.sin(now * 3) : 0.4;
       ring.circle(center.x, center.y, innerRadius).stroke({ width: 4, color: 0xff2030, alpha: ringGlow });
-      ring.circle(center.x, center.y, innerRadius - 7).stroke({ width: 2, color: 0xff6048, alpha: ringGlow * 0.7 });
 
       // A line links every pair of filled chairs (the complete graph), sketched
       // in as souls are seated. Skip-one pairs form the bright pentagram star;
@@ -1362,25 +1358,11 @@ function syncSoulSigil(ctx: RenderContext, state: GameState): void {
         }
       }
 
-      // Completed-sigil flourishes.
-      if (completed) {
-        // Spark racing around the star path (one full lap every ~5s).
-        const lap = (now * 0.2) % 1;
-        const seg = Math.floor(lap * SIGIL_EDGES.length);
-        const segT = lap * SIGIL_EDGES.length - seg;
-        const [ea, eb] = SIGIL_EDGES[seg];
-        const ca = ordered[ea], cb = ordered[eb];
-        if (ca?.occupied && cb?.occupied) {
-          const sx = ca.hx + (cb.hx - ca.hx) * segT;
-          const sy = ca.hy + (cb.hy - ca.hy) * segT;
-          ring.circle(sx, sy, 16).fill({ color: 0xffe6b0, alpha: 0.9 });
-          ring.circle(sx, sy, 30).fill({ color: 0xff8030, alpha: 0.35 });
-        }
-        // One-shot shockwave expanding from the centre the moment it completes.
-        if (compAge < 1.6) {
-          const r = innerRadius + compAge * 900;
-          ring.circle(center.x, center.y, r).stroke({ width: 7, color: 0xffd060, alpha: (1 - compAge / 1.6) * 0.9 });
-        }
+      // Completed-sigil flourish: a one-shot shockwave expanding from the
+      // centre the moment it completes.
+      if (completed && compAge < 1.6) {
+        const r = innerRadius + compAge * 900;
+        ring.circle(center.x, center.y, r).stroke({ width: 7, color: 0xffd060, alpha: (1 - compAge / 1.6) * 0.9 });
       }
 
       // Chair discs + labels.
@@ -1416,7 +1398,9 @@ function syncSoulSigil(ctx: RenderContext, state: GameState): void {
           }
         }
 
-        // Small "needs a soul" tag above an empty chair.
+        // Tag above the chair: "needs a soul" while empty, then — once the
+        // whole sigil is lit and the chair is actually feeding the grid — a
+        // permanent "+1 GW" readout in the power-surge blue.
         let label = ctx.soulChairLabels.get(chair.id);
         if (!label) {
           label = new Text({
@@ -1432,8 +1416,15 @@ function syncSoulSigil(ctx: RenderContext, state: GameState): void {
           ctx.soulSigilLayer.addChild(label);
           ctx.soulChairLabels.set(chair.id, label);
         }
+        const labelText = !occupied
+          ? 'needs a soul'
+          : completed ? `+${formatPower(SOUL_SIGIL.powerPerChair)}` : '';
+        if (label.text !== labelText && labelText !== '') {
+          label.text = labelText;
+          label.style.fill = occupied ? 0x8acfff : 0xff8a7a;
+        }
         label.position.set(hx, hy - chairRadius - 6);
-        label.visible = !occupied;
+        label.visible = labelText !== '';
         seenLabels.add(chair.id);
       }
     }

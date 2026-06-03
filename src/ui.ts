@@ -1669,17 +1669,15 @@ function showHellPortal(state: GameState, b: Building, panel: HTMLElement, portr
   stateEl.textContent = b.state === 'constructing'
     ? 'A rift tearing open above'
     : 'A rift torn between worlds';
-  // The portal puts out a deadpan +0 W on its own — its real output is the
-  // soul sigil ringed around its mirror, which feeds 25 GW (five chairs × 5 GW)
+  // The portal puts out a deadpan +1 W on its own — its real output is the
+  // soul sigil ringed around its mirror, which feeds 5 GW (five chairs × 1 GW)
   // into the grid once every chair is bound.
   const sigilPowered = state.soulSigilCompletedAt.has(b.id);
   const power = sigilPowered
-    ? `Power output: ${formatPower(SOUL_SIGIL.count * SOUL_SIGIL.powerPerChair)}`
-    : def.powerOutput === 0
-      ? 'Power output: +0 W'
-      : def.powerOutput > 0
-        ? `Power output: ${formatPower(def.powerOutput)}`
-        : `Power draw: ${formatPower(-def.powerOutput)}`;
+    ? `Power output: ${formatPower(SOUL_SIGIL.count * SOUL_SIGIL.powerPerChair + def.powerOutput)}`
+    : def.powerOutput >= 0
+      ? `Power output: ${formatPower(def.powerOutput)}`
+      : `Power draw: ${formatPower(-def.powerOutput)}`;
   extra.innerHTML = [
     `<span style="color:#ff8a6a">Its light pierces down into the abyss</span>`,
     `<span style="color:#8acfff">${power}</span>`,

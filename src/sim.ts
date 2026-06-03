@@ -365,7 +365,7 @@ function shoveGhostOffDemons(state: GameState, g: Ghost): void {
 
 // Bind a soul into a chair: light it, clear its pending claim, and — if it was
 // the fifth of ITS portal's sigil — fire the completion (sound + log + VFX
-// timestamp). The +25 GW payout itself is read off the chairs each tick in the
+// timestamp). The +5 GW payout itself is read off the chairs each tick in the
 // power pass below.
 function seatSoulInChair(state: GameState, chair: SoulChair) {
   chair.occupied = true;
@@ -381,7 +381,7 @@ function seatSoulInChair(state: GameState, chair: SoulChair) {
     const total = SOUL_SIGIL.count * SOUL_SIGIL.powerPerChair;
     appendLog(state, `The pentagram blazes to life — the sigil floods the grid with ${formatPower(total)}!`);
     // Each chair only feeds the grid once the whole ring is lit, so the moment
-    // the fifth soul lands every chair powers up at once — float a "+5 GW"
+    // the fifth soul lands every chair powers up at once — float a "+1 GW"
     // surge over each one, the hell-scene twin of a building coming online.
     for (const c of sigil) {
       pushFloater(state, c.hx, c.hy - SOUL_SIGIL.chairRadius, `+${formatPower(SOUL_SIGIL.powerPerChair)}`, 0x8acfff, 1.6, undefined, false, true);
@@ -2261,7 +2261,7 @@ function resolvePowerAndState(state: GameState) {
   production += currentPowerBoost(state);
 
   // Each portal's soul sigil feeds the grid only once all five of its chairs are
-  // filled — then every chair contributes its powerPerChair (25 GW per sigil).
+  // filled — then every chair contributes its powerPerChair (5 GW per sigil).
   // Count occupied chairs per portal and pay out for each completed ring.
   const occupiedPerPortal = new Map<number, number>();
   for (const c of state.soulChairs) {

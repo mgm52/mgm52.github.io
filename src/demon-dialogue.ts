@@ -109,9 +109,9 @@ export async function bobOverworldBark(state: GameState, bob: Goblin, text: stri
 const GIBBERISH = ['gleh', 'goink', 'grah', 'groh', 'gonk'];
 
 // Non-bob, non-demon souls punctuate their babble at random — an excited "!",
-// a flat ".", or a trailing "..." (which also earns the typed-out ellipsis
-// hold, so the soul audibly trails off).
-const GIBBERISH_SUFFIXES = ['!', '.', '...'];
+// a flat ".", a puzzled "?", or a trailing "..." (which also earns the
+// typed-out ellipsis hold, so the soul audibly trails off).
+const GIBBERISH_SUFFIXES = ['!', '.', '...', '?'];
 function gibberishSuffix(): string {
   return GIBBERISH_SUFFIXES[Math.floor(Math.random() * GIBBERISH_SUFFIXES.length)];
 }

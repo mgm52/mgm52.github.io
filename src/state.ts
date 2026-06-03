@@ -406,7 +406,7 @@ export type GameState = {
   soulChairs: SoulChair[];
   // Per-portal completion: state.now when a portal's fifth chair was seated and
   // its pentagram lit, keyed by portalId. Drives the completed-sigil VFX and the
-  // +25 GW-per-sigil payout. Absent until that portal's sigil completes.
+  // +5 GW-per-sigil payout. Absent until that portal's sigil completes.
   soulSigilCompletedAt: Map<number, number>;
   // state.now of the first time the player entered hell; undefined until then.
   // Anchors the "demons parlay with talking goblins" nudge.
