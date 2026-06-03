@@ -1475,7 +1475,7 @@ export function refreshUI(state: GameState) {
     hint.textContent = `Tap to place ${name} · tap the button again or press ESC to cancel`;
   } else if (state.pendingCandle) {
     hint.style.display = 'block';
-    hint.textContent = "Tap a mirror's outer ring to place a candle · tap the button again or press ESC to cancel";
+    hint.textContent = 'Tap to place Candle · tap the button again or press ESC to cancel';
   } else {
     hint.style.display = 'none';
   }
@@ -2158,6 +2158,22 @@ function buildingFootprintCells(b: Building, n: number): Cell[] {
     }
   }
   return out;
+}
+
+// Dev cheat (options menu): guarantee an active Hell Portal exists so the
+// skip-to-hell descent has a beacon waiting in the abyss. Reuses the
+// task-skip placement machinery; returns false when no free spot exists
+// (vanishingly unlikely for a 1×1). The skip-built portal gets activatedAt
+// stamped so its beam draws in as if construction just finished.
+export function ensureHellPortal(state: GameState): boolean {
+  for (const b of state.buildings.values()) {
+    if (b.kind === 'hell_portal' && b.state !== 'constructing') return true;
+  }
+  const b = placeOneBuilding(state, 'hell_portal');
+  if (!b) return false;
+  b.activatedAt = state.now;
+  state.hellUnlocked = true;
+  return true;
 }
 
 function teleportGoblinTo(state: GameState, g: Goblin, c: Cell): void {

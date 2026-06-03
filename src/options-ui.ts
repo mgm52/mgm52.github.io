@@ -10,6 +10,7 @@ export type OptionsUICallbacks = {
   onCheatPower: () => void;
   onCheatBones: () => void;
   onTriggerBob: () => void;
+  onSkipToHell: () => void;
   onTaskSkip: () => void;
   onShowTitleScreen: () => void;
 };
@@ -299,6 +300,13 @@ function rebuildPanel(panel: HTMLElement, callbacks: OptionsUICallbacks, refresh
   cheatBob.textContent = 'Cheat: trigger Bob on next building';
   cheatBob.addEventListener('click', () => callbacks.onTriggerBob());
   panel.appendChild(cheatBob);
+
+  const skipHell = document.createElement('button');
+  skipHell.type = 'button';
+  skipHell.className = 'options-reset';
+  skipHell.textContent = 'Cheat: skip to hell';
+  skipHell.addEventListener('click', () => callbacks.onSkipToHell());
+  panel.appendChild(skipHell);
 
   const taskSkip = document.createElement('button');
   taskSkip.type = 'button';

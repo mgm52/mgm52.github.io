@@ -1482,18 +1482,20 @@ function syncSoulSigil(ctx: RenderContext, state: GameState): void {
     seenPower.add(portal.id);
   }
 
-  // Candle placement preview: the snapped ghost candle under the cursor —
-  // gold when the spot takes, red when the ring is full/crowded.
+  // Candle placement preview: a ghost candle under the cursor in the same
+  // blue (placeable) / red (blocked) the building placement ghost uses. Near
+  // a ring it snaps onto the ring; away from any ring it rides the cursor in
+  // red so there's always feedback while the mode is armed.
   if (state.pendingCandle && ctx.candleCursor) {
     const spot = candleSpotAt(state, ctx.candleCursor.x, ctx.candleCursor.y);
-    if (spot) {
-      const color = spot.ok ? 0xffd96b : 0xd96b6b;
-      cg.circle(spot.x, spot.y, chairRadius).stroke({ width: 2, color, alpha: 0.85 });
-      if (spot.ok) {
-        cg.rect(spot.x - 5, spot.y - 26, 10, 26).fill({ color: 0xe8dcc8, alpha: 0.35 });
-        cg.ellipse(spot.x, spot.y - 33, 5, 9).fill({ color: 0xffc040, alpha: 0.35 });
-      }
-    }
+    const gx = spot ? spot.x : ctx.candleCursor.x;
+    const gy = spot ? spot.y : ctx.candleCursor.y;
+    const valid = spot !== null && spot.ok;
+    const color = valid ? 0x6a8eb0 : 0xd96b6b;
+    cg.circle(gx, gy, chairRadius).fill({ color, alpha: 0.25 });
+    cg.circle(gx, gy, chairRadius).stroke({ width: 2, color });
+    cg.rect(gx - 5, gy - 26, 10, 26).fill({ color, alpha: 0.45 });
+    cg.ellipse(gx, gy - 33, 5, 9).fill({ color, alpha: 0.45 });
   }
 
   // Drop labels whose candle/portal is gone.
