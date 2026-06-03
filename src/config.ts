@@ -252,7 +252,7 @@ export function sigilPortalOutput(baseWatts: number, seatedSouls: number): numbe
 // extends Autobuild so idle goblins are also routed onto watering duty —
 // unlocks once Autobuild is owned and a water source has been dug.
 export const SUMMON_UPGRADES = {
-  autoAssign: { bloodCost: 13 },
+  autoAssign: { bloodCost: 6 },
   autoSpawn: { bloodCost: 13, intervalSeconds: 3 },
   autoWater: { bloodCost: 128 },
   goldgoblins: { bloodCost: 26 },

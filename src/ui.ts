@@ -59,11 +59,24 @@ let minotaurEverSummoned = false;
 // appearance gets a soft fade-in via the .fade-in CSS animation.
 const everVisibleButtonIds = new Set<string>();
 
-// Element ids of buttons/tasks that have just unlocked during play and that the
-// player hasn't yet scrolled into view. The scroll cue points at these and the
-// entry is dropped the moment the item enters the visible band (see refreshUI),
-// so the arrow only ever nudges toward genuinely-unseen new content.
-const pendingNewItemIds = new Set<string>();
+// ─── Staged unlock reveal ───────────────────────────────────────────
+// While a task celebration is in flight, game time is frozen (the
+// 'unlock-reveal-hold' body class, checked by main.ts's frame loop) and any
+// button that first shows is held invisible (.reveal-hidden) and queued here
+// instead of fading in. Once the WORK COMPLETE overlay clears,
+// runUnlockRevealSequence walks the queue one item at a time: the rest of
+// the sidebar dims, each unlock pops in with a glow, gets smooth-scrolled
+// into view, and plays a rising chime — the fresh task line lands last —
+// then the dim lifts and game time resumes.
+const REVEAL_STEP_MS = 550;
+const revealQueue: string[] = [];
+let celebrationsInFlight = 0;   // WORK COMPLETE overlays currently up
+let revealArmed = false;        // an overlay just cleared; kick the walk at the end of this refresh
+let revealSequenceActive = false;
+let taskTextPendingReveal = false;
+function revealHoldActive(): boolean {
+  return celebrationsInFlight > 0 || revealArmed || revealSequenceActive;
+}
 // Buttons currently carrying the faint "new" tag (id → the tag element, a
 // positioned sibling in the button's list container). The whole set retires
 // the moment a later unlock wave appears (newer content supersedes the old
@@ -107,10 +120,7 @@ function buildScrollContainer(): HTMLElement {
 function applyFadeInOnFirstShow(btnId: string): void {
   if (everVisibleButtonIds.has(btnId)) return;
   everVisibleButtonIds.add(btnId);
-  // A genuinely new button (one that appears during play, not on the initial
-  // load seed) is unseen content the scroll cue should point toward.
   if (initialButtonsSeeded) {
-    pendingNewItemIds.add(btnId);
     const target = newBadgeTarget(btnId);
     if (!NEW_BADGE_EXEMPT.has(btnId) && !newlyShownButtonIds.includes(target)) {
       newlyShownButtonIds.push(target);
@@ -121,23 +131,20 @@ function applyFadeInOnFirstShow(btnId: string): void {
     // move as their whole row (the newBadgeTarget unit).
     const moveEl = document.getElementById(target);
     moveEl?.parentElement?.appendChild(moveEl);
+    // Mid-celebration: hold the item invisible and queue it for the staged
+    // one-at-a-time reveal instead of the plain fade-in.
+    if (revealHoldActive()) {
+      if (!revealQueue.includes(target)) {
+        revealQueue.push(target);
+        moveEl?.classList.add('reveal-hidden');
+      }
+      return;
+    }
   }
   const btn = document.getElementById(btnId);
   if (!btn) return;
   btn.classList.add('fade-in');
   window.setTimeout(() => btn.classList.remove('fade-in'), 700);
-}
-
-// Vertical position of the active scroll container's visible bottom edge, in
-// viewport coordinates — the cutoff below which content sits "below the fold".
-// Elements outside the build panel (e.g. the task line, which on desktop lives
-// below the internally-scrolling panel) clip to the window instead, so they
-// don't read as below-the-fold while plainly visible on screen.
-function scrollViewBottom(el: HTMLElement): number {
-  const scroller = buildScrollContainer();
-  let bottom = window.innerHeight;
-  if (scroller.contains(el)) bottom = Math.min(bottom, scroller.getBoundingClientRect().bottom);
-  return bottom;
 }
 
 // Draws the custom grey scrollbar over the active scroll container. Always
@@ -268,6 +275,11 @@ export function revealSecretSettings(state: GameState): void {
 function playTaskCompleteAnimation(taskId: string): void {
   const overlay = document.getElementById('task-complete-overlay');
   if (!overlay) return;
+  // Freeze game time for the whole ceremony: the overlay plus the staged
+  // unlock reveal that follows. Released at the end of
+  // runUnlockRevealSequence (main.ts checks this class in its frame loop).
+  celebrationsInFlight++;
+  document.body.classList.add('unlock-reveal-hold');
   // Optional side-tasks read "OPTIONAL COMPLETE" rather than "WORK COMPLETE".
   const task = TASKS.find(t => t.id === taskId);
   const isOptional = task?.optional ?? false;
@@ -280,20 +292,86 @@ function playTaskCompleteAnimation(taskId: string): void {
   // "Level Up/Mission Complete (Resistance)" by Dylan Kelk (freesound 672801).
   playSound('task_complete', 1);
   // Hold the overlay for ~2s, then fade out (CSS handles the 600ms fade). As it
-  // starts fading we snap the build panel back to the top: the task's unlocks
-  // are about to fade in below, and the scroll cue only ever points *down*, so
-  // putting the player at the top guarantees fresh content reads as "more below"
-  // rather than scrolling in off-screen above the fold. The jump happens behind
-  // the still-opaque overlay, so it isn't visible as a lurch.
+  // starts fading we snap the build panel back to the top: the staged reveal
+  // that follows smooth-scrolls down to each unlock in turn, so starting from
+  // the top turns the walk into one clean downward sweep. The jump happens
+  // behind the still-opaque overlay, so it isn't visible as a lurch.
   window.setTimeout(() => {
     overlay.classList.remove('shown');
     buildScrollContainer().scrollTo({ top: 0, behavior: 'auto' });
   }, 2200);
-  // Only after the overlay clears do the task's unlocks take effect — that
-  // gives newly-revealed buttons a moment to be hidden and then fade in
-  // properly via the .fade-in animation, rather than flashing on screen
-  // behind a transparent overlay.
-  window.setTimeout(() => { revealedTaskIds.add(taskId); }, 2800);
+  // Only after the overlay clears do the task's unlocks take effect — the
+  // next refreshUI pass collects every freshly-shown item into revealQueue
+  // (held invisible via .reveal-hidden) and then kicks off the staged
+  // one-by-one reveal at the end of that same pass.
+  window.setTimeout(() => {
+    revealedTaskIds.add(taskId);
+    celebrationsInFlight = Math.max(0, celebrationsInFlight - 1);
+    revealArmed = true;
+  }, 2800);
+}
+
+// Pulls the next element due a staged reveal: queued unlocks first (in visual
+// top-to-bottom order — see the sort at the kick site), the fresh task line
+// last. Skips ids whose element has vanished in the meantime.
+function takeNextRevealTarget(): HTMLElement | null {
+  while (revealQueue.length > 0) {
+    const el = document.getElementById(revealQueue.shift()!);
+    if (el) return el;
+  }
+  if (taskTextPendingReveal) {
+    taskTextPendingReveal = false;
+    const el = document.getElementById('task-text');
+    if (el && el.style.display !== 'none') return el;
+    // No live task line after all (e.g. the run's final task just completed)
+    // — don't leave it stuck invisible for whenever it next shows.
+    el?.classList.remove('reveal-hidden');
+  }
+  return null;
+}
+
+// Reveal in visual (top-to-bottom) order rather than refreshUI's walk order,
+// so the smooth-scroll sweeps down the sidebar once instead of hopping
+// between the Summon / Build / Ritual sections.
+function sortRevealQueueByDocumentOrder(): void {
+  revealQueue.sort((a, b) => {
+    const ea = document.getElementById(a);
+    const eb = document.getElementById(b);
+    if (!ea || !eb) return 0;
+    return (ea.compareDocumentPosition(eb) & Node.DOCUMENT_POSITION_FOLLOWING) ? -1 : 1;
+  });
+}
+
+// Walks the staged reveal: each step un-hides one queued unlock, glows it,
+// smooth-scrolls it into view, and plays a rising chime; the rest of the
+// sidebar stays dimmed (#sidebar.unlock-reveal-dim) throughout. Items queued
+// by a celebration that lands mid-walk simply extend the run. When the queue
+// (and the pending task line) is exhausted, the dim lifts and the
+// unlock-reveal-hold body class is dropped so game time resumes.
+function runUnlockRevealSequence(step = 0): void {
+  const el = takeNextRevealTarget();
+  const sidebar = document.getElementById('sidebar');
+  if (!el) {
+    revealSequenceActive = false;
+    sidebar?.classList.remove('unlock-reveal-dim');
+    // Let the un-dim start before the glows retire so the handoff is soft.
+    window.setTimeout(() => {
+      for (const h of Array.from(document.querySelectorAll('.reveal-highlight'))) {
+        h.classList.remove('reveal-highlight');
+      }
+    }, 300);
+    // Another task's overlay may already be up — keep time frozen for it.
+    if (!revealHoldActive()) document.body.classList.remove('unlock-reveal-hold');
+    return;
+  }
+  revealSequenceActive = true;
+  sidebar?.classList.add('unlock-reveal-dim');
+  el.classList.remove('reveal-hidden');
+  el.classList.add('reveal-highlight');
+  el.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+  // Rising pitch per unlock so a wave of reveals reads as a little arpeggio.
+  playSound('online', 0.5, 1 + step * 0.12);
+  window.setTimeout(() => runUnlockRevealSequence(step + 1), REVEAL_STEP_MS);
 }
 
 // Tutorial gating: each task unlocks one or more building kinds when complete.
@@ -452,11 +530,15 @@ export function setupUI(state: GameState, callbacks: UICallbacks) {
   const ritualList = document.getElementById('ritual-list')!;
   const buildList = document.getElementById('build-list')!;
 
-  // Tapping the scroll-cue arrow nudges the panel down by most of a page so it
-  // doubles as a control, not just an indicator.
+  // Tapping a scroll-cue arrow nudges the panel by most of a page in that
+  // direction, so each doubles as a control, not just an indicator.
   document.getElementById('scroll-cue')!.addEventListener('click', () => {
     const sc = buildScrollContainer();
     sc.scrollBy({ top: sc.clientHeight * 0.8, behavior: 'smooth' });
+  });
+  document.getElementById('scroll-cue-up')!.addEventListener('click', () => {
+    const sc = buildScrollContainer();
+    sc.scrollBy({ top: -sc.clientHeight * 0.8, behavior: 'smooth' });
   });
 
   // Custom scrollbar thumb drag — map vertical thumb travel onto the active
@@ -1265,31 +1347,27 @@ export function refreshUI(state: GameState) {
   const panelBuildVisible = firstTaskDone || ritualVisible;
   panelBuild.style.display = panelBuildVisible ? '' : 'none';
 
-  // Scroll cue — a minimal chevron pointing at a newly-unlocked button or task
-  // that's currently sitting below the fold, since iOS/macOS hide overlay
-  // scrollbars and players otherwise miss fresh content. We also keep the custom
-  // grey scrollbar in sync here. Both measure whichever element is the scroll
-  // container right now (build panel vs whole sidebar; see media query).
-  const scrollCue = document.getElementById('scroll-cue')!;
-
-  // A fresh task surfacing at the bottom of the sidebar is new content too.
+  // A fresh task surfacing at the bottom of the sidebar is part of the unlock
+  // wave: hold its line invisible so the staged reveal can land it last.
   const activeTaskKey = activeTasks.map(t => t.id).join('|');
-  if (initialButtonsSeeded && activeTaskKey && activeTaskKey !== lastActiveTaskKey) {
-    pendingNewItemIds.add('task-text');
+  if (initialButtonsSeeded && activeTaskKey && activeTaskKey !== lastActiveTaskKey && revealHoldActive()) {
+    taskTextPendingReveal = true;
+    document.getElementById('task-text')?.classList.add('reveal-hidden');
   }
   lastActiveTaskKey = activeTaskKey;
 
-  // Walk the pending-new items: drop any that have scrolled into view (their top
-  // edge cleared the fold) or whose element is gone, and note whether at least
-  // one is still waiting below — that's the only thing that surfaces the cue.
-  let newBelow = false;
-  for (const id of [...pendingNewItemIds]) {
-    const el = document.getElementById(id);
-    if (!el || el.offsetParent === null) { pendingNewItemIds.delete(id); continue; }
-    if (el.getBoundingClientRect().top >= scrollViewBottom(el) - 6) newBelow = true;
-    else pendingNewItemIds.delete(id);
-  }
-  scrollCue.classList.toggle('visible', panelBuildVisible && newBelow);
+  // Scroll cues — muted chevrons at the top/bottom of the build panel whenever
+  // any content sits off-screen in that direction (iOS/macOS hide overlay
+  // scrollbars, so without these the area doesn't read as scrollable). We also
+  // keep the custom grey scrollbar in sync here. All measure whichever element
+  // is the scroll container right now (build panel vs whole sidebar; see media
+  // query).
+  const cueScroller = buildScrollContainer();
+  const cueRange = cueScroller.scrollHeight - cueScroller.clientHeight;
+  const cueDown = panelBuildVisible && cueRange > 4 && cueScroller.scrollTop < cueRange - 4;
+  const cueUp = panelBuildVisible && cueRange > 4 && cueScroller.scrollTop > 4;
+  document.getElementById('scroll-cue')!.classList.toggle('visible', cueDown);
+  document.getElementById('scroll-cue-up')!.classList.toggle('visible', cueUp);
 
   updateCustomScrollbar(panelBuildVisible);
 
@@ -1536,13 +1614,23 @@ export function refreshUI(state: GameState) {
   refreshInfoPanel(state);
 
   // A fresh unlock wave retires every older "new" tag before raising its own —
-  // once newer content exists, the old call-outs have done their job.
-  if (newlyShownButtonIds.length > 0) {
+  // once newer content exists, the old call-outs have done their job. Deferred
+  // while a celebration/staged reveal is in flight so tags don't appear next
+  // to still-hidden buttons; they land once the sequence finishes.
+  if (!revealHoldActive() && newlyShownButtonIds.length > 0) {
     for (const id of [...newBadges.keys()]) removeNewBadge(id);
     for (const id of newlyShownButtonIds) addNewBadge(id);
     newlyShownButtonIds = [];
   }
   syncNewBadges();
+
+  // A WORK COMPLETE overlay finished clearing this frame and the pass above
+  // has collected its unlocks — walk the staged one-by-one reveal.
+  if (revealArmed && celebrationsInFlight === 0 && !revealSequenceActive) {
+    revealArmed = false;
+    sortRevealQueueByDocumentOrder();
+    runUnlockRevealSequence();
+  }
 
   // Every button/task shown this first frame is the baseline (a resumed save
   // shouldn't nag about content the player already had). From the next frame on,
