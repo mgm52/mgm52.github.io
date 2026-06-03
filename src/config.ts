@@ -522,16 +522,16 @@ export const BUILDING_DEFS = {
       constructing: 0x3a3f47, constructingBorder: 0x808890,
     },
   }),
-  // Hell Portal — unlocked by the Build a Hypercentre task. A
+  // Hell Portal — unlocked by the Build a Nuclear Reactor task. A
   // 2×2 portal that opens the way
   // down to Hell. Once placed, a red beam animates from the portal toward
   // the abyss below and the player can hold ↓ at the bottom of the map to
-  // descend. Display name is "Weird power source".
+  // descend. Display name is "Bad power source?".
   hell_portal: def(2, {
-    name: 'Weird power source',
-    short: 'WPS',
-    cost: 10_000_000,
-    bloodCost: 1000,
+    name: 'Bad power source?',
+    short: 'BPS',
+    cost: 9_999_999,
+    bloodCost: 999,
     buildersRequired: 4,
     buildTime: 12,
     maintainersRequired: 0,

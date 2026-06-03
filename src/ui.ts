@@ -380,7 +380,7 @@ const TASKS: Task[] = [
   {
     id: 'build_nuclear_reactor',
     text: 'Build a Nuclear Reactor',
-    // The Hell Portal ("Weird power source") opens up alongside the
+    // The Hell Portal ("Bad power source?") opens up alongside the
     // Hypercentre — no longer gated behind ascending.
     unlocks: ['hypercentre', 'hell_portal'],
     isDone: (s) => {
@@ -765,8 +765,8 @@ export function setupUI(state: GameState, callbacks: UICallbacks) {
     if (def.income) yieldBits.push(`<span class="yield-money">+Ƶ${def.income.toLocaleString('en-US')}/s</span>`);
     if (def.powerOutput > 0 || kind === 'hell_portal') {
       // Gas Turbine spells its gain out in plain watts rather than the
-      // MW-rounded form, so its modest output reads precisely. The Weird
-      // power source advertises a deadpan +0 W despite its true purpose.
+      // MW-rounded form, so its modest output reads precisely. The Bad
+      // power source? advertises a deadpan +0 W despite its true purpose.
       const powerText = kind === 'gas_engine'
         ? `${def.powerOutput.toLocaleString('en-US')} W`
         : formatPower(def.powerOutput);
