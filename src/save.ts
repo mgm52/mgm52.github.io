@@ -3,6 +3,7 @@ import { compressToUTF16, decompressFromUTF16 } from 'lz-string';
 import {
   Building, GameState, createDemons, emptyBuildingCounts, pruneAllAssignedGoblins, rebuildWalls,
 } from './state';
+import { LEGACY_TASK_UNLOCKS } from './upgrade-tree';
 
 const STORAGE_KEY = 'rts.savegame.v1';
 const VERSION = 2;
@@ -148,6 +149,48 @@ export function loadGame(): { state: GameState; savedAt: number } | null {
       if (b.kind === 'hell_portal' && b.state !== 'constructing' && b.activatedAt === undefined) {
         b.activatedAt = Math.max(0, env.state.now - 100);
       }
+    }
+    // Pip-based upgrade tree — saves predating it carry only completed task
+    // ids, whose completion used to unlock buildings/abilities directly. Seed
+    // the purchase set from the legacy task→unlocks map so the player resumes
+    // with exactly what the old gating had granted (no pips refunded), and
+    // mark every already-completed task as pips-paid so resuming doesn't
+    // shower retroactive pips on top of the seeded purchases.
+    env.state.pips ??= 0;
+    // Per-creature kill counters (recordGhost). Saves predate them — seed
+    // from the ghost list, which holds one entry per kill anyway.
+    if (!env.state.kills) {
+      const kills = { goblin: 0, minotaur: 0, dragon: 0 };
+      for (const g of env.state.ghosts ?? []) {
+        if (g.kind in kills) kills[g.kind]++;
+      }
+      env.state.kills = kills;
+    }
+    // Cumulative construction completions — seed older saves from whatever is
+    // currently standing (ground, finished only) plus everything in orbit.
+    // Demolished history is unrecoverable; best effort.
+    if (!env.state.buildingsBuilt) {
+      const built = emptyBuildingCounts();
+      for (const b of env.state.buildings.values()) {
+        if (b.state !== 'constructing') built[b.kind]++;
+      }
+      for (const sb of (env.state.spaceBuildings ?? new Map()).values()) {
+        built[sb.building.kind]++;
+      }
+      env.state.buildingsBuilt = built;
+    }
+    if (!(env.state.purchasedUpgrades instanceof Set)) {
+      const purchased = new Set<string>();
+      const completed = new Set(env.state.unlocks?.completed ?? []);
+      // 'earn_30_blood' is the pre-rename id of 'summon_minotaurs'.
+      if (completed.has('earn_30_blood')) completed.add('summon_minotaurs');
+      for (const id of completed) {
+        for (const u of LEGACY_TASK_UNLOCKS[id] ?? []) purchased.add(u);
+      }
+      env.state.purchasedUpgrades = purchased;
+    }
+    if (env.state.unlocks && !(env.state.unlocks.pipsAwarded instanceof Set)) {
+      env.state.unlocks.pipsAwarded = new Set(env.state.unlocks.completed);
     }
     env.state.view = 'ground';
     env.state.lightningStrikeCooldown ??= 0;

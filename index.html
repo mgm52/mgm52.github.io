@@ -437,6 +437,93 @@
         0%, 100% { box-shadow: inset 0 0 0 1px rgba(234,218,106,0); background: rgba(234,218,106,0); }
         50%      { box-shadow: inset 0 0 0 2px rgba(234,218,106,0.5); background: rgba(234,218,106,0.07); }
       }
+      /* ─── Upgrades pip-tree overlay (upgrade-ui.ts) ─────────────────── */
+      #upgrade-section { margin-bottom: 6px; }
+      #upgrade-overlay {
+        position: fixed; inset: 0; z-index: 60;
+        background: rgba(0, 0, 0, 0.72);
+        display: flex; align-items: center; justify-content: center;
+      }
+      #upgrade-overlay[hidden] { display: none; }
+      #upgrade-card {
+        width: min(1000px, 94vw); height: min(720px, 88vh);
+        display: flex; flex-direction: column;
+        background: linear-gradient(180deg, rgba(34,39,46,0.98) 0%, rgba(18,20,24,0.98) 100%);
+        border: 1px solid #3a4048; border-radius: 8px;
+        box-shadow: 0 12px 48px rgba(0,0,0,0.6);
+      }
+      #upgrade-card-header {
+        display: flex; align-items: center; gap: 12px;
+        padding: 10px 14px; border-bottom: 1px solid #2d3138;
+      }
+      #upgrade-card-title {
+        flex: 1;
+        font-family: var(--font-display); font-size: calc(13px * var(--font-display-scale));
+        text-transform: uppercase; letter-spacing: 3px; color: #b8bec6;
+      }
+      #upgrade-overlay-pips {
+        font-family: var(--font-mono); font-size: calc(18px * var(--font-mono-scale));
+        color: var(--sidebar-accent); font-variant-numeric: tabular-nums;
+      }
+      #upgrade-close {
+        width: 28px; height: 28px;
+        background: none; border: 1px solid #3a4048; border-radius: 4px;
+        color: #9aa1ab; font-size: 14px; line-height: 1;
+      }
+      #upgrade-close:hover { border-color: #5a6470; color: #eee; }
+      #upgrade-hint {
+        padding: 7px 14px; border-bottom: 1px solid #22262c;
+        font-family: var(--font-body); font-size: calc(11px * var(--font-body-scale));
+        color: #6a7080;
+      }
+      #upgrade-hint strong { color: #b8bec6; font-weight: 600; }
+      #upgrade-viewport { flex: 1; overflow: auto; -webkit-overflow-scrolling: touch; }
+      #upgrade-canvas { position: relative; }
+      #upgrade-edges { position: absolute; left: 0; top: 0; pointer-events: none; }
+      .ut-edge { fill: none; stroke: #3a4048; stroke-width: 2; }
+      .ut-edge.lit { stroke: rgba(255, 217, 107, 0.5); }
+      .ut-node {
+        position: absolute; width: 148px; height: 58px;
+        display: flex; flex-direction: column; align-items: flex-start; justify-content: center;
+        gap: 1px; padding: 4px 10px; box-sizing: border-box;
+        background: var(--sidebar-button-bg); border: 1px solid var(--sidebar-button-border);
+        border-radius: 6px; color: #eee; text-align: left;
+        font-family: var(--font-body);
+        transition: background 0.1s, border-color 0.1s, opacity 0.2s;
+      }
+      .ut-node-section {
+        font-size: calc(8px * var(--font-display-scale));
+        letter-spacing: 1px; text-transform: uppercase; color: #6a7080;
+      }
+      .ut-node-name {
+        font-family: var(--font-display); font-size: calc(13px * var(--font-display-scale));
+        line-height: 1.1;
+      }
+      .ut-node-cost {
+        font-family: var(--font-mono); font-size: calc(11px * var(--font-mono-scale));
+        color: #9aa1ab; font-variant-numeric: tabular-nums;
+      }
+      .ut-node:disabled { cursor: default; }
+      .ut-node.locked { opacity: 0.4; }
+      .ut-node.owned { border-color: #4a7a4e; background: #18221a; }
+      .ut-node.owned .ut-node-cost { color: #79c97f; }
+      .ut-node.can-buy { border-color: var(--sidebar-accent); animation: ut-can-buy-pulse 1.8s ease-in-out infinite; }
+      .ut-node.can-buy .ut-node-cost { color: var(--sidebar-accent); }
+      .ut-node.can-buy:hover { background: #2a2f37; }
+      @keyframes ut-can-buy-pulse {
+        0%, 100% { box-shadow: 0 0 0 0 rgba(255, 217, 107, 0); }
+        50%      { box-shadow: 0 0 10px 1px rgba(255, 217, 107, 0.35); }
+      }
+      .ut-node.ut-just-bought { animation: ut-pop 0.35s ease-out; }
+      @keyframes ut-pop {
+        0%   { transform: scale(1); }
+        40%  { transform: scale(1.08); }
+        100% { transform: scale(1); }
+      }
+      @media (prefers-reduced-motion: reduce) {
+        .ut-node.can-buy { animation: none; }
+        .ut-node.ut-just-bought { animation: none; }
+      }
       .build-warning {
         position: absolute; left: 0; right: 0; bottom: 0;
         font-family: var(--font-body);
@@ -1466,6 +1553,19 @@
                Ritual hides itself before any of its content unlocks. The task
                text sits at the end so it always tucks directly under the last
                button instead of pinning to the sidebar floor. -->
+          <!-- Upgrades button: opens the pip-tree overlay (upgrade-ui.ts).
+               Appears with the first pip payout, sticky after that. The pip
+               balance is written onto the button each refreshUI. -->
+          <div id="upgrade-section" style="display:none">
+            <button class="build-button" id="btn-open-upgrades" type="button">
+              <div class="build-content">
+                <div class="build-text">
+                  <div class="build-name">Upgrades</div>
+                </div>
+                <div class="build-cost-side"><span class="build-cost" id="upgrade-pip-count">◉ 0</span></div>
+              </div>
+            </button>
+          </div>
           <div id="build-section" style="display:none">
             <div class="panel-title">Build</div>
             <div id="build-list"></div>

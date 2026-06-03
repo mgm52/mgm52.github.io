@@ -10,8 +10,35 @@
 import { playSound } from './audio';
 import {
   Demon, GameState, Ghost,
-  appendLog, hellToWorld, pushDeathEffect, resurrectBob,
+  appendLog, earnBlood, earnDragonBone, earnMoney, hellToWorld, pushDeathEffect, resurrectBob,
 } from './state';
+import { demonReward, upgradeName } from './upgrade-tree';
+
+// Apply the configured parlay gift (upgrade-tree.json's demonReward; the
+// dev editor edits it). Returns the log line describing what Bob received.
+function applyDemonReward(state: GameState): string {
+  const reward = demonReward();
+  switch (reward.type) {
+    case 'upgrade':
+      state.purchasedUpgrades.add(reward.id);
+      if (reward.id === 'lightning') return 'The demon grants Bob the power of lightning.';
+      return `The demon grants Bob ${upgradeName(reward.id)}.`;
+    case 'pips':
+      state.pips += reward.amount;
+      return `The demon grants Bob ${reward.amount} pip${reward.amount === 1 ? '' : 's'}.`;
+    case 'money':
+      earnMoney(state, reward.amount);
+      return `The demon grants Bob Ƶ${reward.amount.toLocaleString('en-US')}.`;
+    case 'blood':
+      earnBlood(state, reward.amount);
+      state.bloodUnlocked = true;
+      return `The demon grants Bob ${reward.amount} blood.`;
+    case 'bones':
+      earnDragonBone(state, reward.amount);
+      state.dragonBoneUnlocked = true;
+      return `The demon grants Bob ${reward.amount} dragon bone${reward.amount === 1 ? '' : 's'}.`;
+  }
+}
 
 type Speaker = 'demon' | 'goblin' | 'bob';
 type Seg = { t: string; em: boolean };
@@ -266,8 +293,7 @@ export async function runDemonDialogue(state: GameState, demon: Demon, ghost: Gh
         await say('demon', 'mmm');
         await say('demon', 'delicious. thank you my child');
         await say('demon', 'be witness to my gift');
-        state.lightningUnlocked = true;
-        appendLog(state, 'The demon grants Bob the power of lightning.');
+        appendLog(state, applyDemonReward(state));
       } else {
         await ellipsisBeat();
         await say('demon', 'untruth');

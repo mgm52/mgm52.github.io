@@ -9,6 +9,7 @@ export type OptionsUICallbacks = {
   onCheatBlood: () => void;
   onCheatPower: () => void;
   onCheatBones: () => void;
+  onCheatPips: () => void;
   onTriggerBob: () => void;
   onTaskSkip: () => void;
   onShowTitleScreen: () => void;
@@ -286,6 +287,13 @@ function rebuildPanel(panel: HTMLElement, callbacks: OptionsUICallbacks, refresh
   cheatBones.addEventListener('click', () => callbacks.onCheatBones());
   panel.appendChild(cheatBones);
 
+  const cheatPips = document.createElement('button');
+  cheatPips.type = 'button';
+  cheatPips.className = 'options-reset';
+  cheatPips.textContent = 'Cheat +5 pips';
+  cheatPips.addEventListener('click', () => callbacks.onCheatPips());
+  panel.appendChild(cheatPips);
+
   const cheatBob = document.createElement('button');
   cheatBob.type = 'button';
   cheatBob.className = 'options-reset';
@@ -306,6 +314,18 @@ function rebuildPanel(panel: HTMLElement, callbacks: OptionsUICallbacks, refresh
   showTitle.textContent = 'Show title screen';
   showTitle.addEventListener('click', () => callbacks.onShowTitleScreen());
   panel.appendChild(showTitle);
+
+  // Dev-server only: the upgrade-tree balance editor (a separate vite page
+  // backed by a middleware that writes src/upgrade-tree.json). The page isn't
+  // part of the production bundle, so the button hides outside dev.
+  if (import.meta.env.DEV) {
+    const treeEditor = document.createElement('button');
+    treeEditor.type = 'button';
+    treeEditor.className = 'options-reset';
+    treeEditor.textContent = 'Upgrade tree editor (dev)';
+    treeEditor.addEventListener('click', () => window.open('upgrade-editor.html', '_blank'));
+    panel.appendChild(treeEditor);
+  }
 
   const reset = document.createElement('button');
   reset.type = 'button';

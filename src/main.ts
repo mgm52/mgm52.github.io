@@ -12,6 +12,7 @@ import { applyDomOptions, centerCameraOn, centerHellCameraOnWorld, centerSpaceCa
 import { appendLog, cellCenter, createInitialState, destroyBuilding, digDirection, earnBlood, earnDragonBone, earnMoney, getSpawnCapacity, pushDeathEffect, pushFloater, recordGhost, removeGoblin, type GameState } from './state';
 import { autoAssignAllIdle, spawnDragon, spawnMinotaur, spawnTinytaur, tick } from './sim';
 import { executeTaskSkip, refreshUI, setupUI } from './ui';
+import { setupUpgradeUI } from './upgrade-ui';
 import { clearSave, formatRelativeTime, loadGame, saveGame } from './save';
 
 // Returns the player's choice — 'resume' if they clicked the resume button,
@@ -246,6 +247,10 @@ async function main() {
       state.dragonBoneUnlocked = true;
       appendLog(state, 'Cheat: +100 dragon bones.');
     },
+    onCheatPips: () => {
+      state.pips += 5;
+      appendLog(state, 'Cheat: +5 pips.');
+    },
     onTriggerBob: () => {
       // Re-arm the cutscene for the next building placement, regardless of
       // the 20-building threshold or whether Bob has been spawned before.
@@ -425,6 +430,8 @@ async function main() {
       appendLog(state, `Building #${id} destroyed.`);
     },
   });
+  // The Upgrades pip-tree overlay + its sidebar button.
+  setupUpgradeUI(state);
   // Populate task text + show/hide panels now so the sidebar isn't blank
   // under the (still-fading) title screen on slow mobile loads.
   refreshUI(state);

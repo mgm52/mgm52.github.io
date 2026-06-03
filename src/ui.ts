@@ -12,6 +12,8 @@ import {
 } from './state';
 import { spawnDragon, spawnMinotaur } from './sim';
 import { unlockOptionsCog } from './options-ui';
+import { LEGACY_TASK_UNLOCKS, UPGRADE_TREE, goalDone, pipsForTask, taskRequiresOf, taskText } from './upgrade-tree';
+import { refreshUpgradeUI } from './upgrade-ui';
 
 // Build buttons appear in this fixed order, mostly cheapest-first. goblin_hole
 // is the exception: it's an auxiliary spawn-capacity expander rendered in the
@@ -27,19 +29,18 @@ const SORTED_KINDS: BuildingKind[] = [
   'hell_portal',
 ];
 
-// Inserted between adjacent build buttons that belong to different tutorial
-// task groups; refreshUI hides separators for not-yet-completed tasks.
-type BuildSeparator = { el: HTMLElement; afterTaskId: string };
-const buildSeparators: BuildSeparator[] = [];
-
 // Snapshot of completedTaskIds from the previous refreshUI tick — used to
 // detect newly-completed tasks and trigger the celebration animation.
 const previouslyCompletedTaskIds = new Set<string>();
 
-// Tasks whose celebration overlay has finished — only then do their unlocks
-// take effect, so newly-revealed buttons stay hidden behind the overlay
-// instead of flashing through it.
+// Tasks whose celebration overlay has finished. Buildings/abilities are
+// unlocked by pip purchases now, so this mostly times non-purchase reveals
+// (the collect_dragon_bones secret-settings gag) to after the overlay clears.
 const revealedTaskIds = new Set<string>();
+
+// Tasks whose pip payout has been credited — sticky and persisted (via
+// state.unlocks) so a reload can't re-award the same task's pips.
+const pipsAwardedTaskIds = new Set<string>();
 
 // Building kinds the player has outgrown — sticky once the upgrade has gone
 // active even once. Mirrors the sticky-task-progress philosophy: destroying
@@ -188,7 +189,7 @@ function updateResourceRates(state: GameState): void {
     setText('blood-rate', formatRate(avgRate(bloodRateHist)));
   }
   const moneyRateEl = document.getElementById('money-rate');
-  if (moneyRateEl) moneyRateEl.style.display = completedTaskIds.has('run_phone_farm') ? '' : 'none';
+  if (moneyRateEl) moneyRateEl.style.display = completedTaskIds.has(MONEY_RATE_TASK_ID) ? '' : 'none';
   const bloodRateEl = document.getElementById('blood-rate');
   if (bloodRateEl) bloodRateEl.style.display = minotaurEverSummoned ? '' : 'none';
 }
@@ -241,9 +242,13 @@ function playTaskCompleteAnimation(taskId: string): void {
   const isOptional = task?.optional ?? false;
   const textEl = overlay.querySelector('.task-complete-text');
   if (textEl) textEl.innerHTML = `${isOptional ? 'OPTIONAL' : 'WORK'}<br>COMPLETE`;
-  // Subtitle recalls what the finished task actually was.
+  // Subtitle recalls what the finished task actually was, plus its pip payout.
   const subtitleEl = overlay.querySelector('.task-complete-subtitle');
-  if (subtitleEl) subtitleEl.textContent = task?.text ?? '';
+  if (subtitleEl) {
+    const pips = pipsForTask(taskId);
+    const pipBit = pips > 0 ? ` — +${pips} pip${pips === 1 ? '' : 's'}` : '';
+    subtitleEl.textContent = `${task?.text ?? ''}${pipBit}`;
+  }
   overlay.classList.add('shown');
   // "Level Up/Mission Complete (Resistance)" by Dylan Kelk (freesound 672801).
   playSound('task_complete', 1);
@@ -264,9 +269,13 @@ function playTaskCompleteAnimation(taskId: string): void {
   window.setTimeout(() => { revealedTaskIds.add(taskId); }, 2800);
 }
 
-// Tutorial gating: each task unlocks one or more building kinds when complete.
+// Tutorial tasks: each pays out pips on completion (amounts live in
+// upgrade-tree.json, keyed by task id), which the player spends on upgrade
+// nodes in the Upgrades overlay — that's what unlocks buildings/abilities.
 // Tasks form a DAG via `prereq` — multiple tasks with the same prereqs become
 // active simultaneously and are shown together.
+// NOTE: when adding/changing tasks, keep TASK_META in upgrade-tree.ts in sync
+// (it mirrors this DAG for the dev balance editor).
 type Task = {
   id: string;
   text: string;
@@ -274,11 +283,15 @@ type Task = {
   // runtime (e.g. a target that scales with live state). Falls back to `text`
   // when absent.
   dynamicText?: (s: GameState) => string;
-  unlocks: BuildingKind[];
   isDone: (s: GameState) => boolean;
   prereq?: string[];
   // Optional side-tasks don't gate any other task and render as "Optional: …".
   optional?: boolean;
+  // The building kind a place/build/run goal targets. While such a task is
+  // active, its kind's build button ignores the "outgrown" hide so the task
+  // can't be bricked by progressing past its tier (e.g. running a Datacentre
+  // obsoletes the Phone Farm button mid-"Place 10 Phone Farms").
+  targetKind?: BuildingKind;
 };
 
 // Tasks are sticky: once a task's isDone has ever returned true in this session,
@@ -289,99 +302,46 @@ const completedTaskIds = new Set<string>();
 // re-running the whole task evaluation.
 let currentTaskCached: Task | null = null;
 
-// Abilities (summons + rituals) aren't buildings, so they aren't listed in a
-// task's `unlocks` (which only takes BuildingKind). Instead each is gated in
-// refreshUI on the reveal of the task that grants it:
-//   run_phone_farm       → Autobuild, Autospawn
-//   build_gas_engine     → Minotaur, Dig
-//   summon_minotaurs     → Goldblins
-// Lightning Strike is special: it's granted by a truthful demon parlay, not a
-// task (see state.lightningUnlocked).
-// The Dragon summon is special-cased: it has no gating task. Its button shows
-// whenever at least one Dragon Beacon is `active`, and the simultaneous-dragon
-// cap (live + queued) equals the active-beacon count.
-const TASKS: Task[] = [
-  {
-    id: 'earn_100',
-    text: 'Make Ƶ100 (somehow...)',
-    unlocks: ['goblin_wheel', 'phone_farm'],
-    isDone: (s) => s.money >= 100,
-  },
-  {
-    id: 'run_phone_farm',
-    text: 'Run a Phone Farm',
-    unlocks: ['gas_engine'],
-    isDone: (s) => {
-      for (const b of s.buildings.values()) {
-        if (b.kind === 'phone_farm' && b.state === 'active') return true;
-      }
-      return false;
-    },
-    prereq: ['earn_100'],
-  },
-  {
-    id: 'build_gas_engine',
-    text: 'Construct a Gas Turbine',
-    unlocks: ['datacentre'],
-    isDone: (s) => {
-      for (const b of s.buildings.values()) {
-        if (b.kind === 'gas_engine' && b.state !== 'constructing') return true;
-      }
-      return false;
-    },
-    prereq: ['run_phone_farm'],
-  },
-  {
-    id: 'run_datacentre',
-    text: 'Run your first datacentre',
-    unlocks: ['nuclear_reactor', 'hypercentre', 'wall'],
-    isDone: (s) => {
-      for (const b of s.buildings.values()) {
-        if (b.kind === 'datacentre' && b.state === 'active') return true;
-      }
-      return false;
-    },
-    prereq: ['build_gas_engine'],
-  },
-  {
-    id: 'build_hypercentre',
-    text: 'Build a Hypercentre',
-    // The Hell Portal ("Weird power source") opens up alongside the Dragon
-    // Beacon — no longer gated behind ascending.
-    unlocks: ['dragon_beacon', 'hell_portal'],
-    isDone: (s) => {
-      for (const b of s.buildings.values()) {
-        if (b.kind === 'hypercentre') return true;
-      }
-      return false;
-    },
-    prereq: ['run_datacentre'],
-  },
-  {
-    // Optional side-task: unlocks after Phase 3 (build_gas_engine). Grants the
-    // Goblin Hole (a Ritual purchase) plus the Goldblins ritual (gated in
-    // refreshUI). minotaursBought is cumulative for the run, so this stays
-    // complete once reached even if those Minotaurs later die.
-    id: 'summon_minotaurs',
-    text: 'Summon 2 Minotaurs',
-    unlocks: ['goblin_hole'],
-    isDone: (s) => s.minotaursBought >= 2,
-    prereq: ['build_gas_engine'],
-    optional: true,
-  },
-  {
-    // Main closing task: collecting five dragon bones (cumulative) fires the
-    // demo's "game's incomplete" alerts and unlocks the secret settings menu
-    // (see the revealSecretSettings gate in refreshUI). Dragon bones drop when
-    // one dragon incinerates another, so this needs the Dragon Beacon
-    // (build_hypercentre) first. Grants no building.
-    id: 'collect_dragon_bones',
-    text: 'Collect 5 dragon bones',
-    unlocks: [],
-    isDone: (s) => s.dragonBoneEarned >= 5,
-    prereq: ['build_hypercentre'],
-  },
-];
+// Buildings and abilities unlock via pip purchases in the Upgrades overlay
+// (see upgrade-ui.ts); refreshUI gates each button on
+// state.purchasedUpgrades. A few summons stay outside the pip tree:
+// Lightning Strike is granted by a truthful demon parlay (see
+// state.lightningUnlocked), the Tinytaur reveals itself once enough Minotaurs
+// are fielded at once, and the Dragon summon shows whenever at least one
+// Dragon Beacon is `active` (the simultaneous-dragon cap equals the
+// active-beacon count).
+//
+// The task list itself is data: upgrade-tree.json's `tasks` array (editable
+// in the dev editor, including adding new work blocks). Each def's goal
+// template becomes a live isDone via goalDone; each def's `requires` is its
+// explicit prerequisite DAG — same model as upgrades.
+const TASKS: Task[] = UPGRADE_TREE.tasks.map((d): Task => {
+  const prereq = taskRequiresOf(d);
+  const g = d.goal;
+  const targetKind = (g.type === 'place' || g.type === 'build' || g.type === 'run') && g.building in BUILDING_DEFS
+    ? g.building as BuildingKind
+    : undefined;
+  return {
+    id: d.id,
+    text: taskText(d),
+    isDone: (s) => goalDone(g, s),
+    prereq: prereq.length > 0 ? prereq : undefined,
+    optional: d.optional,
+    targetKind,
+  };
+});
+
+// First root task (no prerequisites) — gates the build panel's first reveal
+// and the onboarding hints. (Was hardcoded 'earn_100' before tasks became
+// data.)
+const FIRST_TASK: Task | undefined = TASKS.find(t => !t.prereq && !t.optional)
+  ?? TASKS.find(t => !t.prereq) ?? TASKS[0];
+// The money-rate readout historically appears once the Phone Farm task is
+// complete. If that task gets edited out of the tree, fall back to the first
+// task so the readout still unlocks somewhere sensible.
+const MONEY_RATE_TASK_ID = TASKS.some(t => t.id === 'run_phone_farm')
+  ? 'run_phone_farm'
+  : (FIRST_TASK?.id ?? '');
 
 export type UICallbacks = {
   onSpawnGoblin: () => void;
@@ -680,28 +640,10 @@ export function setupUI(state: GameState, callbacks: UICallbacks) {
   lightningBtn.addEventListener('click', (e) => { playSound('click', 1, 0.75); flashSummonClick(lightningBtn); emanateAtCursor(e.clientX, e.clientY, 'white'); callbacks.onLightningStrike(); });
   ritualList.appendChild(lightningBtn);
 
-  // Map each buildable kind back to the task that unlocks it. Used both for
-  // gating and for placing visual separators between task-unlock groups.
-  const kindToTaskId: Record<string, string> = {};
-  for (const t of TASKS) for (const k of t.unlocks) kindToTaskId[k] = t.id;
-
-  // One button per building kind
-  let prevTaskId: string | null = null;
+  // One button per building kind. The Goblin Hole renders inside the Ritual
+  // section rather than the Build list.
   for (const kind of SORTED_KINDS) {
-    const taskId = kindToTaskId[kind] ?? '';
-    // The Goblin Hole renders inside the Ritual section rather than the Build
-    // list, so it neither emits a build-list separator nor breaks the run of
-    // build kinds around it.
     const inRitual = kind === 'goblin_hole';
-    if (!inRitual) {
-      if (prevTaskId !== null && taskId !== prevTaskId) {
-        const sep = document.createElement('div');
-        sep.className = 'build-separator';
-        buildList.appendChild(sep);
-        buildSeparators.push({ el: sep, afterTaskId: taskId });
-      }
-      prevTaskId = taskId;
-    }
     const def = BUILDING_DEFS[kind];
     const btn = document.createElement('button');
     btn.className = 'build-button';
@@ -913,8 +855,10 @@ export function refreshUI(state: GameState) {
       // old id onto the new one so an in-progress save keeps Goldblins unlocked.
       if (u.completed.has('earn_30_blood')) u.completed.add('summon_minotaurs');
       if (u.revealed.has('earn_30_blood')) u.revealed.add('summon_minotaurs');
+      if (u.pipsAwarded.has('earn_30_blood')) u.pipsAwarded.add('summon_minotaurs');
       for (const id of u.completed) { completedTaskIds.add(id); previouslyCompletedTaskIds.add(id); }
       for (const id of u.revealed) revealedTaskIds.add(id);
+      for (const id of u.pipsAwarded) pipsAwardedTaskIds.add(id);
       for (const k of u.obsoleted) obsoletedKinds.add(k);
       for (const k of u.everBuilt) everBuiltKinds.add(k);
       if (u.minotaurEverSummoned) minotaurEverSummoned = true;
@@ -974,13 +918,12 @@ export function refreshUI(state: GameState) {
     setFillWidth(`fill-spawn-goblin-${i}`, spawnBySlot[i] ?? 0);
   }
 
-  // Minotaur button — unlocked by the Construct-a-Gas-Turbine task (Phase 3).
-  // Gated on revealedTaskIds so it fades in after the TASK COMPLETE overlay
-  // clears. Cost doubles per summon (8→16→32→64). Disabled while a summon is in
-  // progress; the segment bar fills like the Goblin button's spawn track.
+  // Minotaur button — unlocked by buying the Minotaur node in the Upgrades
+  // overlay. Cost doubles per summon (8→16→32→64). Disabled while a summon is
+  // in progress; the segment bar fills like the Goblin button's spawn track.
   const minotaurBtn = document.getElementById('btn-summon-minotaur') as HTMLButtonElement;
   const minotaurCostEl = document.getElementById('cost-summon-minotaur')!;
-  if (revealedTaskIds.has('build_gas_engine')) {
+  if (state.purchasedUpgrades.has('minotaur')) {
     minotaurBtn.style.display = '';
     applyFadeInOnFirstShow('btn-summon-minotaur');
     const queued = state.minotaurSpawnQueue.length;
@@ -1053,25 +996,33 @@ export function refreshUI(state: GameState) {
 
   // Tutorial: build the completed set first, then collect any tasks whose
   // prereqs are all done but which are themselves not done yet — those are
-  // the *active* tasks (multiple can be active at once). A completed task's
-  // unlocks only kick in once its celebration overlay has finished
-  // (revealedTaskIds), so newly-revealed buttons stay hidden during the
-  // black-out and then fade in.
-  const unlocked = new Set<BuildingKind>();
+  // the *active* tasks (multiple can be active at once). Completing a task
+  // pays out its pips (amounts in upgrade-tree.json) exactly once, tracked
+  // sticky in pipsAwardedTaskIds.
   for (const t of TASKS) {
     // A task can only complete once its prereqs have, so an isDone satisfiable
-    // out of DAG order can't fire its unlock early (the Goblin Hole's
-    // Summon-2-Minotaurs task, gated behind build_gas_engine, would otherwise
-    // pop the instant a Minotaur count crossed 2). Safe as a single forward pass: prereqs
+    // out of DAG order can't fire early (the Summon-2-Minotaurs side-task,
+    // gated behind build_gas_engine, would otherwise pop the instant a
+    // Minotaur count crossed 2). Safe as a single forward pass: prereqs
     // precede their dependents in TASKS, so they're added to completedTaskIds
     // earlier in this same loop.
     const prereqsDone = !t.prereq || t.prereq.every(id => completedTaskIds.has(id));
     if (completedTaskIds.has(t.id) || (prereqsDone && t.isDone(state))) {
       completedTaskIds.add(t.id);
-      if (revealedTaskIds.has(t.id)) {
-        for (const k of t.unlocks) unlocked.add(k);
+      if (!pipsAwardedTaskIds.has(t.id)) {
+        pipsAwardedTaskIds.add(t.id);
+        const pips = pipsForTask(t.id);
+        if (pips > 0) {
+          state.pips += pips;
+          appendLog(state, `+${pips} pip${pips === 1 ? '' : 's'} — spend them in Upgrades.`);
+        }
       }
     }
+  }
+  // Buildings unlock by owning their upgrade-tree node, not by task reveals.
+  const unlocked = new Set<BuildingKind>();
+  for (const id of state.purchasedUpgrades) {
+    if (id in BUILDING_DEFS) unlocked.add(id as BuildingKind);
   }
   // Fire the celebration animation for any task that crossed the threshold
   // since the last frame.
@@ -1089,21 +1040,29 @@ export function refreshUI(state: GameState) {
   }
   // Mandatory tasks first, optional side-tasks after (stable within each group).
   activeTasks.sort((a, b) => Number(a.optional ?? false) - Number(b.optional ?? false));
-  const firstTaskDone = completedTaskIds.has('earn_100');
+  // Kinds targeted by live work — exempt from the "outgrown" button hide
+  // below, so progressing a tier can't brick an active place/build/run task.
+  const taskTargetKinds = new Set<BuildingKind>();
+  for (const t of activeTasks) {
+    if (t.targetKind !== undefined) taskTargetKinds.add(t.targetKind);
+  }
+  const firstTaskDone = FIRST_TASK !== undefined && completedTaskIds.has(FIRST_TASK.id);
   currentTaskCached = activeTasks[0] ?? null;
+  // The Build list shows once any build-list kind is owned (the Goblin Hole
+  // lives in the Ritual list, so it doesn't count toward this).
+  let anyBuildKindUnlocked = false;
+  for (const k of unlocked) {
+    if (k !== 'goblin_hole') { anyBuildKindUnlocked = true; break; }
+  }
   const buildSection = document.getElementById('build-section')!;
-  buildSection.style.display = firstTaskDone ? '' : 'none';
+  buildSection.style.display = anyBuildKindUnlocked ? '' : 'none';
 
-  // Reveal flags for the task-gated abilities. Gated on revealedTaskIds (not
-  // completedTaskIds) so each button emerges AFTER its TASK COMPLETE overlay
-  // fades, letting the fade-in animation play.
-  //   run_phone_farm       → Autobuild, Autospawn
-  //   build_gas_engine     → Dig (+ Minotaur, handled above)
-  //   summon_minotaurs     → Goldblins
-  // (Lightning Strike is granted by the demon parlay, not a task.)
-  const phaseRunPhoneFarm = revealedTaskIds.has('run_phone_farm');
-  const phaseGasTurbine = revealedTaskIds.has('build_gas_engine');
-  const minotaurTaskDone = revealedTaskIds.has('summon_minotaurs');
+  // Ownership flags for the pip-purchased abilities (bought in the Upgrades
+  // overlay; each button surfaces the moment its node is owned).
+  // (Lightning Strike is granted by the demon parlay, not a purchase.)
+  const autobuildOwned = state.purchasedUpgrades.has('autobuild');
+  const autospawnOwned = state.purchasedUpgrades.has('autospawn');
+  const goldblinsOwned = state.purchasedUpgrades.has('goldblins');
 
   // Collecting 5 dragon bones is the demo's closing easter egg: once that task
   // reveals, fire the "game's incomplete" alerts and unlock the secret settings
@@ -1112,11 +1071,14 @@ export function refreshUI(state: GameState) {
     revealSecretSettings(state);
   }
 
-  // Lightning Strike — a ritual granted only by a truthful demon parlay (see
-  // demon-dialogue.ts). Disabled when the player can't cover the blood cost;
-  // lit while armed.
+  // Lightning Strike — owned via the 'lightning' upgrade node (demon-gifted
+  // by default, or pip-purchased if the designer puts it in the tree).
+  // state.lightningUnlocked covers saves from when the parlay set a bespoke
+  // flag. Disabled when the player can't cover the blood cost; lit while
+  // armed.
+  const lightningOwned = state.lightningUnlocked || state.purchasedUpgrades.has('lightning');
   const lightningBtn = document.getElementById('btn-lightning-strike') as HTMLButtonElement;
-  if (state.lightningUnlocked) {
+  if (lightningOwned) {
     lightningBtn.style.display = '';
     applyFadeInOnFirstShow('btn-lightning-strike');
     const canAffordLightning = state.blood >= LIGHTNING.bloodCost;
@@ -1128,19 +1090,29 @@ export function refreshUI(state: GameState) {
     lightningBtn.style.display = 'none';
   }
 
-  // Dig rewards build_gas_engine (Phase 3). Digging itself still needs a
-  // Minotaur (also rewarded around Phase 3), so a "needs Minotaur" banner covers
-  // the row until one is summoned; see the dig-overlay below.
-  const digUnlocked = phaseGasTurbine;
-  const ritualVisible = phaseRunPhoneFarm || phaseGasTurbine || minotaurTaskDone || state.lightningUnlocked;
+  // Dig is its own pip purchase. Digging itself still needs a Minotaur, so a
+  // "needs Minotaur" banner covers the row until one is summoned; see the
+  // dig-overlay below.
+  const digUnlocked = state.purchasedUpgrades.has('dig');
+  const ritualVisible = autobuildOwned || autospawnOwned || goldblinsOwned
+    || digUnlocked || unlocked.has('goblin_hole') || lightningOwned;
   const ritualSection = document.getElementById('ritual-section')!;
   ritualSection.style.display = ritualVisible ? '' : 'none';
   // Now that the panel renders as a bordered card, an empty container shows
   // up as a thin empty bar — hide the outer panel until either subsection
-  // unlocks.
+  // (or the Upgrades button, which appears with the first pip payout) unlocks.
+  const upgradesVisible = state.pips > 0 || state.purchasedUpgrades.size > 0;
   const panelBuild = document.getElementById('panel-build')!;
-  const panelBuildVisible = firstTaskDone || ritualVisible;
+  const panelBuildVisible = upgradesVisible || firstTaskDone || ritualVisible;
   panelBuild.style.display = panelBuildVisible ? '' : 'none';
+
+  // The Upgrades button sits at the top of the build panel; it appears with
+  // the first pip payout and never leaves.
+  const upgradeSectionEl = document.getElementById('upgrade-section');
+  if (upgradeSectionEl) {
+    upgradeSectionEl.style.display = upgradesVisible ? '' : 'none';
+    if (upgradesVisible) applyFadeInOnFirstShow('btn-open-upgrades');
+  }
 
   // Scroll cue — a minimal chevron pointing at a newly-unlocked button or task
   // that's currently sitting below the fold, since iOS/macOS hide overlay
@@ -1177,7 +1149,7 @@ export function refreshUI(state: GameState) {
   const autoWaterVisible = state.autoAssignEnabled && state.waterSources.size > 0;
   refreshRitualButton(
     'btn-buy-autoassign', 'cost-buy-autoassign',
-    phaseRunPhoneFarm && !autoWaterVisible,
+    autobuildOwned && !autoWaterVisible,
     state.autoAssignEnabled, state.blood >= SUMMON_UPGRADES.autoAssign.bloodCost,
     `${SUMMON_UPGRADES.autoAssign.bloodCost} blood`,
   );
@@ -1187,15 +1159,15 @@ export function refreshUI(state: GameState) {
     state.autoWaterEnabled, state.blood >= SUMMON_UPGRADES.autoWater.bloodCost,
     `${SUMMON_UPGRADES.autoWater.bloodCost} blood`,
   );
-  // Autospawn — unlocked by the Run-a-Phone-Farm task (Phase 2).
-  refreshAutospawnButton(state, phaseRunPhoneFarm);
+  // Autospawn — its own pip purchase.
+  refreshAutospawnButton(state, autospawnOwned);
   // Goldblins → Goldblins x10 form a replace chain (like Autospawn): base
   // button hides once owned, x10 takes its place; x10 hides once owned.
-  // Base Goldblins unlocks via the optional Summon-2-Minotaurs side-task; x10
-  // follows once base Goldblins is owned.
+  // Base Goldblins unlocks via its pip purchase; x10 follows once base
+  // Goldblins is owned.
   refreshRitualButton(
     'btn-buy-goldgoblins', 'cost-buy-goldgoblins',
-    minotaurTaskDone && !state.goldgoblinsEnabled, false,
+    goldblinsOwned && !state.goldgoblinsEnabled, false,
     state.blood >= SUMMON_UPGRADES.goldgoblins.bloodCost,
     `${SUMMON_UPGRADES.goldgoblins.bloodCost} blood`,
   );
@@ -1207,10 +1179,10 @@ export function refreshUI(state: GameState) {
     `${SUMMON_UPGRADES.goldgoblinsX10.bloodCost} blood`,
   );
 
-  // Dig row: unlocked by the Construct-a-Gas-Turbine task (Phase 3). Each
-  // direction is one-shot. First time the row appears, each button fades in.
-  // Until a Minotaur has been summoned (also Phase 3), a "needs Minotaur" banner
-  // covers the row and the buttons are disabled.
+  // Dig row: unlocked by the Dig pip purchase. Each direction is one-shot.
+  // First time the row appears, each button fades in. Until a Minotaur has
+  // been summoned, a "needs Minotaur" banner covers the row and the buttons
+  // are disabled.
   if (state.minotaurs.size > 0) minotaurEverSummoned = true;
   const needsMinotaur = !minotaurEverSummoned;
   const digRow = document.getElementById('dig-row')!;
@@ -1267,7 +1239,7 @@ export function refreshUI(state: GameState) {
   for (const kind of SORTED_KINDS) {
     const def = BUILDING_DEFS[kind];
     const btn = document.getElementById(btnId(kind)) as HTMLButtonElement;
-    const visible = unlocked.has(kind) && !obsoletedKinds.has(kind);
+    const visible = unlocked.has(kind) && (!obsoletedKinds.has(kind) || taskTargetKinds.has(kind));
     btn.classList.toggle('locked', !visible);
     if (!visible) { setBuyFlash(btnId(kind), false); continue; }
     // Goblin Hole's price doubles per hole in play, so its cost is dynamic —
@@ -1294,29 +1266,6 @@ export function refreshUI(state: GameState) {
     if (bloodCostEl) bloodCostEl.classList.toggle('met', canAffordBlood);
     const boneCostEl = document.getElementById(`bone-cost-${kind}`);
     if (boneCostEl) boneCostEl.classList.toggle('met', canAffordBone);
-  }
-
-  // Hide separators that mark a task boundary the player hasn't crossed yet.
-  // Hide separators that don't actually sit between two visible buttons.
-  // Walks the live DOM so this stays correct regardless of how visibility
-  // is computed (locked, obsoleted, etc.) — a separator only shows when
-  // there's at least one non-locked .build-button on each side of it.
-  const buildListEl = document.getElementById('build-list')!;
-  const children = Array.from(buildListEl.children) as HTMLElement[];
-  const isVisibleButton = (el: HTMLElement) =>
-    el.classList.contains('build-button') && !el.classList.contains('locked');
-  for (let i = 0; i < children.length; i++) {
-    const c = children[i];
-    if (!c.classList.contains('build-separator')) continue;
-    let hasBefore = false;
-    for (let j = i - 1; j >= 0; j--) {
-      if (isVisibleButton(children[j])) { hasBefore = true; break; }
-    }
-    let hasAfter = false;
-    for (let j = i + 1; j < children.length; j++) {
-      if (isVisibleButton(children[j])) { hasAfter = true; break; }
-    }
-    c.style.display = (hasBefore && hasAfter) ? '' : 'none';
   }
 
   // Placement hint
@@ -1346,10 +1295,11 @@ export function refreshUI(state: GameState) {
   panHint.style.display = (dugDelayElapsed && !state.waterSeen) ? 'block' : 'none';
 
   // Spawn-hint — onboarding nudge that fades in once either timeout trips.
-  // First task is `earn_100`; check sticky completion as well as live state
-  // so a save resumed mid-game doesn't pop the hint back up.
+  // Keyed to the first mandatory task; check sticky completion as well as
+  // live state so a save resumed mid-game doesn't pop the hint back up.
   const spawnHint = document.getElementById('spawn-hint')!;
-  const earn100Done = completedTaskIds.has('earn_100') || TASKS[0].isDone(state);
+  const earn100Done = FIRST_TASK !== undefined
+    && (completedTaskIds.has(FIRST_TASK.id) || FIRST_TASK.isDone(state));
   const noSpawnTrip = state.spawnsCompleted === 0 && state.now >= SPAWN_HINT_NO_SPAWN_SEC;
   const noTaskTrip = !earn100Done && state.now >= SPAWN_HINT_NO_TASK_SEC;
   spawnHint.classList.toggle('visible', noSpawnTrip || noTaskTrip);
@@ -1378,10 +1328,14 @@ export function refreshUI(state: GameState) {
   state.unlocks = {
     completed: completedTaskIds,
     revealed: revealedTaskIds,
+    pipsAwarded: pipsAwardedTaskIds,
     obsoleted: obsoletedKinds,
     everBuilt: everBuiltKinds,
     minotaurEverSummoned,
   };
+
+  // Upgrades button + (if open) the tree overlay.
+  refreshUpgradeUI(state);
 
   refreshInfoPanel(state);
 
@@ -1890,9 +1844,17 @@ export function executeTaskSkip(state: GameState): void {
   const skipped = next;
   completedTaskIds.add(skipped.id);
   // Task-skip is a debug shortcut — don't fire the celebration animation
-  // and reveal the unlocks immediately rather than waiting on the overlay.
+  // and reveal immediately rather than waiting on the overlay.
   previouslyCompletedTaskIds.add(skipped.id);
   revealedTaskIds.add(skipped.id);
+  // Pay the task's pips, and grant its legacy unlock set free of charge —
+  // the rigs above place buildings the player "should" own by this point,
+  // so their build buttons need to exist post-skip.
+  if (!pipsAwardedTaskIds.has(skipped.id)) {
+    pipsAwardedTaskIds.add(skipped.id);
+    state.pips += pipsForTask(skipped.id);
+  }
+  for (const u of LEGACY_TASK_UNLOCKS[skipped.id] ?? []) state.purchasedUpgrades.add(u);
   appendLog(state, `Work skip: "${skipped.text}" marked complete.`);
 }
 
@@ -1953,6 +1915,9 @@ function placeOneBuilding(state: GameState, kind: BuildingKind, opts: PlaceOpts 
   };
   state.buildings.set(b.id, b);
   markBuildingsChanged(state);
+  // Skip-rigged buildings arrive pre-built — count them toward "Build X"
+  // task goals like a real completion.
+  state.buildingsBuilt[kind] = (state.buildingsBuilt[kind] ?? 0) + 1;
 
   // Snap idle goblins straight into 'maintaining' inside the footprint so
   // resolvePowerAndState marks the building active on the very next tick.

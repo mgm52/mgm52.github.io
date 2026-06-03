@@ -1,0 +1,129 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Upgrade Tree Editor — Goblin Datacentres</title>
+    <!-- Dev-only balance editor for src/upgrade-tree.json. Served by the vite
+         dev server only (not part of the production build); Save writes the
+         file back through the /__dev/upgrade-tree middleware in vite.config.ts. -->
+    <style>
+      :root {
+        --bg: #14161a;
+        --panel: #1d2127;
+        --border: #2d3138;
+        --text: #d6dae0;
+        --dim: #6a7080;
+        --accent: #ffd96b;
+        --task: #d98c4a;
+        --owned: #79c97f;
+        --danger: #e06c6c;
+      }
+      html, body { margin: 0; height: 100%; background: var(--bg); color: var(--text);
+        font-family: 'Segoe UI', system-ui, sans-serif; font-size: 13px; overflow: hidden; }
+      #topbar {
+        display: flex; align-items: center; gap: 12px;
+        padding: 8px 14px; border-bottom: 1px solid var(--border); background: var(--panel);
+      }
+      #topbar h1 { font-size: 14px; margin: 0; letter-spacing: 2px; text-transform: uppercase; color: #b8bec6; flex: 0 0 auto; }
+      #status { color: var(--dim); flex: 1; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+      #status.dirty { color: var(--accent); }
+      #status.error { color: var(--danger); }
+      button {
+        background: #262b32; color: var(--text); border: 1px solid #3a4048;
+        border-radius: 4px; padding: 5px 12px; cursor: pointer; font-size: 13px;
+      }
+      button:hover { border-color: #5a6470; }
+      button.primary { border-color: var(--accent); color: var(--accent); }
+      button.danger { border-color: #5a3030; color: var(--danger); }
+      #toggle-needs-label { color: var(--dim); display: inline-flex; align-items: center; gap: 5px; white-space: nowrap; user-select: none; cursor: pointer; }
+      .insp-row input[type="text"], .insp-row select {
+        flex: 1; min-width: 0; background: #14161a; color: var(--text);
+        border: 1px solid #3a4048; border-radius: 4px; padding: 3px 6px; font-size: 13px;
+      }
+      .insp-row input[type="checkbox"] { margin: 0; }
+      .btn-row { display: flex; gap: 6px; margin-top: 8px; flex-wrap: wrap; }
+      main { display: flex; height: calc(100% - 42px); }
+      #canvas-wrap { flex: 1; overflow: auto; position: relative; }
+      #canvas { position: relative; }
+      #edges { position: absolute; left: 0; top: 0; }
+      .edge { fill: none; stroke: #3a4048; stroke-width: 2; }
+      .edge.req { cursor: pointer; pointer-events: stroke; }
+      .edge.req:hover { stroke: var(--danger); }
+      .edge.chain { stroke: rgba(217, 140, 74, 0.45); stroke-dasharray: 6 4; cursor: pointer; pointer-events: stroke; }
+      .edge.chain:hover { stroke: var(--danger); }
+      .edge.needs { stroke: rgba(217, 140, 74, 0.18); stroke-dasharray: 2 4; pointer-events: none; }
+      /* invisible fat twin under each req edge to make clicking easy */
+      .edge-hit { fill: none; stroke: transparent; stroke-width: 12; cursor: pointer; pointer-events: stroke; }
+      /* Running pip totals drawn at each edge's midpoint: cumulative ◉ spent
+         to own the target (req edges) / earned by that point (chain edges). */
+      .edge-label { font-size: 10px; pointer-events: none; paint-order: stroke; stroke: var(--bg); stroke-width: 3px; }
+      .edge-label.req { fill: #9aa1ab; }
+      .edge-label.chain { fill: var(--task); }
+      .node {
+        position: absolute; width: 148px; height: 58px; box-sizing: border-box;
+        display: flex; flex-direction: column; justify-content: center; gap: 1px;
+        padding: 4px 10px; border-radius: 6px; cursor: grab;
+        background: #20242a; border: 1px solid #3a4048; user-select: none;
+      }
+      .node:active { cursor: grabbing; }
+      .node .sec { font-size: 8px; letter-spacing: 1px; text-transform: uppercase; color: var(--dim); }
+      .node .name { font-size: 13px; line-height: 1.15; }
+      .node .cost { font-size: 11px; color: #9aa1ab; font-variant-numeric: tabular-nums; }
+      .node.task { background: #241c12; border-color: #5a4426; }
+      .node.task .cost { color: var(--task); }
+      .node.optional { border-style: dashed; }
+      .node.selected { border-color: var(--accent); box-shadow: 0 0 8px rgba(255, 217, 107, 0.35); }
+      .node.link-target-ok:hover { border-color: var(--owned); }
+      #side {
+        width: 320px; flex: 0 0 auto; overflow-y: auto;
+        border-left: 1px solid var(--border); background: var(--panel); padding: 12px;
+        box-sizing: border-box;
+      }
+      #side h2 { font-size: 11px; letter-spacing: 2px; text-transform: uppercase; color: var(--dim); margin: 14px 0 6px; }
+      #side h2:first-child { margin-top: 0; }
+      .insp-row { display: flex; align-items: center; gap: 8px; margin-bottom: 6px; }
+      .insp-row label { flex: 0 0 70px; color: var(--dim); }
+      .insp-row input[type="number"] {
+        width: 70px; background: #14161a; color: var(--text);
+        border: 1px solid #3a4048; border-radius: 4px; padding: 3px 6px; font-size: 13px;
+      }
+      .chip {
+        display: inline-flex; align-items: center; gap: 5px;
+        background: #262b32; border: 1px solid #3a4048; border-radius: 10px;
+        padding: 1px 8px; margin: 0 4px 4px 0; font-size: 12px;
+      }
+      .chip button { border: none; background: none; color: var(--dim); padding: 0; font-size: 12px; }
+      .chip button:hover { color: var(--danger); }
+      .muted { color: var(--dim); }
+      #report div { padding: 2px 0; }
+      .rep-ok::before { content: "✓ "; color: var(--owned); }
+      .rep-bad::before { content: "✗ "; color: var(--danger); }
+      .rep-warn::before { content: "⚠ "; color: var(--accent); }
+      kbd { background: #262b32; border: 1px solid #3a4048; border-radius: 3px; padding: 0 4px; font-size: 11px; }
+    </style>
+  </head>
+  <body>
+    <div id="topbar">
+      <h1>Upgrade Tree</h1>
+      <span id="status">loading…</span>
+      <label id="toggle-needs-label"><input type="checkbox" id="toggle-needs" checked /> work→unlock lines</label>
+      <button id="btn-add-work" type="button">+ Add work</button>
+      <button id="btn-add-upgrade" type="button">+ Add upgrade</button>
+      <button id="btn-revert" type="button">Revert</button>
+      <button id="btn-save" class="primary" type="button">Save to file</button>
+    </div>
+    <main>
+      <div id="canvas-wrap"><div id="canvas"></div></div>
+      <aside id="side">
+        <h2>Inspector</h2>
+        <div id="inspector" class="muted">Click a node to edit it. Drag nodes to rearrange. Click a solid edge to delete it. <kbd>Ctrl+S</kbd> saves.</div>
+        <h2>Demon reward</h2>
+        <div id="demon-reward"></div>
+        <h2>Balance check</h2>
+        <div id="report"></div>
+      </aside>
+    </main>
+    <script type="module" src="/src/upgrade-editor.ts"></script>
+  </body>
+</html>

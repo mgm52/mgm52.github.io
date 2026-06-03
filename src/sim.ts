@@ -2201,6 +2201,8 @@ function updateConstruction(state: GameState, b: Building) {
       g.goal = null;
     }
     b.assignedGoblins = newAssigned;
+    // Cumulative completion tally — drives the "Build X" task goals.
+    state.buildingsBuilt[b.kind] = (state.buildingsBuilt[b.kind] ?? 0) + 1;
     // Buildings with no power draw and no maintainers (e.g. Goblin Hole)
     // skip resolvePowerAndState and stay where we put them, so finish them
     // straight to active.

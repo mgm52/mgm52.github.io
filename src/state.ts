@@ -373,6 +373,14 @@ export function getSpawnCapacity(state: GameState): number {
 
 export type GameState = {
   money: number;
+  // Pips — the upgrade-tree currency. Paid out by completing tutorial tasks
+  // (amounts in upgrade-tree.json), spent on upgrade nodes in the Upgrades
+  // overlay. Holds the *unspent* balance.
+  pips: number;
+  // Upgrade-tree nodes the player owns (building kinds + ability ids — see
+  // upgrade-tree.ts). Owning a node is what surfaces its button in the
+  // Build / Summon / Ritual menus. Sticky: never removed.
+  purchasedUpgrades: Set<string>;
   // Blood is earned by killing goblins. Once any blood is earned in this run
   // `bloodUnlocked` flips true and the resource row stays visible (sticky).
   blood: number;
@@ -387,6 +395,14 @@ export type GameState = {
   moneyEarned: number;
   bloodEarned: number;
   dragonBoneEarned: number;
+  // Cumulative kills per creature type — incremented in recordGhost, which
+  // every kill site already calls. Drives the "Kill a [creature]" task goals.
+  kills: Record<'goblin' | 'minotaur' | 'dragon', number>;
+  // Cumulative construction completions per kind — bumped when a build
+  // finishes (sim) or a task-skip rig places a pre-built building. Monotonic
+  // like buildingCounts, so "Build X" task goals can't regress (or brick) when
+  // buildings are demolished, hauled to space, or their button is outgrown.
+  buildingsBuilt: Record<BuildingKind, number>;
   goblins: Map<number, Goblin>;
   minotaurs: Map<number, Minotaur>;
   dragons: Map<number, Dragon>;
@@ -434,8 +450,10 @@ export type GameState = {
   // Sticky: flips true once the player has vaporised two or more dragons with a
   // single Lightning Strike. (Legacy: no longer read by the demon parlay.)
   slewTwoDragonsInOneStrike: boolean;
-  // Sticky: the Lightning Strike ritual. Granted solely by a truthful demon
-  // parlay (Bob owning a dragon bone); never unlocked any other way.
+  // Sticky: legacy flag for the Lightning Strike ritual. Newer grants go
+  // through purchasedUpgrades ('lightning' — demon-gifted or pip-purchased
+  // per upgrade-tree.json's demonReward); this stays for old saves and the
+  // UI checks both.
   lightningUnlocked: boolean;
   // Number of Minotaurs summoned this run — drives the doubling summon cost.
   minotaursBought: number;
@@ -541,6 +559,7 @@ export type GameState = {
 export type UnlockState = {
   completed: Set<string>;       // completedTaskIds
   revealed: Set<string>;        // revealedTaskIds
+  pipsAwarded: Set<string>;     // pipsAwardedTaskIds — tasks whose pip payout already happened
   obsoleted: Set<BuildingKind>; // obsoletedKinds
   everBuilt: Set<BuildingKind>; // everBuiltKinds
   minotaurEverSummoned: boolean;
@@ -862,6 +881,8 @@ export function digDirection(state: GameState, dir: 'n' | 'e' | 's' | 'w'): { ok
 export function createInitialState(): GameState {
   const state: GameState = {
     money: START_MONEY,
+    pips: 0,
+    purchasedUpgrades: new Set(),
     blood: 0,
     bloodUnlocked: false,
     dragonBone: 0,
@@ -869,6 +890,8 @@ export function createInitialState(): GameState {
     moneyEarned: 0,
     bloodEarned: 0,
     dragonBoneEarned: 0,
+    kills: { goblin: 0, minotaur: 0, dragon: 0 },
+    buildingsBuilt: emptyBuildingCounts(),
     goblins: new Map(),
     minotaurs: new Map(),
     dragons: new Map(),
@@ -1151,6 +1174,9 @@ export function recordGhost(
   facing: number,
   opts: { gold?: boolean; tiny?: boolean; bob?: boolean } = {},
 ): void {
+  // Every kill site funnels through here, so this is the one counting spot
+  // the "Kill a [creature]" task goals need.
+  state.kills[kind]++;
   state.ghosts.push({
     id: state.nextId++,
     kind, x, y, facing,

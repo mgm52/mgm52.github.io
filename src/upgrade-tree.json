@@ -1,0 +1,298 @@
+{
+  "_comment": "Pip-based upgrade tree balance. Edited via the dev editor (upgrade-editor.html on the vite dev server) or by hand. Each task in `tasks` carries explicit `requires` (prerequisite task ids; empty/absent = available from the start) — same DAG model as upgrades. A task's `goal` is a template the game turns into a live completion check (see goalDone in upgrade-tree.ts); `text` overrides the auto-generated label; `optional` only affects how the task line renders. `demonReward` is what a truthful parlay grants Bob. `upgrades` holds pip cost + prerequisite upgrade ids for every purchasable node (building kinds plus ability ids - see ABILITY_UPGRADES in upgrade-tree.ts). `layout` holds editor/in-game node positions; task nodes are keyed as task:<id>.",
+  "tasks": [
+    {
+      "id": "earn_100",
+      "pips": 2,
+      "text": "Make Ƶ100 (somehow...)",
+      "requires": [],
+      "goal": {
+        "type": "earn_money",
+        "amount": 100
+      }
+    },
+    {
+      "id": "run_phone_farm",
+      "pips": 5,
+      "requires": [
+        "earn_100"
+      ],
+      "goal": {
+        "type": "run",
+        "building": "phone_farm",
+        "count": 1
+      }
+    },
+    {
+      "id": "build_gas_engine",
+      "pips": 10,
+      "text": "Construct a Gas Turbine",
+      "requires": [
+        "run_phone_farm"
+      ],
+      "goal": {
+        "type": "build",
+        "building": "gas_engine",
+        "count": 1
+      }
+    },
+    {
+      "id": "run_datacentre",
+      "pips": 20,
+      "text": "Run your first datacentre",
+      "requires": [
+        "build_gas_engine"
+      ],
+      "goal": {
+        "type": "run",
+        "building": "datacentre",
+        "count": 1
+      }
+    },
+    {
+      "id": "build_hypercentre",
+      "pips": 20,
+      "text": "Build a Hypercentre",
+      "requires": [
+        "run_datacentre"
+      ],
+      "goal": {
+        "type": "place",
+        "building": "hypercentre",
+        "count": 1
+      }
+    },
+    {
+      "id": "summon_minotaurs",
+      "pips": 10,
+      "optional": true,
+      "requires": [
+        "work_1"
+      ],
+      "goal": {
+        "type": "summon_minotaurs",
+        "count": 2
+      }
+    },
+    {
+      "id": "collect_dragon_bones",
+      "pips": 12,
+      "requires": [
+        "build_hypercentre"
+      ],
+      "goal": {
+        "type": "collect_bones",
+        "amount": 5
+      }
+    },
+    {
+      "id": "work_1",
+      "pips": 10,
+      "requires": [
+        "run_phone_farm"
+      ],
+      "goal": {
+        "type": "place",
+        "building": "phone_farm",
+        "count": 10
+      }
+    }
+  ],
+  "demonReward": {
+    "type": "blood",
+    "amount": 2500
+  },
+  "upgrades": {
+    "goblin_wheel": {
+      "cost": 1,
+      "requires": []
+    },
+    "phone_farm": {
+      "cost": 1,
+      "requires": []
+    },
+    "autobuild": {
+      "cost": 2,
+      "requires": [
+        "gas_engine"
+      ]
+    },
+    "autospawn": {
+      "cost": 2,
+      "requires": [
+        "gas_engine"
+      ]
+    },
+    "gas_engine": {
+      "cost": 2,
+      "requires": [
+        "goblin_wheel"
+      ]
+    },
+    "minotaur": {
+      "cost": 2,
+      "requires": [
+        "autobuild"
+      ]
+    },
+    "datacentre": {
+      "cost": 6,
+      "requires": [
+        "phone_farm"
+      ]
+    },
+    "goblin_hole": {
+      "cost": 2,
+      "requires": [
+        "autospawn"
+      ]
+    },
+    "goldblins": {
+      "cost": 2,
+      "requires": [
+        "autospawn"
+      ]
+    },
+    "wall": {
+      "cost": 1,
+      "requires": [
+        "gas_engine"
+      ]
+    },
+    "nuclear_reactor": {
+      "cost": 30,
+      "requires": [
+        "hypercentre"
+      ]
+    },
+    "hypercentre": {
+      "cost": 6,
+      "requires": [
+        "datacentre"
+      ]
+    },
+    "dragon_beacon": {
+      "cost": 10,
+      "requires": [
+        "hypercentre"
+      ]
+    },
+    "hell_portal": {
+      "cost": 15,
+      "requires": [
+        "nuclear_reactor",
+        "dragon_beacon"
+      ]
+    },
+    "lightning": {
+      "cost": 1,
+      "requires": [
+        "minotaur"
+      ]
+    },
+    "dig": {
+      "cost": 1,
+      "requires": [
+        "datacentre"
+      ]
+    }
+  },
+  "layout": {
+    "task:earn_100": {
+      "x": 0,
+      "y": 453
+    },
+    "task:run_phone_farm": {
+      "x": 212,
+      "y": 454
+    },
+    "task:build_gas_engine": {
+      "x": 447,
+      "y": 475
+    },
+    "task:run_datacentre": {
+      "x": 641,
+      "y": 473
+    },
+    "task:build_hypercentre": {
+      "x": 832,
+      "y": 468
+    },
+    "task:collect_dragon_bones": {
+      "x": 1016,
+      "y": 467
+    },
+    "task:summon_minotaurs": {
+      "x": 640,
+      "y": 402
+    },
+    "goblin_wheel": {
+      "x": 104,
+      "y": 631
+    },
+    "phone_farm": {
+      "x": 90,
+      "y": 289
+    },
+    "autobuild": {
+      "x": 319,
+      "y": 660
+    },
+    "autospawn": {
+      "x": 342,
+      "y": 125
+    },
+    "gas_engine": {
+      "x": 327,
+      "y": 563
+    },
+    "minotaur": {
+      "x": 511,
+      "y": 662
+    },
+    "datacentre": {
+      "x": 341,
+      "y": 327
+    },
+    "goblin_hole": {
+      "x": 521,
+      "y": 126
+    },
+    "goldblins": {
+      "x": 517,
+      "y": 48
+    },
+    "wall": {
+      "x": 527,
+      "y": 263
+    },
+    "nuclear_reactor": {
+      "x": 524,
+      "y": 553
+    },
+    "hypercentre": {
+      "x": 526,
+      "y": 324
+    },
+    "dragon_beacon": {
+      "x": 707,
+      "y": 321
+    },
+    "hell_portal": {
+      "x": 703,
+      "y": 551
+    },
+    "lightning": {
+      "x": 697,
+      "y": 663
+    },
+    "dig": {
+      "x": 528,
+      "y": 202
+    },
+    "task:work_1": {
+      "x": 446,
+      "y": 403
+    }
+  }
+}
