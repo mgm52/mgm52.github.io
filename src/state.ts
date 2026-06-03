@@ -343,6 +343,9 @@ export type SoulChair = {
   claimedBy?: number;
   // Selection state for the hell info panel. Ephemeral — reset on load.
   selected?: boolean;
+  // state.now when a soul was last commanded onto this chair — drives the
+  // one-shot ring pulse (see applyRingFlash), same as other command targets.
+  commandFlashAt?: number;
 };
 
 // One-shot jagged white bolt drawn from above down to a strike point. The
@@ -1044,13 +1047,13 @@ export function pruneSoulChairs(state: GameState): void {
 // Where a candle would land for a tap at a hell coord: the nearest portal
 // whose outer ring passes within SOUL_SIGIL.placeBand of the point, with the
 // position snapped onto the ring at the tapped angle. `ok` is false (with a
-// player-facing `reason`) when the ring already has its five candles or the
-// snap point crowds an existing one. Null when no ring is anywhere near.
+// `blocked` code) when the ring already has its five candles or the snap
+// point crowds an existing one. Null when no ring is anywhere near.
 export type CandleSpot = {
   portal: Building;
   x: number; y: number;
   ok: boolean;
-  reason?: string;
+  blocked?: 'full' | 'crowded';
 };
 export function candleSpotAt(state: GameState, hx: number, hy: number): CandleSpot | null {
   const { count, ringRadius, placeBand, candleMinGap } = SOUL_SIGIL;
@@ -1069,9 +1072,9 @@ export function candleSpotAt(state: GameState, hx: number, hy: number): CandleSp
     const y = c.y + Math.sin(a) * ringRadius;
     const ring = state.soulChairs.filter((ch) => ch.portalId === b.id);
     if (ring.length >= count) {
-      best = { portal: b, x, y, ok: false, reason: 'That ring already bears its five candles.' };
+      best = { portal: b, x, y, ok: false, blocked: 'full' };
     } else if (ring.some((ch) => Math.hypot(ch.hx - x, ch.hy - y) < candleMinGap)) {
-      best = { portal: b, x, y, ok: false, reason: 'Too close to another candle.' };
+      best = { portal: b, x, y, ok: false, blocked: 'crowded' };
     } else {
       best = { portal: b, x, y, ok: true };
     }

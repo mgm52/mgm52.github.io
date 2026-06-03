@@ -725,7 +725,9 @@ function tryPlaceCandle(state: GameState, hx: number, hy: number) {
   }
   if (!spot.ok) {
     playSound('error');
-    appendLog(state, spot.reason ?? 'Cannot place there.');
+    appendLog(state, spot.blocked === 'full'
+      ? 'That ring already bears its five candles.'
+      : 'Too close to another candle.');
     return;
   }
   if (state.blood < SOUL_SIGIL.candleBloodCost) {
@@ -795,6 +797,7 @@ function handleHellRightClick(state: GameState, hx: number, hy: number) {
     nearest.targetChairId = chair.id;
     nearest.commanded = true;
     chair.claimedBy = nearest.id;
+    chair.commandFlashAt = state.now;
     playSound('select', 0.4);
     appendLog(state, 'A soul shuffles toward the sigil.');
     return;

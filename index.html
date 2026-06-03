@@ -602,11 +602,11 @@
           pointer-events: auto; cursor: pointer; padding: 14px 22px;
         }
       }
-      /* From orbit you can't build or summon — dim those panels out. In hell
-         only summoning dims: the Build panel stays live for the Candle option. */
-      body.space-view #panel-summon,
-      body.space-view #panel-build,
-      body.hell-view #panel-summon {
+      /* From orbit you can't place buildings, so the Build list dims out.
+         Summon + Ritual stay live in every view — they simply act on the
+         overworld — and in hell the Build list is replaced by the Candle
+         option, which must stay clickable. */
+      body.space-view #build-section {
         opacity: 0.32; pointer-events: none; filter: grayscale(0.6);
         transition: opacity 500ms ease;
       }

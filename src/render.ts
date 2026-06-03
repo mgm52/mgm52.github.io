@@ -451,6 +451,9 @@ export type RenderContext = {
   // Cursor position in hell coords while candle placement is armed — drives
   // the snapped candle ghost on the outer ring. Updated by input.ts.
   candleCursor: { x: number; y: number } | null;
+  // "too close" / "ring full" tag over a blocked candle-placement preview.
+  // Created lazily, hidden whenever the preview isn't showing a blocked spot.
+  candlePreviewLabel: Text | null;
   // Death-effect splatters that ride in the hell scene (the "born in blood"
   // appearance of a ghost). Drawn from the same DeathEffect entries flagged
   // hell:true; the renderer maps their world coords into hell coords.
@@ -727,6 +730,7 @@ export async function createRender(parent: HTMLElement, state: GameState): Promi
     soulSigilLayer, soulSigilGfx, soulChairGfx, soulChairLabels: new Map(),
     sigilPowerLabels: new Map(),
     candleCursor: null,
+    candlePreviewLabel: null,
     hellEffectsLayer,
     hellFloatersLayer,
     holeGfx, holeRing, bobPickerGfx,
@@ -1405,9 +1409,18 @@ function syncSoulSigil(ctx: RenderContext, state: GameState): void {
         cg.circle(hx, hy, chairRadius * 0.55).fill({ color: 0xff5a2a, alpha: 0.5 * pulse + 0.2 });
         cg.circle(hx, hy, chairRadius * 0.28).fill({ color: 0xffd6a0, alpha: 0.45 * pulse + 0.25 });
       }
-      // Selection ring — matches the gold highlight other selected things get.
+      // Selection ring — matches the gold highlight other selected things
+      // get — or, when a soul was just commanded onto this chair, the same
+      // one-shot pulse other command targets flash (see applyRingFlash).
       if (chair.selected) {
         cg.circle(hx, hy, chairRadius + 8).stroke({ width: 3, color: 0xffd96b, alpha: 0.95 });
+      } else if (chair.commandFlashAt !== undefined) {
+        const t = (now - chair.commandFlashAt) / COMMAND_FLASH_S;
+        if (t >= 0 && t < 1) {
+          cg.circle(hx, hy, chairRadius + 8).stroke({
+            width: 3, color: 0xffd96b, alpha: Math.sin(t * Math.PI) * COMMAND_FLASH_PEAK,
+          });
+        }
       }
       // Place-in flare: a small expanding ring when the candle first takes.
       if (chair.placedAt !== undefined) {
@@ -1486,6 +1499,8 @@ function syncSoulSigil(ctx: RenderContext, state: GameState): void {
   // blue (placeable) / red (blocked) the building placement ghost uses. Near
   // a ring it snaps onto the ring; away from any ring it rides the cursor in
   // red so there's always feedback while the mode is armed.
+  let previewTag = '';
+  let previewPos = { x: 0, y: 0 };
   if (state.pendingCandle && ctx.candleCursor) {
     const spot = candleSpotAt(state, ctx.candleCursor.x, ctx.candleCursor.y);
     const gx = spot ? spot.x : ctx.candleCursor.x;
@@ -1496,6 +1511,31 @@ function syncSoulSigil(ctx: RenderContext, state: GameState): void {
     cg.circle(gx, gy, chairRadius).stroke({ width: 2, color });
     cg.rect(gx - 5, gy - 26, 10, 26).fill({ color, alpha: 0.45 });
     cg.ellipse(gx, gy - 33, 5, 9).fill({ color, alpha: 0.45 });
+    // Say WHY a ring spot is refused, right on the ghost.
+    if (spot && !spot.ok) {
+      previewTag = spot.blocked === 'full' ? 'ring full' : 'too close';
+      previewPos = { x: gx, y: gy - chairRadius - 22 };
+    }
+  }
+  let tag = ctx.candlePreviewLabel;
+  if (previewTag !== '' && !tag) {
+    tag = new Text({
+      text: '',
+      style: {
+        fontFamily: fontFamilyById(getOptions().fonts.buildingLabel.family).css,
+        fontSize: 16,
+        fill: 0xd96b6b,
+        fontWeight: 'bold',
+      },
+    });
+    tag.anchor.set(0.5, 1);
+    ctx.soulSigilLayer.addChild(tag);
+    ctx.candlePreviewLabel = tag;
+  }
+  if (tag) {
+    if (tag.text !== previewTag && previewTag !== '') tag.text = previewTag;
+    tag.visible = previewTag !== '';
+    if (previewTag !== '') tag.position.set(previewPos.x, previewPos.y);
   }
 
   // Drop labels whose candle/portal is gone.

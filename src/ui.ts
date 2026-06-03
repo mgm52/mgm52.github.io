@@ -1419,7 +1419,10 @@ export function refreshUI(state: GameState) {
   }
 
   // Candle — the hell-view replacement for the Build list. 9 blood a piece;
-  // lit (active) while placement mode is armed.
+  // lit (active) while placement mode is armed. First hell entry surfaces it
+  // with the fade-in + "new" tag, and it attention-flashes while affordable
+  // until the player has set their first candle down (mirroring the
+  // never-built-before flash on building buttons).
   const candleBtn = document.getElementById('btn-place-candle') as HTMLButtonElement;
   candleBtn.style.display = inHell ? '' : 'none';
   if (inHell) {
@@ -1428,9 +1431,11 @@ export function refreshUI(state: GameState) {
     candleBtn.disabled = !canAffordCandle;
     candleBtn.classList.toggle('active', state.pendingCandle);
     document.getElementById('blood-cost-candle')!.classList.toggle('met', canAffordCandle);
-  } else if (state.pendingCandle) {
+    setBuyFlash('btn-place-candle', canAffordCandle && state.soulChairs.length === 0);
+  } else {
+    setBuyFlash('btn-place-candle', false);
     // Left hell with placement still armed — disarm it.
-    state.pendingCandle = false;
+    if (state.pendingCandle) state.pendingCandle = false;
   }
 
   // Hide separators that mark a task boundary the player hasn't crossed yet.
