@@ -2,7 +2,7 @@ import { playSound, playMinotaurCommand } from './audio';
 import {
   AUTOSPAWN_TIERS, BUILDABLE_KINDS, BUILDING_DEFS, BuildingKind, DRAG_SELECT_HINT_DELAY_SEC, MULTI_SPAWN_HINT_DELAY_SEC,
   DRAGON, GOBLIN, LIGHTNING, SPAWN_HINT_NO_SPAWN_SEC,
-  SPAWN_HINT_NO_TASK_SEC, SUMMON_UPGRADES, WATER_HINT_DELAY_SEC, digBloodCost, MINOTAUR, minotaurBloodCost, TINYTAUR, formatPower, SOUL_SIGIL,
+  SPAWN_HINT_NO_TASK_SEC, SUMMON_UPGRADES, WATER_HINT_DELAY_SEC, digBloodCost, MINOTAUR, minotaurBloodCost, TINYTAUR, formatPower, SOUL_SIGIL, sigilPortalOutput,
 } from './config';
 import {
   Building, Cell, Demon, DragonState, GameState, Ghost, Goblin, GoblinState, SoulChair, SpaceBuilding, WaterSource,
@@ -442,6 +442,7 @@ export type UICallbacks = {
   onBuyGoldgoblinsX10: () => void;
   onDig: (dir: 'n' | 'e' | 's' | 'w') => void;
   onBuildBuilding: (kind: BuildingKind) => void;
+  onPlaceCandle: () => void;
   onDestroyBuilding: (id: number) => void;
   onKillGoblin: (id: number) => void;
 };
@@ -789,6 +790,29 @@ export function setupUI(state: GameState, callbacks: UICallbacks) {
     btn.addEventListener('click', () => { playSound('click', 1, 0.75); callbacks.onBuildBuilding(kind); });
     (inRitual ? ritualList : buildList).appendChild(btn);
   }
+
+  // Candle — the hell view's entire Build menu. Hidden on the ground/space;
+  // while in hell it replaces every building button (see refreshUI). Arms
+  // candle-placement mode: each tap on a mirror's outer ring sets one down
+  // for SOUL_SIGIL.candleBloodCost blood. The blue "x87" advertises what a
+  // completed ring's seated souls do to the portal's wattage.
+  const candleBtn = document.createElement('button');
+  candleBtn.className = 'build-button';
+  candleBtn.id = 'btn-place-candle';
+  candleBtn.style.display = 'none';
+  candleBtn.innerHTML = `
+    <div class="build-content">
+      <div class="build-text">
+        <div class="build-name">Candle</div>
+        <div class="build-meta">
+          <span class="build-cost build-blood-cost" id="blood-cost-candle">${SOUL_SIGIL.candleBloodCost} blood</span>
+        </div>
+      </div>
+      <div class="build-yields"><span class="yield-power">x${SOUL_SIGIL.soulMultiplier}</span></div>
+    </div>
+  `;
+  candleBtn.addEventListener('click', () => { playSound('click', 1, 0.75); callbacks.onPlaceCandle(); });
+  buildList.appendChild(candleBtn);
 
   // Destroy button on the info panel — instead of instantly tearing down the
   // building, allocate the nearest minotaur to smash it. Without one, flash
@@ -1358,12 +1382,14 @@ export function refreshUI(state: GameState) {
     if (b.kind === 'hypercentre') obsoletedKinds.add('datacentre');
   }
 
-  // Each building kind
+  // Each building kind. In hell the whole Build menu is replaced by the
+  // Candle option, so every building button hides while the view is down there.
+  const inHell = state.view === 'hell';
   const availablePower = state.lastPowerProduced - state.lastPowerConsumed;
   for (const kind of SORTED_KINDS) {
     const def = BUILDING_DEFS[kind];
     const btn = document.getElementById(btnId(kind)) as HTMLButtonElement;
-    const visible = unlocked.has(kind) && !obsoletedKinds.has(kind);
+    const visible = unlocked.has(kind) && !obsoletedKinds.has(kind) && !inHell;
     btn.classList.toggle('locked', !visible);
     if (!visible) { setBuyFlash(btnId(kind), false); continue; }
     // Goblin Hole's price doubles per hole in play, so its cost is dynamic —
@@ -1390,6 +1416,21 @@ export function refreshUI(state: GameState) {
     if (bloodCostEl) bloodCostEl.classList.toggle('met', canAffordBlood);
     const boneCostEl = document.getElementById(`bone-cost-${kind}`);
     if (boneCostEl) boneCostEl.classList.toggle('met', canAffordBone);
+  }
+
+  // Candle — the hell-view replacement for the Build list. 9 blood a piece;
+  // lit (active) while placement mode is armed.
+  const candleBtn = document.getElementById('btn-place-candle') as HTMLButtonElement;
+  candleBtn.style.display = inHell ? '' : 'none';
+  if (inHell) {
+    applyFadeInOnFirstShow('btn-place-candle');
+    const canAffordCandle = state.blood >= SOUL_SIGIL.candleBloodCost;
+    candleBtn.disabled = !canAffordCandle;
+    candleBtn.classList.toggle('active', state.pendingCandle);
+    document.getElementById('blood-cost-candle')!.classList.toggle('met', canAffordCandle);
+  } else if (state.pendingCandle) {
+    // Left hell with placement still armed — disarm it.
+    state.pendingCandle = false;
   }
 
   // Hide separators that mark a task boundary the player hasn't crossed yet.
@@ -1432,6 +1473,9 @@ export function refreshUI(state: GameState) {
     const name = BUILDING_DEFS[state.pendingBuild.kind].name;
     hint.style.display = 'block';
     hint.textContent = `Tap to place ${name} · tap the button again or press ESC to cancel`;
+  } else if (state.pendingCandle) {
+    hint.style.display = 'block';
+    hint.textContent = "Tap a mirror's outer ring to place a candle · tap the button again or press ESC to cancel";
   } else {
     hint.style.display = 'none';
   }
@@ -1669,34 +1713,41 @@ function showHellPortal(state: GameState, b: Building, panel: HTMLElement, portr
   stateEl.textContent = b.state === 'constructing'
     ? 'A rift tearing open above'
     : 'A rift torn between worlds';
-  // The portal puts out a deadpan +1 W on its own — its real output is the
-  // soul sigil ringed around its mirror, which feeds 5 GW (five chairs × 1 GW)
-  // into the grid once every chair is bound.
-  const sigilPowered = state.soulSigilCompletedAt.has(b.id);
-  const power = sigilPowered
-    ? `Power output: ${formatPower(SOUL_SIGIL.count * SOUL_SIGIL.powerPerChair + def.powerOutput)}`
-    : def.powerOutput >= 0
-      ? `Power output: ${formatPower(def.powerOutput)}`
-      : `Power draw: ${formatPower(-def.powerOutput)}`;
-  extra.innerHTML = [
+  // The portal puts out a deadpan 1 W on its own — its real output is the
+  // soul sigil ringed around its mirror: every seated soul multiplies the
+  // wattage by 87, so a full ring of five feeds ~5 GW into the grid.
+  const ring = state.soulChairs.filter((c) => c.portalId === b.id);
+  const seated = ring.filter((c) => c.occupied).length;
+  const power = `Power output: ${formatPower(sigilPortalOutput(def.powerOutput, seated))}`;
+  const lines = [
     `<span style="color:#ff8a6a">Its light pierces down into the abyss</span>`,
     `<span style="color:#8acfff">${power}</span>`,
-  ].join('<br>');
+  ];
+  if (b.state !== 'constructing' && ring.length < SOUL_SIGIL.count) {
+    lines.push(`<span style="color:#ff8a6a">${ring.length}/${SOUL_SIGIL.count} candles on its outer ring</span>`);
+  } else if (seated > 0) {
+    lines.push(`<span style="color:#8acfff">x${SOUL_SIGIL.soulMultiplier} per bound soul (${seated}/${SOUL_SIGIL.count})</span>`);
+  }
+  extra.innerHTML = lines.join('<br>');
 }
 
-// A soul chair in the abyssal sigil — a deliberately minimal info card: its
-// bound state plus the sigil's chair count, and a one-line command hint while
-// it's still empty.
+// A candle (→ soul chair) in the abyssal sigil — a deliberately minimal info
+// card. Until the ring carries all five candles it's just a waiting candle;
+// after that it's a soul chair, with a one-line command hint while empty.
 function showSoulChair(state: GameState, c: SoulChair, panel: HTMLElement, portrait: HTMLElement,
                        name: HTMLElement, stateEl: HTMLElement, extra: HTMLElement) {
   panel.classList.add('visible');
   const cls = c.occupied ? 'active' : 'constructing';
   portrait.innerHTML = `<div class="portrait-building hell_portal ${cls}">${c.occupied ? '✦' : '○'}</div>`;
-  const filled = state.soulChairs.filter((sc) => sc.portalId === c.portalId && sc.occupied).length;
-  name.textContent = 'Soul Chair';
-  stateEl.textContent = c.occupied ? 'Bound' : 'Empty';
-  const lines = [`<span style="color:#ff8a6a">${filled}/${SOUL_SIGIL.count} bound</span>`];
-  if (!c.occupied) {
+  const ring = state.soulChairs.filter((sc) => sc.portalId === c.portalId);
+  const ringDone = ring.length >= SOUL_SIGIL.count;
+  const filled = ring.filter((sc) => sc.occupied).length;
+  name.textContent = ringDone ? 'Soul Chair' : 'Candle';
+  stateEl.textContent = c.occupied ? 'Bound' : ringDone ? 'Hungry for a soul' : 'Waiting on the ring';
+  const lines = ringDone
+    ? [`<span style="color:#ff8a6a">${filled}/${SOUL_SIGIL.count} bound · x${SOUL_SIGIL.soulMultiplier} each</span>`]
+    : [`<span style="color:#ff4a3a">needs ${SOUL_SIGIL.count - ring.length} more candle${SOUL_SIGIL.count - ring.length === 1 ? '' : 's'}</span>`];
+  if (ringDone && !c.occupied) {
     lines.push(`<span style="color:#6a7080">${TOUCH_PRIMARY ? 'Long tap' : 'Right click'} to bind a soul</span>`);
   }
   extra.innerHTML = lines.join('<br>');

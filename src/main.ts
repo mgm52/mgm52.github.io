@@ -417,7 +417,13 @@ async function main() {
     },
     onBuildBuilding: (kind) => {
       state.pendingBuild = state.pendingBuild?.kind === kind ? null : { kind };
-      if (state.pendingBuild) state.pendingStrike = false;
+      if (state.pendingBuild) { state.pendingStrike = false; state.pendingCandle = false; }
+    },
+    onPlaceCandle: () => {
+      // Toggle hell candle-placement mode; entering it cancels any pending
+      // build/strike (none of which can fire in hell anyway, but stay tidy).
+      state.pendingCandle = !state.pendingCandle;
+      if (state.pendingCandle) { state.pendingBuild = null; state.pendingStrike = false; }
     },
     onDestroyBuilding: (id) => {
       destroyBuilding(state, id);
@@ -509,7 +515,7 @@ async function main() {
     ctx.spaceCamera.y = 0; clampSpaceCamera(ctx);  // arrive looking down from the top
     transitioning = true; transFrom = 0; transTo = 1; transStart = now; ascendHold = 0;
     state.view = 'space';
-    state.pendingBuild = null; state.pendingStrike = false;
+    state.pendingBuild = null; state.pendingStrike = false; state.pendingCandle = false;
     playSound('ritual', 0.7, 0.5);
     playSound('online', 0.5, 0.3);
   }
@@ -528,7 +534,7 @@ async function main() {
     hellTransitioning = true; hellTransFrom = 0; hellTransTo = 1; hellTransStart = now;
     descendHellHold = 0;
     state.view = 'hell';
-    state.pendingBuild = null; state.pendingStrike = false;
+    state.pendingBuild = null; state.pendingStrike = false; state.pendingCandle = false;
     playSound('ritual', 0.6, 0.6);
   }
   function triggerAscendFromHell(now: number) {
@@ -543,6 +549,7 @@ async function main() {
     hellZoomDuration = HELL.zoomMs;
     hellTransitioning = true; hellTransFrom = 1; hellTransTo = 0; hellTransStart = now;
     ascendHellHold = 0;
+    state.pendingCandle = false;
     playSound('ritual', 0.7, 0.5);
   }
 
@@ -840,9 +847,10 @@ async function main() {
         }
       }
     }
-    // Dim + disable the summon/build panels whenever the player isn't on the
-    // ground — both orbit and hell view share this restriction.
-    document.body.classList.toggle('space-view', state.view !== 'ground');
+    // Dim + disable the summon/build panels in orbit. Hell only dims the
+    // summon panel — its Build panel stays live, holding the Candle option.
+    document.body.classList.toggle('space-view', state.view === 'space');
+    document.body.classList.toggle('hell-view', state.view === 'hell');
     // The music pitches + slows down as you descend into hell (rather than
     // muting), and rises back to pitch on the return. Space stays at full pitch.
     setMusicDepth(ctx.depth);

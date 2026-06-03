@@ -9,9 +9,9 @@ extensions.add(GifAsset);
 // game seconds. Used as a manual sprite-sheet — we pick the frame ourselves
 // each tick based on (state.now - spawnAt) so playback always starts at frame 0.
 type DeathFrames = { textures: Texture[]; ends: number[]; duration: number };
-import { AMBIENT_DRAGON, BUILDING_DEFS, BuildingKind, CELL, COLS, DEMON, DRAGON, GOBLIN, HELL, RENDER_SCALE, ROWS, MINOTAUR, SOUL_SIGIL, SPACE, TINYTAUR, WORLD, formatPower } from './config';
+import { AMBIENT_DRAGON, BUILDING_DEFS, BuildingKind, CELL, COLS, DEMON, DRAGON, GOBLIN, HELL, RENDER_SCALE, ROWS, MINOTAUR, SOUL_SIGIL, SPACE, TINYTAUR, WORLD, formatPower, sigilPortalOutput } from './config';
 import { ensureFontLoaded, fontFamilyById, getOptions, onOptionsChange, type FontConfig, type Options } from './options';
-import { Building, Demon, Dragon, GameState, Ghost, Goblin, HOLE_SIZE, Minotaur, SoulChair, SpaceBuilding, WaterSource, buildingCenter, cellCenter, defOf, holeCenter, isInPlayCell, maintainerCount } from './state';
+import { Building, Demon, Dragon, GameState, Ghost, Goblin, HOLE_SIZE, Minotaur, SoulChair, SpaceBuilding, WaterSource, buildingCenter, candleSpotAt, cellCenter, defOf, holeCenter, isInPlayCell, maintainerCount } from './state';
 import { getParlaySpeaker } from './demon-dialogue';
 
 export type Camera = { x: number; y: number };
@@ -436,22 +436,28 @@ export type RenderContext = {
   // overworld hell_portal. Built/destroyed in lockstep with their counterpart.
   hellPortalMirrorLayer: Container;
   hellPortalMirrors: Map<number, Container>;
-  // The soul sigil: a central inner ring + five chairs + the pentagram edges
-  // that spring between filled chairs. Two Graphics (lines/ring + chair discs)
-  // are redrawn each frame for the pulse/seat/completion VFX; the chair labels
-  // ("needs a soul" / "+1 GW" once powered) are Text objects made once and
-  // retargeted by occupancy.
+  // The soul sigil: a central inner ring + outer candle ring + the pentagram
+  // edges that spring between placed candles. Two Graphics (lines/rings +
+  // candle discs) are redrawn each frame for the flicker/seat/completion VFX;
+  // the candle labels ("needs 4 candles" / "needs soul") are Text objects made
+  // once and retargeted by ring state.
   soulSigilLayer: Container;
   soulSigilGfx: Graphics;
   soulChairGfx: Graphics;
   soulChairLabels: Map<number, Text>;
+  // Live wattage readout on each portal's mirror ("1 W" → ×87 per seated
+  // soul), keyed by portalId.
+  sigilPowerLabels: Map<number, Text>;
+  // Cursor position in hell coords while candle placement is armed — drives
+  // the snapped candle ghost on the outer ring. Updated by input.ts.
+  candleCursor: { x: number; y: number } | null;
   // Death-effect splatters that ride in the hell scene (the "born in blood"
   // appearance of a ghost). Drawn from the same DeathEffect entries flagged
   // hell:true; the renderer maps their world coords into hell coords.
   hellEffectsLayer: Container;
-  // Floating-text overlay for the hell scene (the "+1 GW" surge above each soul
-  // chair when its sigil powers up). Mirrors floatersLayer but rides the hell
-  // transform so the text tracks its chair's hell coordinates.
+  // Floating-text overlay for the hell scene (the "x87" surge above a mirror
+  // when a soul is seated). Mirrors floatersLayer but rides the hell
+  // transform so the text tracks its hell coordinates.
   hellFloatersLayer: Container;
   // Goblin Hole: a fixed pit-graphic plus its selection ring. Drawn between
   // the grid and buildings so a building placed on top covers it.
@@ -719,6 +725,8 @@ export async function createRender(parent: HTMLElement, state: GameState): Promi
     hellPortalMirrorLayer,
     hellPortalMirrors: new Map(),
     soulSigilLayer, soulSigilGfx, soulChairGfx, soulChairLabels: new Map(),
+    sigilPowerLabels: new Map(),
+    candleCursor: null,
     hellEffectsLayer,
     hellFloatersLayer,
     holeGfx, holeRing, bobPickerGfx,
@@ -1275,10 +1283,11 @@ function makeHellPortalMirror(b: Building): Container {
   const half = def.size / 2;
   // Single halo ring drawn first so it sits BEHIND the body/core. A stroked
   // outline (not a filled disc) so the portal reads as an emanation in the
-  // underworld. Kept to one circle — the sigil's red inner ring (see
-  // syncSoulSigil) is the only other one, so the scene stays uncluttered.
+  // underworld. Kept to one circle, sized to sit clearly inside the sigil's
+  // red inner ring (radius SOUL_SIGIL.innerRadius) now that the portal's
+  // footprint is 1×1, so the scene stays uncluttered.
   const halo = new Graphics();
-  const outerR = def.size * 3.6;
+  const outerR = def.size * 2.2;
   halo.circle(0, 0, outerR).stroke({ width: 3, color: 0xfff4c0, alpha: 0.3 });
   const body = new Graphics();
   body.rect(-half, -half, def.size, def.size).fill({ color: 0x2a0610, alpha: 0.95 });
@@ -1294,143 +1303,210 @@ function makeHellPortalMirror(b: Building): Container {
   return c;
 }
 
-// Redraw the soul sigil every frame: the central inner ring, the pentagram
-// edges between filled chairs, the chair discs (dark when empty, glowing when
-// filled), the seat-in burst, and — once all five are bound — a wave of pulses
-// chasing around the ring plus a one-shot shockwave on completion. The chair
-// labels ("needs a soul" / the permanent "+1 GW" once powered) are driven
-// here too.
+// Redraw the soul sigil every frame: the central inner ring, the outer candle
+// ring (the placement target), the pentagram edges between placed candles, the
+// candles themselves (flickering flames; ember-bound once a soul is seated),
+// the place-in/seat-in bursts, and — once all five souls are bound — a wave of
+// pulses chasing around the ring plus a one-shot shockwave on completion. The
+// candle labels ("needs N candles" / "needs soul") and the live wattage
+// readout on each mirror ("1 W" ×87 per seated soul) are driven here too.
 function syncSoulSigil(ctx: RenderContext, state: GameState): void {
   const now = state.now;
-  const { innerRadius, chairRadius } = SOUL_SIGIL;
+  const { count, innerRadius, ringRadius, chairRadius } = SOUL_SIGIL;
   const ring = ctx.soulSigilGfx;
   const cg = ctx.soulChairGfx;
   ring.clear();
   cg.clear();
 
+  // Group the placed candles by portal so each active portal draws one
+  // self-contained sigil (rings show even before the first candle goes down).
+  const groups = new Map<number, SoulChair[]>();
+  for (const c of state.soulChairs) {
+    const arr = groups.get(c.portalId);
+    if (arr) arr.push(c); else groups.set(c.portalId, [c]);
+  }
+
   const seenLabels = new Set<number>();
-  const chairs = state.soulChairs;
-  if (chairs && chairs.length > 0) {
-    // Each Hell Portal owns one ring of chairs around its mirror — group the
-    // chairs by portal and draw a self-contained sigil for each.
-    const groups = new Map<number, SoulChair[]>();
-    for (const c of chairs) {
-      const arr = groups.get(c.portalId);
-      if (arr) arr.push(c); else groups.set(c.portalId, [c]);
+  const seenPower = new Set<number>();
+  for (const portal of state.buildings.values()) {
+    if (portal.kind !== 'hell_portal' || portal.state === 'constructing') continue;
+    const ctr = buildingCenter(portal);
+    const center = { x: worldToHellX(ctr.x), y: worldToHellY(ctr.y) };
+    const group = groups.get(portal.id) ?? [];
+    const completedAt = state.soulSigilCompletedAt.get(portal.id);
+    const completed = completedAt !== undefined;
+    const compAge = completed ? now - completedAt : 0;
+    // Candles ordered by ring index (assigned by angle at placement) so the
+    // pentagram edges read cleanly.
+    const ordered = [...group].sort((a, b) => a.index - b.index);
+    const ringDone = ordered.length >= count;
+
+    // Central inner ring at the mirror — a single occult outline that
+    // brightens once the sigil is complete.
+    const ringGlow = completed ? 0.55 + 0.25 * Math.sin(now * 3) : 0.4;
+    ring.circle(center.x, center.y, innerRadius).stroke({ width: 4, color: 0xff2030, alpha: ringGlow });
+
+    // Outer ring — where candles take. Faint normally; breathes brighter
+    // while the player is placing candles and the ring still has room.
+    const placing = state.pendingCandle && !ringDone;
+    const outerAlpha = placing ? 0.38 + 0.14 * Math.sin(now * 3) : 0.14;
+    ring.circle(center.x, center.y, ringRadius).stroke({ width: placing ? 3 : 2, color: 0xff2030, alpha: outerAlpha });
+
+    // A line links every pair of placed candles (the complete graph), so the
+    // pentagram sketches itself in line by line as candles go down. Skip-one
+    // pairs form the bright pentagram star; adjacent perimeter lines are
+    // thinner + fainter so the star reads on top.
+    for (let a = 0; a < ordered.length; a++) {
+      for (let b = a + 1; b < ordered.length; b++) {
+        const ca = ordered[a], cb = ordered[b];
+        const gap = Math.min(Math.abs(a - b), ordered.length - Math.abs(a - b));
+        const isStar = ordered.length < count || gap === 2; // skip-one pairs are the pentagram
+        const alpha = isStar ? (completed ? 0.85 : 0.6) : (completed ? 0.4 : 0.26);
+        ring.moveTo(ca.hx, ca.hy).lineTo(cb.hx, cb.hy)
+          .stroke({ width: isStar ? 5 : 3, color: 0xff2030, alpha });
+        if (completed && isStar) {
+          const a2 = 0.4 + 0.35 * Math.sin(now * 4);
+          ring.moveTo(ca.hx, ca.hy).lineTo(cb.hx, cb.hy).stroke({ width: 2, color: 0xffe0a0, alpha: a2 });
+        }
+      }
     }
 
-    for (const [portalId, group] of groups) {
-      const portal = state.buildings.get(portalId);
-      if (!portal) continue;
-      const ctr = buildingCenter(portal);
-      const center = { x: worldToHellX(ctr.x), y: worldToHellY(ctr.y) };
-      const completedAt = state.soulSigilCompletedAt.get(portalId);
-      const completed = completedAt !== undefined;
-      const compAge = completed ? now - completedAt : 0;
-      // Chairs ordered by ring index so the pentagram edges read cleanly.
-      const ordered = [...group].sort((a, b) => a.index - b.index);
+    // Completed-sigil flourish: a one-shot shockwave expanding from the
+    // centre the moment it completes.
+    if (completed && compAge < 1.6) {
+      const r = innerRadius + compAge * 900;
+      ring.circle(center.x, center.y, r).stroke({ width: 7, color: 0xffd060, alpha: (1 - compAge / 1.6) * 0.9 });
+    }
 
-      // Central inner ring at the mirror — a single occult outline that
-      // brightens once the sigil is complete.
-      const ringGlow = completed ? 0.55 + 0.25 * Math.sin(now * 3) : 0.4;
-      ring.circle(center.x, center.y, innerRadius).stroke({ width: 4, color: 0xff2030, alpha: ringGlow });
-
-      // A line links every pair of filled chairs (the complete graph), sketched
-      // in as souls are seated. Skip-one pairs form the bright pentagram star;
-      // adjacent perimeter lines are thinner + fainter so the star reads on top.
-      for (let a = 0; a < ordered.length; a++) {
-        for (let b = a + 1; b < ordered.length; b++) {
-          const ca = ordered[a], cb = ordered[b];
-          if (!ca.occupied || !cb.occupied) continue;
-          const gap = Math.min(Math.abs(a - b), ordered.length - Math.abs(a - b));
-          const isStar = gap === 2; // skip-one pairs are the pentagram
-          const alpha = isStar ? (completed ? 0.85 : 0.6) : (completed ? 0.4 : 0.26);
-          ring.moveTo(ca.hx, ca.hy).lineTo(cb.hx, cb.hy)
-            .stroke({ width: isStar ? 5 : 3, color: 0xff2030, alpha });
-          if (completed && isStar) {
-            const a2 = 0.4 + 0.35 * Math.sin(now * 4);
-            ring.moveTo(ca.hx, ca.hy).lineTo(cb.hx, cb.hy).stroke({ width: 2, color: 0xffe0a0, alpha: a2 });
-          }
-        }
+    // Candles + labels.
+    for (const chair of ordered) {
+      const { hx, hy, occupied, index } = chair;
+      // Dark wax-pool disc with a rim that lights up when bound.
+      cg.circle(hx, hy, chairRadius).fill({ color: 0x140306, alpha: 0.92 });
+      cg.circle(hx, hy, chairRadius).stroke({
+        width: 3,
+        color: occupied ? 0xff4a30 : 0x6a2024,
+        alpha: occupied ? 0.95 : 0.6,
+      });
+      // The candle itself: a pale stick rising from the pool with a
+      // flickering flame (per-candle phase so the ring never flickers in
+      // lockstep).
+      const flicker = 0.5 + 0.5 * Math.sin(now * 7 + index * 2.1);
+      cg.rect(hx - 5, hy - 26, 10, 26).fill({ color: 0xe8dcc8, alpha: 0.9 });
+      cg.circle(hx, hy - 32, 13).fill({ color: 0xff8030, alpha: 0.1 + 0.08 * flicker });
+      cg.ellipse(hx, hy - 33, 5, 9).fill({ color: 0xffc040, alpha: 0.55 + 0.35 * flicker });
+      cg.ellipse(hx, hy - 31, 2.5, 5).fill({ color: 0xfff0b0, alpha: 0.6 + 0.3 * flicker });
+      if (occupied) {
+        // Glowing ember core in the pool. Once complete, the pulse phase is
+        // offset per chair so a wave of brightening chases around the ring.
+        const pulse = completed
+          ? 0.55 + 0.45 * Math.sin(now * 4 - index * 1.4)
+          : 0.5 + 0.25 * Math.sin(now * 2.5);
+        cg.circle(hx, hy, chairRadius * 0.55).fill({ color: 0xff5a2a, alpha: 0.5 * pulse + 0.2 });
+        cg.circle(hx, hy, chairRadius * 0.28).fill({ color: 0xffd6a0, alpha: 0.45 * pulse + 0.25 });
       }
-
-      // Completed-sigil flourish: a one-shot shockwave expanding from the
-      // centre the moment it completes.
-      if (completed && compAge < 1.6) {
-        const r = innerRadius + compAge * 900;
-        ring.circle(center.x, center.y, r).stroke({ width: 7, color: 0xffd060, alpha: (1 - compAge / 1.6) * 0.9 });
+      // Selection ring — matches the gold highlight other selected things get.
+      if (chair.selected) {
+        cg.circle(hx, hy, chairRadius + 8).stroke({ width: 3, color: 0xffd96b, alpha: 0.95 });
       }
-
-      // Chair discs + labels.
-      for (const chair of ordered) {
-        const { hx, hy, occupied, index } = chair;
-        // Dark base disc with a rim that lights up when bound.
-        cg.circle(hx, hy, chairRadius).fill({ color: 0x140306, alpha: 0.92 });
-        cg.circle(hx, hy, chairRadius).stroke({
-          width: 3,
-          color: occupied ? 0xff4a30 : 0x6a2024,
-          alpha: occupied ? 0.95 : 0.6,
-        });
-        if (occupied) {
-          // Glowing ember core. Once complete, the pulse phase is offset per
-          // chair so a wave of brightening chases around the ring.
-          const pulse = completed
-            ? 0.55 + 0.45 * Math.sin(now * 4 - index * 1.4)
-            : 0.5 + 0.25 * Math.sin(now * 2.5);
-          cg.circle(hx, hy, chairRadius * 0.55).fill({ color: 0xff5a2a, alpha: 0.5 * pulse + 0.2 });
-          cg.circle(hx, hy, chairRadius * 0.28).fill({ color: 0xffd6a0, alpha: 0.45 * pulse + 0.25 });
-        }
-        // Selection ring — matches the gold highlight other selected things get.
-        if (chair.selected) {
-          cg.circle(hx, hy, chairRadius + 8).stroke({ width: 3, color: 0xffd96b, alpha: 0.95 });
-        }
-        // Seat-in burst: a quick expanding ring when the soul first lands.
-        if (chair.filledAt !== undefined) {
-          const age = now - chair.filledAt;
-          if (age >= 0 && age < 0.9) {
-            cg.circle(hx, hy, chairRadius + age * 240).stroke({
-              width: 3, color: 0xff8040, alpha: (1 - age / 0.9) * 0.85,
-            });
-          }
-        }
-
-        // Tag above the chair: "needs a soul" while empty, then — once the
-        // whole sigil is lit and the chair is actually feeding the grid — a
-        // permanent "+1 GW" readout in the power-surge blue.
-        let label = ctx.soulChairLabels.get(chair.id);
-        if (!label) {
-          label = new Text({
-            text: 'needs a soul',
-            style: {
-              fontFamily: fontFamilyById(getOptions().fonts.buildingLabel.family).css,
-              fontSize: 16,
-              fill: 0xff8a7a,
-              fontWeight: 'bold',
-            },
+      // Place-in flare: a small expanding ring when the candle first takes.
+      if (chair.placedAt !== undefined) {
+        const age = now - chair.placedAt;
+        if (age >= 0 && age < 0.6) {
+          cg.circle(hx, hy, chairRadius + age * 120).stroke({
+            width: 2, color: 0xffc040, alpha: (1 - age / 0.6) * 0.8,
           });
-          label.anchor.set(0.5, 1);
-          ctx.soulSigilLayer.addChild(label);
-          ctx.soulChairLabels.set(chair.id, label);
         }
-        const labelText = !occupied
-          ? 'needs a soul'
-          : completed ? `+${formatPower(SOUL_SIGIL.powerPerChair)}` : '';
-        if (label.text !== labelText && labelText !== '') {
-          label.text = labelText;
-          label.style.fill = occupied ? 0x8acfff : 0xff8a7a;
+      }
+      // Seat-in burst: a quick expanding ring when the soul lands.
+      if (chair.filledAt !== undefined) {
+        const age = now - chair.filledAt;
+        if (age >= 0 && age < 0.9) {
+          cg.circle(hx, hy, chairRadius + age * 240).stroke({
+            width: 3, color: 0xff8040, alpha: (1 - age / 0.9) * 0.85,
+          });
         }
-        label.position.set(hx, hy - chairRadius - 6);
-        label.visible = labelText !== '';
-        seenLabels.add(chair.id);
+      }
+
+      // Tag above the candle: red "needs N candles" until the ring is full,
+      // then "needs soul" until a soul is bound (nothing once it is — the
+      // mirror's wattage readout takes over the storytelling).
+      let label = ctx.soulChairLabels.get(chair.id);
+      if (!label) {
+        label = new Text({
+          text: '',
+          style: {
+            fontFamily: fontFamilyById(getOptions().fonts.buildingLabel.family).css,
+            fontSize: 16,
+            fill: 0xff8a7a,
+            fontWeight: 'bold',
+          },
+        });
+        label.anchor.set(0.5, 1);
+        ctx.soulSigilLayer.addChild(label);
+        ctx.soulChairLabels.set(chair.id, label);
+      }
+      const remaining = count - ordered.length;
+      const labelText = !ringDone
+        ? `needs ${remaining} candle${remaining === 1 ? '' : 's'}`
+        : !occupied ? 'needs soul' : '';
+      if (label.text !== labelText) label.text = labelText;
+      label.style.fill = ringDone ? 0xff8a7a : 0xff3a2a;
+      label.position.set(hx, hy - chairRadius - 22);
+      label.visible = labelText !== '';
+      seenLabels.add(chair.id);
+    }
+
+    // Live wattage readout on the mirror: "1 W" untouched, ×87 per seated
+    // soul. Sits just below the mirror body so the beam/core stay clear.
+    let power = ctx.sigilPowerLabels.get(portal.id);
+    if (!power) {
+      power = new Text({
+        text: '',
+        style: {
+          fontFamily: fontFamilyById(getOptions().fonts.buildingLabel.family).css,
+          fontSize: 18,
+          fill: 0x8acfff,
+          fontWeight: 'bold',
+        },
+      });
+      power.anchor.set(0.5, 0);
+      ctx.soulSigilLayer.addChild(power);
+      ctx.sigilPowerLabels.set(portal.id, power);
+    }
+    const seated = ordered.filter((c) => c.occupied).length;
+    const watts = sigilPortalOutput(defOf(portal).powerOutput, seated);
+    const powerText = formatPower(watts);
+    if (power.text !== powerText) power.text = powerText;
+    power.position.set(center.x, center.y + defOf(portal).size * 0.5 + 6);
+    seenPower.add(portal.id);
+  }
+
+  // Candle placement preview: the snapped ghost candle under the cursor —
+  // gold when the spot takes, red when the ring is full/crowded.
+  if (state.pendingCandle && ctx.candleCursor) {
+    const spot = candleSpotAt(state, ctx.candleCursor.x, ctx.candleCursor.y);
+    if (spot) {
+      const color = spot.ok ? 0xffd96b : 0xd96b6b;
+      cg.circle(spot.x, spot.y, chairRadius).stroke({ width: 2, color, alpha: 0.85 });
+      if (spot.ok) {
+        cg.rect(spot.x - 5, spot.y - 26, 10, 26).fill({ color: 0xe8dcc8, alpha: 0.35 });
+        cg.ellipse(spot.x, spot.y - 33, 5, 9).fill({ color: 0xffc040, alpha: 0.35 });
       }
     }
   }
 
-  // Drop labels whose chair is gone (portal destroyed, or no chairs at all).
+  // Drop labels whose candle/portal is gone.
   for (const [id, label] of ctx.soulChairLabels) {
     if (!seenLabels.has(id)) {
       label.destroy();
       ctx.soulChairLabels.delete(id);
+    }
+  }
+  for (const [id, label] of ctx.sigilPowerLabels) {
+    if (!seenPower.has(id)) {
+      label.destroy();
+      ctx.sigilPowerLabels.delete(id);
     }
   }
 }
