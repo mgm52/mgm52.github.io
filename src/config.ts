@@ -545,7 +545,7 @@ export const BUILDING_DEFS = {
     short: 'BPS',
     cost: 999_999,
     bloodCost: 999,
-    buildersRequired: 4,
+    buildersRequired: 1,
     buildTime: 12,
     maintainersRequired: 0,
     income: 0,
