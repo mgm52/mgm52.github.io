@@ -27,6 +27,7 @@ const GOBLIN_BREAKDANCE_BASE = 'assets/rigged_goblin_dancing_aligol3dart_breakda
 const GOBLIN_SWIPE_BASE = 'assets/rigged_goblin_dancing_aligol3dart_mutant_swiping';
 const MINOTAUR_WALK_BASE = 'assets/rigged_minotaur_sasswalk_aligol3dart_rigged_minotaur_sasswalk_aligol3dart';
 const MINOTAUR_SWIPE_BASE = 'assets/rigged_minotaur_sasswalk_aligol3dart_mutant_swiping';
+const DRAGON_FLY_BASE = 'assets/dragon_fly_new';
 
 type SheetHeading = { index: number; headingDeg: number };
 type SheetMeta = {
@@ -46,6 +47,7 @@ let goblinBreakdanceSheet: Sheet | null = null;
 let goblinSwipeSheet: Sheet | null = null;
 let minotaurWalkSheet: Sheet | null = null;
 let minotaurSwipeSheet: Sheet | null = null;
+let dragonFlySheet: Sheet | null = null;
 
 async function loadSheet(base: string): Promise<Sheet> {
   const meta = await fetch(`${base}.json`).then(r => r.json()) as SheetMeta;
@@ -92,7 +94,7 @@ async function loadBuildingTextures(): Promise<void> {
 async function loadGoblinSheets(): Promise<void> {
   [
     goblinWalkSheet, goblinIdleSheet, goblinBreakdanceSheet, goblinSwipeSheet,
-    minotaurWalkSheet, minotaurSwipeSheet,
+    minotaurWalkSheet, minotaurSwipeSheet, dragonFlySheet,
   ] = await Promise.all([
     loadSheet(GOBLIN_WALK_BASE),
     loadSheet(GOBLIN_IDLE_BASE),
@@ -100,6 +102,7 @@ async function loadGoblinSheets(): Promise<void> {
     loadSheet(GOBLIN_SWIPE_BASE),
     loadSheet(MINOTAUR_WALK_BASE),
     loadSheet(MINOTAUR_SWIPE_BASE),
+    loadSheet(DRAGON_FLY_BASE),
   ]);
 }
 
@@ -278,11 +281,15 @@ type DemonView = {
 
 type DragonView = {
   container: Container;   // positioned at the dragon's world pos
-  glow: Sprite;           // soft radial behind the block
-  block: Graphics;        // placeholder tile (drawn once)
-  label: Text;            // 🐉 glyph on the tile
+  glow: Sprite;           // soft radial behind the sprite
+  sprite: Sprite;         // animated frame from the fly sheet
   carried: Sprite;        // the building currently being hauled (hidden otherwise)
   selectionRing: Graphics;
+  // Heading (atan2 radians) derived from frame-to-frame movement; the sim only
+  // tracks a ±1 mirror for dragons, so the renderer infers the 8-way row here.
+  heading: number;
+  lastX: number;
+  lastY: number;
 };
 
 type SpaceBuildingView = {
@@ -315,6 +322,7 @@ type AmbientDragon = {
   bobAmp: number;
   spawnAt: number;       // state.now when it entered
   container: Container;  // lives in spaceAmbientLayer
+  sprite: Sprite;        // animated frame from the fly sheet
   selectionRing: Graphics;
   // Live space-x/y from the last frame (after movement + bob). Cached so a
   // pointer hit-test doesn't have to re-derive it from x0/dir/speed.
@@ -1027,30 +1035,21 @@ function makeDemonView(): DemonView {
   return { container, shadow, sprite, selectionRing: ring };
 }
 
-// No dragon sprite sheet ships, so the dragon is a placeholder tile: an orange
-// rounded block with a 🐉 glyph, matching the building-placeholder look. A soft
-// glow sits behind it and the carried building rides just below.
+// The dragon draws from an 8-direction fly sheet (dragonFlySheet). A soft glow
+// sits behind it and the carried building rides just below. DRAGON_BLOCK
+// survives as the hit-test footprint for ambient dragons.
 const DRAGON_BLOCK = Math.round(DRAGON.displayPx * 0.78);
-function makeDragonView(): DragonView {
+function makeDragonView(d: Dragon): DragonView {
   const container = new Container();
 
   const glow = new Sprite(getGlowTexture());
   glow.anchor.set(0.5);
   glow.tint = 0xff8a3a;
-  glow.scale.set(DRAGON.displayPx * 1.7 / 128);
-  glow.alpha = 0.35;
+  glow.scale.set(DRAGON.displayPx * 1.3 / 128);
+  glow.alpha = 0.18;
 
-  const block = new Graphics();
-  const half = DRAGON_BLOCK / 2;
-  block.roundRect(-half, -half, DRAGON_BLOCK, DRAGON_BLOCK, 8)
-    .fill(0xe07a2a)
-    .stroke({ width: 3, color: 0xffd24a });
-
-  const label = new Text({
-    text: '🐉',
-    style: { fontFamily: 'sans-serif', fontSize: Math.round(DRAGON_BLOCK * 0.62), fill: 0xffffff },
-  });
-  label.anchor.set(0.5);
+  const sprite = new Sprite(Texture.EMPTY);
+  sprite.anchor.set(0.5);
 
   const carried = new Sprite(Texture.EMPTY);
   carried.anchor.set(0.5);
@@ -1062,17 +1061,21 @@ function makeDragonView(): DragonView {
 
   container.addChild(glow);
   container.addChild(carried);
-  container.addChild(block);
-  container.addChild(label);
+  container.addChild(sprite);
   container.addChild(selectionRing);
-  return { container, glow, block, label, carried, selectionRing };
+  // Seed the heading from the sim's ±1 mirror (0 = east in atan2 convention)
+  // until the first frame of real movement reveals a proper direction.
+  return {
+    container, glow, sprite, carried, selectionRing,
+    heading: d.facing > 0 ? 0 : Math.PI,
+    lastX: d.pos.x, lastY: d.pos.y,
+  };
 }
 
-// Ambient dragons reuse the placeholder-tile look but darkened: a dim block, a
-// faint glow, and the whole thing held at reduced alpha so it reads as a distant
+// Ambient dragons reuse the fly sheet but darkened: a warm dim tint, a faint
+// glow, and the whole thing held at reduced alpha so it reads as a distant
 // silhouette against the stars rather than a summonable dragon.
-const AMBIENT_DRAGON_FILL = 0x53300f;
-const AMBIENT_DRAGON_BORDER = 0x7a4a22;
+const AMBIENT_DRAGON_TINT = 0xb09070;
 function spawnAmbientDragon(ctx: RenderContext, midScene: boolean): void {
   const cfg = AMBIENT_DRAGON;
   const dir: 1 | -1 = Math.random() < 0.5 ? 1 : -1;
@@ -1085,29 +1088,20 @@ function spawnAmbientDragon(ctx: RenderContext, midScene: boolean): void {
   const glow = new Sprite(getGlowTexture());
   glow.anchor.set(0.5);
   glow.tint = 0xff8a3a;
-  glow.scale.set(DRAGON.displayPx * 1.4 / 128);
-  glow.alpha = 0.16;
+  glow.scale.set(DRAGON.displayPx * 1.1 / 128);
+  glow.alpha = 0.08;
 
-  const block = new Graphics();
-  const half = DRAGON_BLOCK / 2;
-  block.roundRect(-half, -half, DRAGON_BLOCK, DRAGON_BLOCK, 8)
-    .fill(AMBIENT_DRAGON_FILL)
-    .stroke({ width: 3, color: AMBIENT_DRAGON_BORDER });
-
-  const label = new Text({
-    text: '🐉',
-    style: { fontFamily: 'sans-serif', fontSize: Math.round(DRAGON_BLOCK * 0.62), fill: 0xffffff },
-  });
-  label.anchor.set(0.5);
-  label.alpha = 0.82;
+  const sprite = new Sprite(Texture.EMPTY);
+  sprite.anchor.set(0.5);
+  sprite.tint = AMBIENT_DRAGON_TINT;
+  if (dragonFlySheet) sprite.scale.set(DRAGON.displayPx / dragonFlySheet.meta.spriteSize);
 
   const selectionRing = new Graphics();
   selectionRing.circle(0, 0, DRAGON.displayPx * 0.5).stroke({ width: 2, color: 0xffd96b });
   selectionRing.visible = false;
 
   container.addChild(glow);
-  container.addChild(block);
-  container.addChild(label);
+  container.addChild(sprite);
   container.addChild(selectionRing);
   ctx.spaceAmbientLayer.addChild(container);
 
@@ -1125,6 +1119,7 @@ function spawnAmbientDragon(ctx: RenderContext, midScene: boolean): void {
     bobAmp: cfg.bobAmpMin + Math.random() * (cfg.bobAmpMax - cfg.bobAmpMin),
     spawnAt: ctx.state.now,
     container,
+    sprite,
     selectionRing,
     cx: x0,
     cy: y,
@@ -1165,8 +1160,17 @@ function updateAmbientDragons(ctx: RenderContext): void {
     a.cx = x;
     a.cy = a.y + bob;
     a.container.position.set(x, a.cy);
-    // The 🐉 glyph faces left; mirror on x when travelling right.
-    a.container.scale.set(a.dir > 0 ? -a.scale : a.scale, a.scale);
+    a.container.scale.set(a.scale);
+    // Cruise direction picks the sheet row directly: east row when travelling
+    // right, west when left. bobPhase doubles as a flap-phase offset so the
+    // flock doesn't beat its wings in lockstep.
+    const sheet = dragonFlySheet;
+    if (sheet) {
+      const dirRow = dirIndex(sheet.meta, a.dir > 0 ? 0 : Math.PI);
+      const fpd = sheet.meta.framesPerDirection;
+      const frame = Math.floor((now + a.bobPhase) * sheet.fps) % fpd;
+      a.sprite.texture = sheet.frames[dirRow][frame];
+    }
     a.selectionRing.visible = ctx.state.selectedAmbientDragonId === a.id;
   }
 }
@@ -1239,27 +1243,20 @@ function makeGhostView(g: Ghost): GhostView | null {
     container.addChild(sprite);
     return { container, sprite, selectionRing };
   }
-  // Dragon ghost: reuse the placeholder block + glyph but in deep dim red.
-  const half = DRAGON_BLOCK / 2;
-  const block = new Graphics();
-  block.roundRect(-half, -half, DRAGON_BLOCK, DRAGON_BLOCK, 8)
-    .fill(0x4a0e18)
-    .stroke({ width: 3, color: 0x8a3030 });
-  const label = new Text({
-    text: '🐉',
-    style: { fontFamily: 'sans-serif', fontSize: Math.round(DRAGON_BLOCK * 0.62), fill: 0xffffff },
-  });
-  label.anchor.set(0.5);
-  label.alpha = 0.8;
+  // Dragon ghost: first fly-sheet frame for the east/west row, dim red.
+  // Dragon facing is -1 (left) / +1 (right) — map it onto the sheet's
+  // east/west headings (atan2 convention: 0 = east).
+  const sheet = dragonFlySheet;
+  if (!sheet) return null;
+  const dir = dirIndex(sheet.meta, g.facing > 0 ? 0 : Math.PI);
+  const sprite = new Sprite(sheet.frames[dir][0]);
+  sprite.anchor.set(0.5);
+  sprite.scale.set(DRAGON.displayPx / sheet.meta.spriteSize);
+  sprite.tint = 0x9a5050;
   selectionRing.circle(0, 0, DRAGON.displayPx * 0.5).stroke({ width: 2, color: 0xffd96b });
   container.addChild(selectionRing);
-  container.addChild(block);
-  container.addChild(label);
-  // Dragon facing is -1 (left) / +1 (right); the glyph faces left, mirror on +1.
-  container.scale.set(g.facing > 0 ? -1 : 1, 1);
-  // Cast block as the "sprite" for the view interface; we never touch it after
-  // creation here, so any Container child works.
-  return { container, sprite: block as unknown as Sprite, selectionRing };
+  container.addChild(sprite);
+  return { container, sprite, selectionRing };
 }
 
 // Build the hell-side mirror of an overworld hell_portal — a darker copy of
@@ -2273,26 +2270,40 @@ export function render(state: GameState, ctx: RenderContext) {
     }
   }
 
-  // Dragons — placeholder tiles that bob, glow, and brighten while breathing
+  // Dragons — fly-sheet sprites that bob, glow, and flush red while breathing
   // fire on a commanded kill. While carrying, the lifted building rides beneath.
   const seenD = new Set<number>();
   for (const d of state.dragons.values()) {
     seenD.add(d.id);
     let v = ctx.dragonViews.get(d.id);
     if (!v) {
-      v = makeDragonView();
+      v = makeDragonView(d);
       v.container.cullable = true;
       ctx.dragonLayer.addChild(v.container);
       ctx.dragonViews.set(d.id, v);
     }
     v.container.position.set(d.pos.x, d.pos.y);
+    // The sim only mirrors dragons left/right, so derive the 8-way heading
+    // from actual movement; while hovering, hold the last real heading.
+    const mvX = d.pos.x - v.lastX, mvY = d.pos.y - v.lastY;
+    if (Math.abs(mvX) > 0.05 || Math.abs(mvY) > 0.05) v.heading = Math.atan2(mvY, mvX);
+    v.lastX = d.pos.x;
+    v.lastY = d.pos.y;
     const phase = state.now - d.spawnAt;
     const breathing = d.state.kind === 'going_to_kill' && d.state.attackAt !== undefined;
     const bob = Math.sin(phase * 2.2) * 3;
-    v.block.y = bob;
-    v.label.y = bob;
-    v.block.tint = breathing ? 0xff5a2a : 0xffffff;
-    v.glow.alpha = breathing ? 0.85 : 0.35 + 0.12 * Math.sin(state.now * 3);
+    v.sprite.y = bob;
+    v.sprite.tint = breathing ? 0xff5a2a : 0xffffff;
+    const sheet = dragonFlySheet;
+    if (sheet) {
+      const dir = dirIndex(sheet.meta, v.heading);
+      const fpd = sheet.meta.framesPerDirection;
+      // phase (not raw now) keys the flap so each dragon beats independently.
+      const frame = Math.floor(phase * sheet.fps) % fpd;
+      v.sprite.texture = sheet.frames[dir][frame];
+      v.sprite.scale.set(DRAGON.displayPx / sheet.meta.spriteSize);
+    }
+    v.glow.alpha = breathing ? 0.6 : 0.18 + 0.06 * Math.sin(state.now * 3);
     applyRingFlash(v.selectionRing, d.selected, d.commandFlashAt, state.now);
     if (d.carrying) {
       const def = defOf(d.carrying);
