@@ -1,6 +1,6 @@
 import { playDecayingGoblinDeath, playDecayingGoblinSpawn, playDecayingGoldKillCash, playSound } from './audio';
 import { BUILDING_DEFS, CELL, COLS, DEMON, DRAGON, DRAGON_KILL_REWARD, GOBLIN, GOLD_GOBLIN_CHANCE, GOLD_KILL_REWARD, HELL, KILL_REWARD, LIGHTNING, MINOTAUR_KILL_REWARD, SOUL_SIGIL, SPACE, SUMMON_UPGRADES, TICK_S, MINOTAUR, TINYTAUR, WATER_DEPLETION_PP_PER_SEC, WATER_METER_MAX, WORLD, formatPower, sigilPortalOutput } from './config';
-import { getOptions } from './options';
+import { DEMON_FACING_ANGLE, getOptions } from './options';
 import {
   ALL_DIRS, Building, Cell, DX, DY, Demon, Dir, Dragon, GameState, Ghost, Goblin, HOLE_SIZE, Minotaur, SoulChair, SpaceBuilding, WaterSource,
   appendLog, buildingAtCell, buildingCenter, buildingFootprint, buildingPerimeter,
@@ -950,11 +950,18 @@ function updateDemon(state: GameState, d: Demon) {
     }
     return;
   }
-  // Slow vertical patrol, reversing at the band edges.
-  d.hy += d.dir * DEMON.speed * TICK_S;
-  if (d.hy >= d.y1) { d.hy = d.y1; d.dir = -1; }
-  else if (d.hy <= d.y0) { d.hy = d.y0; d.dir = 1; }
-  d.facing = d.dir > 0 ? Math.PI / 2 : -Math.PI / 2;
+  // Slow vertical patrol, reversing at the band edges. The dev options can
+  // freeze the demon in place instead, with a chosen standing direction
+  // (a live parlay still turns it toward the speaker, handled above).
+  const o = getOptions();
+  if (o.demonWalks) {
+    d.hy += d.dir * DEMON.speed * TICK_S;
+    if (d.hy >= d.y1) { d.hy = d.y1; d.dir = -1; }
+    else if (d.hy <= d.y0) { d.hy = d.y0; d.dir = 1; }
+    d.facing = d.dir > 0 ? Math.PI / 2 : -Math.PI / 2;
+  } else {
+    d.facing = DEMON_FACING_ANGLE[o.demonFacing];
+  }
   // Steer any approaching soul and open a parlay once one is close enough.
   for (const g of state.ghosts) {
     if (g.parlayDemonId !== d.id) continue;

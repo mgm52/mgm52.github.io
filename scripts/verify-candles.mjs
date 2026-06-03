@@ -84,6 +84,20 @@ check('Candle button shown in hell', buildState.candleShown);
 check('Candle button shows 9 blood + x87', /9 blood/.test(buildState.candleText) && /x87/.test(buildState.candleText), buildState.candleText.trim());
 check('Building buttons hidden in hell', buildState.wheelHidden);
 
+// First hell entry: the button carries the "new" tag and (affordable, no
+// candles placed yet) the attention flash.
+const fresh = await page.evaluate(() => {
+  const btn = document.getElementById('btn-place-candle');
+  return { badge: btn.classList.contains('has-new-badge'), flash: btn.classList.contains('buy-flash') };
+});
+check('Candle button tagged "new" on first hell entry', fresh.badge);
+check('Candle button buy-flashes while affordable + unplaced', fresh.flash);
+
+// Summon panel stays usable from hell (it just summons to the overworld).
+const summonLive = await page.evaluate(() =>
+  getComputedStyle(document.getElementById('panel-summon')).pointerEvents !== 'none');
+check('Summon panel interactive in hell', summonLive);
+
 // Arm candle mode via the real button.
 await page.click('#btn-place-candle');
 const armed = await page.evaluate(() => window.__game.state.pendingCandle);
@@ -130,6 +144,18 @@ for (let i = 0; i < angles.length; i++) {
       return labels.map((l) => l.text).join('|');
     });
     check('First candle reads "needs 4 candles"', label === 'needs 4 candles', label);
+    check('Buy-flash clears after first candle', await page.evaluate(() =>
+      !document.getElementById('btn-place-candle').classList.contains('buy-flash')));
+    // Hover just along the ring from the placed candle: the preview should go
+    // red and read "too close".
+    const near = await screenAt(m.hx + Math.cos(angles[0] + 0.1) * RING, m.hy + Math.sin(angles[0] + 0.1) * RING);
+    await page.mouse.move(near.x, near.y);
+    await sleep(250);
+    const tag = await page.evaluate(() => {
+      const t = window.__game.ctx.candlePreviewLabel;
+      return t ? { text: t.text, visible: t.visible } : null;
+    });
+    check('Crowded preview reads "too close"', tag !== null && tag.visible && tag.text === 'too close', JSON.stringify(tag));
     mkdirSync('screenshots', { recursive: true });
     await page.screenshot({ path: 'screenshots/candles-1.png' });
   }

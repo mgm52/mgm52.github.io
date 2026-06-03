@@ -11,7 +11,7 @@ import { relockOptionsCog, setupOptionsUI } from './options-ui';
 import { applyDomOptions, centerCameraOn, centerHellCameraOnWorld, centerSpaceCamera, clampCamera, clampHellCamera, clampSpaceCamera, createRender, currentHellScale, render, spaceCameraMaxY } from './render';
 import { appendLog, cellCenter, createInitialState, destroyBuilding, digDirection, earnBlood, earnDragonBone, earnMoney, getSpawnCapacity, pushDeathEffect, pushFloater, recordGhost, removeGoblin, type GameState } from './state';
 import { autoAssignAllIdle, spawnDragon, spawnMinotaur, spawnTinytaur, tick } from './sim';
-import { executeTaskSkip, refreshUI, setupUI } from './ui';
+import { ensureHellPortal, executeTaskSkip, refreshUI, setupUI } from './ui';
 import { clearSave, formatRelativeTime, loadGame, saveGame } from './save';
 
 // Returns the player's choice — 'resume' if they clicked the resume button,
@@ -223,6 +223,9 @@ async function main() {
     clearSave();
     state = createInitialState();
   }
+  // Dev cheat flag: set by the options menu's "skip to hell" button,
+  // consumed at the top of the frame loop (where the transition state lives).
+  let requestSkipToHell = false;
   // Wire up the DOM-only UI (sidebar buttons, options cog, task text) and
   // run one refresh now so the sidebar is fully populated while the title
   // screen is still fading out. Pixi setup (createRender/setupInput) can
@@ -253,6 +256,18 @@ async function main() {
       state.bobPickingHole = false;
       state.bobCheatPending = true;
       appendLog(state, 'Cheat: Bob will appear on your next building placement.');
+    },
+    onSkipToHell: () => {
+      // Conjure an active Hell Portal if none exists, then ride its beam
+      // straight down. Only meaningful from the ground view (transitions are
+      // ground↔space / ground↔hell), and not while another one is running.
+      if (state.view !== 'ground') return;
+      if (!ensureHellPortal(state)) {
+        appendLog(state, 'Cheat: nowhere to fit a Hell Portal.');
+        return;
+      }
+      appendLog(state, 'Cheat: descending into hell.');
+      requestSkipToHell = true;
     },
     onTaskSkip: () => { skipIntro(); executeTaskSkip(state); },
     onShowTitleScreen: () => { void showTitleScreen(); },
@@ -645,6 +660,13 @@ async function main() {
   function frame(now: number) {
     const dt = now - last;
     last = now;
+    // Dev cheat: a queued skip-to-hell fires here, where the transition
+    // machinery lives, so the options callback (wired before ctx exists)
+    // never touches it directly.
+    if (requestSkipToHell) {
+      requestSkipToHell = false;
+      if (state.view === 'ground' && !hellTransitioning && !transitioning) triggerDescendToHell(now);
+    }
     // Freeze game ticks while the intro is on-screen so state.now (and with
     // it the spawn-hint / no-task timers in refreshUI) doesn't drift forward
     // during the intro's preamble + dialog. Once the intro releases the

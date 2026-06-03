@@ -10,6 +10,7 @@ export type OptionsUICallbacks = {
   onCheatPower: () => void;
   onCheatBones: () => void;
   onTriggerBob: () => void;
+  onSkipToHell: () => void;
   onTaskSkip: () => void;
   onShowTitleScreen: () => void;
 };
@@ -263,6 +264,19 @@ function rebuildPanel(panel: HTMLElement, callbacks: OptionsUICallbacks, refresh
     color('Blood splatter',  o.hellBloodColor,      (v) => setOption('hellBloodColor', v)),
   ]));
 
+  panel.appendChild(section('Demon', [
+    slider('Size', o.demonScale, 0.2, 3, 0.05, (v) => setOption('demonScale', v)),
+    toggle('Walks (patrols)', o.demonWalks, (v) => setOption('demonWalks', v)),
+    select('Facing (standing)', o.demonFacing, [
+      { value: 'down',  label: 'Down' },
+      { value: 'up',    label: 'Up' },
+      { value: 'left',  label: 'Left' },
+      { value: 'right', label: 'Right' },
+    ], (v) => setOption('demonFacing', v as Options['demonFacing'])),
+    slider('Saturation', o.demonSaturation, 0, 3, 0.05, (v) => setOption('demonSaturation', v)),
+    slider('Brightness', o.demonBrightness, 0, 3, 0.05, (v) => setOption('demonBrightness', v)),
+  ]));
+
   panel.appendChild(fontsSection(o));
 
   const cheat = document.createElement('button');
@@ -299,6 +313,13 @@ function rebuildPanel(panel: HTMLElement, callbacks: OptionsUICallbacks, refresh
   cheatBob.textContent = 'Cheat: trigger Bob on next building';
   cheatBob.addEventListener('click', () => callbacks.onTriggerBob());
   panel.appendChild(cheatBob);
+
+  const skipHell = document.createElement('button');
+  skipHell.type = 'button';
+  skipHell.className = 'options-reset';
+  skipHell.textContent = 'Cheat: skip to hell';
+  skipHell.addEventListener('click', () => callbacks.onSkipToHell());
+  panel.appendChild(skipHell);
 
   const taskSkip = document.createElement('button');
   taskSkip.type = 'button';

@@ -1241,9 +1241,12 @@ export function refreshUI(state: GameState) {
     applyFadeInOnFirstShow('btn-lightning-strike');
     const canAffordLightning = state.blood >= LIGHTNING.bloodCost;
     const onCooldown = state.lightningStrikeCooldown > 0;
-    lightningBtn.disabled = !canAffordLightning || onCooldown;
+    // Unlike the other rituals (which act on the overworld from anywhere),
+    // the strike has to be AIMED at the ground — disable it off-ground.
+    const offGround = state.view !== 'ground';
+    lightningBtn.disabled = !canAffordLightning || onCooldown || offGround;
     lightningBtn.classList.toggle('active', state.pendingStrike);
-    document.getElementById('cost-lightning-strike')!.classList.toggle('met', canAffordLightning && !onCooldown);
+    document.getElementById('cost-lightning-strike')!.classList.toggle('met', canAffordLightning && !onCooldown && !offGround);
   } else {
     lightningBtn.style.display = 'none';
   }
@@ -1419,7 +1422,10 @@ export function refreshUI(state: GameState) {
   }
 
   // Candle — the hell-view replacement for the Build list. 9 blood a piece;
-  // lit (active) while placement mode is armed.
+  // lit (active) while placement mode is armed. First hell entry surfaces it
+  // with the fade-in + "new" tag, and it attention-flashes while affordable
+  // until the player has set their first candle down (mirroring the
+  // never-built-before flash on building buttons).
   const candleBtn = document.getElementById('btn-place-candle') as HTMLButtonElement;
   candleBtn.style.display = inHell ? '' : 'none';
   if (inHell) {
@@ -1428,9 +1434,11 @@ export function refreshUI(state: GameState) {
     candleBtn.disabled = !canAffordCandle;
     candleBtn.classList.toggle('active', state.pendingCandle);
     document.getElementById('blood-cost-candle')!.classList.toggle('met', canAffordCandle);
-  } else if (state.pendingCandle) {
+    setBuyFlash('btn-place-candle', canAffordCandle && state.soulChairs.length === 0);
+  } else {
+    setBuyFlash('btn-place-candle', false);
     // Left hell with placement still armed — disarm it.
-    state.pendingCandle = false;
+    if (state.pendingCandle) state.pendingCandle = false;
   }
 
   // Hide separators that mark a task boundary the player hasn't crossed yet.
@@ -1475,7 +1483,7 @@ export function refreshUI(state: GameState) {
     hint.textContent = `Tap to place ${name} · tap the button again or press ESC to cancel`;
   } else if (state.pendingCandle) {
     hint.style.display = 'block';
-    hint.textContent = "Tap a mirror's outer ring to place a candle · tap the button again or press ESC to cancel";
+    hint.textContent = 'Tap to place Candle · tap the button again or press ESC to cancel';
   } else {
     hint.style.display = 'none';
   }
@@ -2158,6 +2166,22 @@ function buildingFootprintCells(b: Building, n: number): Cell[] {
     }
   }
   return out;
+}
+
+// Dev cheat (options menu): guarantee an active Hell Portal exists so the
+// skip-to-hell descent has a beacon waiting in the abyss. Reuses the
+// task-skip placement machinery; returns false when no free spot exists
+// (vanishingly unlikely for a 1×1). The skip-built portal gets activatedAt
+// stamped so its beam draws in as if construction just finished.
+export function ensureHellPortal(state: GameState): boolean {
+  for (const b of state.buildings.values()) {
+    if (b.kind === 'hell_portal' && b.state !== 'constructing') return true;
+  }
+  const b = placeOneBuilding(state, 'hell_portal');
+  if (!b) return false;
+  b.activatedAt = state.now;
+  state.hellUnlocked = true;
+  return true;
 }
 
 function teleportGoblinTo(state: GameState, g: Goblin, c: Cell): void {

@@ -451,6 +451,9 @@ export type RenderContext = {
   // Cursor position in hell coords while candle placement is armed — drives
   // the snapped candle ghost on the outer ring. Updated by input.ts.
   candleCursor: { x: number; y: number } | null;
+  // "too close" / "ring full" tag over a blocked candle-placement preview.
+  // Created lazily, hidden whenever the preview isn't showing a blocked spot.
+  candlePreviewLabel: Text | null;
   // Death-effect splatters that ride in the hell scene (the "born in blood"
   // appearance of a ghost). Drawn from the same DeathEffect entries flagged
   // hell:true; the renderer maps their world coords into hell coords.
@@ -487,6 +490,7 @@ export type RenderContext = {
   wallGfx: Graphics;
   grid: Graphics;
   goblinFilter: ColorMatrixFilter;
+  demonFilter: ColorMatrixFilter;
   minotaurFilter: ColorMatrixFilter;
   dragonFilter: ColorMatrixFilter;
   buildingFilter: ColorMatrixFilter;
@@ -699,6 +703,7 @@ export async function createRender(parent: HTMLElement, state: GameState): Promi
   const dragonFilter = new ColorMatrixFilter();
   const buildingFilter = new ColorMatrixFilter();
   const hellGhostFilter = new ColorMatrixFilter();
+  const demonFilter = new ColorMatrixFilter();
 
   const ctx: RenderContext = {
     app, worldLayer, buildingLayer, goblinLayer, uiLayer,
@@ -727,6 +732,7 @@ export async function createRender(parent: HTMLElement, state: GameState): Promi
     soulSigilLayer, soulSigilGfx, soulChairGfx, soulChairLabels: new Map(),
     sigilPowerLabels: new Map(),
     candleCursor: null,
+    candlePreviewLabel: null,
     hellEffectsLayer,
     hellFloatersLayer,
     holeGfx, holeRing, bobPickerGfx,
@@ -736,6 +742,7 @@ export async function createRender(parent: HTMLElement, state: GameState): Promi
     whiteEffectsLayer, lightningGfx,
     walls, wallsVersion: -1, state, playBg, wallGfx, grid, goblinFilter, minotaurFilter, dragonFilter, buildingFilter,
     hellGhostFilter,
+    demonFilter,
   };
 
   // Decode the GIF once into AnimatedSprite frames. Sharing GifSprite across
@@ -814,6 +821,7 @@ function applyOptions(ctx: RenderContext, o: Options) {
   applyFilter(ctx.dragonLayer, ctx.dragonFilter, o.dragonSaturation, o.dragonBrightness);
   applyFilter(ctx.buildingLayer, ctx.buildingFilter, o.buildingSaturation, o.buildingBrightness);
   applyFilter(ctx.hellGhostLayer, ctx.hellGhostFilter, 1, o.hellGhostBrightness);
+  applyFilter(ctx.demonLayer, ctx.demonFilter, o.demonSaturation, o.demonBrightness);
   applyDomOptions(o);
   applyFonts(ctx, o);
 }
@@ -1405,9 +1413,18 @@ function syncSoulSigil(ctx: RenderContext, state: GameState): void {
         cg.circle(hx, hy, chairRadius * 0.55).fill({ color: 0xff5a2a, alpha: 0.5 * pulse + 0.2 });
         cg.circle(hx, hy, chairRadius * 0.28).fill({ color: 0xffd6a0, alpha: 0.45 * pulse + 0.25 });
       }
-      // Selection ring — matches the gold highlight other selected things get.
+      // Selection ring — matches the gold highlight other selected things
+      // get — or, when a soul was just commanded onto this chair, the same
+      // one-shot pulse other command targets flash (see applyRingFlash).
       if (chair.selected) {
         cg.circle(hx, hy, chairRadius + 8).stroke({ width: 3, color: 0xffd96b, alpha: 0.95 });
+      } else if (chair.commandFlashAt !== undefined) {
+        const t = (now - chair.commandFlashAt) / COMMAND_FLASH_S;
+        if (t >= 0 && t < 1) {
+          cg.circle(hx, hy, chairRadius + 8).stroke({
+            width: 3, color: 0xffd96b, alpha: Math.sin(t * Math.PI) * COMMAND_FLASH_PEAK,
+          });
+        }
       }
       // Place-in flare: a small expanding ring when the candle first takes.
       if (chair.placedAt !== undefined) {
@@ -1482,18 +1499,47 @@ function syncSoulSigil(ctx: RenderContext, state: GameState): void {
     seenPower.add(portal.id);
   }
 
-  // Candle placement preview: the snapped ghost candle under the cursor —
-  // gold when the spot takes, red when the ring is full/crowded.
+  // Candle placement preview: a ghost candle under the cursor in the same
+  // blue (placeable) / red (blocked) the building placement ghost uses. Near
+  // a ring it snaps onto the ring; away from any ring it rides the cursor in
+  // red so there's always feedback while the mode is armed.
+  let previewTag = '';
+  let previewPos = { x: 0, y: 0 };
   if (state.pendingCandle && ctx.candleCursor) {
     const spot = candleSpotAt(state, ctx.candleCursor.x, ctx.candleCursor.y);
-    if (spot) {
-      const color = spot.ok ? 0xffd96b : 0xd96b6b;
-      cg.circle(spot.x, spot.y, chairRadius).stroke({ width: 2, color, alpha: 0.85 });
-      if (spot.ok) {
-        cg.rect(spot.x - 5, spot.y - 26, 10, 26).fill({ color: 0xe8dcc8, alpha: 0.35 });
-        cg.ellipse(spot.x, spot.y - 33, 5, 9).fill({ color: 0xffc040, alpha: 0.35 });
-      }
+    const gx = spot ? spot.x : ctx.candleCursor.x;
+    const gy = spot ? spot.y : ctx.candleCursor.y;
+    const valid = spot !== null && spot.ok;
+    const color = valid ? 0x6a8eb0 : 0xd96b6b;
+    cg.circle(gx, gy, chairRadius).fill({ color, alpha: 0.25 });
+    cg.circle(gx, gy, chairRadius).stroke({ width: 2, color });
+    cg.rect(gx - 5, gy - 26, 10, 26).fill({ color, alpha: 0.45 });
+    cg.ellipse(gx, gy - 33, 5, 9).fill({ color, alpha: 0.45 });
+    // Say WHY a ring spot is refused, right on the ghost.
+    if (spot && !spot.ok) {
+      previewTag = spot.blocked === 'full' ? 'ring full' : 'too close';
+      previewPos = { x: gx, y: gy - chairRadius - 22 };
     }
+  }
+  let tag = ctx.candlePreviewLabel;
+  if (previewTag !== '' && !tag) {
+    tag = new Text({
+      text: '',
+      style: {
+        fontFamily: fontFamilyById(getOptions().fonts.buildingLabel.family).css,
+        fontSize: 16,
+        fill: 0xd96b6b,
+        fontWeight: 'bold',
+      },
+    });
+    tag.anchor.set(0.5, 1);
+    ctx.soulSigilLayer.addChild(tag);
+    ctx.candlePreviewLabel = tag;
+  }
+  if (tag) {
+    if (tag.text !== previewTag && previewTag !== '') tag.text = previewTag;
+    tag.visible = previewTag !== '';
+    if (previewTag !== '') tag.position.set(previewPos.x, previewPos.y);
   }
 
   // Drop labels whose candle/portal is gone.
@@ -1854,7 +1900,7 @@ function positionParlaySpeech(
     let headTopHy: number;
     if (sp.kind === 'demon') {
       hx = sp.demon.hx;
-      headTopHy = sp.demon.hy - DEMON.displayPx * 0.5;
+      headTopHy = sp.demon.hy - DEMON.displayPx * 0.5 * getOptions().demonScale;
     } else {
       const g = sp.ghost;
       hx = g.hx ?? worldToHellX(g.x + (g.offX ?? 0));
@@ -2661,6 +2707,9 @@ export function render(state: GameState, ctx: RenderContext) {
       ctx.demonViews.set(d.id, v);
     }
     v.container.position.set(d.hx, d.hy);
+    // Dev size dial: scale the whole view (sprite + shadow + selection ring)
+    // around the demon's hell position.
+    v.container.scale.set(opts.demonScale);
     applyRingFlash(v.selectionRing, d.selected, d.commandFlashAt, state.now);
     v.shadow.visible = opts.goblinShadow;
     if (opts.goblinShadow) {
@@ -2675,7 +2724,10 @@ export function render(state: GameState, ctx: RenderContext) {
     if (sheet) {
       const dir = dirIndex(sheet.meta, d.facing);
       const fpd = sheet.meta.framesPerDirection;
-      const frame = d.busyWith !== null ? 0 : Math.floor(state.now * sheet.fps) % fpd;
+      // Freeze on the standing frame while locked in a parlay or when the
+      // dev "walks" toggle has parked it.
+      const standing = d.busyWith !== null || !opts.demonWalks;
+      const frame = standing ? 0 : Math.floor(state.now * sheet.fps) % fpd;
       v.sprite.texture = sheet.frames[dir][frame];
       v.sprite.scale.set(DEMON.displayPx / sheet.meta.spriteSize);
     }

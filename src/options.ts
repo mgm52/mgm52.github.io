@@ -219,6 +219,23 @@ export type Options = {
   hellGhostBrightness: number; // multiplier on ghost-layer brightness (1 = no change)
   hellGhostFallSpeed: number; // px/sec the ghosts drift downward in hell
   hellBloodColor: number;     // tint applied to the hell-side death splatters
+  // Demon (the giant hell Minotaur) dev controls: render scale, whether it
+  // patrols its band or stands frozen (and which way it faces while frozen),
+  // plus its own saturation/brightness colour filter.
+  demonScale: number;         // multiplier on DEMON.displayPx (1 = native size)
+  demonWalks: boolean;        // false = stands still at its current spot
+  demonFacing: DemonFacing;   // facing while standing still (walking overrides it)
+  demonSaturation: number;
+  demonBrightness: number;
+};
+
+export type DemonFacing = 'down' | 'up' | 'left' | 'right';
+// Facing option → sprite heading angle (atan2 convention, 0 = east).
+export const DEMON_FACING_ANGLE: Record<DemonFacing, number> = {
+  right: 0,
+  down: Math.PI / 2,
+  left: Math.PI,
+  up: -Math.PI / 2,
 };
 
 export const DEFAULT_OPTIONS: Options = {
@@ -299,6 +316,11 @@ export const DEFAULT_OPTIONS: Options = {
   hellGhostBrightness: 1.05,
   hellGhostFallSpeed: 7,
   hellBloodColor: 0x4a8acf,
+  demonScale: 1,
+  demonWalks: true,
+  demonFacing: 'down',
+  demonSaturation: 1,
+  demonBrightness: 1,
 };
 
 // Set every font key to the same family at once. Convenience for the options
