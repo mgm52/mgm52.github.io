@@ -490,6 +490,7 @@ export type RenderContext = {
   wallGfx: Graphics;
   grid: Graphics;
   goblinFilter: ColorMatrixFilter;
+  demonFilter: ColorMatrixFilter;
   minotaurFilter: ColorMatrixFilter;
   dragonFilter: ColorMatrixFilter;
   buildingFilter: ColorMatrixFilter;
@@ -702,6 +703,7 @@ export async function createRender(parent: HTMLElement, state: GameState): Promi
   const dragonFilter = new ColorMatrixFilter();
   const buildingFilter = new ColorMatrixFilter();
   const hellGhostFilter = new ColorMatrixFilter();
+  const demonFilter = new ColorMatrixFilter();
 
   const ctx: RenderContext = {
     app, worldLayer, buildingLayer, goblinLayer, uiLayer,
@@ -740,6 +742,7 @@ export async function createRender(parent: HTMLElement, state: GameState): Promi
     whiteEffectsLayer, lightningGfx,
     walls, wallsVersion: -1, state, playBg, wallGfx, grid, goblinFilter, minotaurFilter, dragonFilter, buildingFilter,
     hellGhostFilter,
+    demonFilter,
   };
 
   // Decode the GIF once into AnimatedSprite frames. Sharing GifSprite across
@@ -818,6 +821,7 @@ function applyOptions(ctx: RenderContext, o: Options) {
   applyFilter(ctx.dragonLayer, ctx.dragonFilter, o.dragonSaturation, o.dragonBrightness);
   applyFilter(ctx.buildingLayer, ctx.buildingFilter, o.buildingSaturation, o.buildingBrightness);
   applyFilter(ctx.hellGhostLayer, ctx.hellGhostFilter, 1, o.hellGhostBrightness);
+  applyFilter(ctx.demonLayer, ctx.demonFilter, o.demonSaturation, o.demonBrightness);
   applyDomOptions(o);
   applyFonts(ctx, o);
 }
@@ -1896,7 +1900,7 @@ function positionParlaySpeech(
     let headTopHy: number;
     if (sp.kind === 'demon') {
       hx = sp.demon.hx;
-      headTopHy = sp.demon.hy - DEMON.displayPx * 0.5;
+      headTopHy = sp.demon.hy - DEMON.displayPx * 0.5 * getOptions().demonScale;
     } else {
       const g = sp.ghost;
       hx = g.hx ?? worldToHellX(g.x + (g.offX ?? 0));
@@ -2703,6 +2707,9 @@ export function render(state: GameState, ctx: RenderContext) {
       ctx.demonViews.set(d.id, v);
     }
     v.container.position.set(d.hx, d.hy);
+    // Dev size dial: scale the whole view (sprite + shadow + selection ring)
+    // around the demon's hell position.
+    v.container.scale.set(opts.demonScale);
     applyRingFlash(v.selectionRing, d.selected, d.commandFlashAt, state.now);
     v.shadow.visible = opts.goblinShadow;
     if (opts.goblinShadow) {
@@ -2717,7 +2724,10 @@ export function render(state: GameState, ctx: RenderContext) {
     if (sheet) {
       const dir = dirIndex(sheet.meta, d.facing);
       const fpd = sheet.meta.framesPerDirection;
-      const frame = d.busyWith !== null ? 0 : Math.floor(state.now * sheet.fps) % fpd;
+      // Freeze on the standing frame while locked in a parlay or when the
+      // dev "walks" toggle has parked it.
+      const standing = d.busyWith !== null || !opts.demonWalks;
+      const frame = standing ? 0 : Math.floor(state.now * sheet.fps) % fpd;
       v.sprite.texture = sheet.frames[dir][frame];
       v.sprite.scale.set(DEMON.displayPx / sheet.meta.spriteSize);
     }
