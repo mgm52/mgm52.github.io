@@ -198,16 +198,16 @@
       #sidebar-scrollbar-thumb:hover,
       #sidebar-scrollbar.dragging #sidebar-scrollbar-thumb { background: rgba(198,206,216,0.85); }
 
-      /* Minimal scroll cue: a small, muted chevron that surfaces only when a
-         newly-unlocked button or task is sitting below the fold, and clears
-         itself the moment the player scrolls it into view (toggled in
-         refreshUI). Lives as the last child of #panel-build; the negative margin
-         cancels its own height so it never adds to the scroll length, while
-         position:sticky pins it to the bottom of whichever container scrolls.
-         Clickable: nudges the panel down. */
-      #scroll-cue {
-        position: sticky; bottom: 6px; z-index: 40;
-        width: 28px; height: 28px; margin: -28px auto 0;
+      /* Scroll cues: small, muted chevrons pinned to the top/bottom of the
+         build panel, each shown whenever any content sits off-screen in its
+         direction (toggled per-frame in refreshUI) — so once the menu
+         overflows there's always at least one visible. Negative margins
+         cancel their own height so they never add to the scroll length,
+         while position:sticky pins them to the edges of whichever container
+         scrolls. Clickable: each nudges the panel most of a page. */
+      .scroll-cue {
+        position: sticky; z-index: 40;
+        width: 28px; height: 28px;
         display: flex; align-items: center; justify-content: center;
         color: #c2c8d0; font-size: 20px; line-height: 1;
         text-shadow: 0 1px 3px rgba(0,0,0,0.7);
@@ -215,13 +215,47 @@
         opacity: 0; pointer-events: none;
         transition: opacity 220ms ease;
       }
-      #scroll-cue.visible { opacity: 0.85; pointer-events: auto; animation: scroll-cue-bounce 1.6s ease-in-out infinite; }
-      @keyframes scroll-cue-bounce {
-        0%, 100% { transform: translateY(0); }
-        50%      { transform: translateY(3px); }
+      #scroll-cue { bottom: 6px; margin: -28px auto 0; }
+      #scroll-cue-up { top: 0; margin: 0 auto -28px; }
+      .scroll-cue.visible { opacity: 0.6; pointer-events: auto; }
+      .scroll-cue.visible:hover { opacity: 0.95; }
+
+      /* Staged unlock reveal (runUnlockRevealSequence in ui.ts). Items due a
+         reveal hold .reveal-hidden — invisible but keeping their layout slot
+         so nothing reflows as they pop in one at a time. While the walk runs,
+         #sidebar carries .unlock-reveal-dim: everything fades back except the
+         freshly-revealed items, each of which glows in with an accent pop. */
+      .reveal-hidden { visibility: hidden !important; }
+      #sidebar.unlock-reveal-dim .build-button:not(.reveal-highlight),
+      #sidebar.unlock-reveal-dim .panel-title,
+      #sidebar.unlock-reveal-dim .panel-resources,
+      #sidebar.unlock-reveal-dim .build-separator,
+      #sidebar.unlock-reveal-dim .task-text:not(.reveal-highlight),
+      #sidebar.unlock-reveal-dim #dig-row:not(.reveal-highlight),
+      #sidebar.unlock-reveal-dim .new-badge,
+      #sidebar.unlock-reveal-dim .scroll-cue {
+        opacity: 0.22;
+        transition: opacity 250ms ease;
+      }
+      /* Revealed items (and the buttons inside a revealed dig row) punch
+         through the dim at full strength. Declared after the dim rules so
+         they win. */
+      #sidebar.unlock-reveal-dim .reveal-highlight,
+      #sidebar.unlock-reveal-dim .reveal-highlight .build-button {
+        opacity: 1;
+      }
+      .reveal-highlight {
+        animation: unlock-reveal-pop 500ms ease;
+        box-shadow: 0 0 0 1px rgba(255,217,107,0.55), 0 0 16px rgba(255,217,107,0.35);
+      }
+      .build-button.reveal-highlight { border-color: var(--sidebar-accent); }
+      @keyframes unlock-reveal-pop {
+        0%   { opacity: 0; transform: translateY(8px) scale(0.96); }
+        60%  { opacity: 1; transform: translateY(-1px) scale(1.03); }
+        100% { transform: none; }
       }
       @media (prefers-reduced-motion: reduce) {
-        #scroll-cue.visible { animation: none; }
+        .reveal-highlight { animation: none; }
       }
 
       /* ───────── Compact landscape (mobile phones) ───────── */
@@ -295,7 +329,7 @@
         background: var(--sidebar-button-bg); border: 1px solid var(--sidebar-button-border);
         color: #eee; padding: 10px 12px; margin-bottom: 6px;
         text-align: left; cursor: pointer; border-radius: 4px;
-        font-family: var(--font-body); transition: background 0.1s, border-color 0.1s;
+        font-family: var(--font-body); transition: background 0.1s, border-color 0.1s, opacity 250ms ease;
       }
       body.no-rounded-buttons .build-button { border-radius: 0; }
       /* Cut-corner buttons: clip to an octagon and paint the outline as the
@@ -1500,6 +1534,9 @@
                Ritual hides itself before any of its content unlocks. The task
                text sits at the end so it always tucks directly under the last
                button instead of pinning to the sidebar floor. -->
+          <!-- Scroll affordances: chevrons shown whenever content sits
+               off-screen above/below (toggled per-frame in refreshUI). -->
+          <div id="scroll-cue-up" class="scroll-cue" aria-hidden="true">▴</div>
           <div id="build-section" style="display:none">
             <div class="panel-title">Build</div>
             <div id="build-list"></div>
@@ -1508,10 +1545,7 @@
             <div class="panel-title">Ritual</div>
             <div id="ritual-list"></div>
           </div>
-          <!-- Scroll affordance: minimal chevron shown only when a newly
-               unlocked button/task sits below the fold, cleared once it's
-               scrolled into view (toggled in refreshUI). -->
-          <div id="scroll-cue" aria-hidden="true">▾</div>
+          <div id="scroll-cue" class="scroll-cue" aria-hidden="true">▾</div>
         </div>
         <div id="task-text" class="task-text"></div>
       </div>

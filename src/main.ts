@@ -674,10 +674,14 @@ async function main() {
     // Bob's hole-picker freezes the world the same way so the player can
     // line up the summon without the rest of the colony advancing; bob-spawn-hold
     // then holds it for a beat right after he emerges (set in input.ts).
+    // unlock-reveal-hold freezes time for the whole task-complete ceremony:
+    // the WORK COMPLETE overlay plus the staged one-by-one unlock reveal that
+    // follows it (set/cleared in ui.ts).
     const introActive = document.body.classList.contains('intro-hold')
       || document.body.classList.contains('bob-cutscene-hold')
       || document.body.classList.contains('demon-parlay-hold')
       || document.body.classList.contains('bob-spawn-hold')
+      || document.body.classList.contains('unlock-reveal-hold')
       || state.bobPickingHole;
     if (!paused && !introActive) {
       acc += dt;
