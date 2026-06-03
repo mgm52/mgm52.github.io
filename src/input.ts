@@ -1286,15 +1286,27 @@ function ordinalWord(n: number): string {
   return `${n}th`;
 }
 
-// Translucent blast-radius preview that follows the cursor while a Lightning
-// Strike is armed. Reuses the placement-ghost graphics layer.
+// Translucent blast preview that follows the cursor while a Lightning Strike
+// is armed. Reuses the placement-ghost graphics layer. Paints the exact cells
+// the strike will hit — same test as lightningStrike's splatter loop in
+// sim.ts (a cell is in the blast when its center falls inside the radius of
+// the un-snapped cursor point) — so what you see is what gets scorched.
 function drawStrikeGhost(input: InputState, x: number, y: number) {
-  const radius = (LIGHTNING.cellsWide / 2) * CELL;
-  input.placementGhost.clear();
-  input.placementGhost
-    .circle(x, y, radius)
-    .fill({ color: 0xcdeeff, alpha: 0.18 })
-    .stroke({ width: 2, color: 0xffffff, alpha: 0.9 });
+  const radiusPx = (LIGHTNING.cellsWide / 2) * CELL;
+  const r2 = radiusPx * radiusPx;
+  const span = Math.ceil(LIGHTNING.cellsWide / 2);
+  const ccx = Math.floor(x / CELL), ccy = Math.floor(y / CELL);
+  const g = input.placementGhost;
+  g.clear();
+  for (let cy = ccy - span; cy <= ccy + span; cy++) {
+    for (let cx = ccx - span; cx <= ccx + span; cx++) {
+      const dx = (cx + 0.5) * CELL - x, dy = (cy + 0.5) * CELL - y;
+      if (dx * dx + dy * dy > r2) continue;
+      g.rect(cx * CELL, cy * CELL, CELL, CELL)
+        .fill({ color: 0xcdeeff, alpha: 0.18 })
+        .stroke({ width: 1, color: 0xffffff, alpha: 0.35 });
+    }
+  }
 }
 
 function drawGhost(input: InputState, x: number, y: number, state: GameState) {

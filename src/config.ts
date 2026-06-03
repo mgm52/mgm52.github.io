@@ -62,8 +62,8 @@ export const GOBLIN = {
 export const MINOTAUR = {
   speed: 70,
   radius: 22,
-  bloodCost: 8,        // base cost; doubles per purchase up to bloodCostCap
-  bloodCostCap: 32,
+  bloodCost: 16,       // flat per summon (bar the one-time first discount)
+  firstBloodCost: 8,   // first-summon mercy price — see minotaurBloodCost
   spawnTime: 2,
   spawnCapacity: 1,
   arriveDist: 2,
@@ -71,10 +71,12 @@ export const MINOTAUR = {
   wanderInterval: 1.2,
 };
 
-// Minotaur summoning gets pricier the more you've bought: 8 → 16 → 32, then
-// flat at the cap. `bought` is the number summoned so far this run.
-export function minotaurBloodCost(bought: number): number {
-  return Math.min(MINOTAUR.bloodCostCap, MINOTAUR.bloodCost * (2 ** bought));
+// Flat price per summon, with one mercy exception: if the player was sitting
+// on less than the discounted price in blood at the moment the summon
+// unlocked (state.minotaurFirstDiscount, decided in refreshUI), their FIRST
+// Minotaur costs firstBloodCost so reaching it isn't a long grind.
+export function minotaurBloodCost(bought: number, firstDiscount: boolean | null): number {
+  return bought === 0 && firstDiscount ? MINOTAUR.firstBloodCost : MINOTAUR.bloodCost;
 }
 
 // Tinytaur — a secret summon unlocked once the player has fielded a few
@@ -361,7 +363,7 @@ export const BUILDING_DEFS = {
   phone_farm: def(3, {
     name: 'Phone Farm',
     short: 'PF',
-    cost: 100,
+    cost: 50,
     buildersRequired: 3,
     buildTime: 4,
     maintainersRequired: 3,

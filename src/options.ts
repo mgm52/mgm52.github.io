@@ -170,6 +170,11 @@ export type Options = {
   minotaurBrightness: number;
   minotaurDisplayPx: number;
   minotaurSpriteYOffset: number;
+  // Dragon sprites (summoned carriers — ambient space dragons keep config sizing)
+  dragonSaturation: number;
+  dragonBrightness: number;
+  dragonDisplayPx: number;
+  dragonSpriteYOffset: number;
   // Buildings
   buildingSaturation: number;
   buildingBrightness: number;
@@ -239,6 +244,13 @@ export const DEFAULT_OPTIONS: Options = {
   minotaurBrightness: 1.95,
   minotaurDisplayPx: 96,
   minotaurSpriteYOffset: -22,
+  // Dragon defaults dialled in via the admin sliders — notably larger than
+  // the old DRAGON.displayPx = 132 constant, nudged up so the body sits
+  // above the carried building.
+  dragonSaturation: 1,
+  dragonBrightness: 1,
+  dragonDisplayPx: 244,
+  dragonSpriteYOffset: -39,
   buildingSaturation: 1.50,
   buildingBrightness: 1.05,
   buildingSpriteEnabled: true,

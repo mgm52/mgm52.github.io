@@ -212,6 +212,13 @@ function rebuildPanel(panel: HTMLElement, callbacks: OptionsUICallbacks, refresh
     slider('Sprite Y offset', o.minotaurSpriteYOffset, -64, 64, 1, (v) => setOption('minotaurSpriteYOffset', v)),
   ]));
 
+  panel.appendChild(section('Dragons', [
+    slider('Saturation', o.dragonSaturation, 0, 2, 0.05, (v) => setOption('dragonSaturation', v)),
+    slider('Brightness', o.dragonBrightness, 0.2, 2, 0.05, (v) => setOption('dragonBrightness', v)),
+    slider('Sprite size', o.dragonDisplayPx, 48, 320, 1, (v) => setOption('dragonDisplayPx', v)),
+    slider('Sprite Y offset', o.dragonSpriteYOffset, -64, 64, 1, (v) => setOption('dragonSpriteYOffset', v)),
+  ]));
+
   panel.appendChild(section('Buildings', [
     slider('Saturation', o.buildingSaturation, 0, 2, 0.05, (v) => setOption('buildingSaturation', v)),
     slider('Brightness', o.buildingBrightness, 0.2, 2, 0.05, (v) => setOption('buildingBrightness', v)),

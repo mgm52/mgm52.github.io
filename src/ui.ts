@@ -64,6 +64,26 @@ const everVisibleButtonIds = new Set<string>();
 // entry is dropped the moment the item enters the visible band (see refreshUI),
 // so the arrow only ever nudges toward genuinely-unseen new content.
 const pendingNewItemIds = new Set<string>();
+// Buttons currently carrying the faint "new" tag (id → the tag element, a
+// positioned sibling in the button's list container). The whole set retires
+// the moment a later unlock wave appears (newer content supersedes the old
+// call-out); individual tags also clear on first click of their button.
+const newBadges = new Map<string, HTMLSpanElement>();
+// Width of the gutter a badged button frees up on its left — must match the
+// .has-new-badge margin/width shift in index.html.
+const NEW_BADGE_GUTTER = 34;
+// Buttons revealed during the current refresh pass — collected in
+// applyFadeInOnFirstShow, converted to "new" tags at the end of refreshUI so
+// same-wave unlocks all tag together.
+let newlyShownButtonIds: string[] = [];
+// The tutorial's first two unlocks — the task line already walks the player
+// into these, so tagging them "new" is noise.
+const NEW_BADGE_EXEMPT = new Set(['btn-build-goblin_wheel', 'btn-build-phone_farm']);
+// The four compact dig buttons share one tag on their row container — four
+// per-button gutters would crush the row to slivers.
+function newBadgeTarget(btnId: string): string {
+  return btnId.startsWith('btn-dig-') ? 'dig-row' : btnId;
+}
 // Flips true at the end of the first refresh. Buttons already present on load
 // (a resumed save) shouldn't be flagged as "newly unlocked" — only ones that
 // appear afterwards do.
@@ -89,7 +109,19 @@ function applyFadeInOnFirstShow(btnId: string): void {
   everVisibleButtonIds.add(btnId);
   // A genuinely new button (one that appears during play, not on the initial
   // load seed) is unseen content the scroll cue should point toward.
-  if (initialButtonsSeeded) pendingNewItemIds.add(btnId);
+  if (initialButtonsSeeded) {
+    pendingNewItemIds.add(btnId);
+    const target = newBadgeTarget(btnId);
+    if (!NEW_BADGE_EXEMPT.has(btnId) && !newlyShownButtonIds.includes(target)) {
+      newlyShownButtonIds.push(target);
+    }
+    // Newly-unlocked content always lands at the bottom of its menu — that's
+    // where the player's eye already is (task line, scroll cue). Buttons
+    // present on the initial seed keep their curated order. The dig buttons
+    // move as their whole row (the newBadgeTarget unit).
+    const moveEl = document.getElementById(target);
+    moveEl?.parentElement?.appendChild(moveEl);
+  }
   const btn = document.getElementById(btnId);
   if (!btn) return;
   btn.classList.add('fade-in');
@@ -295,8 +327,8 @@ let currentTaskCached: Task | null = null;
 //   run_phone_farm       → Autobuild, Autospawn
 //   build_gas_engine     → Minotaur, Dig
 //   summon_minotaurs     → Goldblins
-// Lightning Strike is special: it's granted by a truthful demon parlay, not a
-// task (see state.lightningUnlocked).
+//   run_datacentre       → Lightning Strike (via the sticky
+//                          state.lightningUnlocked flag)
 // The Dragon summon is special-cased: it has no gating task. Its button shows
 // whenever at least one Dragon Beacon is `active`, and the simultaneous-dragon
 // cap (live + queued) equals the active-beacon count.
@@ -333,8 +365,10 @@ const TASKS: Task[] = [
   },
   {
     id: 'run_datacentre',
+    // Also grants the Lightning Strike ritual (gated in refreshUI, like the
+    // other non-building abilities listed above).
     text: 'Run your first datacentre',
-    unlocks: ['nuclear_reactor', 'hypercentre', 'wall'],
+    unlocks: ['nuclear_reactor', 'wall'],
     isDone: (s) => {
       for (const b of s.buildings.values()) {
         if (b.kind === 'datacentre' && b.state === 'active') return true;
@@ -344,18 +378,30 @@ const TASKS: Task[] = [
     prereq: ['build_gas_engine'],
   },
   {
+    id: 'build_nuclear_reactor',
+    text: 'Build a Nuclear Reactor',
+    // The Hell Portal ("Weird power source") opens up alongside the
+    // Hypercentre — no longer gated behind ascending.
+    unlocks: ['hypercentre', 'hell_portal'],
+    isDone: (s) => {
+      for (const b of s.buildings.values()) {
+        if (b.kind === 'nuclear_reactor') return true;
+      }
+      return false;
+    },
+    prereq: ['run_datacentre'],
+  },
+  {
     id: 'build_hypercentre',
     text: 'Build a Hypercentre',
-    // The Hell Portal ("Weird power source") opens up alongside the Dragon
-    // Beacon — no longer gated behind ascending.
-    unlocks: ['dragon_beacon', 'hell_portal'],
+    unlocks: ['dragon_beacon'],
     isDone: (s) => {
       for (const b of s.buildings.values()) {
         if (b.kind === 'hypercentre') return true;
       }
       return false;
     },
-    prereq: ['run_datacentre'],
+    prereq: ['build_nuclear_reactor'],
   },
   {
     // Optional side-task: unlocks after Phase 3 (build_gas_engine). Grants the
@@ -809,6 +855,47 @@ function setBuyFlash(btnId: string, on: boolean): void {
   document.getElementById(btnId)?.classList.toggle('buy-flash', on);
 }
 
+// Faint "new" tag in the gutter left of a freshly-unlocked button. The tag is
+// a positioned sibling (the buttons clip their own children via overflow /
+// the cut-corner clip-path), and the button shifts right via .has-new-badge
+// to clear the gutter. Cleared on the button's first click, or wholesale when
+// a later unlock wave lands (see the newlyShownButtonIds processing in
+// refreshUI). syncNewBadges keeps each tag glued to its button across reflows.
+function addNewBadge(id: string): void {
+  const btn = document.getElementById(id);
+  if (!btn || newBadges.has(id)) return;
+  const parent = btn.parentElement!;
+  if (getComputedStyle(parent).position === 'static') parent.style.position = 'relative';
+  const tag = document.createElement('span');
+  tag.className = 'new-badge';
+  tag.textContent = 'new';
+  parent.insertBefore(tag, btn);
+  btn.classList.add('has-new-badge');
+  newBadges.set(id, tag);
+  btn.addEventListener('click', () => removeNewBadge(id), { once: true });
+}
+
+function removeNewBadge(id: string): void {
+  newBadges.get(id)?.remove();
+  newBadges.delete(id);
+  document.getElementById(id)?.classList.remove('has-new-badge');
+}
+
+// Repositions every live tag against its button's current offset box — runs
+// each refreshUI frame so the tags track buttons that move as neighbours
+// appear/hide, and vanish while their button is hidden.
+function syncNewBadges(): void {
+  for (const [id, tag] of newBadges) {
+    const btn = document.getElementById(id);
+    if (!btn || btn.offsetParent === null) { tag.style.display = 'none'; continue; }
+    tag.style.display = '';
+    // offsetLeft includes the .has-new-badge margin, so this lands the tag
+    // in the freed gutter.
+    tag.style.left = `${btn.offsetLeft - NEW_BADGE_GUTTER}px`;
+    tag.style.top = `${btn.offsetTop + btn.offsetHeight / 2}px`;
+  }
+}
+
 function refreshRitualButton(
   btnId: string, costId: string,
   visible: boolean, owned: boolean, canAfford: boolean,
@@ -871,6 +958,9 @@ function refreshAutospawnButton(state: GameState, unlocked: boolean): void {
   const willOverflow = next.multiplier > cap;
   warn.style.display = willOverflow ? '' : 'none';
   btn.disabled = !canAfford || willOverflow;
+  // First reveal: fade in + "new" tag, like every other unlockable button.
+  // (Set disabled above first so the fade picks the right keyframes.)
+  applyFadeInOnFirstShow('btn-buy-autospawn');
   // Flash only the very first purchase — once Autospawn has ever been bought
   // the player knows the upgrade exists, so later tiers don't flash.
   setBuyFlash('btn-buy-autospawn', current === 0 && canAfford && !willOverflow);
@@ -983,8 +1073,13 @@ export function refreshUI(state: GameState) {
   if (revealedTaskIds.has('build_gas_engine')) {
     minotaurBtn.style.display = '';
     applyFadeInOnFirstShow('btn-summon-minotaur');
+    // First frame the summon is unlocked: lock in the one-time mercy
+    // discount if the player's blood is below the discounted price.
+    if (state.minotaurFirstDiscount === null) {
+      state.minotaurFirstDiscount = state.blood < MINOTAUR.firstBloodCost;
+    }
     const queued = state.minotaurSpawnQueue.length;
-    const minoCost = minotaurBloodCost(state.minotaursBought);
+    const minoCost = minotaurBloodCost(state.minotaursBought, state.minotaurFirstDiscount);
     const canAffordMinotaur = state.blood >= minoCost;
     minotaurBtn.disabled = queued > 0 || !canAffordMinotaur;
     minotaurCostEl.textContent = `${minoCost} blood`;
@@ -1112,9 +1207,10 @@ export function refreshUI(state: GameState) {
     revealSecretSettings(state);
   }
 
-  // Lightning Strike — a ritual granted only by a truthful demon parlay (see
-  // demon-dialogue.ts). Disabled when the player can't cover the blood cost;
-  // lit while armed.
+  // Lightning Strike — part of the run_datacentre reward. Granted via the
+  // sticky lightningUnlocked flag so the save plumbing stays unchanged.
+  // Disabled when the player can't cover the blood cost; lit while armed.
+  if (revealedTaskIds.has('run_datacentre')) state.lightningUnlocked = true;
   const lightningBtn = document.getElementById('btn-lightning-strike') as HTMLButtonElement;
   if (state.lightningUnlocked) {
     lightningBtn.style.display = '';
@@ -1299,24 +1395,26 @@ export function refreshUI(state: GameState) {
   // Hide separators that mark a task boundary the player hasn't crossed yet.
   // Hide separators that don't actually sit between two visible buttons.
   // Walks the live DOM so this stays correct regardless of how visibility
-  // is computed (locked, obsoleted, etc.) — a separator only shows when
-  // there's at least one non-locked .build-button on each side of it.
+  // is computed (locked, obsoleted, etc.) — a separator only shows when at
+  // least one non-locked .build-button sits between it and the previous
+  // SHOWN separator (so runs of separators around all-hidden groups collapse
+  // to nothing instead of stacking), plus at least one more below it.
   const buildListEl = document.getElementById('build-list')!;
   const children = Array.from(buildListEl.children) as HTMLElement[];
   const isVisibleButton = (el: HTMLElement) =>
     el.classList.contains('build-button') && !el.classList.contains('locked');
+  let buttonSinceShownSeparator = false;
   for (let i = 0; i < children.length; i++) {
     const c = children[i];
+    if (isVisibleButton(c)) { buttonSinceShownSeparator = true; continue; }
     if (!c.classList.contains('build-separator')) continue;
-    let hasBefore = false;
-    for (let j = i - 1; j >= 0; j--) {
-      if (isVisibleButton(children[j])) { hasBefore = true; break; }
-    }
     let hasAfter = false;
     for (let j = i + 1; j < children.length; j++) {
       if (isVisibleButton(children[j])) { hasAfter = true; break; }
     }
-    c.style.display = (hasBefore && hasAfter) ? '' : 'none';
+    const show = buttonSinceShownSeparator && hasAfter;
+    c.style.display = show ? '' : 'none';
+    if (show) buttonSinceShownSeparator = false;
   }
 
   // Placement hint
@@ -1384,6 +1482,15 @@ export function refreshUI(state: GameState) {
   };
 
   refreshInfoPanel(state);
+
+  // A fresh unlock wave retires every older "new" tag before raising its own —
+  // once newer content exists, the old call-outs have done their job.
+  if (newlyShownButtonIds.length > 0) {
+    for (const id of [...newBadges.keys()]) removeNewBadge(id);
+    for (const id of newlyShownButtonIds) addNewBadge(id);
+    newlyShownButtonIds = [];
+  }
+  syncNewBadges();
 
   // Every button/task shown this first frame is the baseline (a resumed save
   // shouldn't nag about content the player already had). From the next frame on,

@@ -481,6 +481,7 @@ export type RenderContext = {
   grid: Graphics;
   goblinFilter: ColorMatrixFilter;
   minotaurFilter: ColorMatrixFilter;
+  dragonFilter: ColorMatrixFilter;
   buildingFilter: ColorMatrixFilter;
   hellGhostFilter: ColorMatrixFilter;
 };
@@ -688,6 +689,7 @@ export async function createRender(parent: HTMLElement, state: GameState): Promi
   // when the matrix is the identity.
   const goblinFilter = new ColorMatrixFilter();
   const minotaurFilter = new ColorMatrixFilter();
+  const dragonFilter = new ColorMatrixFilter();
   const buildingFilter = new ColorMatrixFilter();
   const hellGhostFilter = new ColorMatrixFilter();
 
@@ -723,7 +725,7 @@ export async function createRender(parent: HTMLElement, state: GameState): Promi
     effectsLayer, deathViews: new Map(),
     deathFrames: null,
     whiteEffectsLayer, lightningGfx,
-    walls, wallsVersion: -1, state, playBg, wallGfx, grid, goblinFilter, minotaurFilter, buildingFilter,
+    walls, wallsVersion: -1, state, playBg, wallGfx, grid, goblinFilter, minotaurFilter, dragonFilter, buildingFilter,
     hellGhostFilter,
   };
 
@@ -800,6 +802,7 @@ function applyOptions(ctx: RenderContext, o: Options) {
   ctx.app.renderer.background.color = o.oobColor;
   applyFilter(ctx.goblinLayer, ctx.goblinFilter, o.goblinSaturation, o.goblinBrightness);
   applyFilter(ctx.minotaurLayer, ctx.minotaurFilter, o.minotaurSaturation, o.minotaurBrightness);
+  applyFilter(ctx.dragonLayer, ctx.dragonFilter, o.dragonSaturation, o.dragonBrightness);
   applyFilter(ctx.buildingLayer, ctx.buildingFilter, o.buildingSaturation, o.buildingBrightness);
   applyFilter(ctx.hellGhostLayer, ctx.hellGhostFilter, 1, o.hellGhostBrightness);
   applyDomOptions(o);
@@ -2292,7 +2295,9 @@ export function render(state: GameState, ctx: RenderContext) {
     const phase = state.now - d.spawnAt;
     const breathing = d.state.kind === 'going_to_kill' && d.state.attackAt !== undefined;
     const bob = Math.sin(phase * 2.2) * 3;
-    v.sprite.y = bob;
+    // Live-tunable from the admin cog (Dragons section).
+    const dragonPx = opts.dragonDisplayPx;
+    v.sprite.y = bob + opts.dragonSpriteYOffset;
     v.sprite.tint = breathing ? 0xff5a2a : 0xffffff;
     const sheet = dragonFlySheet;
     if (sheet) {
@@ -2301,8 +2306,9 @@ export function render(state: GameState, ctx: RenderContext) {
       // phase (not raw now) keys the flap so each dragon beats independently.
       const frame = Math.floor(phase * sheet.fps) % fpd;
       v.sprite.texture = sheet.frames[dir][frame];
-      v.sprite.scale.set(DRAGON.displayPx / sheet.meta.spriteSize);
+      v.sprite.scale.set(dragonPx / sheet.meta.spriteSize);
     }
+    v.glow.scale.set(dragonPx * 1.3 / 128);
     v.glow.alpha = breathing ? 0.6 : 0.18 + 0.06 * Math.sin(state.now * 3);
     applyRingFlash(v.selectionRing, d.selected, d.commandFlashAt, state.now);
     if (d.carrying) {
@@ -2310,7 +2316,7 @@ export function render(state: GameState, ctx: RenderContext) {
       const tex = buildingTextures[d.carrying.kind];
       if (tex && v.carried.texture !== tex) { v.carried.texture = tex; sizeBuildingSprite(v.carried, def.size * 0.8); }
       v.carried.visible = opts.buildingSpriteEnabled;
-      v.carried.position.set(0, DRAGON.displayPx * 0.38);
+      v.carried.position.set(0, dragonPx * 0.38);
     } else if (v.carried.visible) {
       v.carried.visible = false;
     }

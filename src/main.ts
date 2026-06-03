@@ -273,7 +273,7 @@ async function main() {
       appendLog(state, 'Hatching a goblin...');
     },
     onSummonMinotaur: () => {
-      const cost = minotaurBloodCost(state.minotaursBought);
+      const cost = minotaurBloodCost(state.minotaursBought, state.minotaurFirstDiscount);
       if (state.blood < cost) { playSound('error'); return; }
       if (state.minotaurSpawnQueue.length >= MINOTAUR.spawnCapacity) { playSound('error'); return; }
       state.blood -= cost;

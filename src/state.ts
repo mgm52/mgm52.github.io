@@ -434,11 +434,18 @@ export type GameState = {
   // Sticky: flips true once the player has vaporised two or more dragons with a
   // single Lightning Strike. (Legacy: no longer read by the demon parlay.)
   slewTwoDragonsInOneStrike: boolean;
-  // Sticky: the Lightning Strike ritual. Granted solely by a truthful demon
-  // parlay (Bob owning a dragon bone); never unlocked any other way.
+  // Sticky: the Lightning Strike ritual. Granted by the run_datacentre task
+  // reveal (see refreshUI). The demon parlay used to grant this too; it pays
+  // out blood now.
   lightningUnlocked: boolean;
-  // Number of Minotaurs summoned this run — drives the doubling summon cost.
+  // Number of Minotaurs summoned this run — the first summon can be
+  // discounted (see minotaurFirstDiscount), the rest cost the flat price.
   minotaursBought: number;
+  // Mercy discount on the first Minotaur: decided once at the moment the
+  // summon unlocks (null = not yet unlocked). True if the player was sitting
+  // on less than the discounted price in blood at that moment — their first
+  // Minotaur then costs MINOTAUR.firstBloodCost instead of bloodCost.
+  minotaurFirstDiscount: boolean | null;
   // Multiplier applied to a gold goblin's GOLD_KILL_REWARD.money on death.
   // 1 by default; 10 once Goldgoblins x10 is purchased.
   goldgoblinMultiplier: number;
@@ -905,6 +912,7 @@ export function createInitialState(): GameState {
     powerBoosts: [],
     pendingStrike: false,
     minotaursBought: 0,
+    minotaurFirstDiscount: null,
     spawnQueue: [],
     minotaurSpawnQueue: [],
     dragonSpawnQueue: [],

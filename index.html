@@ -422,6 +422,28 @@
       .build-button.fade-in:disabled { animation: build-button-fade-in-disabled 700ms ease; }
       @keyframes build-button-fade-in { from { opacity: 0; } to { opacity: 1; } }
       @keyframes build-button-fade-in-disabled { from { opacity: 0; } to { opacity: 0.55; } }
+      /* Faint "new" tag in a gutter to the left of a freshly-unlocked button.
+         The badged button shifts right (.has-new-badge — keep the 34px in
+         sync with NEW_BADGE_GUTTER in ui.ts) to clear the gutter; ui.ts
+         positions each tag and removes it on first click or when a later
+         unlock wave appears. */
+      .new-badge {
+        position: absolute;
+        width: 30px;
+        transform: translateY(-50%);
+        text-align: center;
+        opacity: 0.5;
+        color: #eee;
+        font-family: var(--font-display);
+        font-size: calc(11px * var(--font-display-scale));
+        letter-spacing: 0.5px;
+        pointer-events: none;
+      }
+      /* Any badged element clears the gutter via margin; full-width buttons
+         also shrink so they don't overflow their column. The dig row is a
+         flex div (auto width), so the margin alone is enough there. */
+      .has-new-badge { margin-left: 34px; }
+      .build-button.has-new-badge { width: calc(100% - 34px); }
       /* Gentle attention-flash for purchasables the player can afford but has
          never bought before. Painted on ::after (below .build-content's
          z-index 1) so the text stays legible and the button's own .fade-in

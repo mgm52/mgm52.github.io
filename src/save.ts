@@ -87,6 +87,10 @@ export function loadGame(): { state: GameState; savedAt: number } | null {
     env.state.dragons ??= new Map();
     env.state.dragonSpawnQueue ??= [];
     env.state.minotaursBought ??= 0;
+    // First-Minotaur mercy discount — saves predating it decide on the next
+    // refresh (no-op if the player already owns Minotaurs, since the discount
+    // only ever applies to purchase #1).
+    env.state.minotaurFirstDiscount ??= null;
     env.state.spaceBuildings ??= new Map();
     // `selected` was added with space-building selection; default it so saves
     // predating it don't leave the field undefined.

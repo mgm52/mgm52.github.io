@@ -266,8 +266,8 @@ export async function runDemonDialogue(state: GameState, demon: Demon, ghost: Gh
         await say('demon', 'mmm');
         await say('demon', 'delicious. thank you my child');
         await say('demon', 'be witness to my gift');
-        state.lightningUnlocked = true;
-        appendLog(state, 'The demon grants Bob the power of lightning.');
+        state.blood += 9999;
+        appendLog(state, 'The demon grants Bob 9,999 blood.');
       } else {
         await ellipsisBeat();
         await say('demon', 'untruth');
