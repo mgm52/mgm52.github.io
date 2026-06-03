@@ -1241,9 +1241,12 @@ export function refreshUI(state: GameState) {
     applyFadeInOnFirstShow('btn-lightning-strike');
     const canAffordLightning = state.blood >= LIGHTNING.bloodCost;
     const onCooldown = state.lightningStrikeCooldown > 0;
-    lightningBtn.disabled = !canAffordLightning || onCooldown;
+    // Unlike the other rituals (which act on the overworld from anywhere),
+    // the strike has to be AIMED at the ground — disable it off-ground.
+    const offGround = state.view !== 'ground';
+    lightningBtn.disabled = !canAffordLightning || onCooldown || offGround;
     lightningBtn.classList.toggle('active', state.pendingStrike);
-    document.getElementById('cost-lightning-strike')!.classList.toggle('met', canAffordLightning && !onCooldown);
+    document.getElementById('cost-lightning-strike')!.classList.toggle('met', canAffordLightning && !onCooldown && !offGround);
   } else {
     lightningBtn.style.display = 'none';
   }

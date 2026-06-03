@@ -337,6 +337,12 @@
         z-index: 0;
       }
       .build-button:hover:not(:disabled) { background: #353a42; border-color: var(--sidebar-button-hover-border, #5a6470); }
+      /* The Candle is hell-only kit — trim its button in the abyss's red.
+         Declared after the base/hover rules so the outline wins on equal
+         specificity; the armed (.active) state below still takes over. */
+      #btn-place-candle { border-color: #8a2030; }
+      #btn-place-candle:hover:not(:disabled) { border-color: #ff2030; }
+      #btn-place-candle.active { background: #4a1018; border-color: #ff2030; box-shadow: 0 0 0 1px #ff2030; }
       .build-button:disabled { opacity: 0.55; cursor: not-allowed; border-color: transparent; }
       .build-button.active { background: #3a4a5e; border-color: #6a8eb0; box-shadow: 0 0 0 1px #6a8eb0; }
       .build-button.in-progress { border-color: #6a8eb0; opacity: 0.85; }
