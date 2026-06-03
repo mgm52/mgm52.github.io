@@ -533,7 +533,7 @@ export const BUILDING_DEFS = {
   hell_portal: def(2, {
     name: 'Bad power source?',
     short: 'BPS',
-    cost: 9_999_999,
+    cost: 999_999,
     bloodCost: 999,
     buildersRequired: 4,
     buildTime: 12,
