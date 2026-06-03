@@ -449,34 +449,33 @@
       }
       .build-name { font-family: var(--font-display); font-size: calc(14px * var(--font-display-scale)); font-weight: 400; letter-spacing: 0.5px; margin-bottom: 3px; }
       .build-meta { font-family: var(--font-mono); font-size: calc(13px * var(--font-mono-scale)); color: var(--sidebar-title); line-height: 1.5; font-variant-numeric: tabular-nums; }
-      /* Unmet costs tint by resource — gold yellow, blood red (the
-         .build-cost base), bone white, power blue (below) — so a shortfall
-         reads as "which resource am I missing" rather than uniform red.
+      /* Unmet costs read uniformly red ("red = missing"), while a
+         resource-tinted underline (set below) says WHICH resource is short —
+         gold yellow, blood red, bone white, power blue.
          Once met, every cost goes green (.met outranks the tint classes). */
-      .build-cost { color: #d96b6b; font-family: var(--font-mono); font-variant-numeric: tabular-nums; }
-      .build-gold-cost { color: #ffd96b; }
-      .build-bone-cost { color: #eae0c0; }
+      .build-cost { color: #d96b6b; font-family: var(--font-mono); font-variant-numeric: tabular-nums; --cost-tint: #d96b6b; }
+      .build-gold-cost { --cost-tint: #ffd96b; }
+      .build-bone-cost { --cost-tint: #eae0c0; }
       .build-cost.met { color: #6fbf73; }
       .build-cost.owned { color: #6a7080; }
-      /* Unaffordable costs also carry a thin red outline (8-direction
-         text-shadow — there's no true text-outline primitive that renders
-         outside the glyph) so the shortfall still reads as "red = missing"
-         now that the text itself tints per resource. Met/owned costs drop it. */
+      /* Unaffordable costs carry a resource-tinted underline identifying the
+         missing resource, now that the text itself is uniformly red.
+         Met/owned costs drop it. */
       .build-cost:not(.met):not(.owned),
       .build-power-cost:not(.met) {
-        text-shadow:
-          -1px -1px 0 #9c2b2b, 1px -1px 0 #9c2b2b,
-          -1px  1px 0 #9c2b2b, 1px  1px 0 #9c2b2b,
-          -1px  0   0 #9c2b2b, 1px  0   0 #9c2b2b,
-           0   -1px 0 #9c2b2b, 0    1px 0 #9c2b2b;
+        text-decoration: underline;
+        text-decoration-color: var(--cost-tint);
+        text-decoration-thickness: 1px;
+        text-underline-offset: 2px;
       }
       .build-button-compact { padding: 5px 10px; }
       .build-button-compact .build-name { margin-bottom: 0; }
       .build-cost-side { font-family: var(--font-mono); font-size: calc(13px * var(--font-mono-scale)); white-space: nowrap; font-variant-numeric: tabular-nums; }
       .build-separator { height: 1px; background: rgba(255,255,255,0.08); margin: 8px 4px; }
-      /* Power costs render blue (matching the power production colour) until
-         the requirement is met, then green like every other satisfied cost. */
-      .build-power-cost { color: #8acfff; font-family: var(--font-mono); font-variant-numeric: tabular-nums; }
+      /* Power costs go red like every other unmet cost, with a blue underline
+         (matching the power production colour) until the requirement is met,
+         then green like every other satisfied cost. */
+      .build-power-cost { color: #d96b6b; font-family: var(--font-mono); font-variant-numeric: tabular-nums; --cost-tint: #8acfff; }
       .build-power-cost.met { color: #6fbf73; }
       .build-req { color: #d96b6b; }
       .build-req.met { color: #6fbf73; }
