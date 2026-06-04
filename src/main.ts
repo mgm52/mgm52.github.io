@@ -251,7 +251,7 @@ async function main() {
     },
     onTriggerBob: () => {
       // Re-arm the cutscene for the next building placement, regardless of
-      // the 20-building threshold or whether Bob has been spawned before.
+      // the 10-minute playtime threshold or whether Bob has been spawned before.
       state.bobSpawned = false;
       state.bobPickingHole = false;
       state.bobCheatPending = true;

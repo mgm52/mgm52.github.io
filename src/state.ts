@@ -52,7 +52,7 @@ export type Goblin = {
   // Rolled at spawn time when Goldgoblins is owned. Gold goblins render with
   // a yellow tint and drop GOLD_KILL_REWARD instead of the usual KILL_REWARD.
   gold?: boolean;
-  // The unique "bob" goblin summoned from the post-15-buildings cutscene.
+  // The unique "bob" goblin summoned from the post-10-minutes cutscene.
   // Renders with a yellow "bob" nametag above his head; otherwise behaves
   // exactly like a normal goblin. Dies once like any goblin; his ghost in
   // hell stays still rather than drifting.
@@ -547,7 +547,7 @@ export type GameState = {
   // a click on one summons Bob.
   bobPickingHole: boolean;
   // Dev cheat: when true, the next building placement triggers the Bob
-  // cutscene regardless of the 20-building threshold or bobSpawned state.
+  // cutscene regardless of the 10-minute playtime threshold or bobSpawned state.
   // Self-clearing once the cutscene fires.
   bobCheatPending: boolean;
   // Ghosts of every unit the player has killed (goblin, minotaur, dragon),
