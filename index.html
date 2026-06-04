@@ -1037,9 +1037,24 @@
         pointer-events: none;
         z-index: 10;
         opacity: 0;
+        /* visibility:hidden (not just opacity:0) when faded out: the goblin
+           sprite below carries an infinite steps() animation plus a large
+           drop-shadow filter, and Safari keeps rasterizing that huge filtered
+           layer on every animation step even at opacity 0 — a permanent,
+           invisible frame-rate tax on mobile. The visibility flip is delayed
+           to match the opacity fade so the exit still animates out. */
+        visibility: hidden;
+        transition: opacity 600ms ease, visibility 0s linear 600ms;
+      }
+      #intro-overlay.visible {
+        opacity: 1;
+        visibility: visible;
         transition: opacity 600ms ease;
       }
-      #intro-overlay.visible { opacity: 1; }
+      /* Belt and braces: also stop the sprite-sheet animation itself while
+         the overlay is hidden, so the style/animation machinery goes fully
+         idle between intros. */
+      #intro-overlay:not(.visible) #intro-goblin { animation-play-state: paused; }
       /* Full-screen click target. While the overlay is .visible the wall
          always absorbs clicks (so the player can't accidentally interact
          with the canvas behind it), but it only shows the glove cursor and
