@@ -504,12 +504,20 @@ export async function createRender(parent: HTMLElement, state: GameState): Promi
   const initH = parent.clientHeight || window.innerHeight || WORLD.height;
   const initScale = computeRenderScale(initW, initH);
   const app = new Application();
+  // Touch devices (phones/tablets) get a cheaper render target: cap the
+  // backing-store resolution at 2x and skip MSAA. Modern iPhones report a
+  // devicePixelRatio of 3, which makes a fullscreen antialiased framebuffer
+  // ~2.3x the pixel work of a 2x one for no perceptible visual gain at
+  // phone sizes — and was a major contributor to single-digit FPS in
+  // mobile Safari. Desktop keeps full DPR + antialiasing.
+  const coarsePointer = window.matchMedia?.('(pointer: coarse)').matches ?? false;
+  const dpr = window.devicePixelRatio || 1;
   await app.init({
     background: '#000000',
     width: initW,
     height: initH,
-    antialias: true,
-    resolution: window.devicePixelRatio || 1,
+    antialias: !coarsePointer,
+    resolution: coarsePointer ? Math.min(dpr, 2) : dpr,
     autoDensity: true,
   });
   parent.appendChild(app.canvas);

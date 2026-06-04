@@ -105,6 +105,10 @@ let initialButtonsSeeded = false;
 // Joined ids of the currently-active tasks, so a change (a fresh task surfacing
 // at the bottom of the sidebar) can flag the task line as new content.
 let lastActiveTaskKey = '';
+// Last-written innerHTML for the power readout / task line — assigning the
+// same markup again still rebuilds the DOM nodes, so both writes are gated.
+let lastPowerHtml = '';
+let lastTaskHtml = '';
 // True while the player is dragging the custom scrollbar thumb — keeps the bar
 // pinned visible and stops refreshUI from fighting the drag.
 let scrollbarDragging = false;
@@ -150,6 +154,26 @@ function applyFadeInOnFirstShow(btnId: string): void {
   // chime for it) still announces itself — same sample as the staged walk,
   // a touch quieter. Buttons present on the initial seed stay silent.
   if (initialButtonsSeeded) playSound('online', 0.35);
+}
+
+// Last build-panel visibility handed to updateScrollAffordances, so the raw
+// scroll listeners (wired in setupUI) can re-run the update between throttled
+// refreshUI calls without recomputing task state.
+let lastPanelBuildVisible = false;
+
+// Scroll cues + custom scrollbar, measured off whichever element is the
+// active scroll container. Called from refreshUI (throttled to ~10Hz in
+// main.ts) and directly from scroll events, so the thumb and cues still
+// track momentum scrolling smoothly between refreshes.
+function updateScrollAffordances(panelVisible: boolean): void {
+  lastPanelBuildVisible = panelVisible;
+  const scroller = buildScrollContainer();
+  const range = scroller.scrollHeight - scroller.clientHeight;
+  const cueDown = panelVisible && range > 4 && scroller.scrollTop < range - 4;
+  const cueUp = panelVisible && range > 4 && scroller.scrollTop > 4;
+  document.getElementById('scroll-cue')!.classList.toggle('visible', cueDown);
+  document.getElementById('scroll-cue-up')!.classList.toggle('visible', cueUp);
+  updateCustomScrollbar(panelVisible);
 }
 
 // Draws the custom grey scrollbar over the active scroll container. Always
@@ -539,6 +563,16 @@ export function setupUI(state: GameState, callbacks: UICallbacks) {
   const summonList = document.getElementById('summon-list')!;
   const ritualList = document.getElementById('ritual-list')!;
   const buildList = document.getElementById('build-list')!;
+
+  // refreshUI runs throttled (main.ts), so also drive the scrollbar/cue
+  // updates straight from scroll events — otherwise the custom thumb would
+  // visibly lag a flick-scroll. Both possible scroll containers are wired;
+  // only the active one ever fires.
+  for (const id of ['panel-build', 'sidebar']) {
+    document.getElementById(id)?.addEventListener(
+      'scroll', () => updateScrollAffordances(lastPanelBuildVisible), { passive: true },
+    );
+  }
 
   // Tapping a scroll-cue arrow nudges the panel by most of a page in that
   // direction, so each doubles as a control, not just an indicator.
@@ -1162,10 +1196,14 @@ export function refreshUI(state: GameState) {
   const powerRow = document.getElementById('row-power')!;
   powerRow.style.display = produced > 0 ? '' : 'none';
   const powerEl = document.getElementById('power')!;
-  if (consumed > 0) {
-    powerEl.innerHTML = `${formatPower(produced - consumed)}<span class="power-total"> / ${formatPower(produced)}</span>`;
-  } else {
-    powerEl.textContent = formatPower(produced);
+  // innerHTML assignment rebuilds child nodes even when the markup is
+  // unchanged, so gate it on a cached copy of the last-written string.
+  const powerHtml = consumed > 0
+    ? `${formatPower(produced - consumed)}<span class="power-total"> / ${formatPower(produced)}</span>`
+    : formatPower(produced);
+  if (powerHtml !== lastPowerHtml) {
+    lastPowerHtml = powerHtml;
+    powerEl.innerHTML = powerHtml;
   }
   powerEl.style.color = '#8acfff';
 
@@ -1382,14 +1420,7 @@ export function refreshUI(state: GameState) {
   // keep the custom grey scrollbar in sync here. All measure whichever element
   // is the scroll container right now (build panel vs whole sidebar; see media
   // query).
-  const cueScroller = buildScrollContainer();
-  const cueRange = cueScroller.scrollHeight - cueScroller.clientHeight;
-  const cueDown = panelBuildVisible && cueRange > 4 && cueScroller.scrollTop < cueRange - 4;
-  const cueUp = panelBuildVisible && cueRange > 4 && cueScroller.scrollTop > 4;
-  document.getElementById('scroll-cue')!.classList.toggle('visible', cueDown);
-  document.getElementById('scroll-cue-up')!.classList.toggle('visible', cueUp);
-
-  updateCustomScrollbar(panelBuildVisible);
+  updateScrollAffordances(panelBuildVisible);
 
   // Autobuild → Autowater replace chain: Autowater needs Autobuild owned
   // AND a water source dug (so the upgrade has something to act on). The
@@ -1459,13 +1490,20 @@ export function refreshUI(state: GameState) {
   const taskEl = document.getElementById('task-text')!;
   if (activeTasks.length > 0) {
     taskEl.style.display = '';
-    taskEl.innerHTML = activeTasks
+    // Same caching as the power line: re-assigning identical innerHTML still
+    // tears down and rebuilds the child nodes (and re-layouts the sidebar),
+    // which added up when this ran every refresh.
+    const taskHtml = activeTasks
       .map(t => {
         const label = t.optional ? 'Optional' : 'Work';
         const text = t.dynamicText ? t.dynamicText(state) : t.text;
         return `<div><strong>${label}:</strong> ${text}</div>`;
       })
       .join('');
+    if (taskHtml !== lastTaskHtml) {
+      lastTaskHtml = taskHtml;
+      taskEl.innerHTML = taskHtml;
+    }
   } else {
     taskEl.style.display = 'none';
   }
@@ -2046,7 +2084,10 @@ function setFillWidth(id: string, progress: number) {
   const el = document.getElementById(id) as HTMLElement | null;
   if (!el) return;
   const pct = Math.max(0, Math.min(1, progress)) * 100;
-  el.style.width = `${pct}%`;
+  const w = `${pct}%`;
+  // Skip the no-op write — these run for every fill bar on every refresh,
+  // and unguarded style writes still dirty the element's style.
+  if (el.style.width !== w) el.style.width = w;
 }
 
 function describeGoblinState(state: GameState, s: GoblinState): string {
