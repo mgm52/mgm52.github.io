@@ -80,6 +80,12 @@ export function setupInput(
   app.stage.eventMode = 'static';
   // Receive pointer events anywhere on the canvas (regardless of camera position).
   app.stage.hitArea = { contains: () => true };
+  // Every pointer listener in the game lives on the stage itself, so skip
+  // Pixi's recursive hit-test into the scene graph entirely. Without this,
+  // each pointermove walks every goblin/building/ghost view doing bounds
+  // checks — on touch devices, which deliver a dense stream of coalesced
+  // move events while dragging, that starved the frame loop badly.
+  app.stage.interactiveChildren = false;
   app.canvas.addEventListener('contextmenu', (e) => e.preventDefault());
 
   app.stage.on('pointerdown', (e: FederatedPointerEvent) => {

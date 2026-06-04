@@ -127,6 +127,13 @@
         opacity: 0.06;
         mix-blend-mode: overlay;
       }
+      /* mix-blend-mode composited over an accelerated WebGL canvas is
+         notoriously expensive in mobile Safari (it pushes the canvas through
+         a slower blending path every frame). The grain is barely perceptible
+         on a phone-sized screen anyway, so touch devices skip it. */
+      @media (pointer: coarse) {
+        body::after { display: none; }
+      }
       /* TASK COMPLETE celebration overlay — covers the whole sidebar with
          black, fades in, holds, fades out (drives the new-content reveal). */
       #task-complete-overlay {

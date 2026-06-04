@@ -115,6 +115,36 @@ function showTitleScreen(savedAt: number | null = null): Promise<'new' | 'resume
   });
 }
 
+// ─── Debug FPS overlay ───
+// Enabled by adding ?fps to the URL (e.g. mgm52.github.io/?fps). Shows the
+// frame rate plus the average and worst frame time over each half-second
+// window — cheap enough to leave running while hunting jank on a phone,
+// where devtools aren't handy.
+function createFpsHud(): ((now: number, dt: number) => void) | null {
+  if (!new URLSearchParams(window.location.search).has('fps')) return null;
+  const el = document.createElement('div');
+  el.id = 'fps-hud';
+  el.style.cssText =
+    'position:fixed;top:6px;left:6px;z-index:9999;background:rgba(0,0,0,0.65);'
+    + 'color:#8f8;font:12px/1.4 monospace;padding:4px 8px;border-radius:4px;'
+    + 'pointer-events:none;white-space:pre;';
+  document.body.appendChild(el);
+  let frames = 0;
+  let accMs = 0;
+  let worst = 0;
+  let windowStart = performance.now();
+  return (now: number, dt: number) => {
+    frames++;
+    accMs += dt;
+    if (dt > worst) worst = dt;
+    if (now - windowStart >= 500 && frames > 0) {
+      const fps = (frames * 1000) / (now - windowStart);
+      el.textContent = `${fps.toFixed(0)} fps\navg ${(accMs / frames).toFixed(1)} ms\nworst ${worst.toFixed(0)} ms`;
+      frames = 0; accMs = 0; worst = 0; windowStart = now;
+    }
+  };
+}
+
 const BACKGROUND_MUSIC_URL = encodeURI('assets/Dmitri Shostakovich String Quartet No. 4 in D major Op.83 1949.mp3');
 const BACKGROUND_CRACKLE_URL = 'assets/vinyl_crackle.mp3';
 // Crackle gets a head-start so the room "settles" before the quartet enters.
@@ -597,6 +627,17 @@ async function main() {
   let acc = 0;
   let last = performance.now();
 
+  // The DOM sidebar refresh (refreshUI) forces style/layout work in the
+  // browser — innerHTML, classList churn, scroll measurements — and running
+  // it every animation frame was a big chunk of the per-frame budget on
+  // mobile Safari. 10Hz is plenty for resource counters and button states;
+  // the canvas render below still runs every frame. Seeded to fire on the
+  // very first frame.
+  const UI_REFRESH_MS = 100;
+  let uiAcc = UI_REFRESH_MS;
+
+  const fpsHud = createFpsHud();
+
   // ─── Demon parlay ──────────────────────────────────────────────────
   // When a soul reaches a demon, the sim sets demon.busyWith. We freeze the
   // world (demon-parlay-hold, folded into introActive above) and run the modal
@@ -888,7 +929,12 @@ async function main() {
     // underworld is supposed to be hushed. Death cries still play.
     setInHellView(state.view === 'hell');
     render(state, ctx);
-    refreshUI(state);
+    uiAcc += dt;
+    if (uiAcc >= UI_REFRESH_MS) {
+      uiAcc = 0;
+      refreshUI(state);
+    }
+    fpsHud?.(now, dt);
     requestAnimationFrame(frame);
   }
   requestAnimationFrame(frame);
