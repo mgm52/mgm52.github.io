@@ -118,10 +118,18 @@ function showTitleScreen(savedAt: number | null = null): Promise<'new' | 'resume
 // ─── Debug FPS overlay ───
 // Enabled by adding ?fps to the URL (e.g. mgm52.github.io/?fps). Shows the
 // frame rate, the average and worst frame time over each half-second window,
-// a worst-case breakdown by subsystem (sim ticks / canvas render / DOM ui),
-// and the cost+size of the most recent autosave — cheap enough to leave
-// running while hunting jank on a phone, where devtools aren't handy.
+// a worst-case breakdown by subsystem (sim ticks / scene sync / DOM ui /
+// Pixi's actual GPU submission), the active renderer backend, the cost+size
+// of the most recent autosave, and the last runtime error — cheap enough to
+// leave running while hunting jank on a phone, where devtools aren't handy.
 type FrameTimings = { tickMs: number; renderMs: number; uiMs: number };
+// Written by the renderer.render patch installed in main() (Pixi renders on
+// its own ticker, outside our frame loop, so it has to be sampled here).
+let pixiRenderMs = 0;
+// e.g. "webgl · 2x · 880×1632" — set once createRender resolves. If this
+// ever reads "canvas", Pixi fell back to CPU rasterization and the frame
+// rate is doomed regardless of game-side work.
+let rendererInfo = '…';
 function createFpsHud(): ((now: number, dt: number, t: FrameTimings) => void) | null {
   if (!new URLSearchParams(window.location.search).has('fps')) return null;
   const el = document.createElement('div');
@@ -129,12 +137,17 @@ function createFpsHud(): ((now: number, dt: number, t: FrameTimings) => void) | 
   el.style.cssText =
     'position:fixed;top:6px;left:6px;z-index:9999;background:rgba(0,0,0,0.65);'
     + 'color:#8f8;font:12px/1.4 monospace;padding:4px 8px;border-radius:4px;'
-    + 'pointer-events:none;white-space:pre;';
+    + 'pointer-events:none;white-space:pre;max-width:95vw;overflow:hidden;';
   document.body.appendChild(el);
+  // Surface uncaught errors/rejections — on a phone there's no console, and
+  // a per-frame throw inside a ticker looks identical to "it's just slow".
+  let lastError = '';
+  window.addEventListener('error', (e) => { lastError = String(e.message ?? e).slice(0, 80); });
+  window.addEventListener('unhandledrejection', (e) => { lastError = String(e.reason ?? e).slice(0, 80); });
   let frames = 0;
   let accMs = 0;
   let worst = 0;
-  let worstTick = 0, worstRender = 0, worstUi = 0;
+  let worstTick = 0, worstRender = 0, worstUi = 0, worstPixi = 0;
   let windowStart = performance.now();
   return (now: number, dt: number, t: FrameTimings) => {
     frames++;
@@ -143,6 +156,7 @@ function createFpsHud(): ((now: number, dt: number, t: FrameTimings) => void) | 
     if (t.tickMs > worstTick) worstTick = t.tickMs;
     if (t.renderMs > worstRender) worstRender = t.renderMs;
     if (t.uiMs > worstUi) worstUi = t.uiMs;
+    if (pixiRenderMs > worstPixi) worstPixi = pixiRenderMs;
     if (now - windowStart >= 500 && frames > 0) {
       const fps = (frames * 1000) / (now - windowStart);
       const save = getLastSaveStats();
@@ -151,10 +165,12 @@ function createFpsHud(): ((now: number, dt: number, t: FrameTimings) => void) | 
         : 'save —';
       el.textContent =
         `${fps.toFixed(0)} fps · avg ${(accMs / frames).toFixed(1)} ms · worst ${worst.toFixed(0)} ms\n`
-        + `worst: tick ${worstTick.toFixed(1)} · render ${worstRender.toFixed(1)} · ui ${worstUi.toFixed(1)} ms\n`
-        + saveLine;
+        + `worst: tick ${worstTick.toFixed(1)} · scene ${worstRender.toFixed(1)} · ui ${worstUi.toFixed(1)} · pixi ${worstPixi.toFixed(1)} ms\n`
+        + `${rendererInfo}\n`
+        + saveLine
+        + (lastError ? `\nERR ${lastError}` : '');
       frames = 0; accMs = 0; worst = 0;
-      worstTick = 0; worstRender = 0; worstUi = 0;
+      worstTick = 0; worstRender = 0; worstUi = 0; worstPixi = 0;
       windowStart = now;
     }
   };
@@ -505,8 +521,32 @@ async function main() {
   // loaded before createRender. Until now they've been loading in parallel
   // with the title screen + the sidebar setup above.
   await fontsReady;
+  const fpsHud = createFpsHud();
+  // Scratch object reused every frame by the HUD instrumentation (only
+  // written when the HUD is active). tickMs is left at its previous value on
+  // frames where the sim is held (pause/intro) — harmless for a debug HUD.
+  const frameTimings: FrameTimings = { tickMs: 0, renderMs: 0, uiMs: 0 };
+
   const ctx = await createRender(document.getElementById('game')!, state);
   setupInput(state, ctx.app, ctx.uiLayer, ctx.worldLayer, ctx);
+
+  // HUD-only: report which backend Pixi actually picked (webgl / webgpu /
+  // canvas — the last one is CPU rasterization and would explain a uniform
+  // sub-10fps regardless of game-side work), and time the real render pass.
+  // Pixi renders on its own ticker, outside our frame loop below, so none of
+  // the frame-loop timings cover it; wrap renderer.render to capture it.
+  if (fpsHud) {
+    const renderer = ctx.app.renderer;
+    rendererInfo = `${renderer.name} · ${renderer.resolution}x · ${ctx.app.canvas.width}×${ctx.app.canvas.height}`;
+    const target = renderer as unknown as { render: (...args: unknown[]) => unknown };
+    const orig = target.render.bind(renderer);
+    target.render = (...args: unknown[]) => {
+      const t0 = performance.now();
+      const out = orig(...args);
+      pixiRenderMs = performance.now() - t0;
+      return out;
+    };
+  }
 
   // Dev-only debug handle for manual + automated testing. Stripped from
   // production builds (import.meta.env.DEV is false there).
@@ -659,12 +699,6 @@ async function main() {
   // very first frame.
   const UI_REFRESH_MS = 100;
   let uiAcc = UI_REFRESH_MS;
-
-  const fpsHud = createFpsHud();
-  // Scratch object reused every frame by the HUD instrumentation (only
-  // written when the HUD is active). tickMs is left at its previous value on
-  // frames where the sim is held (pause/intro) — harmless for a debug HUD.
-  const frameTimings: FrameTimings = { tickMs: 0, renderMs: 0, uiMs: 0 };
 
   // ─── Demon parlay ──────────────────────────────────────────────────
   // When a soul reaches a demon, the sim sets demon.busyWith. We freeze the

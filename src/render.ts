@@ -481,6 +481,10 @@ export type RenderContext = {
   // force-white color matrix (a plain white tint can't brighten the red blood
   // asset). The bolt itself is a single re-drawn Graphics.
   whiteEffectsLayer: Container;
+  // The force-white matrix for whiteEffectsLayer. Only attached while the
+  // layer has children (see render) — an attached filter costs a
+  // render-to-texture pass every frame even on an empty layer.
+  whiteFilter: ColorMatrixFilter;
   lightningGfx: Graphics;
   // Mutable references — used by applyOptions() to redraw on the fly.
   walls: Set<string>;
@@ -581,7 +585,10 @@ export async function createRender(parent: HTMLElement, state: GameState): Promi
     0, 0, 0, 0, 1,
     0, 0, 0, 1, 0,
   ] as typeof whiteFilter.matrix;
-  whiteEffectsLayer.filters = [whiteFilter];
+  // NOT attached here — a filter forces a render-to-texture pass for the
+  // layer every frame even while it's empty (the common case: scorches only
+  // exist for a couple of seconds after a lightning strike). render() attaches
+  // it only while the layer actually has children.
   const lightningGfx = new Graphics();
 
   worldLayer.addChild(playBg);
@@ -763,7 +770,7 @@ export async function createRender(parent: HTMLElement, state: GameState): Promi
     floatersLayer, floaterViews: new Map(),
     effectsLayer, deathViews: new Map(),
     deathFrames: null,
-    whiteEffectsLayer, lightningGfx,
+    whiteEffectsLayer, whiteFilter, lightningGfx,
     walls, wallsVersion: -1, state, playBg, wallGfx, grid, goblinFilter, minotaurFilter, dragonFilter, buildingFilter,
     hellGhostFilter,
     demonFilter,
@@ -2296,6 +2303,15 @@ export function render(state: GameState, ctx: RenderContext) {
   // Death effects: spawn a one-shot GifSprite per new entry; the sim expires
   // entries after a couple seconds and we tear the sprite down with them.
   drawDeathEffects(ctx, state);
+
+  // Attach the force-white matrix only while there are scorch sprites to
+  // recolor; an attached filter renders the layer to an offscreen texture
+  // every frame even when the layer is empty (the common case).
+  const wantWhiteFilter = ctx.whiteEffectsLayer.children.length > 0;
+  const hasWhiteFilter = Array.isArray(ctx.whiteEffectsLayer.filters) && ctx.whiteEffectsLayer.filters.length > 0;
+  if (wantWhiteFilter !== hasWhiteFilter) {
+    ctx.whiteEffectsLayer.filters = wantWhiteFilter ? [ctx.whiteFilter] : [];
+  }
 
   // Lightning bolts: redrawn each frame from the live (fading) bolt list.
   drawLightning(ctx, state);
