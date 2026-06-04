@@ -215,10 +215,21 @@
         opacity: 0; pointer-events: none;
         transition: opacity 220ms ease;
       }
-      #scroll-cue { bottom: 6px; margin: -28px auto 0; }
-      #scroll-cue-up { top: 0; margin: 0 auto -28px; }
+      #scroll-cue { bottom: 6px; margin: -28px auto 0; animation: scroll-cue-bob-down 1.6s ease-in-out infinite; }
+      #scroll-cue-up { top: 0; margin: 0 auto -28px; animation: scroll-cue-bob-up 1.6s ease-in-out infinite; }
       .scroll-cue.visible { opacity: 0.6; pointer-events: auto; }
       .scroll-cue.visible:hover { opacity: 0.95; }
+      /* Gentle perpetual bob in each cue's own direction so the arrows read
+         as "more this way" at a glance. Runs even while hidden (opacity 0)
+         so the pair stays in sync whenever both are visible. */
+      @keyframes scroll-cue-bob-down {
+        0%, 100% { transform: translateY(0); }
+        50% { transform: translateY(4px); }
+      }
+      @keyframes scroll-cue-bob-up {
+        0%, 100% { transform: translateY(0); }
+        50% { transform: translateY(-4px); }
+      }
 
       /* Staged unlock reveal (runUnlockRevealSequence in ui.ts). Items due a
          reveal hold .reveal-hidden — invisible but keeping their layout slot
@@ -256,6 +267,7 @@
       }
       @media (prefers-reduced-motion: reduce) {
         .reveal-highlight { animation: none; }
+        #scroll-cue, #scroll-cue-up { animation: none; }
       }
 
       /* ───────── Compact landscape (mobile phones) ───────── */
@@ -1350,6 +1362,16 @@
            height instead of the desktop build-panel-only inner scroll. */
         #panel-build { overflow: visible; flex: 0 0 auto; }
         .panel { margin-bottom: 8px; padding: 7px 10px; }
+        /* Pin Resources to the top of the scrolling tray so the readouts stay
+           visible however far the player scrolls. Opaque background (matching
+           the sidebar gradient's top stop) so scrolled content doesn't bleed
+           through; z-index above the scroll cues (40) but below the
+           task-complete overlay (50). */
+        .panel.panel-resources {
+          position: sticky; top: 0; z-index: 45;
+          background: #20242a;
+          box-shadow: 0 3px 8px rgba(0,0,0,0.35);
+        }
         .panel-title { font-size: calc(10px * var(--font-display-scale)); margin-bottom: 6px; }
         /* Resources flow as a horizontal wrap so Cash/Blood/Bones/Power share
            the width instead of stacking into four tall rows. */

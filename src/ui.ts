@@ -1,7 +1,7 @@
 import { playSound, playMinotaurCommand } from './audio';
 import {
   AUTOSPAWN_TIERS, BUILDABLE_KINDS, BUILDING_DEFS, BuildingKind, DRAG_SELECT_HINT_DELAY_SEC, MULTI_SPAWN_HINT_DELAY_SEC,
-  DRAGON, GOBLIN, LIGHTNING, SPAWN_HINT_NO_SPAWN_SEC,
+  DRAGON, GOBLIN, LIGHTNING, PAN_HINT_DELAY_SEC, SPAWN_HINT_NO_SPAWN_SEC,
   SPAWN_HINT_NO_TASK_SEC, SUMMON_UPGRADES, WATER_HINT_DELAY_SEC, digBloodCost, MINOTAUR, minotaurBloodCost, TINYTAUR, formatPower, SOUL_SIGIL, sigilPortalOutput,
 } from './config';
 import {
@@ -579,6 +579,10 @@ export function setupUI(state: GameState, callbacks: UICallbacks) {
   const panHintEl = document.getElementById('pan-hint');
   if (window.matchMedia('(pointer: coarse)').matches) {
     if (panHintEl) panHintEl.textContent = 'drag two fingers to look around';
+    // Likewise spell out the touch gesture for multi-select: one finger drags
+    // a selection box (two fingers pan).
+    const dragSelectHintEl = document.getElementById('drag-select-hint');
+    if (dragSelectHintEl) dragSelectHintEl.textContent = 'Hint: drag one finger to choose many creatures';
     // No arrow keys to hold on touch — the hints are tappable instead (wired
     // up in main.ts), so reword them from "Hold ↑/↓" to "Tap".
     const tapText: Record<string, string> = {
@@ -1566,12 +1570,18 @@ export function refreshUI(state: GameState) {
     hint.style.display = 'none';
   }
 
-  // Pan-key hint — surfaces a few seconds after the first dig if the player
-  // still hasn't brought any water source into the viewport. Hides forever
-  // (sticky `waterSeen`) the first frame water appears on screen.
+  // Pan-key hint — two triggers share the element. (a) Water onboarding:
+  // surfaces a few seconds after the first dig if the player still hasn't
+  // brought any water source into the viewport; hides forever (sticky
+  // `waterSeen`) the first frame water appears on screen. (b) Never-panned
+  // nudge: after PAN_HINT_DELAY_SEC of total play if the player has never
+  // moved the camera at all; hides forever (sticky `cameraPanSeen`) on the
+  // first pan — keyboard or two-finger drag.
   const panHint = document.getElementById('pan-hint')!;
   const dugDelayElapsed = state.firstDugAt != null && (state.now - state.firstDugAt) >= WATER_HINT_DELAY_SEC;
-  panHint.style.display = (dugDelayElapsed && !state.waterSeen) ? 'block' : 'none';
+  const waterNudge = dugDelayElapsed && !state.waterSeen;
+  const neverPannedNudge = !state.cameraPanSeen && state.now >= PAN_HINT_DELAY_SEC;
+  panHint.style.display = (waterNudge || neverPannedNudge) ? 'block' : 'none';
 
   // Spawn-hint — onboarding nudge that fades in once either timeout trips.
   // First task is `earn_100`; check sticky completion as well as live state

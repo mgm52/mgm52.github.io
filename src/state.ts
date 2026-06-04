@@ -520,6 +520,10 @@ export type GameState = {
   // player has actually looked at the water.
   firstDugAt: number | null;
   waterSeen: boolean;
+  // Map-movement onboarding state. Flips sticky-true the first time the player
+  // pans any camera (WASD/arrow keys, or a two-finger drag on touch); gates the
+  // PAN_HINT_DELAY_SEC "you can move the map" nudge in refreshUI.
+  cameraPanSeen: boolean;
   // Drag-select onboarding state. Flips sticky-true the first time the player
   // performs a drag-rectangle that picks up 2+ creatures; used to gate the
   // "Hint: drag to choose many creatures" nudge in refreshUI.
@@ -955,6 +959,7 @@ export function createInitialState(): GameState {
     spawnsCompleted: 0,
     firstDugAt: null,
     waterSeen: false,
+    cameraPanSeen: false,
     multiSelectSeen: false,
     multiSpawnSeen: false,
     optionsUnlocked: false,
