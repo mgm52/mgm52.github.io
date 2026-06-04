@@ -51,8 +51,102 @@ export function saveGame(state: GameState): void {
     const env: SaveEnvelope = { version: VERSION, savedAt: Date.now(), state };
     const serialized = devalue.stringify(env);
     const compressed = compressToUTF16(serialized);
+    lastSyncSaveAt = performance.now();
     localStorage.setItem(STORAGE_KEY, compressed);
   } catch { /* storage full / unavailable — silently skip */ }
+}
+
+// ─── Background autosave ────────────────────────────────────────────────
+// devalue.stringify + compressToUTF16 on a mature colony block the main
+// thread for hundreds of milliseconds — running that synchronously every
+// autosave made the game visibly hitch every 10 seconds on mobile. The
+// periodic autosave instead clones the state to a worker (structured clone
+// is native and fast) and lets the worker do the heavy serialization +
+// compression; only the cheap localStorage write happens back here.
+//
+// The synchronous saveGame above stays for the moments that can't wait for
+// a worker round-trip: pagehide / tab-hidden / pause.
+
+// Telemetry for the ?fps debug HUD — duration/size of the last completed
+// background save and how it was performed.
+export type SaveStats = {
+  at: number;            // performance.now() when the save finished
+  cloneMs: number;       // main-thread cost (structured clone postMessage)
+  workMs: number;        // worker-side serialize+compress
+  compressedKb: number;
+  mode: 'worker' | 'sync';
+};
+let lastSaveStats: SaveStats | null = null;
+export function getLastSaveStats(): SaveStats | null { return lastSaveStats; }
+
+let saveWorker: Worker | null = null;
+let saveWorkerBroken = false;
+let saveSeq = 0;
+let saveInFlight = false;
+// Timestamps guarding against a stale write: if a synchronous save (pagehide,
+// pause) lands while a worker save is still compressing, the worker's reply
+// must not overwrite the newer snapshot with the older one.
+let lastSyncSaveAt = 0;
+let inFlightPostedAt = 0;
+
+function getSaveWorker(): Worker | null {
+  if (saveWorkerBroken) return null;
+  if (saveWorker) return saveWorker;
+  try {
+    saveWorker = new Worker(new URL('./save-worker.ts', import.meta.url), { type: 'module' });
+    saveWorker.onmessage = (e: MessageEvent<{ seq: number; compressed: string; rawChars: number; workMs: number }>) => {
+      saveInFlight = false;
+      // A sync save (pagehide/pause) wrote a NEWER snapshot while this one
+      // was compressing — drop the stale result instead of clobbering it.
+      if (lastSyncSaveAt > inFlightPostedAt) return;
+      try { localStorage.setItem(STORAGE_KEY, e.data.compressed); } catch { /* storage full — skip */ }
+      if (lastSaveStats && lastSaveStats.mode === 'worker') {
+        lastSaveStats.at = performance.now();
+        lastSaveStats.workMs = e.data.workMs;
+        lastSaveStats.compressedKb = (e.data.compressed.length * 2) / 1024;
+      }
+    };
+    saveWorker.onerror = () => {
+      // Worker failed to load/run (CSP, bundling, old browser) — fall back
+      // to synchronous saves for the rest of the session.
+      saveWorkerBroken = true;
+      saveInFlight = false;
+      saveWorker?.terminate();
+      saveWorker = null;
+    };
+    return saveWorker;
+  } catch {
+    saveWorkerBroken = true;
+    return null;
+  }
+}
+
+// Fire-and-forget autosave. Skips this round if the previous one is still
+// compressing (better to save 10s later than queue up overlapping clones).
+export function saveGameInBackground(state: GameState): void {
+  const w = getSaveWorker();
+  if (!w) {
+    const t0 = performance.now();
+    saveGame(state);
+    lastSaveStats = { at: performance.now(), cloneMs: performance.now() - t0, workMs: 0, compressedKb: 0, mode: 'sync' };
+    return;
+  }
+  if (saveInFlight) return;
+  saveInFlight = true;
+  const env: SaveEnvelope = { version: VERSION, savedAt: Date.now(), state };
+  const t0 = performance.now();
+  try {
+    w.postMessage({ seq: ++saveSeq, env });
+    inFlightPostedAt = performance.now();
+    lastSaveStats = { at: performance.now(), cloneMs: performance.now() - t0, workMs: 0, compressedKb: 0, mode: 'worker' };
+  } catch {
+    // State contained something the structured clone rejected — save the
+    // old way and stop trying the worker (it would fail every time).
+    saveWorkerBroken = true;
+    saveInFlight = false;
+    saveGame(state);
+    lastSaveStats = { at: performance.now(), cloneMs: performance.now() - t0, workMs: 0, compressedKb: 0, mode: 'sync' };
+  }
 }
 
 export function loadGame(): { state: GameState; savedAt: number } | null {

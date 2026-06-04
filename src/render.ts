@@ -497,9 +497,25 @@ export type RenderContext = {
   hellGhostFilter: ColorMatrixFilter;
 };
 
+// Kick off the heavyweight texture loads (sprite sheets, building art, the
+// blood gif) without waiting for createRender. main() calls this as soon as
+// it starts, so on production the downloads+decodes overlap the title screen
+// instead of stacking up inside the post-click freeze. Memoized; createRender
+// awaits the same promise. The gif preload just warms the Assets cache — the
+// real decode-to-frames happens in createRender as before.
+let renderAssetsPromise: Promise<void> | null = null;
+export function preloadRenderAssets(): Promise<void> {
+  renderAssetsPromise ??= Promise.all([
+    loadGoblinSheets(),
+    loadBuildingTextures(),
+    Assets.load<GifSource>('assets/blood-explosion.gif').catch(() => undefined),
+  ]).then(() => undefined);
+  return renderAssetsPromise;
+}
+
 export async function createRender(parent: HTMLElement, state: GameState): Promise<RenderContext> {
   const walls = state.walls;
-  await Promise.all([loadGoblinSheets(), loadBuildingTextures()]);
+  await preloadRenderAssets();
   const initW = parent.clientWidth || window.innerWidth || WORLD.width;
   const initH = parent.clientHeight || window.innerHeight || WORLD.height;
   const initScale = computeRenderScale(initW, initH);
