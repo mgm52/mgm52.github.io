@@ -298,6 +298,29 @@ export function revealSecretSettings(state: GameState): void {
   );
 }
 
+// The celebration overlay is absolutely positioned inside #sidebar, which in
+// phone portrait is itself the scroll container — so its natural position
+// (top of the scrollable CONTENT) drifts off-screen with any scroll offset,
+// leaving the bottom of the menu uncovered. Re-pin `top` to scrollTop every
+// frame while the overlay is visible (its height is 100% of the visible box
+// via CSS) so it always blacks out exactly what's on screen, including
+// across the behind-the-overlay scroll snap below. Desktop/landscape sidebars
+// don't scroll, so there this keeps top at 0 — same as before.
+let overlayBoxSyncActive = false;
+function syncTaskCompleteOverlayBox(): void {
+  const overlay = document.getElementById('task-complete-overlay');
+  const sidebar = document.getElementById('sidebar');
+  if (!overlay || !sidebar) { overlayBoxSyncActive = false; return; }
+  overlay.style.top = `${sidebar.scrollTop}px`;
+  // Keep tracking until the fade-out has fully finished, then stop so the
+  // rAF loop doesn't run forever between celebrations.
+  if (overlay.classList.contains('shown') || getComputedStyle(overlay).opacity !== '0') {
+    requestAnimationFrame(syncTaskCompleteOverlayBox);
+  } else {
+    overlayBoxSyncActive = false;
+  }
+}
+
 // Plays the "TASK COMPLETE" overlay + a short Skyrim-ish drum-then-fanfare
 // tap. Idempotent in the sense that re-triggers stack the timer; the overlay
 // just stays "shown" longer if multiple tasks complete in quick succession.
@@ -318,6 +341,10 @@ function playTaskCompleteAnimation(taskId: string): void {
   const subtitleEl = overlay.querySelector('.task-complete-subtitle');
   if (subtitleEl) subtitleEl.textContent = task?.text ?? '';
   overlay.classList.add('shown');
+  if (!overlayBoxSyncActive) {
+    overlayBoxSyncActive = true;
+    syncTaskCompleteOverlayBox();
+  }
   // "Level Up/Mission Complete (Resistance)" by Dylan Kelk (freesound 672801).
   playSound('task_complete', 1);
   // Hold the overlay for ~2s, then fade out (CSS handles the 600ms fade). As it
@@ -351,6 +378,11 @@ function takeNextRevealTarget(): HTMLElement | null {
   if (taskTextPendingReveal) {
     taskTextPendingReveal = false;
     const el = document.getElementById('task-text');
+    // The task line's resting opacity comes from .revealed (normally added
+    // by the intro / title-fade timer in main.ts). Make sure it's set before
+    // the pop plays — without it the line fades straight back out to the
+    // .task-text base opacity of 0 once the reveal dim lifts.
+    el?.classList.add('revealed');
     if (el && el.style.display !== 'none') return el;
     // No live task line after all (e.g. the run's final task just completed)
     // — don't leave it stuck invisible for whenever it next shows.

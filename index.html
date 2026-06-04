@@ -135,9 +135,14 @@
         body::after { display: none; }
       }
       /* TASK COMPLETE celebration overlay — covers the whole sidebar with
-         black, fades in, holds, fades out (drives the new-content reveal). */
+         black, fades in, holds, fades out (drives the new-content reveal).
+         In phone portrait the sidebar is itself the scroll container, so the
+         overlay scrolls with the content: height 100% only spans the visible
+         box, and `top` is re-pinned to scrollTop every frame while the
+         overlay is up (syncTaskCompleteOverlayBox in ui.ts) so the visible
+         area stays covered whatever the scroll position. */
       #task-complete-overlay {
-        position: absolute; inset: 0;
+        position: absolute; left: 0; right: 0; top: 0; height: 100%;
         background: #000;
         display: flex; flex-direction: column; align-items: center; justify-content: center;
         z-index: 50;
@@ -257,10 +262,14 @@
       }
       /* Revealed items (and the buttons inside a revealed dig row) punch
          through the dim at full strength. Declared after the dim rules so
-         they win. */
+         they win. transition: none so the underlying opacity snaps straight
+         to 1 — if it eased in instead (e.g. .task-text's 1200ms base fade),
+         the pop animation would land on the still-rising underlying value
+         and the item would dip and fade in a second time. */
       #sidebar.unlock-reveal-dim .reveal-highlight,
       #sidebar.unlock-reveal-dim .reveal-highlight .build-button {
         opacity: 1;
+        transition: none;
       }
       /* A freshly-revealed item's own "new" tag (flagged .reveal-lit in
          runUnlockRevealSequence) holds its normal strength instead of
@@ -272,10 +281,13 @@
         box-shadow: 0 0 0 1px rgba(255,217,107,0.55), 0 0 16px rgba(255,217,107,0.35);
       }
       .build-button.reveal-highlight { border-color: var(--sidebar-accent); }
+      /* opacity is pinned at every keyframe: leaving it off the 100% frame
+         made the tail interpolate back toward the underlying (cascade)
+         value, which read as the item fading in twice. */
       @keyframes unlock-reveal-pop {
         0%   { opacity: 0; transform: translateY(8px) scale(0.96); }
         60%  { opacity: 1; transform: translateY(-1px) scale(1.03); }
-        100% { transform: none; }
+        100% { opacity: 1; transform: none; }
       }
       @media (prefers-reduced-motion: reduce) {
         .reveal-highlight { animation: none; }
