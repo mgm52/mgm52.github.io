@@ -25,6 +25,11 @@ export const RENDER_SCALE = 1.3; // visual zoom factor applied to the world laye
 // the player hasn't already panned the camera to bring water into view.
 export const WATER_HINT_DELAY_SEC = 4;
 
+// General map-movement nudge: if the player has never panned the camera at
+// all (keyboard on desktop, two-finger drag on touch), surface the pan hint
+// after this many seconds of total play. Sticky-hidden on the first pan.
+export const PAN_HINT_DELAY_SEC = 300;
+
 // Onboarding hint: nudges the player to spawn + kill goblins. Surfaces when
 // either bar passes: 30 s with zero spawns, or 90 s without completing the
 // first task (earn Ƶ100, which requires killing goblins).
@@ -34,7 +39,7 @@ export const SPAWN_HINT_NO_TASK_SEC = 90;
 // Drag-select onboarding nudge. Once the player is past the first task, surface
 // a "drag to select many" hint if they still haven't done a multi-creature
 // drag-select after this many seconds of total play. Sticky once seen.
-export const DRAG_SELECT_HINT_DELAY_SEC = 300;
+export const DRAG_SELECT_HINT_DELAY_SEC = 180;
 
 // Multi-spawn onboarding nudge. Once the player has spawned at least one goblin,
 // surface a "queue several at once" hint if they still haven't had more than one
@@ -380,7 +385,7 @@ export const BUILDING_DEFS = {
     buildersRequired: 3,
     buildTime: 4,
     maintainersRequired: 3,
-    income: 12,
+    income: 20,
     powerOutput: -200, // 200 W draw
     wanderInterval: 1.4,
     wanderJitter: 0.8,
@@ -504,7 +509,7 @@ export const BUILDING_DEFS = {
   gas_engine: def(4, {
     name: 'Gas Turbine',
     short: 'GT',
-    cost: 1500,
+    cost: 1900,
     buildersRequired: 5,
     buildTime: 7.5,
     maintainersRequired: 5,

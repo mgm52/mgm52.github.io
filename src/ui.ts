@@ -1,7 +1,7 @@
 import { playSound, playMinotaurCommand } from './audio';
 import {
   AUTOSPAWN_TIERS, BUILDABLE_KINDS, BUILDING_DEFS, BuildingKind, DRAG_SELECT_HINT_DELAY_SEC, MULTI_SPAWN_HINT_DELAY_SEC,
-  DRAGON, GOBLIN, LIGHTNING, SPAWN_HINT_NO_SPAWN_SEC,
+  DRAGON, GOBLIN, LIGHTNING, PAN_HINT_DELAY_SEC, SPAWN_HINT_NO_SPAWN_SEC,
   SPAWN_HINT_NO_TASK_SEC, SUMMON_UPGRADES, WATER_HINT_DELAY_SEC, digBloodCost, MINOTAUR, minotaurBloodCost, TINYTAUR, formatPower, SOUL_SIGIL, sigilPortalOutput,
 } from './config';
 import {
@@ -67,8 +67,9 @@ const everVisibleButtonIds = new Set<string>();
 // runUnlockRevealSequence walks the queue one item at a time: the rest of
 // the sidebar dims, each unlock pops in with a glow, gets smooth-scrolled
 // into view, and plays a rising chime — the fresh task line lands last —
-// then the dim lifts and game time resumes.
-const REVEAL_STEP_MS = 550;
+// then the dim lifts and game time resumes. Deliberately unhurried (half
+// speed) so each unlock gets a beat to register.
+const REVEAL_STEP_MS = 1100;
 const revealQueue: string[] = [];
 let celebrationsInFlight = 0;   // WORK COMPLETE overlays currently up
 let revealArmed = false;        // an overlay just cleared; kick the walk at the end of this refresh
@@ -145,6 +146,10 @@ function applyFadeInOnFirstShow(btnId: string): void {
   if (!btn) return;
   btn.classList.add('fade-in');
   window.setTimeout(() => btn.classList.remove('fade-in'), 700);
+  // A genuine new unlock landing outside a celebration (no staged reveal to
+  // chime for it) still announces itself — same sample as the staged walk,
+  // a touch quieter. Buttons present on the initial seed stay silent.
+  if (initialButtonsSeeded) playSound('online', 0.35);
 }
 
 // Draws the custom grey scrollbar over the active scroll container. Always
@@ -359,7 +364,7 @@ function runUnlockRevealSequence(step = 0): void {
       for (const h of Array.from(document.querySelectorAll('.reveal-highlight'))) {
         h.classList.remove('reveal-highlight');
       }
-    }, 300);
+    }, 600);
     // Another task's overlay may already be up — keep time frozen for it.
     if (!revealHoldActive()) document.body.classList.remove('unlock-reveal-hold');
     return;
@@ -579,6 +584,10 @@ export function setupUI(state: GameState, callbacks: UICallbacks) {
   const panHintEl = document.getElementById('pan-hint');
   if (window.matchMedia('(pointer: coarse)').matches) {
     if (panHintEl) panHintEl.textContent = 'drag two fingers to look around';
+    // Likewise spell out the touch gesture for multi-select: one finger drags
+    // a selection box (two fingers pan).
+    const dragSelectHintEl = document.getElementById('drag-select-hint');
+    if (dragSelectHintEl) dragSelectHintEl.textContent = 'Hint: drag one finger to choose many creatures';
     // No arrow keys to hold on touch — the hints are tappable instead (wired
     // up in main.ts), so reword them from "Hold ↑/↓" to "Tap".
     const tapText: Record<string, string> = {
@@ -1566,12 +1575,18 @@ export function refreshUI(state: GameState) {
     hint.style.display = 'none';
   }
 
-  // Pan-key hint — surfaces a few seconds after the first dig if the player
-  // still hasn't brought any water source into the viewport. Hides forever
-  // (sticky `waterSeen`) the first frame water appears on screen.
+  // Pan-key hint — two triggers share the element. (a) Water onboarding:
+  // surfaces a few seconds after the first dig if the player still hasn't
+  // brought any water source into the viewport; hides forever (sticky
+  // `waterSeen`) the first frame water appears on screen. (b) Never-panned
+  // nudge: after PAN_HINT_DELAY_SEC of total play if the player has never
+  // moved the camera at all; hides forever (sticky `cameraPanSeen`) on the
+  // first pan — keyboard or two-finger drag.
   const panHint = document.getElementById('pan-hint')!;
   const dugDelayElapsed = state.firstDugAt != null && (state.now - state.firstDugAt) >= WATER_HINT_DELAY_SEC;
-  panHint.style.display = (dugDelayElapsed && !state.waterSeen) ? 'block' : 'none';
+  const waterNudge = dugDelayElapsed && !state.waterSeen;
+  const neverPannedNudge = !state.cameraPanSeen && state.now >= PAN_HINT_DELAY_SEC;
+  panHint.style.display = (waterNudge || neverPannedNudge) ? 'block' : 'none';
 
   // Spawn-hint — onboarding nudge that fades in once either timeout trips.
   // First task is `earn_100`; check sticky completion as well as live state

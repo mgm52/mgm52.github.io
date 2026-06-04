@@ -219,6 +219,7 @@ async function main() {
       state.firstDugAt = state.dugDirections.size > 0 ? state.now : null;
     }
     if (state.waterSeen === undefined) state.waterSeen = false;
+    if (state.cameraPanSeen === undefined) state.cameraPanSeen = false;
   } else {
     clearSave();
     state = createInitialState();
@@ -739,6 +740,9 @@ async function main() {
     const upHeld = held.has('w') || held.has('arrowup');
     const downHeld = held.has('s') || held.has('arrowdown');
     const panMove = (CAMERA_SPEED * dt) / 1000;
+    // Any held pan key counts as the player "discovering" map movement —
+    // sticky, hides the never-panned nudge forever (see refreshUI).
+    if (dx !== 0 || dy !== 0) state.cameraPanSeen = true;
 
     // Ease the hell zoom-out (or zoom-in on return) independent of the
     // descent transition. Kicked off when arriving in hell / leaving hell.

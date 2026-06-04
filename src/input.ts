@@ -220,6 +220,9 @@ export function setupInput(
     // Two-finger pan: compute midpoint delta in screen-space, apply to whichever
     // camera the current view uses, in world units.
     if (input.pointers.size >= 2 && input.panLast) {
+      // The player has "discovered" map movement — sticky, hides the
+      // never-panned nudge forever (see refreshUI).
+      state.cameraPanSeen = true;
       const pts = [...input.pointers.values()];
       const midX = (pts[0].x + pts[1].x) / 2;
       const midY = (pts[0].y + pts[1].y) / 2;
