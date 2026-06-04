@@ -8,11 +8,11 @@ import { runDemonDialogue, runGhostChat } from './demon-dialogue';
 import { playIntroSequence, setIntroPaused, skipIntro } from './intro';
 import { getOptions, onOptionsChange } from './options';
 import { relockOptionsCog, setupOptionsUI } from './options-ui';
-import { applyDomOptions, centerCameraOn, centerHellCameraOnWorld, centerSpaceCamera, clampCamera, clampHellCamera, clampSpaceCamera, createRender, currentHellScale, render, spaceCameraMaxY } from './render';
+import { applyDomOptions, centerCameraOn, centerHellCameraOnWorld, centerSpaceCamera, clampCamera, clampHellCamera, clampSpaceCamera, createRender, currentHellScale, preloadRenderAssets, render, spaceCameraMaxY } from './render';
 import { appendLog, cellCenter, createInitialState, destroyBuilding, digDirection, earnBlood, earnDragonBone, earnMoney, getSpawnCapacity, pushDeathEffect, pushFloater, recordGhost, removeGoblin, type GameState } from './state';
 import { autoAssignAllIdle, spawnDragon, spawnMinotaur, spawnTinytaur, tick } from './sim';
 import { ensureHellPortal, executeTaskSkip, refreshUI, setupUI } from './ui';
-import { clearSave, formatRelativeTime, loadGame, saveGame } from './save';
+import { clearSave, formatRelativeTime, getLastSaveStats, loadGame, saveGame, saveGameInBackground } from './save';
 
 // Returns the player's choice — 'resume' if they clicked the resume button,
 // 'new' if they clicked the spawn button. The fade-out animation runs in
@@ -117,10 +117,12 @@ function showTitleScreen(savedAt: number | null = null): Promise<'new' | 'resume
 
 // ─── Debug FPS overlay ───
 // Enabled by adding ?fps to the URL (e.g. mgm52.github.io/?fps). Shows the
-// frame rate plus the average and worst frame time over each half-second
-// window — cheap enough to leave running while hunting jank on a phone,
-// where devtools aren't handy.
-function createFpsHud(): ((now: number, dt: number) => void) | null {
+// frame rate, the average and worst frame time over each half-second window,
+// a worst-case breakdown by subsystem (sim ticks / canvas render / DOM ui),
+// and the cost+size of the most recent autosave — cheap enough to leave
+// running while hunting jank on a phone, where devtools aren't handy.
+type FrameTimings = { tickMs: number; renderMs: number; uiMs: number };
+function createFpsHud(): ((now: number, dt: number, t: FrameTimings) => void) | null {
   if (!new URLSearchParams(window.location.search).has('fps')) return null;
   const el = document.createElement('div');
   el.id = 'fps-hud';
@@ -132,15 +134,28 @@ function createFpsHud(): ((now: number, dt: number) => void) | null {
   let frames = 0;
   let accMs = 0;
   let worst = 0;
+  let worstTick = 0, worstRender = 0, worstUi = 0;
   let windowStart = performance.now();
-  return (now: number, dt: number) => {
+  return (now: number, dt: number, t: FrameTimings) => {
     frames++;
     accMs += dt;
     if (dt > worst) worst = dt;
+    if (t.tickMs > worstTick) worstTick = t.tickMs;
+    if (t.renderMs > worstRender) worstRender = t.renderMs;
+    if (t.uiMs > worstUi) worstUi = t.uiMs;
     if (now - windowStart >= 500 && frames > 0) {
       const fps = (frames * 1000) / (now - windowStart);
-      el.textContent = `${fps.toFixed(0)} fps\navg ${(accMs / frames).toFixed(1)} ms\nworst ${worst.toFixed(0)} ms`;
-      frames = 0; accMs = 0; worst = 0; windowStart = now;
+      const save = getLastSaveStats();
+      const saveLine = save
+        ? `save ${save.mode === 'worker' ? `${save.compressedKb.toFixed(0)}KB · clone ${save.cloneMs.toFixed(0)}ms · zip ${save.workMs.toFixed(0)}ms` : 'sync'} (${((now - save.at) / 1000).toFixed(0)}s ago)`
+        : 'save —';
+      el.textContent =
+        `${fps.toFixed(0)} fps · avg ${(accMs / frames).toFixed(1)} ms · worst ${worst.toFixed(0)} ms\n`
+        + `worst: tick ${worstTick.toFixed(1)} · render ${worstRender.toFixed(1)} · ui ${worstUi.toFixed(1)} ms\n`
+        + saveLine;
+      frames = 0; accMs = 0; worst = 0;
+      worstTick = 0; worstRender = 0; worstUi = 0;
+      windowStart = now;
     }
   };
 }
@@ -168,6 +183,11 @@ async function main() {
   // only once createRender runs applyOptions after the player clicks.
   // applyOptions inside createRender re-applies these for any later changes.
   applyDomOptions(getOptions());
+
+  // Start downloading/decoding the sprite sheets + building art right away,
+  // in parallel with the title screen, so clicking Play/Resume doesn't stall
+  // on them (they used to load inside createRender, after the click).
+  void preloadRenderAssets();
 
   // Production-only title gate. Click here also satisfies the browser's
   // user-gesture requirement so audio can play immediately afterwards.
@@ -615,10 +635,14 @@ async function main() {
   tapHint(ascendHellHint, triggerAscendFromHell);
 
   // Autosave to localStorage every SAVE_INTERVAL_MS, plus on visibilitychange
-  // and pagehide so a closed tab loses at most this much progress.
+  // and pagehide so a closed tab loses at most this much progress. The
+  // periodic save runs through a worker (serialize+compress off the main
+  // thread — see save.ts) so a big colony doesn't hitch every 10s; the
+  // event-driven flushes stay synchronous because the page may be going away.
   const SAVE_INTERVAL_MS = 10_000;
   let saveAcc = 0;
   const flushSave = () => { saveGame(state); saveAcc = 0; };
+  const backgroundSave = () => { saveGameInBackground(state); saveAcc = 0; };
   window.addEventListener('pagehide', flushSave);
   window.addEventListener('visibilitychange', () => {
     if (document.visibilityState === 'hidden') flushSave();
@@ -637,6 +661,10 @@ async function main() {
   let uiAcc = UI_REFRESH_MS;
 
   const fpsHud = createFpsHud();
+  // Scratch object reused every frame by the HUD instrumentation (only
+  // written when the HUD is active). tickMs is left at its previous value on
+  // frames where the sim is held (pause/intro) — harmless for a debug HUD.
+  const frameTimings: FrameTimings = { tickMs: 0, renderMs: 0, uiMs: 0 };
 
   // ─── Demon parlay ──────────────────────────────────────────────────
   // When a soul reaches a demon, the sim sets demon.busyWith. We freeze the
@@ -728,12 +756,14 @@ async function main() {
     if (!paused && !introActive) {
       acc += dt;
       if (acc > TICK_MS * 10) acc = TICK_MS * 10;
+      const tickStart = fpsHud ? performance.now() : 0;
       while (acc >= TICK_MS) {
         tick(state);
         acc -= TICK_MS;
       }
+      if (fpsHud) frameTimings.tickMs = performance.now() - tickStart;
       saveAcc += dt;
-      if (saveAcc >= SAVE_INTERVAL_MS) flushSave();
+      if (saveAcc >= SAVE_INTERVAL_MS) backgroundSave();
     } else {
       // Drop any pending accumulator so the post-intro/unpause frame
       // doesn't dump a burst of ticks into the world.
@@ -928,13 +958,19 @@ async function main() {
     // Suppress goblin_spawn cries once we're actually in hell — the
     // underworld is supposed to be hushed. Death cries still play.
     setInHellView(state.view === 'hell');
+    const renderStart = fpsHud ? performance.now() : 0;
     render(state, ctx);
+    if (fpsHud) frameTimings.renderMs = performance.now() - renderStart;
     uiAcc += dt;
     if (uiAcc >= UI_REFRESH_MS) {
       uiAcc = 0;
+      const uiStart = fpsHud ? performance.now() : 0;
       refreshUI(state);
+      if (fpsHud) frameTimings.uiMs = performance.now() - uiStart;
+    } else if (fpsHud) {
+      frameTimings.uiMs = 0;
     }
-    fpsHud?.(now, dt);
+    fpsHud?.(now, dt, frameTimings);
     requestAnimationFrame(frame);
   }
   requestAnimationFrame(frame);
