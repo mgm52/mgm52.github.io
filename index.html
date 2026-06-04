@@ -255,6 +255,10 @@
       #sidebar.unlock-reveal-dim .reveal-highlight .build-button {
         opacity: 1;
       }
+      /* A freshly-revealed item's own "new" tag (flagged .reveal-lit in
+         runUnlockRevealSequence) holds its normal strength instead of
+         dimming with the rest. */
+      #sidebar.unlock-reveal-dim .new-badge.reveal-lit { opacity: 0.5; }
       .reveal-highlight {
         /* Matches the half-speed REVEAL_STEP_MS walk in ui.ts. */
         animation: unlock-reveal-pop 1000ms ease;
