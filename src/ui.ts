@@ -320,7 +320,7 @@ function playTaskCompleteAnimation(taskId: string): void {
   overlay.classList.add('shown');
   // "Level Up/Mission Complete (Resistance)" by Dylan Kelk (freesound 672801).
   playSound('task_complete', 1);
-  // Hold the overlay for ~2s, then fade out (CSS handles the 600ms fade). As it
+  // Hold the overlay for ~2.5s, then fade out (CSS handles the 600ms fade). As it
   // starts fading we snap the build panel back to the top: the staged reveal
   // that follows smooth-scrolls down to each unlock in turn, so starting from
   // the top turns the walk into one clean downward sweep. The jump happens
@@ -328,7 +328,7 @@ function playTaskCompleteAnimation(taskId: string): void {
   window.setTimeout(() => {
     overlay.classList.remove('shown');
     buildScrollContainer().scrollTo({ top: 0, behavior: 'auto' });
-  }, 2200);
+  }, 2700);
   // Only after the overlay clears do the task's unlocks take effect — the
   // next refreshUI pass collects every freshly-shown item into revealQueue
   // (held invisible via .reveal-hidden) and then kicks off the staged
@@ -337,7 +337,7 @@ function playTaskCompleteAnimation(taskId: string): void {
     revealedTaskIds.add(taskId);
     celebrationsInFlight = Math.max(0, celebrationsInFlight - 1);
     revealArmed = true;
-  }, 2800);
+  }, 3300);
 }
 
 // Pulls the next element due a staged reveal: queued unlocks first (in visual
