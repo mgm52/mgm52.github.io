@@ -361,8 +361,8 @@ function runUnlockRevealSequence(step = 0): void {
     sidebar?.classList.remove('unlock-reveal-dim');
     // Let the un-dim start before the glows retire so the handoff is soft.
     window.setTimeout(() => {
-      for (const h of Array.from(document.querySelectorAll('.reveal-highlight'))) {
-        h.classList.remove('reveal-highlight');
+      for (const h of Array.from(document.querySelectorAll('.reveal-highlight, .reveal-lit'))) {
+        h.classList.remove('reveal-highlight', 'reveal-lit');
       }
     }, 600);
     // Another task's overlay may already be up — keep time frozen for it.
@@ -373,6 +373,11 @@ function runUnlockRevealSequence(step = 0): void {
   sidebar?.classList.add('unlock-reveal-dim');
   el.classList.remove('reveal-hidden');
   el.classList.add('reveal-highlight');
+  // The item's "new" tag (created when the walk kicked off) pops in with it —
+  // .reveal-lit punches it through the sidebar dim, and the sync makes it
+  // show this step rather than on the next refreshUI frame.
+  newBadges.get(el.id)?.classList.add('reveal-lit');
+  syncNewBadges();
   el.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
   // Rising pitch per unlock so a wave of reveals reads as a little arpeggio.
   playSound('online', 0.5, 1 + step * 0.12);
@@ -1002,7 +1007,13 @@ function removeNewBadge(id: string): void {
 function syncNewBadges(): void {
   for (const [id, tag] of newBadges) {
     const btn = document.getElementById(id);
-    if (!btn || btn.offsetParent === null) { tag.style.display = 'none'; continue; }
+    // A button held invisible for the staged reveal (.reveal-hidden keeps its
+    // layout slot, so offsetParent is still set) hides its tag too — both pop
+    // in together when the walk reaches it.
+    if (!btn || btn.offsetParent === null || btn.classList.contains('reveal-hidden')) {
+      tag.style.display = 'none';
+      continue;
+    }
     tag.style.display = '';
     // offsetLeft includes the .has-new-badge margin, so this lands the tag
     // in the freed gutter.
@@ -1629,19 +1640,25 @@ export function refreshUI(state: GameState) {
   refreshInfoPanel(state);
 
   // A fresh unlock wave retires every older "new" tag before raising its own —
-  // once newer content exists, the old call-outs have done their job. Deferred
-  // while a celebration/staged reveal is in flight so tags don't appear next
-  // to still-hidden buttons; they land once the sequence finishes.
-  if (!revealHoldActive() && newlyShownButtonIds.length > 0) {
-    for (const id of [...newBadges.keys()]) removeNewBadge(id);
+  // once newer content exists, the old call-outs have done their job. For a
+  // staged reveal the tags land as the walk kicks off: each tag stays hidden
+  // with its button (see the .reveal-hidden check in syncNewBadges) and pops
+  // in alongside it, already in place rather than appearing after the
+  // sequence. The wave's ids keep accumulating until the hold fully clears,
+  // so a celebration landing mid-walk extends the wave instead of retiring it.
+  const revealKickDue = revealArmed && celebrationsInFlight === 0 && !revealSequenceActive;
+  if (newlyShownButtonIds.length > 0 && (!revealHoldActive() || revealKickDue)) {
+    for (const id of [...newBadges.keys()]) {
+      if (!newlyShownButtonIds.includes(id)) removeNewBadge(id);
+    }
     for (const id of newlyShownButtonIds) addNewBadge(id);
-    newlyShownButtonIds = [];
+    if (!revealHoldActive()) newlyShownButtonIds = [];
   }
   syncNewBadges();
 
   // A WORK COMPLETE overlay finished clearing this frame and the pass above
   // has collected its unlocks — walk the staged one-by-one reveal.
-  if (revealArmed && celebrationsInFlight === 0 && !revealSequenceActive) {
+  if (revealKickDue) {
     revealArmed = false;
     sortRevealQueueByDocumentOrder();
     runUnlockRevealSequence();

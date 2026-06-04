@@ -59,6 +59,43 @@ export function preloadSounds() {
     }
     pools.set(name, pool);
   }
+  // Mobile autoplay policies gate playback per element (see unlockPools) —
+  // hook the unlock onto the first gesture. Kept installed (unlockPools
+  // early-returns once done) in case a rejected unlock needs a retry on a
+  // later gesture.
+  window.addEventListener('pointerdown', unlockPools, { capture: true, passive: true });
+  window.addEventListener('keydown', unlockPools, { capture: true, passive: true });
+}
+
+// ─── Mobile playback unlock ─────────────────────────────────────────
+// iOS Safari (and some Android browsers) only allow an <audio> element to
+// start playing from a user gesture — and the permission is granted *per
+// element*, the first time it plays. Sounds first triggered from input
+// handlers (click, select, ritual…) unlock themselves naturally, but ones
+// whose first play comes from a timer or the sim loop — the WORK COMPLETE
+// fanfare, build_done, online — get their play() rejected and stay silent
+// forever. On the first gesture, run every pooled element through a muted
+// play()+pause() so they're all cleared for later non-gesture playback.
+let poolsUnlocked = false;
+function unlockPools(): void {
+  if (poolsUnlocked) return;
+  poolsUnlocked = true;
+  for (const pool of pools.values()) {
+    for (const a of pool) {
+      if (!a.paused && !a.ended) continue; // mid-playback already — unlocked
+      a.muted = true;
+      a.play().then(() => {
+        a.pause();
+        a.currentTime = 0;
+        a.muted = false;
+      }).catch(() => {
+        // Rejected even inside a gesture (e.g. source still buffering) —
+        // reset so the next gesture retries the sweep.
+        a.muted = false;
+        poolsUnlocked = false;
+      });
+    }
+  }
 }
 
 export function playSound(name: SoundName, volume = 1, playbackRate?: number) {
@@ -68,6 +105,9 @@ export function playSound(name: SoundName, volume = 1, playbackRate?: number) {
   if (!pool) return;
   const free = pool.find((a) => a.paused || a.ended) ?? pool[0];
   free.currentTime = 0;
+  // The element may have been grabbed mid-sweep by unlockPools (briefly
+  // playing muted) — a real playback always unmutes.
+  free.muted = false;
   free.volume = Math.max(0, Math.min(1, masterVolume * volume));
   free.preservesPitch = false;
   free.playbackRate = Math.max(0.25, Math.min(4, playbackRate ?? 1));
