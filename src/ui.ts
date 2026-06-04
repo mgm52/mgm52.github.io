@@ -67,8 +67,9 @@ const everVisibleButtonIds = new Set<string>();
 // runUnlockRevealSequence walks the queue one item at a time: the rest of
 // the sidebar dims, each unlock pops in with a glow, gets smooth-scrolled
 // into view, and plays a rising chime — the fresh task line lands last —
-// then the dim lifts and game time resumes.
-const REVEAL_STEP_MS = 550;
+// then the dim lifts and game time resumes. Deliberately unhurried (half
+// speed) so each unlock gets a beat to register.
+const REVEAL_STEP_MS = 1100;
 const revealQueue: string[] = [];
 let celebrationsInFlight = 0;   // WORK COMPLETE overlays currently up
 let revealArmed = false;        // an overlay just cleared; kick the walk at the end of this refresh
@@ -145,6 +146,10 @@ function applyFadeInOnFirstShow(btnId: string): void {
   if (!btn) return;
   btn.classList.add('fade-in');
   window.setTimeout(() => btn.classList.remove('fade-in'), 700);
+  // A genuine new unlock landing outside a celebration (no staged reveal to
+  // chime for it) still announces itself — same sample as the staged walk,
+  // a touch quieter. Buttons present on the initial seed stay silent.
+  if (initialButtonsSeeded) playSound('online', 0.35);
 }
 
 // Draws the custom grey scrollbar over the active scroll container. Always
@@ -359,7 +364,7 @@ function runUnlockRevealSequence(step = 0): void {
       for (const h of Array.from(document.querySelectorAll('.reveal-highlight'))) {
         h.classList.remove('reveal-highlight');
       }
-    }, 300);
+    }, 600);
     // Another task's overlay may already be up — keep time frozen for it.
     if (!revealHoldActive()) document.body.classList.remove('unlock-reveal-hold');
     return;

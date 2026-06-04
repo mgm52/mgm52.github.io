@@ -256,7 +256,8 @@
         opacity: 1;
       }
       .reveal-highlight {
-        animation: unlock-reveal-pop 500ms ease;
+        /* Matches the half-speed REVEAL_STEP_MS walk in ui.ts. */
+        animation: unlock-reveal-pop 1000ms ease;
         box-shadow: 0 0 0 1px rgba(255,217,107,0.55), 0 0 16px rgba(255,217,107,0.35);
       }
       .build-button.reveal-highlight { border-color: var(--sidebar-accent); }
