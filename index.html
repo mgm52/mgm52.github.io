@@ -1055,13 +1055,6 @@
          the overlay is hidden, so the style/animation machinery goes fully
          idle between intros. */
       #intro-overlay:not(.visible) #intro-goblin { animation-play-state: paused; }
-      /* While the intro IS showing, the drop-shadow forces the ~90vh sprite
-         to re-rasterize through a 24px blur on every animation step — at 3x
-         phone DPR that alone can pin the frame rate to single digits. Phones
-         skip the shadow; the cutscene reads fine without it. */
-      @media (pointer: coarse) {
-        #intro-goblin { filter: none; }
-      }
       /* Full-screen click target. While the overlay is .visible the wall
          always absorbs clicks (so the player can't accidentally interact
          with the canvas behind it), but it only shows the glove cursor and
