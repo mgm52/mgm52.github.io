@@ -389,13 +389,15 @@ async function main() {
       appendLog(state, 'Dragon summon ritual begins...');
     },
     onSummonRobot: () => {
-      // Gated on the late-game industrial base; costs money, arrives instantly
-      // (robots are manufactured, not incubated). spawnRobot beeps and returns
-      // false if every hole exit is blocked — nothing is charged then.
+      // Gated on the late-game industrial base; costs money up front and
+      // assembles on a timed track like the other summons (the queue in
+      // sim.ts retries if every hole exit is blocked when assembly finishes).
       if (countHypercentres(state) < ROBOT.hypercentresRequired) { playSound('error'); return; }
       if (state.money < ROBOT.moneyCost) { playSound('error'); return; }
-      if (!spawnRobot(state)) return;
+      if (state.robotSpawnQueue.length >= ROBOT.spawnCapacity) { playSound('error'); return; }
       state.money -= ROBOT.moneyCost;
+      state.robotSpawnQueue.push({ remaining: ROBOT.spawnTime });
+      appendLog(state, 'Robot assembly begins...');
     },
     onPlaceOrbital: () => {
       // Toggle Orbital Platform placement (space view only — the button is
@@ -642,12 +644,14 @@ async function main() {
     ctx.spaceCamera.y = 0; clampSpaceCamera(ctx);  // arrive looking down from the top
     transitioning = true; transFrom = 0; transTo = 1; transStart = now; ascendHold = 0;
     state.view = 'space';
+    state.viewTransitioning = true;
     state.pendingBuild = null; state.pendingStrike = false; state.pendingCandle = false;
     playSound('ritual', 0.7, 0.5);
     playSound('online', 0.5, 0.3);
   }
   function triggerDescendToSurface(now: number) {
     transitioning = true; transFrom = 1; transTo = 0; transStart = now; descendHold = 0;
+    state.viewTransitioning = true;
     state.pendingOrbital = false;
     playSound('ritual', 0.6, 0.6);
   }
@@ -662,6 +666,7 @@ async function main() {
     hellTransitioning = true; hellTransFrom = 0; hellTransTo = 1; hellTransStart = now;
     descendHellHold = 0;
     state.view = 'hell';
+    state.viewTransitioning = true;
     state.pendingBuild = null; state.pendingStrike = false; state.pendingCandle = false;
     playSound('ritual', 0.6, 0.6);
   }
@@ -677,6 +682,7 @@ async function main() {
     hellZoomDuration = HELL.zoomMs;
     hellTransitioning = true; hellTransFrom = 1; hellTransTo = 0; hellTransStart = now;
     ascendHellHold = 0;
+    state.viewTransitioning = true;
     state.pendingCandle = false;
     playSound('ritual', 0.7, 0.5);
   }
@@ -898,6 +904,8 @@ async function main() {
         ctx.altitude = transTo;
         transitioning = false;
         state.view = transTo >= 0.5 ? 'space' : 'ground';
+        // Arrived — the destination view's buttons may now show (see refreshUI).
+        state.viewTransitioning = false;
       }
       ascendHint?.classList.remove('visible');
       descendHint?.classList.remove('visible');
@@ -911,6 +919,8 @@ async function main() {
       if (t >= 1) {
         ctx.depth = hellTransTo;
         hellTransitioning = false;
+        // Arrived — the destination view's buttons may now show (see refreshUI).
+        state.viewTransitioning = false;
         if (hellTransTo >= 0.5) {
           state.view = 'hell';
           // Arrival: kick off the camera zoom-out reveal — slowed by 50% so

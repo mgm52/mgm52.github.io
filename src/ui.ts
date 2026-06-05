@@ -720,6 +720,7 @@ export function setupUI(state: GameState, callbacks: UICallbacks) {
   robotBtn.id = 'btn-summon-robot';
   robotBtn.style.display = 'none';
   robotBtn.innerHTML = `
+    ${progressTrack('summon-robot', ROBOT.spawnCapacity)}
     <div class="build-content">
       <div class="build-text">
         <div class="build-name">Robot</div>
@@ -1366,12 +1367,18 @@ export function refreshUI(state: GameState) {
     const hcs = countHypercentres(state);
     const enoughHCs = hcs >= ROBOT.hypercentresRequired;
     const canAffordRobot = state.money >= ROBOT.moneyCost;
-    robotBtn.disabled = !enoughHCs || !canAffordRobot;
+    // Assembly runs on a timed track like the other summons — one at a time.
+    const robotQueued = state.robotSpawnQueue.length;
+    robotBtn.disabled = !enoughHCs || !canAffordRobot || robotQueued >= ROBOT.spawnCapacity;
+    robotBtn.classList.toggle('in-progress', robotQueued > 0);
+    const robotRemaining = robotQueued > 0 ? state.robotSpawnQueue[0].remaining : ROBOT.spawnTime;
+    const robotFill = robotQueued > 0 ? 1 - robotRemaining / ROBOT.spawnTime : 0;
+    setFillWidth('fill-summon-robot-0', Math.max(0, Math.min(1, robotFill)));
     document.getElementById('warn-summon-robot')!.style.display = enoughHCs ? 'none' : '';
     const robotCost = document.getElementById('cost-summon-robot')!;
-    robotCost.classList.toggle('met', canAffordRobot && enoughHCs);
+    robotCost.classList.toggle('met', canAffordRobot && enoughHCs && robotQueued === 0);
     // Nudge once the gate finally opens and the player has never built one.
-    setBuyFlash('btn-summon-robot', enoughHCs && canAffordRobot && ![...state.goblins.values()].some((g) => g.robot) && state.spaceUnits.size === 0);
+    setBuyFlash('btn-summon-robot', enoughHCs && canAffordRobot && robotQueued === 0 && ![...state.goblins.values()].some((g) => g.robot) && state.spaceUnits.size === 0);
   } else {
     robotBtn.style.display = 'none';
     setBuyFlash('btn-summon-robot', false);
@@ -1593,6 +1600,10 @@ export function refreshUI(state: GameState) {
   // ground building button hides while the view is away from the surface.
   const inHell = state.view === 'hell';
   const inSpace = state.view === 'space';
+  // The destination view's replacement buttons (Candle / Orbital Platform)
+  // only show once the travel animation has actually landed — mid-transition
+  // neither the old nor the new set is offered.
+  const viewArrived = !state.viewTransitioning;
   const availablePower = state.lastPowerProduced - state.lastPowerConsumed;
   for (const kind of SORTED_KINDS) {
     const def = BUILDING_DEFS[kind];
@@ -1632,14 +1643,17 @@ export function refreshUI(state: GameState) {
   // until the player has set their first candle down (mirroring the
   // never-built-before flash on building buttons).
   const candleBtn = document.getElementById('btn-place-candle') as HTMLButtonElement;
-  candleBtn.style.display = inHell ? '' : 'none';
-  if (inHell) {
+  candleBtn.style.display = (inHell && viewArrived) ? '' : 'none';
+  if (inHell && viewArrived) {
     applyFadeInOnFirstShow('btn-place-candle');
     const canAffordCandle = state.blood >= SOUL_SIGIL.candleBloodCost;
     candleBtn.disabled = !canAffordCandle;
     candleBtn.classList.toggle('active', state.pendingCandle);
     document.getElementById('blood-cost-candle')!.classList.toggle('met', canAffordCandle);
     setBuyFlash('btn-place-candle', canAffordCandle && state.soulChairs.length === 0);
+    // Mid-placement bankruptcy: if the player can no longer cover the next
+    // candle, drop out of placement mode rather than letting taps error-beep.
+    if (state.pendingCandle && !canAffordCandle) state.pendingCandle = false;
   } else {
     setBuyFlash('btn-place-candle', false);
     // Left hell with placement still armed — disarm it.
@@ -1650,8 +1664,8 @@ export function refreshUI(state: GameState) {
   // (active) while placement is armed; flashes for attention until the first
   // platform exists. Like the candle, leaving the view disarms placement.
   const orbitalBtn = document.getElementById('btn-place-orbital') as HTMLButtonElement;
-  orbitalBtn.style.display = inSpace ? '' : 'none';
-  if (inSpace) {
+  orbitalBtn.style.display = (inSpace && viewArrived) ? '' : 'none';
+  if (inSpace && viewArrived) {
     applyFadeInOnFirstShow('btn-place-orbital');
     const orbitalCost = BUILDING_DEFS.orbital_platform.cost;
     const canAffordOrbital = state.money >= orbitalCost;
@@ -1954,10 +1968,13 @@ function showDemon(_state: GameState, d: Demon, panel: HTMLElement, portrait: HT
                    name: HTMLElement, stateEl: HTMLElement, extra: HTMLElement) {
   panel.classList.add('visible');
   portrait.innerHTML = `<div class="portrait-goblin" style="background:#2a0606;border-color:#ff5a4a;color:#ff8a6a">☠</div>`;
-  // L and her friend look identical (and share a name plate — the friend's
-  // corner address is her secret); only the colossus reads as THE pit demon.
+  // Each demon carries its own name now: the colossus is the Third Prince of
+  // Dark Enjoyment; demon L is Lilly; her smaller corner-dwelling friend is
+  // Lolly.
   const variant = d.variant ?? 'pit';
-  name.textContent = variant === 'pit' ? 'Minotaur of the Pit' : 'Lesser Minotaur of the Pit';
+  name.textContent = variant === 'pit' ? 'Third Prince of Dark Enjoyment'
+    : variant === 'l' ? 'Lilly'
+    : 'Lolly';
   stateEl.textContent = d.busyWith !== null ? 'Locked in parlay'
     : variant === 'friend' ? 'Standing alone in a corner of the abyss'
     : 'Standing watch over the abyss';

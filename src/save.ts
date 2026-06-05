@@ -181,6 +181,8 @@ export function loadGame(): { state: GameState; savedAt: number } | null {
     // live-only animation).
     env.state.dragons ??= new Map();
     env.state.dragonSpawnQueue ??= [];
+    // Robot assembly queue — added with the robot cooldown track.
+    env.state.robotSpawnQueue ??= [];
     env.state.minotaursBought ??= 0;
     // First-Minotaur mercy discount — saves predating it decide on the next
     // refresh (no-op if the player already owns Minotaurs, since the discount
@@ -263,6 +265,8 @@ export function loadGame(): { state: GameState; savedAt: number } | null {
       }
     }
     env.state.view = 'ground';
+    // Transitions are a live-only animation — never resume mid-travel.
+    env.state.viewTransitioning = false;
     env.state.lightningStrikeCooldown ??= 0;
     env.state.selectedAmbientDragonId = null;
     // Building.displayNum + state.buildingCounts were added so each kind shows

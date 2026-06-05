@@ -9,7 +9,7 @@ extensions.add(GifAsset);
 // game seconds. Used as a manual sprite-sheet — we pick the frame ourselves
 // each tick based on (state.now - spawnAt) so playback always starts at frame 0.
 type DeathFrames = { textures: Texture[]; ends: number[]; duration: number };
-import { AMBIENT_DRAGON, BUILDING_DEFS, BuildingKind, CELL, COLS, DEMON, DRAGON, GOBLIN, HELL, RENDER_SCALE, ROBOT, ROWS, MINOTAUR, SOUL_SIGIL, SPACE, TINYTAUR, WORLD, formatPower, sigilPortalOutput } from './config';
+import { AMBIENT_DRAGON, BUILDING_DEFS, BuildingKind, CELL, COLS, DEMON, DRAGON, GOBLIN, HELL, RENDER_SCALE, ROBOT, ROWS, MINOTAUR, SOUL_SIGIL, SPACE, SPACE_UNIT, TINYTAUR, WORLD, formatPower, sigilPortalOutput } from './config';
 import { ensureFontLoaded, fontFamilyById, getOptions, onOptionsChange, type FontConfig, type Options } from './options';
 import { Building, Demon, Dragon, GameState, Ghost, Goblin, HOLE_SIZE, Minotaur, SoulChair, SpaceBuilding, SpaceUnit, WaterSource, buildingCenter, candleSpotAt, cellCenter, defOf, demonScaleOf, holeCenter, isInPlayCell, maintainerCount } from './state';
 import { getParlaySpeaker } from './demon-dialogue';
@@ -129,10 +129,6 @@ type GoblinView = {
   outline: Sprite[];   // 4 cardinal-offset copies, black-tinted
   sprite: Sprite;
   selectionRing: Graphics;
-  // Yellow "bob" label drawn above the head, only for the cutscene-summoned
-  // goblin. Undefined on every other goblin so we don't allocate a Text the
-  // whole horde will never use.
-  nametag?: Text;
 };
 
 // Pure-Canvas radial-gradient texture for the foot shadow. Generated lazily so
@@ -467,6 +463,20 @@ export type RenderContext = {
   // Cursor position in hell coords while candle placement is armed — drives
   // the snapped candle ghost on the outer ring. Updated by input.ts.
   candleCursor: { x: number; y: number } | null;
+  // Cursor position in SPACE coords while Orbital Platform placement is
+  // armed — drives the platform ghost under the cursor. Updated by input.ts.
+  orbitalCursor: { x: number; y: number } | null;
+  // The platform placement ghost itself (re-drawn each frame; kept on top of
+  // the floating buildings while placement is armed).
+  orbitalGhostGfx: Graphics;
+  // Bob's yellow nametag(s) — one Text per place Bob currently exists
+  // (overworld goblin, dragon claws, adrift in space, his soul in hell),
+  // keyed by a per-host string. Each lives in its scene's dedicated top
+  // nametag layer so the label is never covered by other units/buildings.
+  bobTags: Map<string, Text>;
+  worldTagLayer: Container;
+  spaceTagLayer: Container;
+  hellTagLayer: Container;
   // "too close" / "ring full" tag over a blocked candle-placement preview.
   // Created lazily, hidden whenever the preview isn't showing a blocked spot.
   candlePreviewLabel: Text | null;
@@ -622,6 +632,10 @@ export async function createRender(parent: HTMLElement, state: GameState): Promi
   worldLayer.addChild(whiteEffectsLayer);
   worldLayer.addChild(floatersLayer);
   worldLayer.addChild(lightningGfx);
+  // Bob's nametag rides above every world entity (only the UI overlays sit
+  // higher) so it can't be covered by minotaurs, dragons, or effects.
+  const worldTagLayer = new Container();
+  worldLayer.addChild(worldTagLayer);
   worldLayer.addChild(uiLayer);
   worldLayer.scale.set(initScale);
   app.stage.addChild(worldLayer);
@@ -637,6 +651,13 @@ export async function createRender(parent: HTMLElement, state: GameState): Promi
   // which are added to spaceLayer later (during render) and so stack on top.
   const spaceAmbientLayer = new Container();
   spaceLayer.addChild(spaceAmbientLayer);
+  // Space-side Bob nametag layer + the Orbital Platform placement ghost.
+  // Building/unit views are appended to spaceLayer as they're created, so the
+  // render loop re-appends these whenever they're in use to keep them on top.
+  const spaceTagLayer = new Container();
+  spaceLayer.addChild(spaceTagLayer);
+  const orbitalGhostGfx = new Graphics();
+  spaceLayer.addChild(orbitalGhostGfx);
   spaceLayer.scale.set(initScale);
   spaceLayer.visible = false;
   app.stage.addChild(spaceLayer);
@@ -682,6 +703,10 @@ export async function createRender(parent: HTMLElement, state: GameState): Promi
   hellLayer.addChild(hellEffectsLayer);
   hellLayer.addChild(hellSideBeamGfx);
   hellLayer.addChild(hellFloatersLayer);
+  // Bob's hell nametag rides above everything in the underworld — demons
+  // included — so his soul stays findable behind the colossi.
+  const hellTagLayer = new Container();
+  hellLayer.addChild(hellTagLayer);
   hellLayer.scale.set(initScale);
   hellLayer.visible = false;
   // Hell sits between the ground and the sky/space stack so the descent's
@@ -780,6 +805,10 @@ export async function createRender(parent: HTMLElement, state: GameState): Promi
     sigilPowerLabels: new Map(),
     candleCursor: null,
     candlePreviewLabel: null,
+    orbitalCursor: null,
+    orbitalGhostGfx,
+    bobTags: new Map(),
+    worldTagLayer, spaceTagLayer, hellTagLayer,
     hellEffectsLayer,
     hellFloatersLayer,
     holeGfx, holeRing, bobPickerGfx,
@@ -1040,32 +1069,86 @@ function makeGoblinView(g: Goblin): GoblinView {
   for (const s of outline) c.addChild(s);
   c.addChild(sprite);
 
-  let nametag: Text | undefined;
-  if (g.bob) {
-    nametag = makeBobNametag();
-    c.addChild(nametag);
-  }
-  return { container: c, shadow, outline, sprite, selectionRing: ring, nametag };
+  return { container: c, shadow, outline, sprite, selectionRing: ring };
 }
 
-// Yellow "bob" label above the head — shared between live Bob and hell Bob,
-// styled to match the gold-goblin tint so it reads as a name-plate rather
-// than a UI label. Drawn at half-pixel anchor so position.set(0, y) hangs
-// the label centered over the sprite. `sizeMult` doubles the type for the
-// hell Bob, whose tag reads at twice the overworld size.
+// Yellow "bob" label above the head — used wherever Bob currently is (alive,
+// snatched, adrift, or a soul in hell; see syncBobTags), styled to match the
+// gold-goblin tint so it reads as a name-plate rather than a UI label. Kept
+// deliberately light — regular weight, thin outline — so the gothic display
+// face stays legible at name-tag sizes. Drawn at half-pixel anchor so
+// position.set(x, y) hangs the label centered over the sprite. `sizeMult`
+// doubles the type for the hell Bob, whose tag reads at twice the overworld
+// size.
 function makeBobNametag(sizeMult = 1): Text {
   const t = new Text({
     text: 'bob',
     style: {
       fontFamily: fontFamilyById(getOptions().fonts.buildingLabel.family).css,
-      fontSize: 12 * sizeMult,
+      fontSize: 13 * sizeMult,
       fill: 0xffd96b,
-      fontWeight: 'bold',
-      stroke: { color: 0x000000, width: 3 },
+      stroke: { color: 0x000000, width: 2 },
     },
   });
   t.anchor.set(0.5, 1);
   return t;
+}
+
+// One nametag per place Bob currently exists: the living overworld goblin, a
+// dragon's claws (carryingUnit), adrift in space, and his soul in hell. Each
+// tag lives in its scene's dedicated top layer (worldTagLayer /
+// spaceTagLayer / hellTagLayer) so nothing — minotaurs, demons, buildings —
+// ever covers it. Synced every frame; tags whose host vanished are torn down.
+function syncBobTags(ctx: RenderContext, state: GameState): void {
+  const opts = getOptions();
+  const px = opts.goblinDisplayPx;
+  type TagSpec = { key: string; layer: Container; x: number; y: number; alpha: number; sizeMult: number };
+  const specs: TagSpec[] = [];
+  for (const g of state.goblins.values()) {
+    if (!g.bob) continue;
+    specs.push({ key: `g${g.id}`, layer: ctx.worldTagLayer, x: g.pos.x, y: g.pos.y - px * 0.55, alpha: 1, sizeMult: 1 });
+  }
+  // Bob dangling from a dragon mid-snatch — tag tracks the carried sprite.
+  for (const d of state.dragons.values()) {
+    if (!d.carryingUnit?.bob) continue;
+    specs.push({
+      key: `d${d.id}`, layer: ctx.worldTagLayer,
+      x: d.pos.x, y: d.pos.y + opts.dragonDisplayPx * 0.34 - px * 0.55,
+      alpha: 1, sizeMult: 1,
+    });
+  }
+  for (const su of state.spaceUnits.values()) {
+    if (!su.bob) continue;
+    specs.push({ key: `su${su.id}`, layer: ctx.spaceTagLayer, x: su.pos.x, y: su.pos.y - px * 0.55, alpha: 1, sizeMult: 1 });
+  }
+  // His soul in hell — double size (the scene zooms out) at half opacity.
+  for (const gh of state.ghosts) {
+    if (!gh.bob) continue;
+    const p = ghostHellPos(state, gh);
+    specs.push({ key: `gh${gh.id}`, layer: ctx.hellTagLayer, x: p.x, y: p.y - px * 0.55, alpha: 0.5, sizeMult: 2 });
+  }
+  const seen = new Set<string>();
+  for (const s of specs) {
+    seen.add(s.key);
+    let t = ctx.bobTags.get(s.key);
+    if (!t) {
+      t = makeBobNametag(s.sizeMult);
+      s.layer.addChild(t);
+      ctx.bobTags.set(s.key, t);
+    }
+    t.position.set(s.x, s.y);
+    t.alpha = s.alpha;
+  }
+  for (const [key, t] of ctx.bobTags) {
+    if (!seen.has(key)) {
+      t.destroy();
+      ctx.bobTags.delete(key);
+    }
+  }
+  // Space building/unit views are appended to spaceLayer as they're created,
+  // which would stack them over the tag layer — re-appending while a tag is
+  // live keeps Bob's name on top of everything in orbit.
+  if (ctx.spaceTagLayer.children.length > 0) ctx.spaceLayer.addChild(ctx.spaceTagLayer);
 }
 
 function makeMinotaurView(): MinotaurView {
@@ -1290,11 +1373,8 @@ function makeGhostView(g: Ghost): GhostView | null {
     selectionRing.circle(0, 0, GOBLIN.radius + 4).stroke({ width: 2, color: 0xffd96b });
     container.addChild(selectionRing);
     container.addChild(sprite);
-    if (g.bob) {
-      const tag = makeBobNametag(2);
-      tag.y = -px * 0.55;
-      container.addChild(tag);
-    }
+    // Bob's hell nametag lives in hellTagLayer (see syncBobTags), not here,
+    // so the demons can never cover it.
     return { container, sprite, selectionRing };
   }
   if (g.kind === 'minotaur') {
@@ -1856,8 +1936,9 @@ function drawFloaters(ctx: RenderContext, state: GameState) {
         style: {
           fontFamily: fontFamilyById(opts.fonts.mono.family).css,
           // Baseline 14 px, scaled by the global font multiplier so the same
-          // slider that resizes UI text also resizes in-world numbers.
-          fontSize: 14 * opts.globalFontScale,
+          // slider that resizes UI text also resizes in-world numbers. Some
+          // floaters (the soul-surge "x87") carry their own size multiplier.
+          fontSize: 14 * opts.globalFontScale * (f.sizeMult ?? 1),
           fill: f.color,
           fontWeight: 'bold',
           stroke: { color: 0x000000, width: 3 },
@@ -2133,22 +2214,15 @@ function makeSpaceBuildingView(sb: SpaceBuilding): SpaceBuildingView {
   return { container, glow, sprite, body, progress, warning, label, selectionRing };
 }
 
-// The Orbital Platform's drawn art: a grey deck with support struts and a
-// beacon mast. Simple on purpose — it does nothing, and looks the part.
+// The Orbital Platform's drawn art: one big flat rectangular deck plate
+// filling the footprint. Deliberately plain — later on it'll be possible to
+// set buildings down on top of it, so the platform is just floor.
 function drawOrbitalPlatformBody(g: Graphics, size: number): void {
   const half = size / 2;
   g.clear();
-  // Support struts splaying down from the deck's underside.
-  g.moveTo(-half * 0.55, size * 0.08).lineTo(-half * 0.3, half * 0.7)
-    .moveTo(half * 0.55, size * 0.08).lineTo(half * 0.3, half * 0.7)
-    .stroke({ width: 4, color: 0x5a606a });
-  // The deck itself.
-  g.roundRect(-half, -size * 0.1, size, size * 0.2, 6)
+  g.rect(-half, -half, size, size)
     .fill(0x4a505a)
-    .stroke({ width: 2, color: 0xb8bec6 });
-  // Beacon mast.
-  g.moveTo(0, -size * 0.1).lineTo(0, -half * 0.75).stroke({ width: 3, color: 0x8a9098 });
-  g.circle(0, -half * 0.75, 5).fill(0xffd96b);
+    .stroke({ width: 3, color: 0xb8bec6 });
 }
 
 function makeSpaceUnitView(): SpaceUnitView {
@@ -2428,9 +2502,6 @@ export function render(state: GameState, ctx: RenderContext) {
       const sy = px / 64;
       v.shadow.scale.set(sy * 0.75, sy);
     }
-    // Bob nametag follows the goblin scale — keep it just above the sprite's
-    // top so it stays attached even when the player tunes goblinDisplayPx.
-    if (v.nametag) v.nametag.y = -px * 0.55;
     // Per-frame sprite-Y offset so the player can tune sprite-to-cell
     // alignment from the options panel. Outline copies preserve their
     // cardinal offsets relative to the sprite.
@@ -2823,6 +2894,33 @@ export function render(state: GameState, ctx: RenderContext) {
     }
   }
 
+  // Orbital Platform placement ghost — mirrors the ground building ghost:
+  // a translucent footprint rect under the cursor, blue when the deploy
+  // would land (clamped into bounds, affordably) and red when Ƶ runs short.
+  {
+    const og = ctx.orbitalGhostGfx;
+    og.clear();
+    if (state.view === 'space' && state.pendingOrbital && ctx.orbitalCursor) {
+      const def = BUILDING_DEFS.orbital_platform;
+      // Same clamp tryPlaceOrbital applies, so the preview sits exactly where
+      // the platform would actually land.
+      const px = Math.max(SPACE_UNIT.margin, Math.min(SPACE.width - SPACE_UNIT.margin, ctx.orbitalCursor.x));
+      const py = Math.max(SPACE_UNIT.margin, Math.min(SPACE.height - SPACE_UNIT.margin, ctx.orbitalCursor.y));
+      const valid = state.money >= def.cost;
+      const color = valid ? 0x6a8eb0 : 0xd96b6b;
+      const half = def.size / 2;
+      og.rect(px - half, py - half, def.size, def.size)
+        .fill({ color, alpha: 0.25 })
+        .stroke({ width: 2, color });
+      // Building views are appended to spaceLayer as they're created —
+      // re-append the ghost while armed so it always draws on top.
+      ctx.spaceLayer.addChild(og);
+    }
+  }
+
+  // Bob's nametag(s) — synced across all scenes after every host has moved.
+  syncBobTags(ctx, state);
+
   // ─── Hell red beam ───
   // One vertical red line per Hell Portal, drawn from the portal's
   // bottom-center down toward the world's bottom edge. Animates its length
@@ -2918,11 +3016,21 @@ export function render(state: GameState, ctx: RenderContext) {
       ctx.demonViews.set(d.id, v);
     }
     v.container.position.set(d.hx, d.hy);
-    // Per-demon size (the colossus is 1; L and her friend ride the live
-    // demonLScale option) times the all-demons dev dial — scales the whole
+    // Per-demon size (the colossus is 1; Lilly rides demonLScale, Lolly
+    // demonFriendScale) times the all-demons dev dial — scales the whole
     // view (sprite + shadow + ring) around the demon's hell position.
     v.container.scale.set(opts.demonScale * demonScaleOf(d));
     applyRingFlash(v.selectionRing, d.selected, d.commandFlashAt, state.now);
+    // Per-demon dev dials: sprite Y nudge relative to the selection circle /
+    // collision centre (the ring and body stay put; only the art moves), and
+    // a per-demon tint over the shared minotaur art.
+    const demonVariant = d.variant ?? 'pit';
+    v.sprite.y = demonVariant === 'l' ? opts.demonLSpriteYOffset
+      : demonVariant === 'friend' ? opts.demonFriendSpriteYOffset
+      : opts.demonRSpriteYOffset;
+    v.sprite.tint = demonVariant === 'l' ? opts.demonLTint
+      : demonVariant === 'friend' ? opts.demonFriendTint
+      : opts.demonRTint;
     v.shadow.visible = opts.goblinShadow;
     if (opts.goblinShadow) {
       // The demon sprite isn't raised the way Minotaurs are, so its feet sit

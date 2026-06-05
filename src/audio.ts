@@ -22,6 +22,12 @@ const REGISTRY = {
   task_complete: 'audio/task_complete.mp3',
   water_splash: 'audio/water_splash.mp3',
   cash:         'audio/cash.mp3',
+  // The Lightning Strike thunderclap — same sample as 'destroy' but in its
+  // own pool. The strike plays it pitched way down (rate 0.4 ≈ 2.5× longer),
+  // and sharing the busy 'destroy' pool meant building smashes could steal
+  // the element mid-rumble, cutting the thunder off (or silencing it when
+  // the steal landed first).
+  lightning:    'audio/destroy.mp3',
 } as const;
 
 export type SoundName = keyof typeof REGISTRY;

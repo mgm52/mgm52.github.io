@@ -1,3 +1,4 @@
+import { HELL } from './config';
 import {
   DEFAULT_OPTIONS, FONT_FAMILIES, FONT_KEYS, ensureFontLoaded,
   getOptions, resetOptions, setAllFontFamilies, setFontConfig, setOption,
@@ -176,10 +177,14 @@ function unlockHint(): HTMLElement {
 
 // Shared facing choices for the per-demon standing-direction pickers.
 const FACING_OPTS = [
-  { value: 'down',  label: 'Down' },
-  { value: 'up',    label: 'Up' },
-  { value: 'left',  label: 'Left' },
-  { value: 'right', label: 'Right' },
+  { value: 'down',      label: 'Down' },
+  { value: 'up',        label: 'Up' },
+  { value: 'left',      label: 'Left' },
+  { value: 'right',     label: 'Right' },
+  { value: 'upleft',    label: 'Up-left' },
+  { value: 'upright',   label: 'Up-right' },
+  { value: 'downleft',  label: 'Down-left' },
+  { value: 'downright', label: 'Down-right' },
 ];
 
 function rebuildPanel(panel: HTMLElement, callbacks: OptionsUICallbacks, refreshPublic?: () => void): void {
@@ -277,14 +282,28 @@ function rebuildPanel(panel: HTMLElement, callbacks: OptionsUICallbacks, refresh
   panel.appendChild(collapsibleSection('Demons', [
     slider('Size (all)', o.demonScale, 0.2, 3, 0.05, (v) => setOption('demonScale', v)),
     toggle('Walk (patrol)', o.demonWalks, (v) => setOption('demonWalks', v)),
-    select('R facing (standing)', o.demonFacing, FACING_OPTS, (v) => setOption('demonFacing', v as Options['demonFacing'])),
     slider('Saturation', o.demonSaturation, 0, 3, 0.05, (v) => setOption('demonSaturation', v)),
     slider('Brightness', o.demonBrightness, 0, 3, 0.05, (v) => setOption('demonBrightness', v)),
-    // Demon L + her identical friend — size also rescales their parlay /
-    // click / body radii (demonScaleOf reads this live).
-    slider('L & friend size', o.demonLScale, 0.1, 2, 0.05, (v) => setOption('demonLScale', v)),
-    select('L facing (standing)', o.demonLFacing, FACING_OPTS, (v) => setOption('demonLFacing', v as Options['demonLFacing'])),
-    select('Friend facing (standing)', o.demonFriendFacing, FACING_OPTS, (v) => setOption('demonFriendFacing', v as Options['demonFriendFacing'])),
+    // R — the pit colossus (Third Prince of Dark Enjoyment). Stand Y is the
+    // absolute hell-y he holds while standing; the sprite offset nudges only
+    // the art relative to his selection circle / collision centre.
+    select('R facing (standing)', o.demonFacing, FACING_OPTS, (v) => setOption('demonFacing', v as Options['demonFacing'])),
+    slider('R stand Y', o.demonRY, 0, HELL.height, 10, (v) => setOption('demonRY', v)),
+    slider('R sprite Y offset', o.demonRSpriteYOffset, -400, 400, 5, (v) => setOption('demonRSpriteYOffset', v)),
+    color('R tint', o.demonRTint, (v) => setOption('demonRTint', v)),
+    // Lilly (demon L) — size also rescales her parlay / click / body radii
+    // (demonScaleOf reads this live).
+    slider('Lilly size', o.demonLScale, 0.1, 2, 0.05, (v) => setOption('demonLScale', v)),
+    select('Lilly facing (standing)', o.demonLFacing, FACING_OPTS, (v) => setOption('demonLFacing', v as Options['demonLFacing'])),
+    slider('Lilly stand Y', o.demonLY, 0, HELL.height, 10, (v) => setOption('demonLY', v)),
+    slider('Lilly sprite Y offset', o.demonLSpriteYOffset, -400, 400, 5, (v) => setOption('demonLSpriteYOffset', v)),
+    color('Lilly tint', o.demonLTint, (v) => setOption('demonLTint', v)),
+    // Lolly (Lilly's corner-dwelling friend) — her own independent dials.
+    slider('Lolly size', o.demonFriendScale, 0.1, 2, 0.05, (v) => setOption('demonFriendScale', v)),
+    select('Lolly facing (standing)', o.demonFriendFacing, FACING_OPTS, (v) => setOption('demonFriendFacing', v as Options['demonFriendFacing'])),
+    slider('Lolly stand Y', o.demonFriendY, 0, HELL.height, 10, (v) => setOption('demonFriendY', v)),
+    slider('Lolly sprite Y offset', o.demonFriendSpriteYOffset, -400, 400, 5, (v) => setOption('demonFriendSpriteYOffset', v)),
+    color('Lolly tint', o.demonFriendTint, (v) => setOption('demonFriendTint', v)),
   ]));
 
   panel.appendChild(collapsibleSection('Robots', [

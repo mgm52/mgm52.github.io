@@ -1,3 +1,5 @@
+import { DEMON, HELL } from './config';
+
 export type BgPattern = 'solid' | 'checker';
 
 // ─── Fonts ──────────────────────────────────────────────────────────
@@ -228,11 +230,26 @@ export type Options = {
   demonFacing: DemonFacing;   // demon R's standing facing (walking overrides it)
   demonSaturation: number;
   demonBrightness: number;
-  // Demon L and her identical friend — live size (fraction of the colossus;
-  // also scales their parlay/hit/body radii) and per-demon standing facings.
+  // Per-demon standing position (absolute hell-y, applied each tick while the
+  // demon stands; the walk toggle overrides it) and per-demon sprite Y nudge
+  // relative to the selection circle / collision centre (the ring and body
+  // radius stay put; only the art moves).
+  demonRY: number;
+  demonRSpriteYOffset: number;
+  demonRTint: number;         // sprite tint over the (shared) minotaur art
+  // Demon L (Lilly) — live size (fraction of the colossus; also scales her
+  // parlay/hit/body radii), standing facing, stand-y, and sprite nudge.
   demonLScale: number;
   demonLFacing: DemonFacing;
+  demonLY: number;
+  demonLSpriteYOffset: number;
+  demonLTint: number;
+  // Lolly (L's friend) — her own live size plus the same per-demon dials.
+  demonFriendScale: number;
   demonFriendFacing: DemonFacing;
+  demonFriendY: number;
+  demonFriendSpriteYOffset: number;
+  demonFriendTint: number;
   // Robots — the late-game grey summons. Live-tunable look + orbital speed.
   robotScale: number;       // sprite size multiplier vs a regular goblin
   robotTint: number;        // chassis tint, applied over the (greyscaled) art
@@ -240,13 +257,19 @@ export type Options = {
   robotSpaceSpeed: number;  // space-px/sec a robot paddles toward a platform
 };
 
-export type DemonFacing = 'down' | 'up' | 'left' | 'right';
+export type DemonFacing =
+  | 'down' | 'up' | 'left' | 'right'
+  | 'upleft' | 'upright' | 'downleft' | 'downright';
 // Facing option → sprite heading angle (atan2 convention, 0 = east).
 export const DEMON_FACING_ANGLE: Record<DemonFacing, number> = {
   right: 0,
+  downright: Math.PI / 4,
   down: Math.PI / 2,
+  downleft: (3 * Math.PI) / 4,
   left: Math.PI,
+  upleft: -(3 * Math.PI) / 4,
   up: -Math.PI / 2,
+  upright: -Math.PI / 4,
 };
 
 export const DEFAULT_OPTIONS: Options = {
@@ -329,19 +352,31 @@ export const DEFAULT_OPTIONS: Options = {
   hellBloodColor: 0x4a8acf,
   demonScale: 1,
   // Demons stand still by default now, each facing its own direction: R faces
-  // left, L faces right (eyeing each other across the abyss), the friend
-  // faces down. The walk toggle resumes the old patrol for all of them.
+  // left, L faces right (eyeing each other across the abyss), Lolly faces
+  // up-left into her corner. The walk toggle resumes the old patrol for all
+  // of them. Stand-Y defaults mirror where createDemons seeds them; sprite Y
+  // offsets start neutral; all three share the deep infernal red tint.
   demonWalks: false,
   demonFacing: 'left',
   demonSaturation: 1,
   demonBrightness: 1,
+  demonRY: HELL.height / 2,
+  demonRSpriteYOffset: 0,
+  demonRTint: 0x7a2014,
   demonLScale: 0.5,           // mirrors DEMON.smallScale
   demonLFacing: 'right',
-  demonFriendFacing: 'down',
-  // Robot defaults — a small grey chassis. The greyscale filter is what makes
+  demonLY: HELL.height / 2,
+  demonLSpriteYOffset: 0,
+  demonLTint: 0x7a2014,
+  demonFriendScale: 0.35,     // mirrors DEMON.friendScale
+  demonFriendFacing: 'upleft',
+  demonFriendY: DEMON.friendCorner.y,
+  demonFriendSpriteYOffset: 0,
+  demonFriendTint: 0x7a2014,
+  // Robot defaults — a small white chassis. The greyscale filter is what makes
   // the green goblin art read as metal; the tint then shades the grey.
   robotScale: 0.72,
-  robotTint: 0x9aa3ad,
+  robotTint: 0xffffff,
   robotGreyscale: true,
   robotSpaceSpeed: 55,
 };
