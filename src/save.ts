@@ -1,7 +1,7 @@
 import * as devalue from 'devalue';
 import { compressToUTF16, decompressFromUTF16 } from 'lz-string';
 import {
-  Building, GameState, createDemons, emptyBuildingCounts, pruneAllAssignedGoblins, rebuildWalls,
+  Building, GameState, createDemons, emptyBuildingCounts, ensureDemonRoster, pruneAllAssignedGoblins, rebuildWalls,
 } from './state';
 
 const STORAGE_KEY = 'rts.savegame.v1';
@@ -190,6 +190,12 @@ export function loadGame(): { state: GameState; savedAt: number } | null {
     // `selected` was added with space-building selection; default it so saves
     // predating it don't leave the field undefined.
     for (const sb of env.state.spaceBuildings.values()) sb.selected ??= false;
+    // Units snatched into space (robots + the doomed) — added with the
+    // dragon-snatch mechanic. Selection is ephemeral.
+    env.state.spaceUnits ??= new Map();
+    for (const su of env.state.spaceUnits.values()) su.selected = false;
+    // Orbital Platform placement mode is ephemeral — never resume armed.
+    env.state.pendingOrbital = false;
     // Strike side-tasks switched from a single struck13Goblins boolean to a
     // maxStruckAtOnce counter. Carry old progress forward (a true flag meant
     // the player had struck 13 at once, which clears the new 5-goblin tier).
@@ -225,6 +231,9 @@ export function loadGame(): { state: GameState; savedAt: number } | null {
                Number.isFinite(d.y0) && Number.isFinite(d.y1),
       );
     if (!demonsValid) env.state.demons = createDemons(env.state);
+    // Bring pre-roster saves up to the full trio (the colossus, demon L, and
+    // L's corner-dwelling friend) and stamp variant/scale/facing defaults.
+    ensureDemonRoster(env.state);
     for (const d of env.state.demons.values()) {
       d.busyWith = null;
       d.selected = false;

@@ -666,14 +666,11 @@
           pointer-events: auto; cursor: pointer; padding: 14px 22px;
         }
       }
-      /* From orbit you can't place buildings, so the Build list dims out.
-         Summon + Ritual stay live in every view — they simply act on the
-         overworld — and in hell the Build list is replaced by the Candle
-         option, which must stay clickable. */
-      body.space-view #build-section {
-        opacity: 0.32; pointer-events: none; filter: grayscale(0.6);
-        transition: opacity 500ms ease;
-      }
+      /* Summon + Ritual stay live in every view — they simply act on the
+         overworld. The Build list swaps its contents per view instead of
+         dimming: in hell it's replaced by the Candle option, and in orbit by
+         the Orbital Platform option (see refreshUI), both of which must stay
+         clickable. */
 
       /* ───────── Bottom-left info panel ───────── */
       #info-panel {
@@ -898,6 +895,32 @@
         font-size: 11px; text-transform: uppercase; letter-spacing: 2px;
         color: #8a9099; margin-bottom: 6px;
       }
+      /* Collapsible (admin-panel) sections: a <details> whose <summary> is the
+         section title with a rotating chevron. Collapsed sections pack tight
+         so the long panel scans as a table of contents. */
+      details.options-section { margin-bottom: 4px; }
+      details.options-section[open] { margin-bottom: 14px; }
+      details.options-section > summary.options-section-title {
+        cursor: pointer;
+        list-style: none;
+        user-select: none;
+        display: flex; align-items: center; gap: 6px;
+        margin-bottom: 0;
+        padding: 4px 0;
+        border-radius: 3px;
+      }
+      details.options-section > summary.options-section-title:hover { color: #c6ccd4; }
+      details.options-section > summary.options-section-title::-webkit-details-marker { display: none; }
+      details.options-section > summary.options-section-title::before {
+        content: "▸";
+        font-size: 9px;
+        color: #6a7080;
+        transition: transform 120ms ease;
+      }
+      details.options-section[open] > summary.options-section-title::before {
+        transform: rotate(90deg);
+      }
+      details.options-section[open] > summary.options-section-title { margin-bottom: 6px; }
       .options-row {
         display: flex; align-items: center; justify-content: space-between;
         gap: 8px; padding: 3px 0;
@@ -1341,6 +1364,11 @@
         left: 50%; top: 60%;
         transform: translate(-50%, -50%);
         display: flex;
+        /* Three-way questions (demon L's clock quiz) can outgrow a phone's
+           width — let the answers wrap rather than spill off-screen. */
+        flex-wrap: wrap;
+        justify-content: center;
+        max-width: 92vw;
         gap: 18px;
         opacity: 0;
         pointer-events: none;
@@ -1539,6 +1567,13 @@
             <button id="demon-no" class="build-button" type="button">
               <div class="build-content">
                 <div class="build-name">NO</div>
+              </div>
+            </button>
+            <!-- Third answer — only shown for three-way questions (demon L's
+                 what-time-is-it quiz); demon-dialogue.ts toggles it. -->
+            <button id="demon-opt3" class="build-button" type="button" style="display:none">
+              <div class="build-content">
+                <div class="build-name"></div>
               </div>
             </button>
           </div>

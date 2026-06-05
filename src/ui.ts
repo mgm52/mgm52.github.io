@@ -1,12 +1,12 @@
 import { playSound, playMinotaurCommand } from './audio';
 import {
   AUTOSPAWN_TIERS, BUILDABLE_KINDS, BUILDING_DEFS, BuildingKind, DRAG_SELECT_HINT_DELAY_SEC, MULTI_SPAWN_HINT_DELAY_SEC,
-  DRAGON, GOBLIN, LIGHTNING, PAN_HINT_DELAY_SEC, SPAWN_HINT_NO_SPAWN_SEC,
+  DRAGON, GOBLIN, LIGHTNING, PAN_HINT_DELAY_SEC, ROBOT, SPAWN_HINT_NO_SPAWN_SEC,
   SPAWN_HINT_NO_TASK_SEC, SUMMON_UPGRADES, WATER_HINT_DELAY_SEC, digBloodCost, MINOTAUR, minotaurBloodCost, TINYTAUR, formatPower, SOUL_SIGIL, sigilPortalOutput,
 } from './config';
 import {
-  Building, Cell, Demon, DragonState, GameState, Ghost, Goblin, GoblinState, SoulChair, SpaceBuilding, WaterSource,
-  appendLog, buildingCenter, buildingLabel, buildingMoneyCost, cellCenter, cellKey, countIdle, defOf, digDirection,
+  Building, Cell, Demon, DragonState, GameState, Ghost, Goblin, GoblinState, SoulChair, SpaceBuilding, SpaceUnit, WaterSource,
+  appendLog, buildingCenter, buildingLabel, buildingMoneyCost, cellCenter, cellKey, countHypercentres, countIdle, defOf, digDirection,
   earnDragonBone, getSpawnCapacity, holeBlockedByBuilding, isCellBlocked, isInBounds,
   maintainerCount, markBuildingsChanged, nextBuildingDisplayNum, occupyCell, waterCarrierCount,
 } from './state';
@@ -546,6 +546,8 @@ export type UICallbacks = {
   onSummonMinotaur: () => void;
   onSummonTinytaur: () => void;
   onSummonDragon: () => void;
+  onSummonRobot: () => void;
+  onPlaceOrbital: () => void;
   onLightningStrike: () => void;
   onBuyAutoAssign: () => void;
   onBuyAutoWater: () => void;
@@ -707,6 +709,27 @@ export function setupUI(state: GameState, callbacks: UICallbacks) {
   `;
   dragonBtn.addEventListener('click', (e) => { playSound('click', 1, 0.75); flashSummonClick(dragonBtn); emanateAtCursor(e.clientX, e.clientY); callbacks.onSummonDragon(); });
   summonList.appendChild(dragonBtn);
+
+  // Robot — late-game money summon, revealed with the Hypercentre era. The
+  // "needs 5 hypercentres" banner sits on the button until the industrial
+  // base is big enough. A robot is a small grey goblin that cannot die; its
+  // real purpose is being dragon-snatched to orbit, where (unlike everything
+  // else) it survives — and can assemble an Orbital Platform.
+  const robotBtn = document.createElement('button');
+  robotBtn.className = 'build-button build-button-compact';
+  robotBtn.id = 'btn-summon-robot';
+  robotBtn.style.display = 'none';
+  robotBtn.innerHTML = `
+    <div class="build-content">
+      <div class="build-text">
+        <div class="build-name">Robot</div>
+      </div>
+      <div class="build-cost-side"><span class="build-cost" id="cost-summon-robot">Ƶ${ROBOT.moneyCost.toLocaleString('en-US')}</span></div>
+    </div>
+    <div class="build-warning" id="warn-summon-robot" style="display:none">needs ${ROBOT.hypercentresRequired} hypercentres</div>
+  `;
+  robotBtn.addEventListener('click', (e) => { playSound('click', 1, 0.75); flashSummonClick(robotBtn); emanateAtCursor(e.clientX, e.clientY, 'white'); callbacks.onSummonRobot(); });
+  summonList.appendChild(robotBtn);
 
   // Ritual upgrades — surfaced once a Phone Farm has finished building.
   // Bought ones stay visible but go disabled.
@@ -943,6 +966,29 @@ export function setupUI(state: GameState, callbacks: UICallbacks) {
   `;
   candleBtn.addEventListener('click', () => { playSound('click', 1, 0.75); callbacks.onPlaceCandle(); });
   buildList.appendChild(candleBtn);
+
+  // Orbital Platform — the space view's entire Build menu, mirroring how the
+  // Candle takes over in hell. Arms placement mode: the next tap on the void
+  // deploys the scaffold. Requires 1 builder, and only a robot up in space
+  // qualifies; the meta line spells that out since nothing else will.
+  const orbitalDef = BUILDING_DEFS.orbital_platform;
+  const orbitalBtn = document.createElement('button');
+  orbitalBtn.className = 'build-button';
+  orbitalBtn.id = 'btn-place-orbital';
+  orbitalBtn.style.display = 'none';
+  orbitalBtn.innerHTML = `
+    <div class="build-content">
+      <div class="build-text">
+        <div class="build-name">${orbitalDef.name}</div>
+        <div class="build-meta">
+          <span class="build-cost build-gold-cost" id="cost-orbital">Ƶ${orbitalDef.cost.toLocaleString('en-US')}</span>
+        </div>
+      </div>
+      <div class="build-yields"><span class="yield-power">robot-built</span></div>
+    </div>
+  `;
+  orbitalBtn.addEventListener('click', () => { playSound('click', 1, 0.75); callbacks.onPlaceOrbital(); });
+  buildList.appendChild(orbitalBtn);
 
   // Destroy button on the info panel — instead of instantly tearing down the
   // building, allocate the nearest minotaur to smash it. Without one, flash
@@ -1310,6 +1356,27 @@ export function refreshUI(state: GameState) {
     setBuyFlash('btn-summon-dragon', false);
   }
 
+  // Robot button — revealed by the Build-a-Hypercentre task, but stays banner-
+  // gated ("needs 5 hypercentres") until the industrial base reaches
+  // ROBOT.hypercentresRequired (ground + orbit combined). Costs money.
+  const robotBtn = document.getElementById('btn-summon-robot') as HTMLButtonElement;
+  if (revealedTaskIds.has('build_hypercentre')) {
+    robotBtn.style.display = '';
+    applyFadeInOnFirstShow('btn-summon-robot');
+    const hcs = countHypercentres(state);
+    const enoughHCs = hcs >= ROBOT.hypercentresRequired;
+    const canAffordRobot = state.money >= ROBOT.moneyCost;
+    robotBtn.disabled = !enoughHCs || !canAffordRobot;
+    document.getElementById('warn-summon-robot')!.style.display = enoughHCs ? 'none' : '';
+    const robotCost = document.getElementById('cost-summon-robot')!;
+    robotCost.classList.toggle('met', canAffordRobot && enoughHCs);
+    // Nudge once the gate finally opens and the player has never built one.
+    setBuyFlash('btn-summon-robot', enoughHCs && canAffordRobot && ![...state.goblins.values()].some((g) => g.robot) && state.spaceUnits.size === 0);
+  } else {
+    robotBtn.style.display = 'none';
+    setBuyFlash('btn-summon-robot', false);
+  }
+
   // Tutorial: build the completed set first, then collect any tasks whose
   // prereqs are all done but which are themselves not done yet — those are
   // the *active* tasks (multiple can be active at once). A completed task's
@@ -1522,13 +1589,15 @@ export function refreshUI(state: GameState) {
   }
 
   // Each building kind. In hell the whole Build menu is replaced by the
-  // Candle option, so every building button hides while the view is down there.
+  // Candle option, and in orbit by the Orbital Platform option, so every
+  // ground building button hides while the view is away from the surface.
   const inHell = state.view === 'hell';
+  const inSpace = state.view === 'space';
   const availablePower = state.lastPowerProduced - state.lastPowerConsumed;
   for (const kind of SORTED_KINDS) {
     const def = BUILDING_DEFS[kind];
     const btn = document.getElementById(btnId(kind)) as HTMLButtonElement;
-    const visible = unlocked.has(kind) && !obsoletedKinds.has(kind) && !inHell;
+    const visible = unlocked.has(kind) && !obsoletedKinds.has(kind) && !inHell && !inSpace;
     btn.classList.toggle('locked', !visible);
     if (!visible) { setBuyFlash(btnId(kind), false); continue; }
     // Goblin Hole's price doubles per hole in play, so its cost is dynamic —
@@ -1577,6 +1646,29 @@ export function refreshUI(state: GameState) {
     if (state.pendingCandle) state.pendingCandle = false;
   }
 
+  // Orbital Platform — the space-view replacement for the Build list. Lit
+  // (active) while placement is armed; flashes for attention until the first
+  // platform exists. Like the candle, leaving the view disarms placement.
+  const orbitalBtn = document.getElementById('btn-place-orbital') as HTMLButtonElement;
+  orbitalBtn.style.display = inSpace ? '' : 'none';
+  if (inSpace) {
+    applyFadeInOnFirstShow('btn-place-orbital');
+    const orbitalCost = BUILDING_DEFS.orbital_platform.cost;
+    const canAffordOrbital = state.money >= orbitalCost;
+    orbitalBtn.disabled = !canAffordOrbital;
+    orbitalBtn.classList.toggle('active', state.pendingOrbital);
+    document.getElementById('cost-orbital')!.classList.toggle('met', canAffordOrbital);
+    let anyPlatform = false;
+    for (const sb of state.spaceBuildings.values()) {
+      if (sb.building.kind === 'orbital_platform') { anyPlatform = true; break; }
+    }
+    setBuyFlash('btn-place-orbital', canAffordOrbital && !anyPlatform);
+  } else {
+    setBuyFlash('btn-place-orbital', false);
+    // Left orbit with placement still armed — disarm it.
+    if (state.pendingOrbital) state.pendingOrbital = false;
+  }
+
   // Hide separators that mark a task boundary the player hasn't crossed yet.
   // Hide separators that don't actually sit between two visible buttons.
   // Walks the live DOM so this stays correct regardless of how visibility
@@ -1620,6 +1712,9 @@ export function refreshUI(state: GameState) {
   } else if (state.pendingCandle) {
     hint.style.display = 'block';
     hint.textContent = 'Tap to place Candle · tap the button again or press ESC to cancel';
+  } else if (state.pendingOrbital) {
+    hint.style.display = 'block';
+    hint.textContent = 'Tap the void to deploy an Orbital Platform · tap the button again or press ESC to cancel';
   } else {
     hint.style.display = 'none';
   }
@@ -1719,6 +1814,7 @@ function refreshInfoPanel(state: GameState) {
   const selectedBuildings = [...state.buildings.values()].filter((b) => b.selected);
   const selectedWater = [...state.waterSources.values()].find((w) => w.selected) ?? null;
   const selectedSpace = [...state.spaceBuildings.values()].filter((sb) => sb.selected);
+  const selectedSpaceUnits = [...state.spaceUnits.values()].filter((su) => su.selected);
   const selectedGhosts = state.ghosts.filter((g) => g.selected);
   // In hell a tap on the portal mirror selects the underlying Hell Portal
   // building. Show it its own beacon panel (no ground-only Destroy/commands)
@@ -1747,6 +1843,14 @@ function refreshInfoPanel(state: GameState) {
     name.textContent = `${selectedGhosts.length} souls`;
     stateEl.textContent = '';
     extra.innerHTML = `<span style="color:#6a7080">${hellCommandHint()}</span>`;
+  } else if (selectedSpaceUnits.length === 1) {
+    showSpaceUnit(state, selectedSpaceUnits[0], panel, portrait, name, stateEl, extra);
+  } else if (selectedSpaceUnits.length > 1) {
+    panel.classList.add('visible');
+    portrait.innerHTML = `<div class="portrait-goblin" style="background:#101830;border-color:#9fd0ff;color:#dbecff">✦</div>`;
+    name.textContent = `${selectedSpaceUnits.length} castaways in orbit`;
+    stateEl.textContent = '';
+    extra.innerHTML = `<span style="color:#6a7080">Adrift among the stars</span>`;
   } else if (selectedSpace.length === 1) {
     showSpaceBuilding(state, selectedSpace[0], panel, portrait, name, stateEl, extra);
   } else if (selectedSpace.length > 1) {
@@ -1819,9 +1923,14 @@ function describeDragonState(state: GameState, s: DragonState): string {
     case 'seeking': return 'Seeking the choicest building';
     case 'hovering_to_lift': return `Looming over ${buildingLabel(state, s.buildingId)}`;
     case 'carrying': return 'Hauling a building to space';
+    case 'carrying_unit': return 'Hauling a snatched unit to space';
     case 'delivering': return 'Carrying a building to a drop-off';
     case 'moving_to': return 'On the wing';
     case 'going_to_building': return `Going to lift ${buildingLabel(state, s.buildingId)}`;
+    case 'going_to_unit':
+      return s.targetKind === 'goblin'
+        ? `Diving to snatch goblin #${s.targetId}`
+        : `Diving to snatch Minotaur #${s.targetId}`;
     case 'going_to_kill':
       return s.targetKind === 'goblin'
         ? `Diving on goblin #${s.targetId}`
@@ -1845,9 +1954,39 @@ function showDemon(_state: GameState, d: Demon, panel: HTMLElement, portrait: HT
                    name: HTMLElement, stateEl: HTMLElement, extra: HTMLElement) {
   panel.classList.add('visible');
   portrait.innerHTML = `<div class="portrait-goblin" style="background:#2a0606;border-color:#ff5a4a;color:#ff8a6a">☠</div>`;
-  name.textContent = 'Minotaur of the Pit';
-  stateEl.textContent = d.busyWith !== null ? 'Locked in parlay' : 'Pacing the abyss';
+  // L and her friend look identical (and share a name plate — the friend's
+  // corner address is her secret); only the colossus reads as THE pit demon.
+  const variant = d.variant ?? 'pit';
+  name.textContent = variant === 'pit' ? 'Minotaur of the Pit' : 'Lesser Minotaur of the Pit';
+  stateEl.textContent = d.busyWith !== null ? 'Locked in parlay'
+    : variant === 'friend' ? 'Standing alone in a corner of the abyss'
+    : 'Standing watch over the abyss';
   extra.innerHTML = `<span style="color:#ff4a4a">You cannot command this creature, only parlay</span>`;
+}
+
+// A unit a dragon dropped off in orbit. Robots thrive (and build); anything
+// else is on a short vacuum clock, counted down live on the card.
+function showSpaceUnit(state: GameState, su: SpaceUnit, panel: HTMLElement, portrait: HTMLElement,
+                       name: HTMLElement, stateEl: HTMLElement, extra: HTMLElement) {
+  panel.classList.add('visible');
+  const glyph = su.robot ? 'R' : su.bob ? 'B' : su.kind === 'minotaur' ? 'M' : 'G';
+  const border = su.robot ? '#9aa3ad' : '#9fd0ff';
+  portrait.innerHTML = `<div class="portrait-goblin" style="background:#101830;border-color:${border};color:#dbecff">${glyph}</div>`;
+  const kindLabel = su.robot ? 'Robot'
+    : su.bob ? 'Bob'
+    : su.kind === 'minotaur' ? (su.tiny ? 'Tinytaur' : 'Minotaur')
+    : su.gold ? 'Gold Goblin' : 'Goblin';
+  name.textContent = `${kindLabel} in orbit`;
+  if (su.robot) {
+    stateEl.textContent = su.workingOn !== undefined
+      ? 'Assembling an Orbital Platform'
+      : 'Functioning normally in the vacuum';
+    extra.innerHTML = `<span style="color:#6a7080">${su.workingOn !== undefined ? 'The only hands that work up here' : 'Awaiting an Orbital Platform to build'}</span>`;
+  } else {
+    const left = su.diesAt !== undefined ? Math.max(0, su.diesAt - state.now) : 0;
+    stateEl.textContent = `Perishing — ${left.toFixed(1)}s of air left`;
+    extra.innerHTML = `<span style="color:#ff8a8a">No one can hear it scream.</span>`;
+  }
 }
 
 // A drifting soul in the hell view. No commands list — the hint covers how to
@@ -1955,9 +2094,11 @@ function showWaterSource(state: GameState, w: WaterSource, panel: HTMLElement,
 function showGoblin(state: GameState, g: Goblin, panel: HTMLElement, portrait: HTMLElement,
                     name: HTMLElement, stateEl: HTMLElement, extra: HTMLElement) {
   panel.classList.add('visible');
-  portrait.innerHTML = `<div class="portrait-goblin">G</div>`;
-  name.textContent = `Goblin #${g.id}`;
-  stateEl.textContent = describeGoblinState(state, g.state);
+  portrait.innerHTML = g.robot
+    ? `<div class="portrait-goblin" style="background:#1c2026;border-color:#9aa3ad;color:#cfd5dc">R</div>`
+    : `<div class="portrait-goblin">G</div>`;
+  name.textContent = g.robot ? `Robot #${g.id}` : `Goblin #${g.id}`;
+  stateEl.textContent = describeGoblinState(state, g.state) || (g.robot ? 'Cannot die' : '');
   setCommandHint(extra, state);
 }
 

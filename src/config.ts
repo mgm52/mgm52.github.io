@@ -97,6 +97,30 @@ export const TINYTAUR = {
   scale: 0.5,       // render size multiplier vs a full Minotaur
 };
 
+// Robot — a late-game summon unlocked alongside the Hypercentre era. Costs
+// money (not blood) and demands a serious industrial base (5 Hypercentres)
+// before the button even arms. On the ground a robot is just a small grey
+// goblin — same jobs, same pathfinding — except it cannot die: lightning,
+// minotaurs, kill orders and dragon fire all pass over it. Its real purpose
+// is orbit: a robot snatched to space by a dragon survives the vacuum and is
+// the only unit able to assemble an Orbital Platform.
+// Look + orbital speed live in options (robotScale / robotTint /
+// robotGreyscale / robotSpaceSpeed) so they're tunable from the dev menu.
+export const ROBOT = {
+  moneyCost: 250_000,
+  hypercentresRequired: 5,
+  buildRange: 30,     // px past a platform's edge that counts as "on site"
+};
+
+// Units hauled to space by a dragon. Anything that isn't a robot suffocates
+// after `lifetime` seconds adrift; until then it tumbles gently like the
+// floating buildings do.
+export const SPACE_UNIT = {
+  lifetime: 5,        // seconds a non-robot unit survives the vacuum
+  driftSpeed: 22,     // baseline tumble speed, px/sec
+  margin: 60,         // keep drifting units this far inside the space bounds
+};
+
 // Dragon — summoned from a constructed Dragon Beacon (64 blood each). A flying
 // creature that, by default, hauls the single most valuable building up to
 // space, where it floats free of the grid. It can also be commanded to
@@ -206,11 +230,17 @@ export const HELL = {
   bobPacePauseSec: 3,
 };
 
-// Demons — uncommandable denizens of hell. For now a single giant Minotaur
-// that paces slowly up and down the abyss. The player can't order one around;
-// a goblin ghost can only be walked up to it to "parlay" (see demon-dialogue.ts).
+// Demons — uncommandable denizens of hell. Three of them now: the original
+// colossus (demon "R", right of the landing zone, bellowing in ALL CAPS), his
+// half-size counterpart across the abyss (demon "L", who speaks every word
+// backwards), and L's identical friend tucked away in a corner of the map.
+// They all stand still by default — R facing left, L facing right, so the
+// pair eye each other across the landing zone. The player can't order one
+// around; a goblin ghost can only be walked up to one to "parlay" (see
+// demon-dialogue.ts). All radii below are for the full-size colossus and are
+// scaled down by each demon's `scale` (see Demon.scale in state.ts).
 export const DEMON = {
-  speed: 16,          // hell-px/sec — a slow, ponderous patrol
+  speed: 16,          // hell-px/sec — a slow, ponderous patrol (dev toggle only)
   displayPx: 900,     // colossal, ~9x a summoned Minotaur
   patrolHalf: 360,    // hell-px travelled either side of the spawn centre
   parlayRadius: 360,  // a ghost within this (hell-px) of the demon starts a parlay
@@ -219,9 +249,16 @@ export const DEMON = {
   // any that ends up inside is shoved back out to the rim. Kept well under
   // parlayRadius so a commanded soul opens its parlay before it ever collides.
   bodyRadius: 240,
-  // Hell-x offset from the map centre where the demon spawns + paces. Nudged
-  // right so it stands clear of the soul sigil at the centre of the abyss.
+  // Hell-x offset from the map centre where demon R stands; demon L mirrors
+  // it on the other side. Nudged out so they stand clear of the soul sigil
+  // at the centre of the abyss.
   spawnOffsetX: 620,
+  // Demon L (and her friend) render at this fraction of the colossus. This is
+  // the seed stamped onto the Demon record; the LIVE size is the demonLScale
+  // dev option (same default) — see demonScaleOf in state.ts.
+  smallScale: 0.5,
+  // Where L's friend stands — the top-left corner of the abyss.
+  friendCorner: { x: 320, y: 460 },
 };
 
 // The soul sigil — up to five candles placed by the player on the outer ring
@@ -560,6 +597,28 @@ export const BUILDING_DEFS = {
     colors: {
       active: 0x6a0a14, activeBorder: 0xff2030,
       dormant: 0x3a0a14, dormantBorder: 0x8a2030,
+      constructing: 0x3a3f47, constructingBorder: 0x808890,
+    },
+  }),
+  // Orbital Platform — the only structure built IN space rather than hauled
+  // up to it. Its button replaces the Build list while the player is in
+  // orbit (mirroring how the Candle takes over in hell). Requires 1 builder,
+  // and the vacuum means only robots qualify — the player has to have a
+  // dragon snatch a robot up first. Does nothing once assembled. For now.
+  orbital_platform: def(3, {
+    name: 'Orbital Platform',
+    short: 'OP',
+    cost: 1_000_000,
+    buildersRequired: 1,
+    buildTime: 20,
+    maintainersRequired: 0,
+    income: 0,
+    powerOutput: 0,
+    wanderInterval: 0,
+    wanderJitter: 0,
+    colors: {
+      active: 0x4a505a, activeBorder: 0xb8bec6,
+      dormant: 0x3a3f47, dormantBorder: 0x808890,
       constructing: 0x3a3f47, constructingBorder: 0x808890,
     },
   }),

@@ -220,13 +220,24 @@ export type Options = {
   hellGhostFallSpeed: number; // px/sec the ghosts drift downward in hell
   hellBloodColor: number;     // tint applied to the hell-side death splatters
   // Demon (the giant hell Minotaur) dev controls: render scale, whether it
-  // patrols its band or stands frozen (and which way it faces while frozen),
-  // plus its own saturation/brightness colour filter.
+  // patrols its band or stands frozen, plus its own saturation/brightness
+  // colour filter. Facing is per-demon: the colossus (R), demon L, and L's
+  // friend each get their own standing direction.
   demonScale: number;         // multiplier on DEMON.displayPx (1 = native size)
   demonWalks: boolean;        // false = stands still at its current spot
-  demonFacing: DemonFacing;   // facing while standing still (walking overrides it)
+  demonFacing: DemonFacing;   // demon R's standing facing (walking overrides it)
   demonSaturation: number;
   demonBrightness: number;
+  // Demon L and her identical friend — live size (fraction of the colossus;
+  // also scales their parlay/hit/body radii) and per-demon standing facings.
+  demonLScale: number;
+  demonLFacing: DemonFacing;
+  demonFriendFacing: DemonFacing;
+  // Robots — the late-game grey summons. Live-tunable look + orbital speed.
+  robotScale: number;       // sprite size multiplier vs a regular goblin
+  robotTint: number;        // chassis tint, applied over the (greyscaled) art
+  robotGreyscale: boolean;  // desaturate the goblin art (off = tint over green)
+  robotSpaceSpeed: number;  // space-px/sec a robot paddles toward a platform
 };
 
 export type DemonFacing = 'down' | 'up' | 'left' | 'right';
@@ -317,10 +328,22 @@ export const DEFAULT_OPTIONS: Options = {
   hellGhostFallSpeed: 7,
   hellBloodColor: 0x4a8acf,
   demonScale: 1,
-  demonWalks: true,
-  demonFacing: 'down',
+  // Demons stand still by default now, each facing its own direction: R faces
+  // left, L faces right (eyeing each other across the abyss), the friend
+  // faces down. The walk toggle resumes the old patrol for all of them.
+  demonWalks: false,
+  demonFacing: 'left',
   demonSaturation: 1,
   demonBrightness: 1,
+  demonLScale: 0.5,           // mirrors DEMON.smallScale
+  demonLFacing: 'right',
+  demonFriendFacing: 'down',
+  // Robot defaults — a small grey chassis. The greyscale filter is what makes
+  // the green goblin art read as metal; the tint then shades the grey.
+  robotScale: 0.72,
+  robotTint: 0x9aa3ad,
+  robotGreyscale: true,
+  robotSpaceSpeed: 55,
 };
 
 // Set every font key to the same family at once. Convenience for the options

@@ -2,7 +2,7 @@ import { Application, Container, FederatedPointerEvent, Graphics } from 'pixi.js
 import { playSound, playMinotaurCommand } from './audio';
 import { flashCursor } from './cursor-fx';
 import { bobOverworldBark, demonRebuke } from './demon-dialogue';
-import { BUILDABLE_KINDS, BUILDING_DEFS, BuildingKind, CELL, DRAGON, GOBLIN, HELL, LIGHTNING, MINOTAUR, SOUL_SIGIL, WORLD, formatPower } from './config';
+import { BUILDABLE_KINDS, BUILDING_DEFS, BuildingKind, CELL, DRAGON, GOBLIN, HELL, LIGHTNING, MINOTAUR, SOUL_SIGIL, SPACE, SPACE_UNIT, WORLD, formatPower } from './config';
 import { runBobCutscene } from './intro';
 import { RenderContext, ambientDragonAt, clampCamera, clampHellCamera, clampSpaceCamera, currentHellScale, ghostAtHell, ghostHellPos } from './render';
 import { autoAssignAllIdle, lightningStrike, spawnBob } from './sim';
@@ -10,7 +10,7 @@ import {
   Building, Cell, Dragon, GameState, Ghost, Goblin, Minotaur, WaterSource,
   appendLog, buildingAtCell, buildingMoneyCost, candleSpotAt, cellKey, defOf, demonAtHell, findFreeCellNear,
   hellPortalAt, holeAtCell, isInBounds, markBuildingsChanged, nextBuildingDisplayNum, pixelToCell, placeCandle,
-  soulChairAt, spaceBuildingAt, waterCarrierCount, waterSourceAtCell,
+  soulChairAt, spaceBuildingAt, spaceUnitAt, waterCarrierCount, waterSourceAtCell,
 } from './state';
 
 type ActivePointer = {
@@ -136,6 +136,12 @@ export function setupInput(
           if (state.pendingCandle) { state.pendingCandle = false; return; }
           const hp = e.getLocalPosition(ctx.hellLayer);
           handleHellRightClick(state, hp.x, hp.y);
+        }
+        // Space view: right-click cancels a pending Orbital Platform placement
+        // (mirroring how a pending candle/strike is cancelled elsewhere).
+        if (e.button === 2 && state.view === 'space' && input.pointers.size < 2 && state.pendingOrbital) {
+          flashCursor(e.clientX, e.clientY);
+          state.pendingOrbital = false;
         }
       }
       return;
@@ -378,12 +384,21 @@ export function setupInput(
           }
         } else if (moved < SPACE_DRAG_TOL) {
           const lp = e.getLocalPosition(ctx.spaceLayer);
-          const sb = spaceBuildingAt(state, lp.x, lp.y);
-          // Ambient dragons sit behind the floating buildings, so they only get
+          // Orbital Platform placement armed: the tap deploys the scaffold
+          // instead of selecting anything (or beeps if Ƶ runs short).
+          if (state.pendingOrbital) {
+            tryPlaceOrbital(state, lp.x, lp.y);
+            return;
+          }
+          // A small drifting unit wins over the building it may be passing in
+          // front of; ambient dragons sit behind everything, so they only get
           // a hit when nothing higher-priority is under the pointer.
-          const ad = sb ? null : ambientDragonAt(ctx, lp.x, lp.y);
+          const su = spaceUnitAt(state, lp.x, lp.y);
+          const sb = su ? null : spaceBuildingAt(state, lp.x, lp.y);
+          const ad = (su || sb) ? null : ambientDragonAt(ctx, lp.x, lp.y);
           if (!e.shiftKey) clearSelection(state);
-          if (sb) { sb.selected = true; playSound('select', 0.33); }
+          if (su) { su.selected = true; playSound('select', 0.33); }
+          else if (sb) { sb.selected = true; playSound('select', 0.33); }
           else if (ad) { state.selectedAmbientDragonId = ad.id; playSound('select', 0.33); }
         } else {
           // Box corners: drag origin + release point, both mapped to space-layer
@@ -397,6 +412,12 @@ export function setupInput(
           for (const sb of state.spaceBuildings.values()) {
             if (sb.pos.x >= x1 && sb.pos.x <= x2 && sb.pos.y >= y1 && sb.pos.y <= y2) {
               sb.selected = true;
+              count++;
+            }
+          }
+          for (const su of state.spaceUnits.values()) {
+            if (su.pos.x >= x1 && su.pos.x <= x2 && su.pos.y >= y1 && su.pos.y <= y2) {
+              su.selected = true;
               count++;
             }
           }
@@ -483,6 +504,7 @@ export function setupInput(
       state.pendingBuild = null;
       state.pendingStrike = false;
       state.pendingCandle = false;
+      state.pendingOrbital = false;
       input.placementGhost.clear();
       return;
     }
@@ -623,10 +645,11 @@ function scheduleLongPress(
     input.isDragging = false;
     input.selectionGfx.clear();
     input.spaceTapStart = null;
-    if (state.pendingBuild || state.pendingCandle) {
+    if (state.pendingBuild || state.pendingCandle || state.pendingOrbital) {
       // No keyboard ESC on touch — long-press cancels pending placement.
       state.pendingBuild = null;
       state.pendingCandle = false;
+      state.pendingOrbital = false;
       input.placementGhost.clear();
       return;
     }
@@ -702,6 +725,7 @@ function clearSelection(state: GameState) {
   for (const b of state.buildings.values()) b.selected = false;
   for (const w of state.waterSources.values()) w.selected = false;
   for (const sb of state.spaceBuildings.values()) sb.selected = false;
+  for (const su of state.spaceUnits.values()) su.selected = false;
   for (const gh of state.ghosts) gh.selected = false;
   for (const d of state.demons.values()) d.selected = false;
   for (const c of state.soulChairs) c.selected = false;
@@ -754,6 +778,45 @@ function tryPlaceCandle(state: GameState, hx: number, hy: number) {
   } else {
     appendLog(state, `A candle gutters to life on the ring (${placed}/${SOUL_SIGIL.count}).`);
   }
+}
+
+// Deploy an Orbital Platform scaffold at a tapped SPACE coord while placement
+// is armed. Costs money up front; arrives as a constructing building that only
+// a robot (snatched to space by a dragon) can assemble. Unlike the candle,
+// placement disarms after one drop — platforms are a considered purchase.
+function tryPlaceOrbital(state: GameState, x: number, y: number) {
+  const def = BUILDING_DEFS.orbital_platform;
+  if (state.money < def.cost) {
+    playSound('error');
+    appendLog(state, 'Not enough Ƶ.');
+    return;
+  }
+  // Clamp inside the void's bounds so the scaffold can't hide off-scene.
+  const px = Math.max(SPACE_UNIT.margin, Math.min(SPACE.width - SPACE_UNIT.margin, x));
+  const py = Math.max(SPACE_UNIT.margin, Math.min(SPACE.height - SPACE_UNIT.margin, y));
+  state.money -= def.cost;
+  const b: Building = {
+    id: state.nextId++,
+    displayNum: nextBuildingDisplayNum(state, 'orbital_platform'),
+    kind: 'orbital_platform',
+    cell: { cx: 0, cy: 0 },   // never on the grid — placeholder only
+    state: 'constructing',
+    buildProgress: 0,
+    assignedGoblins: [],
+    selected: false,
+  };
+  state.spaceBuildings.set(b.id, {
+    id: b.id,
+    building: b,
+    pos: { x: px, y: py },
+    vel: { x: 0, y: 0 },      // platforms hold station
+    spin: 0,
+    spinRate: 0,
+    selected: false,
+  });
+  state.pendingOrbital = false;
+  playSound('place', 1.4);
+  appendLog(state, `${def.name} #${b.displayNum} scaffold deployed — only a robot can assemble it.`);
 }
 
 // Right-click in hell view: walk every selected ghost to the clicked hell-coord.
@@ -1011,7 +1074,9 @@ function handleRightClick(state: GameState, x: number, y: number) {
     // there if there's room, else carries on up to space). Dragons with empty
     // claws take the usual kill / lift / move orders.
     const carryingDragons = selectedDragons.filter((d) => d.carrying);
-    const freeDragons = selectedDragons.filter((d) => !d.carrying);
+    // Dragons hauling a snatched unit are committed: space is the only place
+    // they can set it down, so they ignore fresh orders entirely.
+    const freeDragons = selectedDragons.filter((d) => !d.carrying && !d.carryingUnit);
 
     for (const d of carryingDragons) {
       d.state = { kind: 'delivering', goal: { x, y } };
@@ -1021,18 +1086,23 @@ function handleRightClick(state: GameState, x: number, y: number) {
     }
 
     if (freeDragons.length > 0) {
+      // A non-dragon unit under the cursor is a snatch order: the dragon
+      // grabs it and hauls it up to space, where it dies after a few seconds
+      // adrift (robots survive the vacuum). Only dragon-on-dragon remains a
+      // kill — fratricide for the bone.
       if (targetGoblin) {
         targetGoblin.commandFlashAt = state.now;
         for (const d of freeDragons) {
-          d.state = { kind: 'going_to_kill', targetKind: 'goblin', targetId: targetGoblin.id };
+          d.state = { kind: 'going_to_unit', targetKind: 'goblin', targetId: targetGoblin.id };
         }
-        appendLog(state, `${freeDragons.length} dragon(s) diving on goblin #${targetGoblin.id}.`);
+        const label = targetGoblin.robot ? 'Robot' : targetGoblin.bob ? 'Bob' : 'goblin';
+        appendLog(state, `${freeDragons.length} dragon(s) diving to snatch ${label} #${targetGoblin.id} into space.`);
       } else if (targetMinotaur) {
         targetMinotaur.commandFlashAt = state.now;
         for (const d of freeDragons) {
-          d.state = { kind: 'going_to_kill', targetKind: 'minotaur', targetId: targetMinotaur.id };
+          d.state = { kind: 'going_to_unit', targetKind: 'minotaur', targetId: targetMinotaur.id };
         }
-        appendLog(state, `${freeDragons.length} dragon(s) diving on Minotaur #${targetMinotaur.id}.`);
+        appendLog(state, `${freeDragons.length} dragon(s) diving to snatch Minotaur #${targetMinotaur.id} into space.`);
       } else if (targetDragon) {
         targetDragon.commandFlashAt = state.now;
         for (const d of freeDragons) {
@@ -1129,8 +1199,9 @@ function handleRightClick(state: GameState, x: number, y: number) {
 
   // Kill order: right-click on another goblin sends every selected attacker
   // toward it. The target itself, even if selected, is excluded so the order
-  // never resolves to "kill yourself".
-  if (targetGoblin) {
+  // never resolves to "kill yourself". Robots can't die — a click on one
+  // falls through to a plain move order instead of an unwinnable hunt.
+  if (targetGoblin && !targetGoblin.robot) {
     const attackers = selectedGoblins.filter(g => g.id !== targetGoblin.id);
     if (attackers.length > 0) {
       targetGoblin.commandFlashAt = state.now;

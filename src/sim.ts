@@ -1,10 +1,10 @@
 import { playDecayingGoblinDeath, playDecayingGoblinSpawn, playDecayingGoldKillCash, playSound } from './audio';
-import { BUILDING_DEFS, CELL, COLS, DEMON, DRAGON, DRAGON_KILL_REWARD, GOBLIN, GOLD_GOBLIN_CHANCE, GOLD_KILL_REWARD, HELL, KILL_REWARD, LIGHTNING, MINOTAUR_KILL_REWARD, SOUL_SIGIL, SPACE, SUMMON_UPGRADES, TICK_S, MINOTAUR, TINYTAUR, WATER_DEPLETION_PP_PER_SEC, WATER_METER_MAX, WORLD, formatPower, sigilPortalOutput } from './config';
+import { BUILDING_DEFS, CELL, COLS, DEMON, DRAGON, DRAGON_KILL_REWARD, GOBLIN, GOLD_GOBLIN_CHANCE, GOLD_KILL_REWARD, HELL, KILL_REWARD, LIGHTNING, MINOTAUR_KILL_REWARD, ROBOT, SOUL_SIGIL, SPACE, SPACE_UNIT, SUMMON_UPGRADES, TICK_S, MINOTAUR, TINYTAUR, WATER_DEPLETION_PP_PER_SEC, WATER_METER_MAX, WORLD, formatPower, sigilPortalOutput } from './config';
 import { DEMON_FACING_ANGLE, getOptions } from './options';
 import {
-  ALL_DIRS, Building, Cell, DX, DY, Demon, Dir, Dragon, GameState, Ghost, Goblin, HOLE_SIZE, Minotaur, SoulChair, SpaceBuilding, WaterSource,
+  ALL_DIRS, Building, Cell, DX, DY, Demon, Dir, Dragon, GameState, Ghost, Goblin, HOLE_SIZE, Minotaur, SoulChair, SpaceBuilding, SpaceUnit, WaterSource,
   appendLog, buildingAtCell, buildingCenter, buildingFootprint, buildingPerimeter,
-  cellCenter, cellKey, constructedDragonBeacon, currentPowerBoost, defOf, destroyBuilding, dragonTargetBuilding,
+  cellCenter, cellKey, constructedDragonBeacon, currentPowerBoost, defOf, demonScaleOf, destroyBuilding, dragonTargetBuilding,
   earnBlood, earnDragonBone, earnMoney, findHoleEmergenceCell,
   getSpawnCapacity, holeBlockedByBuilding, holeCenter, isCellBlocked, isCellInBuilding, isCellInWaterSource,
   isInBounds, maintainerCount, markBuildingsChanged, nearestCellInWaterSource, occupyCell, pushDeathEffect, pushFloater,
@@ -119,6 +119,12 @@ export function tick(state: GameState) {
   for (const d of [...state.dragons.values()]) updateDragon(state, d);
   // Floating space buildings drift within their bounds.
   for (const sb of state.spaceBuildings.values()) updateSpaceBuilding(sb);
+  // Units adrift in space: robots paddle toward unfinished platforms, the
+  // rest tumble until their vacuum timer pops them. Copy first — a perishing
+  // unit removes itself mid-loop.
+  for (const su of [...state.spaceUnits.values()]) updateSpaceUnit(state, su);
+  // Robots on site advance any Orbital Platform under construction.
+  advanceOrbitalPlatforms(state);
 
   // ── 2d. Demon updates (hell pacing + parlay arrivals) ─────────────────
   for (const d of state.demons.values()) updateDemon(state, d);
@@ -300,7 +306,7 @@ export function tick(state: GameState) {
       // position like any interacted ghost.
       const hellX = g.x + (g.offX ?? 0) + hellXOffset;
       for (const d of state.demons.values()) {
-        if (Math.hypot(hellX - d.hx, hellY - d.hy) < DEMON.bodyRadius) {
+        if (Math.hypot(hellX - d.hx, hellY - d.hy) < DEMON.bodyRadius * demonScaleOf(d)) {
           g.hx = hellX;
           g.hy = hellY;
           shoveGhostOffDemons(state, g);
@@ -343,20 +349,21 @@ function shoveGhostOffDemons(state: GameState, g: Ghost): void {
   let hx = g.hx;
   let hy = g.hy;
   for (const d of state.demons.values()) {
+    const body = DEMON.bodyRadius * demonScaleOf(d);
     const dx = hx - d.hx;
     const dy = hy - d.hy;
     const dist = Math.hypot(dx, dy);
-    if (dist >= DEMON.bodyRadius) continue;
+    if (dist >= body) continue;
     if (dist < 1e-6) {
-      hx = d.hx + DEMON.bodyRadius;  // dead-centre overlap: eject sideways
+      hx = d.hx + body;  // dead-centre overlap: eject sideways
     } else {
-      hx = d.hx + (dx / dist) * DEMON.bodyRadius;
-      hy = d.hy + (dy / dist) * DEMON.bodyRadius;
+      hx = d.hx + (dx / dist) * body;
+      hy = d.hy + (dy / dist) * body;
     }
     // A walk goal buried inside the demon can never be reached — drop it the
     // moment the soul is pressed against him so it doesn't shuffle at the rim
     // forever. (Chair- and parlay-bound souls re-acquire their goals each tick.)
-    if (g.goal && Math.hypot(g.goal.x - d.hx, g.goal.y - d.hy) < DEMON.bodyRadius) {
+    if (g.goal && Math.hypot(g.goal.x - d.hx, g.goal.y - d.hy) < body) {
       g.goal = undefined;
     }
   }
@@ -421,6 +428,8 @@ export function lightningStrike(state: GameState, x: number, y: number): boolean
   // sees discrete drops rather than one aggregate readout at the centre.
   let killed = 0;
   for (const g of [...state.goblins.values()]) {
+    // Robots are unkillable — the bolt washes right over them.
+    if (g.robot) continue;
     if (within(g.pos.x, g.pos.y)) {
       const r = goblinKillReward(state, g);
       const tx = g.pos.x, ty = g.pos.y;
@@ -594,6 +603,33 @@ export function spawnBob(state: GameState, holeCell: Cell): boolean {
   state.spawnsCompleted++;
   playDecayingGoblinSpawn(0.85);
   appendLog(state, 'Bob has joined the crew.');
+  if (state.autoAssignEnabled) autoAssignAllIdle(state);
+  return true;
+}
+
+// Assemble a robot at the main hole — the late-game money summon. Uses the
+// same emergence-cell flood as a hatching goblin so it can't land on top of
+// anyone; instant (no spawn queue — robots are manufactured, not incubated).
+// Returns false (with an error beep) when every hole exit is blocked.
+export function spawnRobot(state: GameState): boolean {
+  const h = state.hole.cell;
+  const cell = findHoleEmergenceCell(state, h.cx, h.cy);
+  if (!cell) {
+    playSound('error');
+    appendLog(state, 'No room for the robot to deploy — clear the hole.');
+    return false;
+  }
+  const id = state.nextId++;
+  const g: Goblin = {
+    id, pos: cellCenter(cell), cell, target: null, goal: null,
+    path: [], facing: Math.PI / 2,
+    state: { kind: 'idle' }, selected: false, idleSince: null, lastCellChangedAt: state.now,
+    robot: true,
+  };
+  state.goblins.set(id, g);
+  occupyCell(state, cell.cx, cell.cy, id);
+  playSound('online', 0.6, 1.4);
+  appendLog(state, `Robot #${id} whirrs to life.`);
   if (state.autoAssignEnabled) autoAssignAllIdle(state);
   return true;
 }
@@ -833,6 +869,8 @@ function assignMinotaurTargets(state: GameState): Map<number, number> {
   if (autos.length === 0) return result;
   const goblins: Goblin[] = [];
   for (const g of state.goblins.values()) {
+    // Robots can't die, so a minotaur hunting one would gore at it forever.
+    if (g.robot) continue;
     // Goblins inside building footprints (workers/maintainers, plus any idle
     // straggler on a footprint cell) are sheltered from minotaurs.
     if (buildingAtCell(state, g.cell.cx, g.cell.cy)) continue;
@@ -950,9 +988,11 @@ function updateDemon(state: GameState, d: Demon) {
     }
     return;
   }
-  // Slow vertical patrol, reversing at the band edges. The dev options can
-  // freeze the demon in place instead, with a chosen standing direction
-  // (a live parlay still turns it toward the speaker, handled above).
+  // Demons stand still by default now, each holding its own dev-tunable
+  // facing (R faces left, L faces right — the pair eye each other across the
+  // abyss; the friend faces down). The dev "walks" toggle resumes the old
+  // slow vertical patrol for all of them. A live parlay still turns the
+  // demon toward the speaker (handled above).
   const o = getOptions();
   if (o.demonWalks) {
     d.hy += d.dir * DEMON.speed * TICK_S;
@@ -960,14 +1000,18 @@ function updateDemon(state: GameState, d: Demon) {
     else if (d.hy <= d.y0) { d.hy = d.y0; d.dir = 1; }
     d.facing = d.dir > 0 ? Math.PI / 2 : -Math.PI / 2;
   } else {
-    d.facing = DEMON_FACING_ANGLE[o.demonFacing];
+    const variant = d.variant ?? 'pit';
+    const facing = variant === 'l' ? o.demonLFacing
+      : variant === 'friend' ? o.demonFriendFacing
+      : o.demonFacing;
+    d.facing = DEMON_FACING_ANGLE[facing];
   }
   // Steer any approaching soul and open a parlay once one is close enough.
   for (const g of state.ghosts) {
     if (g.parlayDemonId !== d.id) continue;
     if (g.hx === undefined || g.hy === undefined) continue;
     g.goal = { x: d.hx, y: d.hy };
-    if (Math.hypot(g.hx - d.hx, g.hy - d.hy) <= DEMON.parlayRadius) {
+    if (Math.hypot(g.hx - d.hx, g.hy - d.hy) <= DEMON.parlayRadius * demonScaleOf(d)) {
       d.busyWith = g.id;
       g.parlayDemonId = undefined;
       g.goal = undefined;
@@ -1167,6 +1211,7 @@ export function spawnDragon(state: GameState): boolean {
     facing: 1,
     state: { kind: 'swooping_in', goal },
     carrying: null,
+    carryingUnit: null,
     selected: false,
     spawnAt: state.now,
   };
@@ -1200,8 +1245,8 @@ function dragonFlyToward(d: Dragon, tx: number, ty: number, speed: number): bool
 // fall back to idle; the building is removed from the world and rides the
 // dragon up. From here the dragon climbs and the load enters space.
 function dragonLift(state: GameState, d: Dragon, b: Building) {
-  // A dragon already hauling a building can't pick up a second one.
-  if (d.carrying) return;
+  // A dragon already hauling a building (or a snatched unit) can't pick up more.
+  if (d.carrying || d.carryingUnit) return;
   // Hell Portals are rooted to the abyss — no dragon may haul one. Already
   // filtered out at command time in input.ts and skipped by the auto-seek
   // (income-based) picker, but kept here as defense in depth.
@@ -1225,6 +1270,66 @@ function dragonLift(state: GameState, d: Dragon, b: Building) {
   d.state = { kind: 'carrying' };
   appendLog(state, `Dragon #${d.id} hoists ${defOf(b).name} #${b.displayNum} skyward.`);
   playSound('online', 0.8, 0.45);
+}
+
+// Snatch a living unit off the ground onto a dragon. The unit is removed from
+// the world on the spot (its cell freed, building assignments scrubbed by
+// removeGoblin) and rides the dragon up as a CarriedUnit snapshot.
+function dragonSnatchUnit(state: GameState, d: Dragon, kind: 'goblin' | 'minotaur', id: number) {
+  if (d.carrying || d.carryingUnit) { d.state = { kind: 'seeking' }; return; }
+  if (kind === 'goblin') {
+    const g = state.goblins.get(id);
+    if (!g) { d.state = { kind: 'seeking' }; return; }
+    d.carryingUnit = { kind: 'goblin', robot: g.robot, gold: g.gold, bob: g.bob };
+    const label = g.robot ? 'Robot' : g.bob ? 'Bob' : g.gold ? 'Gold Goblin' : 'Goblin';
+    removeGoblin(state, id);
+    appendLog(state, `Dragon #${d.id} snatches ${label} #${id} skyward.`);
+  } else {
+    const m = state.minotaurs.get(id);
+    if (!m) { d.state = { kind: 'seeking' }; return; }
+    d.carryingUnit = { kind: 'minotaur', tiny: m.tiny };
+    state.minotaurs.delete(id);
+    appendLog(state, `Dragon #${d.id} snatches ${m.tiny ? 'Tinytaur' : 'Minotaur'} #${id} skyward.`);
+  }
+  d.state = { kind: 'carrying_unit' };
+  playSound('online', 0.8, 0.45);
+}
+
+// The snatched unit crosses into space: it's set adrift in the void (with a
+// vacuum timer unless it's a robot — robots survive up there, and are the
+// only hands that can assemble an Orbital Platform) and the dragon vanishes,
+// its one trip made, just like a building haul.
+function dragonReachSpaceWithUnit(state: GameState, d: Dragon) {
+  const u = d.carryingUnit;
+  if (u) {
+    const id = state.nextId++;
+    const ang = Math.random() * Math.PI * 2;
+    const su: SpaceUnit = {
+      id,
+      kind: u.kind,
+      robot: u.robot || undefined,
+      gold: u.gold || undefined,
+      bob: u.bob || undefined,
+      tiny: u.tiny || undefined,
+      pos: {
+        x: SPACE.width / 2 + (Math.random() - 0.5) * SPACE.width * 0.45,
+        y: SPACE.height / 2 + (Math.random() - 0.5) * SPACE.height * 0.45,
+      },
+      vel: { x: Math.cos(ang) * SPACE_UNIT.driftSpeed, y: Math.sin(ang) * SPACE_UNIT.driftSpeed },
+      facing: Math.PI / 2,
+      spin: Math.random() * Math.PI * 2,
+      spinRate: (Math.random() - 0.5) * 0.5,
+      diesAt: u.robot ? undefined : state.now + SPACE_UNIT.lifetime,
+      selected: false,
+    };
+    state.spaceUnits.set(id, su);
+    state.spaceUnlocked = true;
+    appendLog(state, u.robot
+      ? 'A robot drifts among the stars, entirely unbothered.'
+      : `A ${u.kind === 'minotaur' ? 'minotaur' : 'goblin'} tumbles into the void. It does not have long.`);
+    playSound('task_complete', 0.5);
+  }
+  removeDragon(state, d.id);
 }
 
 // The carried building crosses into space: it begins drifting in the void and
@@ -1324,7 +1429,7 @@ function dragonKill(state: GameState, d: Dragon, kind: 'goblin' | 'minotaur' | '
   }
   if (kind === 'goblin') {
     const g = state.goblins.get(id);
-    if (!g) return;
+    if (!g || g.robot) return; // robots are fireproof (and otherwise-proof)
     const tx = g.pos.x, ty = g.pos.y;
     const reward = goblinKillReward(state, g);
     const wasGold = !!g.gold;
@@ -1361,13 +1466,37 @@ function updateDragon(state: GameState, d: Dragon) {
   // responsive; the default auto-collecting path stays at the calmer speed.
   const k = d.state.kind;
   const isManualOrder = k === 'moving_to' || k === 'going_to_kill'
-    || k === 'going_to_building' || k === 'delivering';
+    || k === 'going_to_building' || k === 'delivering' || k === 'going_to_unit';
   const speed = isManualOrder ? DRAGON.manualSpeed : DRAGON.speed;
   switch (d.state.kind) {
     case 'carrying': {
       // Climb straight up; once high enough the load enters space.
       dragonFlyToward(d, d.pos.x, DRAGON.spaceY, speed);
       if (d.pos.y <= DRAGON.spaceY + 1) dragonReachSpace(state, d);
+      return;
+    }
+
+    case 'carrying_unit': {
+      // Same climb, but the claws hold a struggling unit instead of a building.
+      dragonFlyToward(d, d.pos.x, DRAGON.spaceY, speed);
+      if (d.pos.y <= DRAGON.spaceY + 1) dragonReachSpaceWithUnit(state, d);
+      return;
+    }
+
+    case 'going_to_unit': {
+      // Commanded onto a non-dragon unit: chase it down and snatch it skyward.
+      const s = d.state;
+      if (d.carrying || d.carryingUnit) { d.state = { kind: 'seeking' }; return; }
+      const target = s.targetKind === 'goblin'
+        ? state.goblins.get(s.targetId)
+        : state.minotaurs.get(s.targetId);
+      // Gone (killed, or another dragon got there first) — back to default.
+      if (!target) { d.state = { kind: 'seeking' }; return; }
+      const tx = target.pos.x, ty = target.pos.y;
+      const reached = dragonFlyToward(d, tx, ty, speed);
+      if (reached || Math.hypot(tx - d.pos.x, ty - d.pos.y) <= DRAGON.pickupDist) {
+        dragonSnatchUnit(state, d, s.targetKind, s.targetId);
+      }
       return;
     }
 
@@ -1399,7 +1528,7 @@ function updateDragon(state: GameState, d: Dragon) {
 
     case 'hovering_to_lift': {
       const b = state.buildings.get(d.state.buildingId);
-      if (!b || d.carrying) { d.state = { kind: 'seeking' }; return; }
+      if (!b || d.carrying || d.carryingUnit) { d.state = { kind: 'seeking' }; return; }
       // Park over the building while the lift timer runs down, then hoist.
       const c = buildingCenter(b);
       dragonFlyToward(d, c.x, c.y, speed);
@@ -1409,7 +1538,7 @@ function updateDragon(state: GameState, d: Dragon) {
 
     case 'going_to_building': {
       const b = state.buildings.get(d.state.buildingId);
-      if (!b || d.carrying) { d.state = { kind: 'seeking' }; return; }
+      if (!b || d.carrying || d.carryingUnit) { d.state = { kind: 'seeking' }; return; }
       const c = buildingCenter(b);
       const reached = dragonFlyToward(d, c.x, c.y, speed);
       if (reached || Math.hypot(c.x - d.pos.x, c.y - d.pos.y) <= DRAGON.pickupDist) {
@@ -1478,6 +1607,7 @@ function updateDragon(state: GameState, d: Dragon) {
       // player has a window to issue a manual command first.
       if (state.now < d.spawnAt + DRAGON.seekDelay) return;
       if (d.carrying) { d.state = { kind: 'carrying' }; return; }
+      if (d.carryingUnit) { d.state = { kind: 'carrying_unit' }; return; }
       const b = dragonTargetBuilding(state);
       if (!b) return; // nothing worth hauling — hover (renderer adds the bob)
       const c = buildingCenter(b);
@@ -1494,6 +1624,9 @@ function updateDragon(state: GameState, d: Dragon) {
 // margins so it never wanders out of view, with the occasional small course
 // nudge so the motion reads as organic rather than perfectly linear.
 function updateSpaceBuilding(sb: SpaceBuilding) {
+  // Orbital Platforms are anchored where they're deployed — no drift, no spin
+  // (they're platforms; a tumbling one would be a fairground ride).
+  if (sb.building.kind === 'orbital_platform') return;
   const def = BUILDING_DEFS[sb.building.kind];
   const halfPx = def.size / 2;
   sb.pos.x += sb.vel.x * TICK_S;
@@ -1511,6 +1644,107 @@ function updateSpaceBuilding(sb: SpaceBuilding) {
     const sp = Math.hypot(sb.vel.x, sb.vel.y) || 1;
     sb.vel.x = (sb.vel.x / sp) * SPACE.driftSpeed;
     sb.vel.y = (sb.vel.y / sp) * SPACE.driftSpeed;
+  }
+}
+
+// A unit adrift in space. Robots paddle toward the nearest Orbital Platform
+// still under construction and hold station at its rim (advanceOrbitalPlatforms
+// counts them as builders there); everything else — and robots with no work —
+// tumbles gently within the space bounds, mirroring the building drift. A
+// non-robot's vacuum timer pops it once SPACE_UNIT.lifetime is up.
+function updateSpaceUnit(state: GameState, su: SpaceUnit) {
+  if (su.diesAt !== undefined && state.now >= su.diesAt) {
+    spaceUnitPerish(state, su);
+    return;
+  }
+  if (su.robot) {
+    let target: SpaceBuilding | null = null;
+    let bestD = Infinity;
+    for (const sb of state.spaceBuildings.values()) {
+      if (sb.building.kind !== 'orbital_platform' || sb.building.state !== 'constructing') continue;
+      const dx = sb.pos.x - su.pos.x, dy = sb.pos.y - su.pos.y;
+      const d = dx * dx + dy * dy;
+      if (d < bestD) { bestD = d; target = sb; }
+    }
+    if (target) {
+      su.workingOn = target.id;
+      const def = BUILDING_DEFS.orbital_platform;
+      const dx = target.pos.x - su.pos.x;
+      const dy = target.pos.y - su.pos.y;
+      const dist = Math.hypot(dx, dy);
+      // Park just inside the build range so the robot reads as ON the site.
+      const hold = def.size / 2 + ROBOT.buildRange * 0.5;
+      if (dist > hold) {
+        const step = Math.min(getOptions().robotSpaceSpeed * TICK_S, dist - hold);
+        su.pos.x += (dx / dist) * step;
+        su.pos.y += (dy / dist) * step;
+        su.facing = Math.atan2(dy, dx);
+        su.spin = 0; // squared up for work, not tumbling
+      }
+      return;
+    }
+    su.workingOn = undefined;
+  }
+  // Gentle bounded tumble — same physics as the floating buildings.
+  su.pos.x += su.vel.x * TICK_S;
+  su.pos.y += su.vel.y * TICK_S;
+  su.spin += su.spinRate * TICK_S;
+  const m = SPACE_UNIT.margin;
+  if (su.pos.x < m) { su.pos.x = m; su.vel.x = Math.abs(su.vel.x); }
+  else if (su.pos.x > SPACE.width - m) { su.pos.x = SPACE.width - m; su.vel.x = -Math.abs(su.vel.x); }
+  if (su.pos.y < m) { su.pos.y = m; su.vel.y = Math.abs(su.vel.y); }
+  else if (su.pos.y > SPACE.height - m) { su.pos.y = SPACE.height - m; su.vel.y = -Math.abs(su.vel.y); }
+}
+
+// A non-robot unit's vacuum timer runs out. Pays the usual kill rewards (a
+// death is a death, however bleak) with space-flagged floaters; no ghost —
+// a soul lost to the void never reaches the underworld.
+function spaceUnitPerish(state: GameState, su: SpaceUnit) {
+  state.spaceUnits.delete(su.id);
+  const x = su.pos.x, y = su.pos.y;
+  if (su.kind === 'goblin') {
+    const reward = su.gold
+      ? { money: GOLD_KILL_REWARD.money * state.goldgoblinMultiplier, blood: GOLD_KILL_REWARD.blood }
+      : KILL_REWARD;
+    earnMoney(state, reward.money);
+    earnBlood(state, reward.blood);
+    state.bloodUnlocked = true;
+    pushFloater(state, x, y, `+Ƶ${reward.money.toLocaleString('en-US')}`, 0xffd96b, 1.6, undefined, true);
+    pushFloater(state, x, y - 14, `+${reward.blood} blood`, 0xff8a8a, 1.6, undefined, true);
+  } else {
+    earnBlood(state, MINOTAUR_KILL_REWARD.blood);
+    state.bloodUnlocked = true;
+    pushFloater(state, x, y - 14, `+${MINOTAUR_KILL_REWARD.blood} blood`, 0xff8a8a, 1.6, undefined, true);
+  }
+  const label = su.bob ? 'Bob'
+    : su.kind === 'minotaur' ? (su.tiny ? 'A tinytaur' : 'A minotaur')
+    : su.gold ? 'A gold goblin' : 'A goblin';
+  // No death cry — in space, no one can hear it scream.
+  appendLog(state, `${label} perishes silently in the vacuum.`);
+}
+
+// Robots holding station at an unfinished Orbital Platform advance its build.
+// buildersRequired is 1, so a single robot on site keeps the work moving;
+// extra robots don't speed it up (there's only one wrench).
+function advanceOrbitalPlatforms(state: GameState) {
+  const def = BUILDING_DEFS.orbital_platform;
+  for (const sb of state.spaceBuildings.values()) {
+    const b = sb.building;
+    if (b.kind !== 'orbital_platform' || b.state !== 'constructing') continue;
+    let workers = 0;
+    for (const su of state.spaceUnits.values()) {
+      if (!su.robot) continue;
+      if (Math.hypot(su.pos.x - sb.pos.x, su.pos.y - sb.pos.y) <= def.size / 2 + ROBOT.buildRange) workers++;
+    }
+    if (workers < def.buildersRequired) continue;
+    b.buildProgress += TICK_S / def.buildTime;
+    if (b.buildProgress >= 1) {
+      b.buildProgress = 1;
+      b.state = 'active';
+      b.activatedAt = state.now;
+      playSound('build_done');
+      appendLog(state, `${def.name} #${b.displayNum} assembled in the void. It does nothing. For now.`);
+    }
   }
 }
 
@@ -1906,7 +2140,8 @@ function updateGoblin(state: GameState, g: Goblin) {
 
     case 'going_to_kill': {
       const target = state.goblins.get(s.targetId);
-      if (!target || target.id === g.id) {
+      // No target, self-target, or a robot target (unkillable) — stand down.
+      if (!target || target.id === g.id || target.robot) {
         g.state = { kind: 'idle' };
         g.goal = null;
         g.path = [];

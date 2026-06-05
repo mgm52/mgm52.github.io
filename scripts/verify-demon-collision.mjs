@@ -179,11 +179,13 @@ async function runParlay() {
 }
 const first = await runParlay();
 console.log('  parlay #1 lines:', JSON.stringify(first));
-check('first parlay ends with "try another"', first[first.length - 1] === 'try another');
+// The pit demon bellows in ALL CAPS now — compare case-insensitively.
+const lower = (xs) => xs.map((l) => l.toLowerCase());
+check('first parlay ends with "try another"', lower(first)[first.length - 1] === 'try another');
 await sleep(1000);
 const second = await runParlay();
 console.log('  parlay #2 lines:', JSON.stringify(second));
-check('second parlay has no "try another"', second.length > 0 && !second.includes('try another'));
+check('second parlay has no "try another"', second.length > 0 && !lower(second).includes('try another'));
 
 await browser.close();
 console.log(failures === 0 ? 'ALL CHECKS PASSED' : `${failures} CHECK(S) FAILED`);

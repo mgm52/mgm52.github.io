@@ -16,6 +16,21 @@ import {
 type Speaker = 'demon' | 'goblin' | 'bob';
 type Seg = { t: string; em: boolean };
 
+// ─── Demon voices ───────────────────────────────────────────────────
+// Every demon line is authored in plain lowercase English and run through the
+// speaker's voice at say-time. The pit colossus (demon R) BELLOWS IN ALL
+// CAPS; demon L and her corner-dwelling friend speak each word backwards in
+// lowercase — "darling…" comes out as "gnilrad…". Punctuation, spacing, and
+// the *emphasis* markers stay where they are, so the ". . ." beats and the
+// <em> styling survive both voices.
+function backwardsSpeech(text: string): string {
+  return text.toLowerCase().replace(/[a-z0-9']+/g, (w) => [...w].reverse().join(''));
+}
+function demonVoice(demon: Demon, text: string): string {
+  const variant = demon.variant ?? 'pit';
+  return variant === 'pit' ? text.toUpperCase() : backwardsSpeech(text);
+}
+
 // Who is currently speaking in the live parlay, so the renderer can float the
 // speech bubble above their head. Holds the live demon/ghost object (its hell
 // coordinates are read each frame) or null when no line is on screen. The
@@ -42,7 +57,7 @@ export function demonRebuke(demon: Demon, text: string): void {
   if (rebukeTimer !== null) { clearTimeout(rebukeTimer); rebukeTimer = null; }
   parlaySpeaker = { kind: 'demon', demon };
   speech.className = 'demon';
-  lineEl.textContent = text;
+  lineEl.textContent = demonVoice(demon, text);
   speech.classList.add('done');               // no caret — it's an instant bark
   overlay.classList.add('visible', 'speaking', 'rebuke');
   rebukeTimer = window.setTimeout(() => {
@@ -202,6 +217,9 @@ type Els = {
   lineEl: HTMLElement;
   yesBtn: HTMLButtonElement;
   noBtn: HTMLButtonElement;
+  // Third answer button — hidden except while a three-way question (demon L's
+  // what-time-is-it quiz) is on screen.
+  opt3Btn: HTMLButtonElement;
   clickWall: HTMLElement;
 };
 
@@ -212,9 +230,10 @@ function getEls(): Els | null {
   const lineEl = document.getElementById('demon-line');
   const yesBtn = document.getElementById('demon-yes') as HTMLButtonElement | null;
   const noBtn = document.getElementById('demon-no') as HTMLButtonElement | null;
+  const opt3Btn = document.getElementById('demon-opt3') as HTMLButtonElement | null;
   const clickWall = document.getElementById('demon-clickwall');
-  if (!overlay || !speech || !speaker || !lineEl || !yesBtn || !noBtn || !clickWall) return null;
-  return { overlay, speech, speaker, lineEl, yesBtn, noBtn, clickWall };
+  if (!overlay || !speech || !speaker || !lineEl || !yesBtn || !noBtn || !opt3Btn || !clickWall) return null;
+  return { overlay, speech, speaker, lineEl, yesBtn, noBtn, opt3Btn, clickWall };
 }
 
 function waitForClick(target: HTMLElement): Promise<void> {
@@ -224,18 +243,45 @@ function waitForClick(target: HTMLElement): Promise<void> {
   });
 }
 
-// Resolves true for YES, false for NO.
-function waitForChoice(yesBtn: HTMLButtonElement, noBtn: HTMLButtonElement): Promise<boolean> {
+// Resolves with the index of whichever button gets clicked first.
+function waitForOption(buttons: HTMLButtonElement[]): Promise<number> {
   return new Promise((resolve) => {
-    const onYes = () => { cleanup(); resolve(true); };
-    const onNo = () => { cleanup(); resolve(false); };
+    const handlers: (() => void)[] = [];
     const cleanup = () => {
-      yesBtn.removeEventListener('click', onYes);
-      noBtn.removeEventListener('click', onNo);
+      buttons.forEach((b, i) => b.removeEventListener('click', handlers[i]));
     };
-    yesBtn.addEventListener('click', onYes);
-    noBtn.addEventListener('click', onNo);
+    buttons.forEach((b, i) => {
+      const fn = () => { cleanup(); resolve(i); };
+      handlers.push(fn);
+      b.addEventListener('click', fn);
+    });
   });
+}
+
+// Generate the answer set for demon L's clock quiz: the player's actual local
+// time plus two decoys, shuffled. Decoys are offset by anywhere from 7
+// minutes to ~10 hours so at least a glance at a clock is required.
+function clockString(d: Date): string {
+  let h = d.getHours() % 12;
+  if (h === 0) h = 12;
+  const m = d.getMinutes().toString().padStart(2, '0');
+  return `${h}:${m} ${d.getHours() < 12 ? 'am' : 'pm'}`;
+}
+function timeQuizOptions(): { labels: string[]; correct: number } {
+  const now = new Date();
+  const actual = clockString(now);
+  const fakes = new Set<string>();
+  while (fakes.size < 2) {
+    const offMin = (7 + Math.floor(Math.random() * 600)) * (Math.random() < 0.5 ? -1 : 1);
+    const fake = clockString(new Date(now.getTime() + offMin * 60_000));
+    if (fake !== actual) fakes.add(fake);
+  }
+  const labels = [actual, ...fakes];
+  for (let i = labels.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [labels[i], labels[j]] = [labels[j], labels[i]];
+  }
+  return { labels, correct: labels.indexOf(actual) };
 }
 
 // White hell flash where Bob stood + a thunderclap, then yank his ghost out of
@@ -253,11 +299,14 @@ function strikeGhostBack(state: GameState, ghost: Ghost): void {
 export async function runDemonDialogue(state: GameState, demon: Demon, ghost: Ghost): Promise<void> {
   const els = getEls();
   if (!els) return;
-  const { overlay, speech, lineEl, yesBtn, noBtn, clickWall } = els;
+  const { overlay, speech, lineEl, yesBtn, noBtn, opt3Btn, clickWall } = els;
 
   // autoMs: auto-advance after typing instead of waiting for a click.
   // hold: leave the line on screen (no click/auto, speech stays visible) — used
-  // for the question line so it remains readable while the YES/NO buttons show.
+  // for the question line so it remains readable while the answer buttons show.
+  // Demon lines are authored in plain lowercase and pass through the speaking
+  // demon's voice (ALL CAPS for the colossus, backwards words for L and her
+  // friend) on the way to the bubble.
   async function say(who: Speaker, text: string, opts: { autoMs?: number; hold?: boolean } = {}): Promise<void> {
     // Anchor the speech bubble over whoever's talking: the demon for its lines,
     // the approaching soul for goblin/bob lines.
@@ -265,7 +314,7 @@ export async function runDemonDialogue(state: GameState, demon: Demon, ghost: Gh
     speech.className = who;            // colour by speaker (also clears prior state)
     lineEl.innerHTML = '';
     overlay.classList.add('speaking');
-    await typeLineText(lineEl, speech, text);
+    await typeLineText(lineEl, speech, who === 'demon' ? demonVoice(demon, text) : text);
     if (opts.hold) return;            // keep the line up; caller drives what's next
     if (opts.autoMs !== undefined) {
       await sleep(opts.autoMs);
@@ -278,15 +327,23 @@ export async function runDemonDialogue(state: GameState, demon: Demon, ghost: Gh
     overlay.classList.remove('speaking');
   }
 
-  async function ask(): Promise<boolean> {
-    yesBtn.querySelector('.build-name')!.textContent = 'YES';
-    noBtn.querySelector('.build-name')!.textContent = 'NO';
+  // Present 2–3 answer buttons and resolve with the picked index. The third
+  // button only appears for three-way questions (demon L's clock quiz).
+  async function choose(labels: string[]): Promise<number> {
+    const buttons = [yesBtn, noBtn, opt3Btn].slice(0, labels.length);
+    buttons.forEach((b, i) => { b.querySelector('.build-name')!.textContent = labels[i]; });
+    opt3Btn.style.display = labels.length >= 3 ? '' : 'none';
     overlay.classList.add('show-buttons');
-    const yes = await waitForChoice(yesBtn, noBtn);
+    const idx = await waitForOption(buttons);
     playSound('click', 0.8, 1);
     overlay.classList.remove('show-buttons');
+    opt3Btn.style.display = 'none';
     await sleep(200);
-    return yes;
+    return idx;
+  }
+
+  async function ask(): Promise<boolean> {
+    return (await choose(['YES', 'NO'])) === 0;
   }
 
   // The demon trailing off in thought: spaced-out dots that linger, then a
@@ -313,55 +370,132 @@ export async function runDemonDialogue(state: GameState, demon: Demon, ghost: Gh
   overlay.classList.add('visible');
   await sleep(60);
 
-  // The greeting only ever plays the first time a soul approaches this demon.
+  // The "speak to me" greeting only ever plays the first time a soul
+  // approaches the colossus. Demon L and her friend instead open EVERY
+  // conversation with their backwards "darling. . ." ("gnilrad. . .").
   const greet = !demon.greeted;
   demon.greeted = true;
+  const variant = demon.variant ?? 'pit';
 
-  try {
-    if (greet) await say('demon', 'speak to me, damned soul');
-
+  // The soul's own opener: Bob can actually speak; a dragon's soul can only
+  // roar; everything else babbles a random word (minotaur souls slurring it
+  // with every letter doubled — a lumbering "ggrroohh").
+  async function soulOpener(): Promise<void> {
     if (ghost.bob) {
       // Bob has actually parlayed — clears the "talking goblins" nudge.
       state.bobParlayed = true;
       await say('bob', 'hello mate');
-      await say('demon', 'a clumsy wield of language');
-      await say('demon', 'have you *collected a dragon bone*?', { hold: true });
-      const yes = await ask();
-      if (!yes) {
-        await say('demon', 'begone and be useful');
-      } else if (state.dragonBone >= 1) {
-        await ellipsisBeat();
-        playSound('ritual', 0.85, 0.55);
-        await say('demon', 'mmm');
-        await say('demon', 'delicious. thank you my child');
-        await say('demon', 'be witness to my gift');
-        state.blood += 9999;
-        appendLog(state, 'The demon grants Bob 9,999 blood.');
-      } else {
-        await ellipsisBeat();
-        await say('demon', 'untruth');
-        strikeGhostBack(state, ghost);
-        resurrectBob(state);
-      }
-    } else if (ghost.kind === 'dragon') {
-      // A dragon's soul can only roar at the demon.
+      return;
+    }
+    if (ghost.kind === 'dragon') {
       await say('goblin', `hhhhffffffffffffffffffff${gibberishSuffix()}`);
-      await say('demon', '. . .');
-      await say('demon', demonNoLanguageLine());
-      await tryAnotherOnce();
+      return;
+    }
+    const gib = GIBBERISH[Math.floor(Math.random() * GIBBERISH.length)];
+    const word = ghost.kind === 'minotaur' ? doubleLetters(gib) : gib;
+    await say('goblin', word + gibberishSuffix());
+  }
+
+  // The brush-off for a soul that can't speak the tongue — shared by all
+  // three demons (each in its own voice), with the once-ever "try another"
+  // nudge after this demon's first failed parlay.
+  async function noLanguage(): Promise<void> {
+    await say('demon', '. . .');
+    await say('demon', demonNoLanguageLine());
+    await tryAnotherOnce();
+  }
+
+  try {
+    if (variant === 'friend') {
+      // Demon L's friend — identical to her sister, but stationed alone in
+      // the corner of the abyss. Any soul that comes to visit counts as
+      // "speaking to the friend" (this demon's `greeted` flag is the truth
+      // demon L's friend-question is judged against).
+      await say('demon', 'darling. . .');
+      await soulOpener();
+      if (ghost.bob) {
+        await say('demon', 'it is so quiet in this corner');
+        await say('demon', 'thank you for coming to see me');
+        await say('demon', 'tell my sister i said hello');
+      } else {
+        await say('demon', '. . .');
+        await say('demon', 'i do not know your words. but thank you for coming');
+      }
+    } else if (variant === 'l') {
+      // Demon L — the half-size demon across the abyss. Quizzes a talking
+      // soul on the overworld's clock (the player's real one); a correct
+      // answer earns the friend question, where a lie is punished exactly
+      // like lying to the colossus and the truth pays out.
+      await say('demon', 'darling. . .');
+      await soulOpener();
+      if (!ghost.bob) {
+        await noLanguage();
+      } else {
+        await say('demon', 'tell me. what *time* is it, up there?', { hold: true });
+        const quiz = timeQuizOptions();
+        const pick = await choose(quiz.labels);
+        if (pick !== quiz.correct) {
+          await ellipsisBeat();
+          await say('demon', 'wrong');
+          await say('demon', 'the clocks up there have abandoned you. begone');
+        } else {
+          await ellipsisBeat();
+          await say('demon', 'correct');
+          await say('demon', 'and have you *spoken with my friend*?', { hold: true });
+          const yes = await ask();
+          const friend = [...state.demons.values()].find((x) => (x.variant ?? 'pit') === 'friend');
+          if (!yes) {
+            // Honest, at least. She points the way to the corner.
+            await say('demon', 'she waits in the corner of this place');
+            await say('demon', 'go to her');
+          } else if (friend?.greeted) {
+            await ellipsisBeat();
+            playSound('ritual', 0.85, 0.7);
+            await say('demon', 'mmm');
+            await say('demon', 'she gets so lonely. thank you my child');
+            await say('demon', 'be witness to my gift');
+            state.blood += 4999;
+            appendLog(state, 'The backwards demon grants Bob 4,999 blood.');
+          } else {
+            await ellipsisBeat();
+            await say('demon', 'untruth');
+            strikeGhostBack(state, ghost);
+            resurrectBob(state);
+          }
+        }
+      }
     } else {
-      // Goblins babble a random word; a minotaur (or tinytaur) soul mangles the
-      // same word with every letter doubled — a lumbering "ggrroohh".
-      const gib = GIBBERISH[Math.floor(Math.random() * GIBBERISH.length)];
-      const word = ghost.kind === 'minotaur' ? doubleLetters(gib) : gib;
-      await say('goblin', word + gibberishSuffix());
-      await say('demon', '. . .');
-      await say('demon', demonNoLanguageLine());
-      await tryAnotherOnce();
+      // The pit colossus — demon R, who bellows in ALL CAPS.
+      if (greet) await say('demon', 'speak to me, damned soul');
+      await soulOpener();
+      if (ghost.bob) {
+        await say('demon', 'a clumsy wield of language');
+        await say('demon', 'have you *collected a dragon bone*?', { hold: true });
+        const yes = await ask();
+        if (!yes) {
+          await say('demon', 'begone and be useful');
+        } else if (state.dragonBone >= 1) {
+          await ellipsisBeat();
+          playSound('ritual', 0.85, 0.55);
+          await say('demon', 'mmm');
+          await say('demon', 'delicious. thank you my child');
+          await say('demon', 'be witness to my gift');
+          state.blood += 9999;
+          appendLog(state, 'The demon grants Bob 9,999 blood.');
+        } else {
+          await ellipsisBeat();
+          await say('demon', 'untruth');
+          strikeGhostBack(state, ghost);
+          resurrectBob(state);
+        }
+      } else {
+        await noLanguage();
+      }
     }
   } finally {
     parlaySpeaker = null;
     overlay.classList.remove('visible', 'speaking', 'click-armed', 'show-buttons');
+    opt3Btn.style.display = 'none';
     speech.className = '';
     lineEl.innerHTML = '';
   }
