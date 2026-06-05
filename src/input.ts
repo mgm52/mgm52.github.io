@@ -267,6 +267,13 @@ export function setupInput(
         const hp = e.getLocalPosition(ctx.hellLayer);
         ctx.candleCursor = { x: hp.x, y: hp.y };
       }
+      // Orbital Platform placement preview: track the cursor in space coords
+      // so the renderer can draw the platform ghost under it (mirroring the
+      // ground-building placement ghost).
+      if (state.view === 'space' && state.pendingOrbital) {
+        const sp = e.getLocalPosition(ctx.spaceLayer);
+        ctx.orbitalCursor = { x: sp.x, y: sp.y };
+      }
       // Dragging far enough to start a selection box cancels the pending hell
       // command long-press (it's a drag, not a press-and-hold).
       if (input.longPressPointerId === e.pointerId && tracked) {
@@ -1154,6 +1161,7 @@ function handleRightClick(state: GameState, x: number, y: number) {
       assigned++;
     }
     if (assigned > 0) {
+      targetWater.commandFlashAt = state.now;
       appendLog(state, `${assigned} goblin(s) on water duty.`);
       return;
     }
@@ -1164,7 +1172,19 @@ function handleRightClick(state: GameState, x: number, y: number) {
 
   // Minotaur commands.
   if (selectedMinotaurs.length > 0) {
-    if (targetMinotaur) {
+    if (targetGoblin && !targetGoblin.robot) {
+      // Manual kill order — flagged `manual` so the auto-targeter doesn't
+      // immediately re-assign each minotaur to its own nearest prey. The
+      // target's ring flashes like every other command target. (Robots can't
+      // die, so a click on one falls through to a plain move below.)
+      targetGoblin.commandFlashAt = state.now;
+      for (const m of selectedMinotaurs) {
+        m.target = null;
+        m.state = { kind: 'going_to_kill', targetId: targetGoblin.id, manual: true };
+        resetMinotaurStuck(m, state.now);
+      }
+      appendLog(state, `${selectedMinotaurs.length} minotaur(s) ordered to kill goblin #${targetGoblin.id}.`);
+    } else if (targetMinotaur) {
       // Minotaur-on-minotaur — the target itself is excluded.
       const attackers = selectedMinotaurs.filter(m => m.id !== targetMinotaur.id);
       for (const m of attackers) {
@@ -1446,7 +1466,7 @@ function maybeTriggerBobCutscene(state: GameState, b: Building, kindName: string
   });
 }
 
-// Bob's running commentary: while he's alive in the overworld, every 5th
+// Bob's running commentary: while he's alive in the overworld, every other
 // building placed (lifetime total, walls included) earns a quick typed bark
 // above his head admiring the building that tipped the count over.
 function maybeBobBuildingRemark(state: GameState, b: Building) {
@@ -1457,7 +1477,7 @@ function maybeBobBuildingRemark(state: GameState, b: Building) {
   if (!bob) return;
   let total = 0;
   for (const k in state.buildingCounts) total += state.buildingCounts[k as BuildingKind];
-  if (total % 5 !== 0) return;
+  if (total % 2 !== 0) return;
   const def = BUILDING_DEFS[b.kind];
   void bobOverworldBark(state, bob, `oh my, your ${ordinalNumber(b.displayNum)} ${def.name}! nice!`);
 }

@@ -98,18 +98,23 @@ export const TINYTAUR = {
 };
 
 // Robot — a late-game summon unlocked alongside the Hypercentre era. Costs
-// money (not blood) and demands a serious industrial base (5 Hypercentres)
-// before the button even arms. On the ground a robot is just a small grey
-// goblin — same jobs, same pathfinding — except it cannot die: lightning,
-// minotaurs, kill orders and dragon fire all pass over it. Its real purpose
-// is orbit: a robot snatched to space by a dragon survives the vacuum and is
-// the only unit able to assemble an Orbital Platform.
+// money (not blood) and demands a serious industrial base (4 Hypercentres)
+// before the button even arms. On the ground a robot is just a small white
+// goblin — same jobs, same pathfinding, faster servos — except it cannot die:
+// lightning, minotaurs, kill orders and dragon fire all pass over it. Its
+// real purpose is orbit: a robot snatched to space by a dragon survives the
+// vacuum and is the only unit able to assemble an Orbital Platform.
 // Look + orbital speed live in options (robotScale / robotTint /
 // robotGreyscale / robotSpaceSpeed) so they're tunable from the dev menu.
 export const ROBOT = {
   moneyCost: 250_000,
-  hypercentresRequired: 5,
+  hypercentresRequired: 4,
+  speed: 150,         // px/sec on the ground — quicker than GOBLIN.speed (110)
   buildRange: 30,     // px past a platform's edge that counts as "on site"
+  // Robots assemble on a timed queue like the other summons (one at a time,
+  // mirroring the Minotaur's single-slot ritual track).
+  spawnTime: 2,
+  spawnCapacity: 1,
 };
 
 // Units hauled to space by a dragon. Anything that isn't a robot suffocates
@@ -231,14 +236,16 @@ export const HELL = {
 };
 
 // Demons — uncommandable denizens of hell. Three of them now: the original
-// colossus (demon "R", right of the landing zone, bellowing in ALL CAPS), his
-// half-size counterpart across the abyss (demon "L", who speaks every word
-// backwards), and L's identical friend tucked away in a corner of the map.
+// colossus (demon "R", the Third Prince of Dark Enjoyment, right of the
+// landing zone, bellowing in ALL CAPS), his half-size counterpart across the
+// abyss (demon "L", Lilly, who speaks every word backwards), and Lilly's
+// smaller friend Lolly tucked away in a corner of the map.
 // They all stand still by default — R facing left, L facing right, so the
-// pair eye each other across the landing zone. The player can't order one
-// around; a goblin ghost can only be walked up to one to "parlay" (see
-// demon-dialogue.ts). All radii below are for the full-size colossus and are
-// scaled down by each demon's `scale` (see Demon.scale in state.ts).
+// pair eye each other across the landing zone; Lolly faces into her corner.
+// The player can't order one around; a goblin ghost can only be walked up to
+// one to "parlay" (see demon-dialogue.ts). All radii below are for the
+// full-size colossus and are scaled down by each demon's `scale` (see
+// Demon.scale in state.ts).
 export const DEMON = {
   speed: 16,          // hell-px/sec — a slow, ponderous patrol (dev toggle only)
   displayPx: 900,     // colossal, ~9x a summoned Minotaur
@@ -253,12 +260,16 @@ export const DEMON = {
   // it on the other side. Nudged out so they stand clear of the soul sigil
   // at the centre of the abyss.
   spawnOffsetX: 620,
-  // Demon L (and her friend) render at this fraction of the colossus. This is
-  // the seed stamped onto the Demon record; the LIVE size is the demonLScale
+  // Demon L (Lilly) renders at this fraction of the colossus. This is the
+  // seed stamped onto the Demon record; the LIVE size is the demonLScale
   // dev option (same default) — see demonScaleOf in state.ts.
   smallScale: 0.5,
-  // Where L's friend stands — the top-left corner of the abyss.
-  friendCorner: { x: 320, y: 460 },
+  // Lolly (L's friend) is smaller still — live size is the demonFriendScale
+  // dev option (same default).
+  friendScale: 0.35,
+  // Where Lolly stands — the top-left corner of the abyss, nudged a bit
+  // higher up so she reads as truly tucked into the corner.
+  friendCorner: { x: 320, y: 380 },
 };
 
 // The soul sigil — up to five candles placed by the player on the outer ring
@@ -276,7 +287,7 @@ export const SOUL_SIGIL = {
   arriveRadius: 40,     // a commanded soul seats once this close to its chair
   candleBloodCost: 9,   // blood per candle placed
   placeBand: 70,        // hell-px either side of ringRadius where a tap counts as "on the ring"
-  candleMinGap: 64,     // hell-px a new candle must keep from its ring-mates
+  candleMinGap: 256,    // hell-px a new candle must keep from its ring-mates
   soulMultiplier: 87,   // each seated soul multiplies its portal's power output by this
 };
 
@@ -346,7 +357,7 @@ export const GOBLIN_HOLE_CAPACITY_PER_BUILDING = 5;
 // powers a temporary surge that decays linearly to zero.
 export const LIGHTNING = {
   cellsWide: 8,                    // blast diameter, in cells
-  bloodCost: 256,                  // blood spent per strike
+  bloodCost: 32,                   // blood spent per strike
   powerBoostWatts: 1_000_000_000,  // 1 GW peak surge
   powerBoostSeconds: 5,            // surge decays to 0 over this many seconds
 };

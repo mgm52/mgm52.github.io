@@ -411,25 +411,33 @@ export async function runBobCutscene(ordinal: string, kindName: string, onHold?:
   overlay.classList.remove('show-buttons');
   yesBtn.hidden = true;
   noBtn.hidden = true;
-  await sleep(200);
 
-  // Walk off the same way the original intro does. Pivot East, swap .up → .exit
-  // to play the slide-right animation, then drop .visible.
-  await faceRow(goblinEl, EXIT_FACING_ROW);
-  overlay.classList.remove('up');
-  overlay.classList.add('exit');
-  await sleep(SLIDE_OUT_MS + 100);
-  overlay.classList.remove('visible');
-  await sleep(700);
-  overlay.classList.remove('exit', 'faced');
-  // Restore the YES/NO labels so the original intro DOM is left exactly as
-  // we found it. Belt-and-braces: the new-game intro never runs after Bob
-  // since it's once-only, but a dev reload + Bob cutscene loop shouldn't
-  // leave OKAY/NO sticking to the buttons.
-  yesBtn.querySelector('.build-name')!.textContent = 'YES';
-  noBtn.querySelector('.build-name')!.textContent = 'NO';
-
+  // Resolve the moment the choice lands: the hold lifts and (on "okay") the
+  // hole picker starts right away, while the goblin's walk-off plays out in
+  // the background. The click wall goes transparent again first so the
+  // departing goblin can't absorb the player's hole-pick clicks.
   document.body.classList.remove('bob-cutscene-hold');
+  clickWall.style.pointerEvents = 'none';
+  const exitAnim = async () => {
+    await sleep(200);
+    // Walk off the same way the original intro does. Pivot East, swap
+    // .up → .exit to play the slide-right animation, then drop .visible.
+    await faceRow(goblinEl, EXIT_FACING_ROW);
+    overlay.classList.remove('up');
+    overlay.classList.add('exit');
+    await sleep(SLIDE_OUT_MS + 100);
+    overlay.classList.remove('visible');
+    await sleep(700);
+    overlay.classList.remove('exit', 'faced');
+    // Restore the YES/NO labels so the original intro DOM is left exactly as
+    // we found it. Belt-and-braces: the new-game intro never runs after Bob
+    // since it's once-only, but a dev reload + Bob cutscene loop shouldn't
+    // leave OKAY/NO sticking to the buttons.
+    yesBtn.querySelector('.build-name')!.textContent = 'YES';
+    noBtn.querySelector('.build-name')!.textContent = 'NO';
+    clickWall.style.pointerEvents = '';
+  };
+  void exitAnim();
   return picked === 0 ? 'yes' : 'no';
 }
 

@@ -105,6 +105,21 @@ export function tick(state: GameState) {
     }
   }
 
+  // ── 1d. Robot assembly queue ─────────────────────────────────────
+  // Mirrors the Minotaur track: money was charged at queue time; if every
+  // hole exit is blocked when assembly completes, retry shortly rather than
+  // burning the slot.
+  for (let i = state.robotSpawnQueue.length - 1; i >= 0; i--) {
+    state.robotSpawnQueue[i].remaining -= TICK_S;
+    if (state.robotSpawnQueue[i].remaining <= 0) {
+      if (spawnRobot(state)) {
+        state.robotSpawnQueue.splice(i, 1);
+      } else {
+        state.robotSpawnQueue[i].remaining = 0.5;
+      }
+    }
+  }
+
   // ── 2. Goblin updates ─────────────────────────────────────────────
   for (const g of state.goblins.values()) updateGoblin(state, g);
 
@@ -389,9 +404,11 @@ function seatSoulInChair(state: GameState, chair: SoulChair) {
   appendLog(state, `A soul takes its chair (${filled}/${SOUL_SIGIL.count}) — the mirror surges to ${formatPower(out)}.`);
   // The hell-scene twin of a building coming online: an "x87" multiplier
   // flash over the mirror, whose live wattage label ticks up underneath it.
+  // Rendered much bigger than a regular floater (sizeMult) so the surge
+  // reads even at hell's zoomed-out scale.
   if (portal) {
     const c = hellMirrorCenter(portal);
-    pushFloater(state, c.x, c.y - SOUL_SIGIL.chairRadius * 1.5, `x${SOUL_SIGIL.soulMultiplier}`, 0x8acfff, 1.6, undefined, false, true);
+    pushFloater(state, c.x, c.y - SOUL_SIGIL.chairRadius * 1.5, `x${SOUL_SIGIL.soulMultiplier}`, 0x8acfff, 1.6, undefined, false, true, 4);
   }
   if (filled === SOUL_SIGIL.count && !state.soulSigilCompletedAt.has(chair.portalId)) {
     state.soulSigilCompletedAt.set(chair.portalId, state.now);
@@ -515,7 +532,10 @@ export function lightningStrike(state: GameState, x: number, y: number): boolean
       LIGHTNING.powerBoostWatts,
     );
   }
-  playSound('destroy', 0.7, 0.4);
+  // The thunderclap has its own dedicated pool ('lightning' — same sample,
+  // pitched down): sharing the busy 'destroy' pool let other destroy plays
+  // steal the element mid-rumble, which cut the thunder off or silenced it.
+  playSound('lightning', 0.7, 0.4);
   if (killed > 0) playDecayingGoblinDeath(0.6);
   appendLog(state, `Lightning strike! ${killed} unit${killed === 1 ? '' : 's'} vaporised.`);
   // 2-second cooldown to stop the player from carpet-bombing through every
@@ -609,16 +629,12 @@ export function spawnBob(state: GameState, holeCell: Cell): boolean {
 
 // Assemble a robot at the main hole — the late-game money summon. Uses the
 // same emergence-cell flood as a hatching goblin so it can't land on top of
-// anyone; instant (no spawn queue — robots are manufactured, not incubated).
-// Returns false (with an error beep) when every hole exit is blocked.
+// anyone. Returns false silently when every hole exit is blocked — the
+// assembly queue in tick() retries shortly after.
 export function spawnRobot(state: GameState): boolean {
   const h = state.hole.cell;
   const cell = findHoleEmergenceCell(state, h.cx, h.cy);
-  if (!cell) {
-    playSound('error');
-    appendLog(state, 'No room for the robot to deploy — clear the hole.');
-    return false;
-  }
+  if (!cell) return false;
   const id = state.nextId++;
   const g: Goblin = {
     id, pos: cellCenter(cell), cell, target: null, goal: null,
@@ -858,13 +874,14 @@ function minotaurWanderStep(state: GameState, t: Minotaur): Cell | null {
 // left, and so on. So when several minotaurs would otherwise pile onto the same
 // goblin, only the nearest keeps it and the rest peel off to other prey (or
 // wander if none remain). Player-issued orders (moving_to / going_to_destroy /
-// going_to_kill_minotaur) are excluded — explicit commands are never overridden,
-// so the player can still deliberately gang several minotaurs onto one target.
+// going_to_kill_minotaur / a manual going_to_kill) are excluded — explicit
+// commands are never overridden, so the player can still deliberately gang
+// several minotaurs onto one target.
 function assignMinotaurTargets(state: GameState): Map<number, number> {
   const result = new Map<number, number>();
   const autos: Minotaur[] = [];
   for (const m of state.minotaurs.values()) {
-    if (m.state.kind === 'wander' || m.state.kind === 'going_to_kill') autos.push(m);
+    if (m.state.kind === 'wander' || (m.state.kind === 'going_to_kill' && !m.state.manual)) autos.push(m);
   }
   if (autos.length === 0) return result;
   const goblins: Goblin[] = [];
@@ -990,9 +1007,10 @@ function updateDemon(state: GameState, d: Demon) {
   }
   // Demons stand still by default now, each holding its own dev-tunable
   // facing (R faces left, L faces right — the pair eye each other across the
-  // abyss; the friend faces down). The dev "walks" toggle resumes the old
-  // slow vertical patrol for all of them. A live parlay still turns the
-  // demon toward the speaker (handled above).
+  // abyss; Lolly faces up-left into her corner) and its own dev-tunable
+  // standing hell-y. The dev "walks" toggle resumes the old slow vertical
+  // patrol for all of them. A live parlay still turns the demon toward the
+  // speaker (handled above).
   const o = getOptions();
   if (o.demonWalks) {
     d.hy += d.dir * DEMON.speed * TICK_S;
@@ -1005,6 +1023,9 @@ function updateDemon(state: GameState, d: Demon) {
       : variant === 'friend' ? o.demonFriendFacing
       : o.demonFacing;
     d.facing = DEMON_FACING_ANGLE[facing];
+    d.hy = variant === 'l' ? o.demonLY
+      : variant === 'friend' ? o.demonFriendY
+      : o.demonRY;
   }
   // Steer any approaching soul and open a parlay once one is close enough.
   for (const g of state.ghosts) {
@@ -1140,8 +1161,15 @@ function updateMinotaur(state: GameState, t: Minotaur, autoTargets: Map<number, 
     return;
   }
 
-  const assignedId = autoTargets.get(t.id);
-  const target = assignedId !== undefined ? (state.goblins.get(assignedId) ?? null) : null;
+  // A player-commanded kill (manual) keeps its prey; otherwise take whatever
+  // goblin the auto-targeter matched this minotaur with.
+  let target: Goblin | null = null;
+  if (t.state.kind === 'going_to_kill' && t.state.manual) {
+    target = state.goblins.get(t.state.targetId) ?? null;
+  } else {
+    const assignedId = autoTargets.get(t.id);
+    target = assignedId !== undefined ? (state.goblins.get(assignedId) ?? null) : null;
+  }
   if (target) {
     if (t.state.kind !== 'going_to_kill' || t.state.targetId !== target.id) {
       t.state = { kind: 'going_to_kill', targetId: target.id };
@@ -1866,13 +1894,14 @@ function updateGoblin(state: GameState, g: Goblin) {
     g.idleSince = null;
   }
 
-  // Continue interpolating toward target cell if mid-step
+  // Continue interpolating toward target cell if mid-step. Robots run on
+  // quicker servos than the flesh-and-blood goblins.
   if (g.target) {
     const tc = cellCenter(g.target);
     const dx = tc.x - g.pos.x;
     const dy = tc.y - g.pos.y;
     const d = Math.hypot(dx, dy);
-    const step = GOBLIN.speed * TICK_S;
+    const step = (g.robot ? ROBOT.speed : GOBLIN.speed) * TICK_S;
     if (d <= step + GOBLIN.arriveDist) {
       releaseCell(state, g.cell.cx, g.cell.cy, g.id);
       g.cell = g.target;

@@ -71,7 +71,9 @@ export type Goblin = {
 export type MinotaurState =
   | { kind: 'wander' }
   | { kind: 'moving_to'; goal: Cell }
-  | { kind: 'going_to_kill'; targetId: number; attackAt?: number }
+  // `manual` marks a player-issued kill order (right-click on a goblin) —
+  // the auto-targeter leaves those alone instead of re-assigning the prey.
+  | { kind: 'going_to_kill'; targetId: number; attackAt?: number; manual?: boolean }
   | { kind: 'going_to_kill_minotaur'; targetId: number; attackAt?: number }
   | { kind: 'going_to_destroy'; buildingId: number; attackAt?: number };
 
@@ -83,6 +85,9 @@ export type WaterSource = {
   x0: number; y0: number;
   x1: number; y1: number;   // exclusive upper bounds
   selected: boolean;
+  // state.now when goblins were last commanded onto this source — flashes its
+  // ring once, like every other command target.
+  commandFlashAt?: number;
 };
 
 export function isCellInWaterSource(w: WaterSource, c: Cell): boolean {
@@ -316,6 +321,9 @@ export type Floater = {
   // Floaters in the hell scene (the soul-chair power surge) carry hell
   // coordinates and ride the hell transform rather than the ground layer.
   hell?: boolean;
+  // Multiplier on the floater's base font size — the "x87" soul-surge text
+  // renders much bigger than a kill reward. 1 when absent.
+  sizeMult?: number;
 };
 
 // One-shot blood-explosion GIF effect played at a world position. The Lightning
@@ -566,6 +574,9 @@ export type GameState = {
   spawnQueue: { remaining: number; slot: number }[];
   minotaurSpawnQueue: { remaining: number }[];
   dragonSpawnQueue: { remaining: number }[];
+  // Robots assemble on the same kind of timed track (money charged at queue
+  // time; capacity ROBOT.spawnCapacity).
+  robotSpawnQueue: { remaining: number }[];
   pendingBuild: PendingBuild;
   // True while the player is placing hell candles (the Candle option in the
   // hell-view Build panel; each tap on a mirror's outer ring places one for
@@ -637,6 +648,10 @@ export type GameState = {
   // Which scene the player is currently looking at. Ephemeral — always reset to
   // 'ground' on load; scene transitions live entirely in the renderer.
   view: 'ground' | 'space' | 'hell';
+  // True while a ground↔space / ground↔hell travel animation is running.
+  // Ephemeral (reset on load). The sidebar uses it to hold back the
+  // destination view's buttons (Candle / Orbital Platform) until arrival.
+  viewTransitioning?: boolean;
   // Persisted UI unlock progress (the sticky sets that live in ui.ts). Saved so
   // tutorial unlocks, the dig gate, and "outgrown" hides survive a reload even
   // after the buildings that triggered them are gone. ui.ts hydrates its module
@@ -1018,6 +1033,7 @@ export function createInitialState(): GameState {
     spawnQueue: [],
     minotaurSpawnQueue: [],
     dragonSpawnQueue: [],
+    robotSpawnQueue: [],
     pendingBuild: null,
     pendingCandle: false,
     buildingCounts: emptyBuildingCounts(),
@@ -1081,17 +1097,22 @@ export function appendLog(state: GameState, msg: string) {
   if (state.log.length > 60) state.log.shift();
 }
 
-// Per-demon size multiplier — the colossus is 1; demon L and her friend use
-// the live demonLScale dev option (default DEMON.smallScale). Every radius in
-// DEMON (hit, body, parlay) scales by this, as does the render scale.
+// Per-demon size multiplier — the colossus is 1; demon L (Lilly) uses the
+// live demonLScale dev option (default DEMON.smallScale) and her smaller
+// friend Lolly the demonFriendScale option (default DEMON.friendScale).
+// Every radius in DEMON (hit, body, parlay) scales by this, as does the
+// render scale.
 export function demonScaleOf(d: Demon): number {
-  return (d.variant ?? 'pit') === 'pit' ? 1 : getOptions().demonLScale;
+  const variant = d.variant ?? 'pit';
+  if (variant === 'pit') return 1;
+  return variant === 'friend' ? getOptions().demonFriendScale : getOptions().demonLScale;
 }
 
 // Seed the hell denizens: the colossus (demon R) to the right of the landing
-// zone facing left, his half-size counterpart (demon L) mirrored on the other
-// side facing right — the pair eye each other across the abyss — and L's
-// identical friend standing alone in the corner of the map.
+// zone facing left, his half-size counterpart (demon L, Lilly) mirrored on
+// the other side facing right — the pair eye each other across the abyss —
+// and Lilly's smaller friend Lolly standing alone in the top-left corner of
+// the map, facing into her corner.
 export function createDemons(state: GameState): Map<number, Demon> {
   const demons = new Map<number, Demon>();
   const cy = HELL.height / 2;
@@ -1107,7 +1128,7 @@ export function createDemons(state: GameState): Map<number, Demon> {
   };
   make('pit', HELL.width / 2 + DEMON.spawnOffsetX, cy, 1, Math.PI);
   make('l', HELL.width / 2 - DEMON.spawnOffsetX, cy, DEMON.smallScale, 0);
-  make('friend', DEMON.friendCorner.x, DEMON.friendCorner.y, DEMON.smallScale, Math.PI / 2);
+  make('friend', DEMON.friendCorner.x, DEMON.friendCorner.y, DEMON.friendScale, -(3 * Math.PI) / 4);
   return demons;
 }
 
@@ -1118,8 +1139,8 @@ export function createDemons(state: GameState): Map<number, Demon> {
 export function ensureDemonRoster(state: GameState): void {
   for (const d of state.demons.values()) {
     d.variant ??= 'pit';
-    d.scale ??= d.variant === 'pit' ? 1 : DEMON.smallScale;
-    d.homeFacing ??= d.variant === 'l' ? 0 : d.variant === 'friend' ? Math.PI / 2 : Math.PI;
+    d.scale ??= d.variant === 'pit' ? 1 : d.variant === 'friend' ? DEMON.friendScale : DEMON.smallScale;
+    d.homeFacing ??= d.variant === 'l' ? 0 : d.variant === 'friend' ? -(3 * Math.PI) / 4 : Math.PI;
   }
   const have = new Set([...state.demons.values()].map((d) => d.variant));
   for (const d of createDemons(state).values()) {
@@ -1371,6 +1392,7 @@ export function pushFloater(
   powerCountdownWatts?: number,
   space = false,
   hell = false,
+  sizeMult?: number,
 ) {
   state.floaters.push({
     id: state.nextId++,
@@ -1380,6 +1402,7 @@ export function pushFloater(
     powerCountdownWatts,
     space,
     hell,
+    sizeMult,
   });
 }
 
