@@ -9,7 +9,7 @@ import { autoAssignAllIdle, lightningStrike, spawnBob } from './sim';
 import {
   Building, Cell, Dragon, GameState, Ghost, Goblin, Minotaur, WaterSource,
   appendLog, buildingAtCell, buildingMoneyCost, candleSpotAt, cellKey, defOf, demonAtHell, findFreeCellNear,
-  hellPortalAt, holeAtCell, isInBounds, markBuildingsChanged, nextBuildingDisplayNum, pixelToCell, placeCandle,
+  hellPortalAt, holeAtCell, isInBounds, markBuildingsChanged, nextBuildingDisplayNum, pixelToCell, placeCandle, pushFloater,
   soulChairAt, spaceBuildingAt, spaceUnitAt, waterCarrierCount, waterSourceAtCell,
 } from './state';
 
@@ -755,24 +755,31 @@ function selectGhost(state: GameState, g: Ghost) {
 // Place a candle at a tapped hell coord while candle mode is armed. Snaps to
 // the nearest mirror's outer ring (candleSpotAt); beeps with a log line when
 // the tap misses every ring, the ring is full/crowded, or blood runs short.
+// Each refusal also raises a red floater at the tap — on touch there's no
+// hover, so the desktop preview tag ("too close" / "ring full") never shows
+// and the floater is the only on-canvas explanation.
 // Placement mode stays armed afterwards so a run of candles goes down fast.
 function tryPlaceCandle(state: GameState, hx: number, hy: number) {
+  const refuse = (x: number, y: number, why: string, log: string) => {
+    playSound('error');
+    pushFloater(state, x, y - 24, why, 0xd96b6b, 1.6, undefined, false, true);
+    appendLog(state, log);
+  };
   const spot = candleSpotAt(state, hx, hy);
   if (!spot) {
-    playSound('error');
-    appendLog(state, "Candles only take on a mirror's outer ring.");
+    refuse(hx, hy, 'needs a mirror ring', "Candles only take on a mirror's outer ring.");
     return;
   }
   if (!spot.ok) {
-    playSound('error');
-    appendLog(state, spot.blocked === 'full'
-      ? 'That ring already bears its five candles.'
-      : 'Too close to another candle.');
+    refuse(spot.x, spot.y, spot.blocked === 'full' ? 'ring full' : 'too close',
+      spot.blocked === 'full'
+        ? 'That ring already bears its five candles.'
+        : 'Too close to another candle.');
     return;
   }
   if (state.blood < SOUL_SIGIL.candleBloodCost) {
-    playSound('error');
-    appendLog(state, `Need ${SOUL_SIGIL.candleBloodCost} blood to place a candle.`);
+    refuse(hx, hy, `need ${SOUL_SIGIL.candleBloodCost} blood`,
+      `Need ${SOUL_SIGIL.candleBloodCost} blood to place a candle.`);
     return;
   }
   state.blood -= SOUL_SIGIL.candleBloodCost;
