@@ -26,7 +26,7 @@ await page.evaluate(() => {
 });
 await sleep(600);
 await page.evaluate(() => {
-  document.body.classList.remove('intro-hold');
+  document.body.classList.remove('intro-hold', 'intro-cutscene-hold');
   document.body.classList.remove('bob-cutscene-hold');
 });
 

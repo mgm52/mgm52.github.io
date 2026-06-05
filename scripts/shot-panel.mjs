@@ -13,7 +13,7 @@ await page.goto('http://127.0.0.1:5173', { waitUntil: 'networkidle' });
 await page.waitForFunction(() => !!window.__game?.state, { timeout: 15000 });
 await page.evaluate(() => document.getElementById('title-screen')?.querySelector('button')?.click());
 await sleep(500);
-await page.evaluate(() => { document.body.classList.remove('intro-hold','bob-cutscene-hold'); });
+await page.evaluate(() => { document.body.classList.remove('intro-hold', 'intro-cutscene-hold','bob-cutscene-hold'); });
 
 await page.evaluate(({ sel }) => {
   const { state, ctx } = window.__game;

@@ -150,8 +150,11 @@ export function skipIntro(): void {
 function teardownIntro(
   overlay: HTMLElement, speechEl: HTMLElement,
   yesBtn: HTMLButtonElement, noBtn: HTMLButtonElement,
+  clickWall: HTMLElement,
 ): void {
   overlay.classList.remove('visible', 'up', 'exit', 'faced', 'speaking', 'click-armed', 'show-buttons');
+  document.body.classList.remove('intro-cutscene-hold');
+  clickWall.style.pointerEvents = '';
   speechEl.textContent = '';
   speechEl.classList.remove('done');
   yesBtn.hidden = true;
@@ -288,6 +291,12 @@ export async function runIntro(): Promise<void> {
   goblinEl.style.setProperty('--row', '0');
   overlay.classList.remove('faced');
 
+  // Mirror runBobCutscene: the world keeps running (and the player keeps
+  // full input — the inline style keeps the click wall transparent despite
+  // `.visible`) through the slide-up. Only once the goblin has turned to
+  // face the player does the cutscene freeze game time and absorb clicks.
+  clickWall.style.pointerEvents = 'none';
+
   overlay.classList.add('visible');
   await sleep(50);
   overlay.classList.add('up');
@@ -297,9 +306,15 @@ export async function runIntro(): Promise<void> {
   // post-turn-around position (-14vh) — see #intro-goblin CSS for the
   // motivation (row 0 vs row 4 sprite geometry).
   await sleep(POST_SLIDE_BEAT_MS);
-  if (introAborted) { teardownIntro(overlay, speechEl, yesBtn, noBtn); return; }
+  if (introAborted) { teardownIntro(overlay, speechEl, yesBtn, noBtn, clickWall); return; }
   overlay.classList.add('faced');
   await turnGoblinAround(goblinEl);
+
+  // The goblin is now addressing the player: freeze the tick loop for the
+  // dialogue (intro-cutscene-hold, see main.ts) and restore the click wall
+  // so the `.visible` rule absorbs clicks again.
+  document.body.classList.add('intro-cutscene-hold');
+  clickWall.style.pointerEvents = '';
 
   for (const step of SCRIPT) {
     if (introAborted) break;
@@ -333,6 +348,9 @@ export async function runIntro(): Promise<void> {
     } else if (step.kind === 'face') {
       await faceRow(goblinEl, step.row);
     } else if (step.kind === 'exit') {
+      // Dialogue over — release the time freeze before the walk-off so the
+      // world resumes behind the departing goblin (same as Bob's exit).
+      document.body.classList.remove('intro-cutscene-hold');
       // Pivot to face East so the walk-off reads as the goblin leaving to the
       // right rather than being dragged sideways while still facing camera.
       await faceRow(goblinEl, EXIT_FACING_ROW);
@@ -343,7 +361,10 @@ export async function runIntro(): Promise<void> {
       await sleep(700);
     }
   }
-  if (introAborted) teardownIntro(overlay, speechEl, yesBtn, noBtn);
+  // Abort can break out of the loop with the hold still on; teardown also
+  // strips it, but belt-and-braces for any future early exit.
+  document.body.classList.remove('intro-cutscene-hold');
+  if (introAborted) teardownIntro(overlay, speechEl, yesBtn, noBtn, clickWall);
 }
 
 // Mid-game cutscene: same goblin, slides back up after the player places their

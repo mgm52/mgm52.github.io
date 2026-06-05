@@ -24,7 +24,7 @@ page.on('dialog', async (d) => d.accept());
 await page.goto('http://localhost:5173', { waitUntil: 'networkidle' });
 await page.waitForFunction(() => !!window.__game?.state, { timeout: 15000 });
 await page.evaluate(() => {
-  document.body.classList.remove('intro-hold', 'bob-cutscene-hold');
+  document.body.classList.remove('intro-hold', 'intro-cutscene-hold', 'bob-cutscene-hold');
   window.__game.state.bobPickingHole = false;
 });
 

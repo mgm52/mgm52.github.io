@@ -1078,19 +1078,16 @@
          the overlay is hidden, so the style/animation machinery goes fully
          idle between intros. */
       #intro-overlay:not(.visible) #intro-goblin { animation-play-state: paused; }
-      /* While the intro IS showing, the drop-shadow forces the ~90vh sprite
-         to re-rasterize through a 24px blur on every sprite-sheet step — at
-         3x phone DPR that pins the whole page to ~1fps (measured 1194ms
-         frames on an iPhone via ?fps, with every instrumented subsystem at
-         0.0ms — the time is all compositor-side). The layer is visible and
-         animating through the entire 6s slide-up, even while the goblin is
-         still below the viewport, so the tax starts before the goblin is
-         even seen. Phones skip the shadow; the cutscene reads fine without
-         it. (Tried keeping it once before — see 709d006 — and the 1fps
-         report came straight back.) */
-      @media (pointer: coarse) {
-        #intro-goblin { filter: none; }
-      }
+      /* The drop-shadow runs everywhere, phones included. History, to stop
+         this flip-flopping: it was twice blamed for ~1fps intros on phones
+         (the ~90vh sprite re-blurring at 3x DPR per sprite step) and twice
+         skipped via a pointer:coarse filter:none rule — but both incriminating
+         measurements were taken on a fresh load over cellular, and the real
+         culprit turned out to be the old 64-element HTMLAudio unlock sweep
+         stalling the main thread on every tap while sounds buffered (fixed in
+         audio.ts by moving SFX to WebAudio). If intro jank ever resurfaces
+         here, measure with ?fps DURING the cutscene and check the `other`
+         metric before touching this. */
       /* Full-screen click target. While the overlay is .visible the wall
          always absorbs clicks (so the player can't accidentally interact
          with the canvas behind it), but it only shows the glove cursor and

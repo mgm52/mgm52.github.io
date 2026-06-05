@@ -259,7 +259,9 @@ async function main() {
   const introWillPlay = choice === 'new';
   if (introWillPlay) {
     // intro-hold suppresses the spawn panel + (via the existing .revealed
-    // gate) the task text. Removed once the intro promise resolves.
+    // gate) the task text. Removed once the intro promise resolves. Purely
+    // visual: the tick freeze is intro-cutscene-hold, set by intro.ts only
+    // while the goblin is face-to-face with the player.
     document.body.classList.add('intro-hold');
   }
   // Reveal the first task a beat after the game has faded in (or after the
@@ -812,17 +814,21 @@ async function main() {
       requestSkipToHell = false;
       if (state.view === 'ground' && !hellTransitioning && !transitioning) triggerDescendToHell(now);
     }
-    // Freeze game ticks while the intro is on-screen so state.now (and with
-    // it the spawn-hint / no-task timers in refreshUI) doesn't drift forward
-    // during the intro's preamble + dialog. Once the intro releases the
-    // hold, ticks resume from 0 and the hint gets its full 30s/90s grace.
+    // Freeze game ticks while a goblin is actually talking. Like Bob's
+    // cutscene, the intro lets the world run through the free-click preamble
+    // and the slide-up; intro.ts only sets intro-cutscene-hold once the
+    // goblin has turned to face the player, and lifts it for the walk-off.
+    // (intro-hold — the panel-visibility gate — deliberately does NOT freeze
+    // time.) The spawn-hint / no-task grace timers in refreshUI lose the
+    // ~15s the preamble+rise now consume, which still leaves most of their
+    // 30s/90s windows.
     // Bob's hole-picker freezes the world the same way so the player can
     // line up the summon without the rest of the colony advancing; bob-spawn-hold
     // then holds it for a beat right after he emerges (set in input.ts).
     // unlock-reveal-hold freezes time for the whole task-complete ceremony:
     // the WORK COMPLETE overlay plus the staged one-by-one unlock reveal that
     // follows it (set/cleared in ui.ts).
-    const introActive = document.body.classList.contains('intro-hold')
+    const introActive = document.body.classList.contains('intro-cutscene-hold')
       || document.body.classList.contains('bob-cutscene-hold')
       || document.body.classList.contains('demon-parlay-hold')
       || document.body.classList.contains('bob-spawn-hold')
