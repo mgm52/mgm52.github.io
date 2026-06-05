@@ -354,7 +354,7 @@ export function setupInput(
             // so several candles can be placed in a row; ESC / right-click /
             // the button toggle it off.
             if (state.pendingCandle) {
-              tryPlaceCandle(state, hp.x, hp.y);
+              tryPlaceCandle(state, ctx, hp.x, hp.y);
               return;
             }
             // A small precise ghost wins over the giant demon hit box behind it,
@@ -752,34 +752,50 @@ function selectGhost(state: GameState, g: Ghost) {
   }
 }
 
+// A refused placement: error beep, a short red floater right at the attempted
+// spot saying WHY, and the full sentence in the log. On touch there's no hover
+// (so desktop-only ghost tags never show) and the log is typically off-screen,
+// making the floater the only on-canvas explanation. `scene` picks which
+// transform the floater rides — ground world layer when omitted.
+function refusePlacement(
+  state: GameState,
+  x: number, y: number,
+  why: string, log: string,
+  scene?: 'space' | 'hell',
+  sizeMult?: number,
+) {
+  playSound('error');
+  pushFloater(state, x, y - 24, why, 0xd96b6b, 1.6, undefined, scene === 'space', scene === 'hell', sizeMult);
+  appendLog(state, log);
+}
+
 // Place a candle at a tapped hell coord while candle mode is armed. Snaps to
-// the nearest mirror's outer ring (candleSpotAt); beeps with a log line when
-// the tap misses every ring, the ring is full/crowded, or blood runs short.
-// Each refusal also raises a red floater at the tap — on touch there's no
-// hover, so the desktop preview tag ("too close" / "ring full") never shows
-// and the floater is the only on-canvas explanation.
+// the nearest mirror's outer ring (candleSpotAt); refuses (beep + floater +
+// log line) when the tap misses every ring, the ring is full/crowded, or
+// blood runs short.
 // Placement mode stays armed afterwards so a run of candles goes down fast.
-function tryPlaceCandle(state: GameState, hx: number, hy: number) {
-  const refuse = (x: number, y: number, why: string, log: string) => {
-    playSound('error');
-    pushFloater(state, x, y - 24, why, 0xd96b6b, 1.6, undefined, false, true);
-    appendLog(state, log);
-  };
+function tryPlaceCandle(state: GameState, ctx: RenderContext, hx: number, hy: number) {
+  // Hell floaters ride the hell transform, which is zoomed out relative to
+  // the ground (down to HELL.zoomedOutScale) — scale the text back up so the
+  // refusal reads the same size as its overworld counterparts.
+  const sizeMult = ctx.renderScale / currentHellScale(ctx);
   const spot = candleSpotAt(state, hx, hy);
   if (!spot) {
-    refuse(hx, hy, 'needs a mirror ring', "Candles only take on a mirror's outer ring.");
+    refusePlacement(state, hx, hy, 'needs a mirror ring',
+      "Candles only take on a mirror's outer ring.", 'hell', sizeMult);
     return;
   }
   if (!spot.ok) {
-    refuse(spot.x, spot.y, spot.blocked === 'full' ? 'ring full' : 'too close',
+    refusePlacement(state, spot.x, spot.y,
+      spot.blocked === 'full' ? 'ring full' : 'too close',
       spot.blocked === 'full'
         ? 'That ring already bears its five candles.'
-        : 'Too close to another candle.');
+        : 'Too close to another candle.', 'hell', sizeMult);
     return;
   }
   if (state.blood < SOUL_SIGIL.candleBloodCost) {
-    refuse(hx, hy, `need ${SOUL_SIGIL.candleBloodCost} blood`,
-      `Need ${SOUL_SIGIL.candleBloodCost} blood to place a candle.`);
+    refusePlacement(state, hx, hy, `need ${SOUL_SIGIL.candleBloodCost} blood`,
+      `Need ${SOUL_SIGIL.candleBloodCost} blood to place a candle.`, 'hell', sizeMult);
     return;
   }
   state.blood -= SOUL_SIGIL.candleBloodCost;
@@ -801,8 +817,7 @@ function tryPlaceCandle(state: GameState, hx: number, hy: number) {
 function tryPlaceOrbital(state: GameState, x: number, y: number) {
   const def = BUILDING_DEFS.orbital_platform;
   if (state.money < def.cost) {
-    playSound('error');
-    appendLog(state, 'Not enough Ƶ.');
+    refusePlacement(state, x, y, `need Ƶ${def.cost.toLocaleString('en-US')}`, 'Not enough Ƶ.', 'space');
     return;
   }
   // Clamp inside the void's bounds so the scaffold can't hide off-scene.
@@ -1348,22 +1363,33 @@ function placeBuilding(state: GameState, x: number, y: number) {
   }
   const def = BUILDING_DEFS[kind];
   const moneyCost = buildingMoneyCost(state, kind);
-  if (state.money < moneyCost) { playSound('error'); appendLog(state, 'Not enough Ƶ.'); return; }
-  if (def.bloodCost && state.blood < def.bloodCost) { playSound('error'); appendLog(state, `Need ${def.bloodCost} blood to build ${def.name}.`); return; }
-  if (def.dragonBoneCost && state.dragonBone < def.dragonBoneCost) { playSound('error'); appendLog(state, `Need ${def.dragonBoneCost} dragon bone${def.dragonBoneCost === 1 ? '' : 's'} to build ${def.name}.`); return; }
+  if (state.money < moneyCost) {
+    refusePlacement(state, x, y, `need Ƶ${moneyCost.toLocaleString('en-US')}`, 'Not enough Ƶ.');
+    return;
+  }
+  if (def.bloodCost && state.blood < def.bloodCost) {
+    refusePlacement(state, x, y, `need ${def.bloodCost} blood`,
+      `Need ${def.bloodCost} blood to build ${def.name}.`);
+    return;
+  }
+  if (def.dragonBoneCost && state.dragonBone < def.dragonBoneCost) {
+    refusePlacement(state, x, y,
+      `need ${def.dragonBoneCost} dragon bone${def.dragonBoneCost === 1 ? '' : 's'}`,
+      `Need ${def.dragonBoneCost} dragon bone${def.dragonBoneCost === 1 ? '' : 's'} to build ${def.name}.`);
+    return;
+  }
   if (def.powerOutput < 0) {
     const draw = -def.powerOutput;
     const available = state.lastPowerProduced - state.lastPowerConsumed;
     if (draw > available) {
-      playSound('error');
-      appendLog(state, `Need ${formatPower(draw)} of free power to build ${def.name}.`);
+      refusePlacement(state, x, y, `need ${formatPower(draw)} free power`,
+        `Need ${formatPower(draw)} of free power to build ${def.name}.`);
       return;
     }
   }
   const tl = topLeftFromClick(x, y, kind);
   if (!canPlaceBuilding(state, tl, kind)) {
-    playSound('error');
-    appendLog(state, 'Cannot place there — blocked.');
+    refusePlacement(state, x, y, 'blocked', 'Cannot place there — blocked.');
     return;
   }
 
@@ -1404,10 +1430,15 @@ function placeBuilding(state: GameState, x: number, y: number) {
 function tryPlaceWallAt(state: GameState, cx: number, cy: number, silent: boolean): boolean {
   if (!isInBounds(cx, cy)) return false;
   if (state.money < 1) {
-    if (!silent) { playSound('error'); appendLog(state, 'Not enough Ƶ.'); }
+    if (!silent) refusePlacement(state, (cx + 0.5) * CELL, (cy + 0.5) * CELL, 'need Ƶ1', 'Not enough Ƶ.');
     return false;
   }
-  if (cellBlocksPlacement(state, cx, cy)) return false;
+  if (cellBlocksPlacement(state, cx, cy)) {
+    // A deliberate tap on a blocked cell says why; drag-paint stays quiet so
+    // sweeping across occupied cells doesn't spam beeps.
+    if (!silent) refusePlacement(state, (cx + 0.5) * CELL, (cy + 0.5) * CELL, 'blocked', 'Cannot place there — blocked.');
+    return false;
+  }
   state.money -= 1;
   const b: Building = {
     id: state.nextId++,
