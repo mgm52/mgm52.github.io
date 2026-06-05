@@ -119,7 +119,8 @@ function showTitleScreen(savedAt: number | null = null): Promise<'new' | 'resume
 // Enabled by adding ?fps to the URL (e.g. mgm52.github.io/?fps). Shows the
 // frame rate, the average and worst frame time over each half-second window,
 // a worst-case breakdown by subsystem (sim ticks / scene sync / DOM ui /
-// Pixi's actual GPU submission), the active renderer backend, the cost+size
+// Pixi's actual GPU submission, plus the unattributed remainder — see
+// worstOther below), the active renderer backend, the cost+size
 // of the most recent autosave, and the last runtime error — cheap enough to
 // leave running while hunting jank on a phone, where devtools aren't handy.
 type FrameTimings = { tickMs: number; renderMs: number; uiMs: number };
@@ -148,6 +149,12 @@ function createFpsHud(): ((now: number, dt: number, t: FrameTimings) => void) | 
   let accMs = 0;
   let worst = 0;
   let worstTick = 0, worstRender = 0, worstUi = 0, worstPixi = 0;
+  // Frame time NOT attributed to any instrumented section — style/layout/
+  // paint, compositing, GPU stalls, or main-thread work outside the frame
+  // loop. When `other` tracks `worst` (and the named sections sit near 0),
+  // the bottleneck is browser-side, not game JS — e.g. a CSS filter being
+  // re-rasterized — and no amount of game-loop optimization will help.
+  let worstOther = 0;
   let windowStart = performance.now();
   return (now: number, dt: number, t: FrameTimings) => {
     frames++;
@@ -157,6 +164,8 @@ function createFpsHud(): ((now: number, dt: number, t: FrameTimings) => void) | 
     if (t.renderMs > worstRender) worstRender = t.renderMs;
     if (t.uiMs > worstUi) worstUi = t.uiMs;
     if (pixiRenderMs > worstPixi) worstPixi = pixiRenderMs;
+    const other = Math.max(0, dt - t.tickMs - t.renderMs - t.uiMs - pixiRenderMs);
+    if (other > worstOther) worstOther = other;
     if (now - windowStart >= 500 && frames > 0) {
       const fps = (frames * 1000) / (now - windowStart);
       const save = getLastSaveStats();
@@ -166,11 +175,12 @@ function createFpsHud(): ((now: number, dt: number, t: FrameTimings) => void) | 
       el.textContent =
         `${fps.toFixed(0)} fps · avg ${(accMs / frames).toFixed(1)} ms · worst ${worst.toFixed(0)} ms\n`
         + `worst: tick ${worstTick.toFixed(1)} · scene ${worstRender.toFixed(1)} · ui ${worstUi.toFixed(1)} · pixi ${worstPixi.toFixed(1)} ms\n`
-        + `${rendererInfo}\n`
+        + `${rendererInfo} · other ${worstOther.toFixed(0)}ms\n`
         + saveLine
         + (lastError ? `\nERR ${lastError}` : '');
       frames = 0; accMs = 0; worst = 0;
       worstTick = 0; worstRender = 0; worstUi = 0; worstPixi = 0;
+      worstOther = 0;
       windowStart = now;
     }
   };
