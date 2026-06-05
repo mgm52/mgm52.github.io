@@ -1668,7 +1668,12 @@ function syncSoulSigil(ctx: RenderContext, state: GameState): void {
   if (tag) {
     if (tag.text !== previewTag && previewTag !== '') tag.text = previewTag;
     tag.visible = previewTag !== '';
-    if (previewTag !== '') tag.position.set(previewPos.x, previewPos.y);
+    if (previewTag !== '') {
+      tag.position.set(previewPos.x, previewPos.y);
+      // Counter the hell zoom-out so the tag keeps a constant apparent size
+      // instead of halving when the camera eases out to zoomedOutScale.
+      tag.scale.set(ctx.renderScale / currentHellScale(ctx));
+    }
   }
 
   // Drop labels whose candle/portal is gone.
