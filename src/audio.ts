@@ -1,9 +1,29 @@
-// Tiny pooled audio player. One pool per sound so rapid retriggers don't
-// cut off in-flight playback (a single Audio element can only play once at
-// a time).
+// SFX play through WebAudio: each sample is fetched once with plain fetch()
+// (small files, HTTP-cache friendly), decoded to an AudioBuffer up front, and
+// played via throwaway AudioBufferSourceNodes.
+//
+// This replaced a 16-sounds × 4-element HTMLAudioElement pool. That design
+// pushed 64 concurrent media fetches through iOS's media stack on page load,
+// and its per-element autoplay unlock had to run a muted play() across all 64
+// elements on a user gesture — re-running the whole sweep on EVERY tap until
+// all 64 succeeded. Over a slow cellular link the sounds buffer for a long
+// time, so every tap during that window did 64 synchronous media-session
+// calls: multi-hundred-ms main-thread stalls that pinned phones to ~3fps
+// while anything was still downloading (and the intro is exactly when the
+// player is tapping around). WebAudio needs none of that: unlock is a single
+// AudioContext.resume(), and playback never touches the network.
 
-const POOL_SIZE = 4;
-const pools = new Map<string, HTMLAudioElement[]>();
+// Cap on simultaneous sources per sound, mirroring the old pool semantics:
+// rapid retriggers overlap up to 4 deep, then the oldest voice is stolen.
+const MAX_VOICES = 4;
+
+let audioCtx: AudioContext | null = null;
+const buffers = new Map<string, AudioBuffer>();
+const activeVoices = new Map<string, AudioBufferSourceNode[]>();
+// Set on the first user gesture. Before it, playSound stays silent (autoplay
+// policy would block anyway); after it, a suspended context (page started
+// without a gesture, or an iOS audio interruption) is nudged with resume().
+let gestureSeen = false;
 
 // Sound name → file URL. Paths are relative (no leading slash) so they resolve
 // against the page URL — works for dev root and GH Pages subpath alike.
@@ -22,11 +42,10 @@ const REGISTRY = {
   task_complete: 'audio/task_complete.mp3',
   water_splash: 'audio/water_splash.mp3',
   cash:         'audio/cash.mp3',
-  // The Lightning Strike thunderclap — same sample as 'destroy' but in its
-  // own pool. The strike plays it pitched way down (rate 0.4 ≈ 2.5× longer),
-  // and sharing the busy 'destroy' pool meant building smashes could steal
-  // the element mid-rumble, cutting the thunder off (or silencing it when
-  // the steal landed first).
+  // The Lightning Strike thunderclap — same sample as 'destroy', pitched way
+  // down at the call site (rate 0.4 ≈ 2.5× longer). Shares the decoded
+  // buffer but gets its own voice slots, so building smashes can't steal the
+  // element mid-rumble the way a shared pool used to.
   lightning:    'audio/destroy.mp3',
 } as const;
 
@@ -53,71 +72,76 @@ function effectiveMusicRate(): number {
 }
 
 export function preloadSounds() {
+  const Ctor = window.AudioContext
+    ?? (window as unknown as { webkitAudioContext?: typeof AudioContext }).webkitAudioContext;
+  if (!Ctor) return;
+  audioCtx = new Ctor();
+  // Fetch each distinct URL once (lightning aliases destroy.mp3) and fan the
+  // decoded buffer out to every registry name that uses it. Decode works fine
+  // on a still-suspended context, so all of this completes behind the title
+  // screen; failures (offline, decode error) just leave that sound silent.
+  const byUrl = new Map<string, Promise<AudioBuffer | null>>();
   for (const [name, url] of Object.entries(REGISTRY)) {
-    const pool: HTMLAudioElement[] = [];
-    for (let i = 0; i < POOL_SIZE; i++) {
-      const a = new Audio(url);
-      a.preload = 'auto';
-      // Default is true → playbackRate time-stretches instead of resampling.
-      // We want pitch to follow rate (resampling), so disable preservation.
-      a.preservesPitch = false;
-      pool.push(a);
+    let p = byUrl.get(url);
+    if (!p) {
+      p = fetch(url)
+        .then((r) => r.arrayBuffer())
+        .then((ab) => audioCtx!.decodeAudioData(ab))
+        .catch(() => null);
+      byUrl.set(url, p);
     }
-    pools.set(name, pool);
+    void p.then((buf) => { if (buf) buffers.set(name, buf); });
   }
-  // Mobile autoplay policies gate playback per element (see unlockPools) —
-  // hook the unlock onto the first gesture. Kept installed (unlockPools
-  // early-returns once done) in case a rejected unlock needs a retry on a
-  // later gesture.
-  window.addEventListener('pointerdown', unlockPools, { capture: true, passive: true });
-  window.addEventListener('keydown', unlockPools, { capture: true, passive: true });
+  // Autoplay policies start the context suspended until a user gesture; the
+  // listeners stay installed (resume is cheap + idempotent) so an iOS audio
+  // interruption mid-session also recovers on the next tap.
+  window.addEventListener('pointerdown', unlockAudio, { capture: true, passive: true });
+  window.addEventListener('keydown', unlockAudio, { capture: true, passive: true });
 }
 
-// ─── Mobile playback unlock ─────────────────────────────────────────
-// iOS Safari (and some Android browsers) only allow an <audio> element to
-// start playing from a user gesture — and the permission is granted *per
-// element*, the first time it plays. Sounds first triggered from input
-// handlers (click, select, ritual…) unlock themselves naturally, but ones
-// whose first play comes from a timer or the sim loop — the WORK COMPLETE
-// fanfare, build_done, online — get their play() rejected and stay silent
-// forever. On the first gesture, run every pooled element through a muted
-// play()+pause() so they're all cleared for later non-gesture playback.
-let poolsUnlocked = false;
-function unlockPools(): void {
-  if (poolsUnlocked) return;
-  poolsUnlocked = true;
-  for (const pool of pools.values()) {
-    for (const a of pool) {
-      if (!a.paused && !a.ended) continue; // mid-playback already — unlocked
-      a.muted = true;
-      a.play().then(() => {
-        a.pause();
-        a.currentTime = 0;
-        a.muted = false;
-      }).catch(() => {
-        // Rejected even inside a gesture (e.g. source still buffering) —
-        // reset so the next gesture retries the sweep.
-        a.muted = false;
-        poolsUnlocked = false;
-      });
-    }
-  }
+function unlockAudio(): void {
+  gestureSeen = true;
+  if (audioCtx && audioCtx.state !== 'running') void audioCtx.resume();
 }
 
 export function playSound(name: SoundName, volume = 1, playbackRate?: number) {
   if (muted) return;
   if (inHellView && name === 'goblin_spawn') return;
-  const pool = pools.get(name);
-  if (!pool) return;
-  const free = pool.find((a) => a.paused || a.ended) ?? pool[0];
-  free.currentTime = 0;
-  // The element may have been grabbed mid-sweep by unlockPools (briefly
-  // playing muted) — a real playback always unmutes.
-  free.muted = false;
-  free.volume = Math.max(0, Math.min(1, masterVolume * volume));
-  free.preservesPitch = false;
-  free.playbackRate = Math.max(0.25, Math.min(4, playbackRate ?? 1));
-  free.play().catch(() => { /* autoplay may be blocked until first interaction */ });
+  const ctx = audioCtx;
+  const buffer = buffers.get(name);
+  if (!ctx || !buffer) return;
+  if (ctx.state !== 'running') {
+    // No gesture yet → autoplay policy blocks us regardless; stay silent
+    // (matches the old pool's swallowed play() rejection). With a gesture on
+    // record, nudge the context and schedule anyway — the source starts the
+    // moment the resume lands, a few ms later.
+    if (!gestureSeen) return;
+    void ctx.resume();
+  }
+  const src = ctx.createBufferSource();
+  src.buffer = buffer;
+  // Rate resamples (pitch follows speed), matching the old elements'
+  // preservesPitch = false.
+  src.playbackRate.value = Math.max(0.25, Math.min(4, playbackRate ?? 1));
+  const gain = ctx.createGain();
+  gain.gain.value = Math.max(0, Math.min(1, masterVolume * volume));
+  src.connect(gain);
+  gain.connect(ctx.destination);
+  let voices = activeVoices.get(name);
+  if (!voices) { voices = []; activeVoices.set(name, voices); }
+  if (voices.length >= MAX_VOICES) {
+    const oldest = voices.shift()!;
+    try { oldest.stop(); } catch { /* already ended */ }
+  }
+  voices.push(src);
+  src.onended = () => {
+    const arr = activeVoices.get(name);
+    const i = arr ? arr.indexOf(src) : -1;
+    if (arr && i >= 0) arr.splice(i, 1);
+    src.disconnect();
+    gain.disconnect();
+  };
+  src.start();
 }
 
 // ─── Decaying spawn / death volumes ─────────────────────────────────
@@ -247,6 +271,9 @@ function resumeStalledAudio(): void {
   // only resume it while it's meant to be on.
   if (musicEl && musicEl.paused) musicEl.play().catch(() => {});
   if (crackleEl && crackleEnabled && crackleEl.paused) crackleEl.play().catch(() => {});
+  // The SFX context can land in 'interrupted' after a call/Siri/another app
+  // grabs audio focus on iOS — re-kick it alongside the music layers.
+  if (gestureSeen && audioCtx && audioCtx.state !== 'running') void audioCtx.resume();
 }
 function ensurePlaybackWatchdog(): void {
   if (watchdogInterval !== null) return;
@@ -296,6 +323,20 @@ function tickCrackleRamp(): void {
     }
   }
 }
+// One-line audio/network status for the ?fps HUD, to pin down lag that
+// correlates with a slow connection. `sfx 16/16 running` = every effect
+// decoded + context live. For the streaming layers: r = readyState (0 nothing
+// … 4 enough to play through), n = networkState (2 = actively loading — over
+// cellular expect n2 for a while on the 6MB quartet; sustained n2 with a low
+// r is a stall).
+export function getAudioDebugInfo(): string {
+  const total = new Set(Object.keys(REGISTRY)).size;
+  const ctxState = audioCtx ? audioCtx.state : 'no-ctx';
+  const media = (el: HTMLAudioElement | null) =>
+    el ? `r${el.readyState}n${el.networkState}${el.paused ? '·p' : ''}` : '—';
+  return `sfx ${buffers.size}/${total} ${ctxState} · mus ${media(musicEl)} · crk ${media(crackleEl)}`;
+}
+
 export function startBackgroundCrackle(url: string): void {
   crackleUrl = url;
   if (!crackleEnabled) return;

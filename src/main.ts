@@ -1,4 +1,4 @@
-import { playSound, preloadSounds, setCrackleEnabled, setInHellView, setMasterVolume, setMusicDepth, setMusicVolume, startBackgroundCrackle, startBackgroundMusic } from './audio';
+import { getAudioDebugInfo, playSound, preloadSounds, setCrackleEnabled, setInHellView, setMasterVolume, setMusicDepth, setMusicVolume, startBackgroundCrackle, startBackgroundMusic } from './audio';
 import {
   AUTOSPAWN_TIERS, CAMERA_SPEED, CELL, DRAGON, GOBLIN, GOLD_KILL_REWARD, HELL, KILL_REWARD, ROBOT, START_CELL,
   SUMMON_UPGRADES, TICK_MS, MINOTAUR, WORLD, digBloodCost, minotaurBloodCost,
@@ -176,6 +176,7 @@ function createFpsHud(): ((now: number, dt: number, t: FrameTimings) => void) | 
         `${fps.toFixed(0)} fps · avg ${(accMs / frames).toFixed(1)} ms · worst ${worst.toFixed(0)} ms\n`
         + `worst: tick ${worstTick.toFixed(1)} · scene ${worstRender.toFixed(1)} · ui ${worstUi.toFixed(1)} · pixi ${worstPixi.toFixed(1)} ms\n`
         + `${rendererInfo} · other ${worstOther.toFixed(0)}ms\n`
+        + `${getAudioDebugInfo()}\n`
         + saveLine
         + (lastError ? `\nERR ${lastError}` : '');
       frames = 0; accMs = 0; worst = 0;
