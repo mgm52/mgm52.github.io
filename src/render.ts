@@ -2683,7 +2683,7 @@ export function render(state: GameState, ctx: RenderContext) {
       ctx.waterLayer.addChild(v.container);
       ctx.waterViews.set(w.id, v);
     }
-    v.selectionRing.visible = w.selected;
+    applyRingFlash(v.selectionRing, w.selected, w.commandFlashAt, state.now);
     // Region is fixed once spawned, so the view only needs to be positioned
     // once at create time.
   }

@@ -1161,6 +1161,7 @@ function handleRightClick(state: GameState, x: number, y: number) {
       assigned++;
     }
     if (assigned > 0) {
+      targetWater.commandFlashAt = state.now;
       appendLog(state, `${assigned} goblin(s) on water duty.`);
       return;
     }

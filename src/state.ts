@@ -85,6 +85,9 @@ export type WaterSource = {
   x0: number; y0: number;
   x1: number; y1: number;   // exclusive upper bounds
   selected: boolean;
+  // state.now when goblins were last commanded onto this source — flashes its
+  // ring once, like every other command target.
+  commandFlashAt?: number;
 };
 
 export function isCellInWaterSource(w: WaterSource, c: Cell): boolean {

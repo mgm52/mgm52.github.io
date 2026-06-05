@@ -1461,6 +1461,10 @@ export function refreshUI(state: GameState) {
     lightningBtn.disabled = !canAffordLightning || onCooldown || offGround;
     lightningBtn.classList.toggle('active', state.pendingStrike);
     document.getElementById('cost-lightning-strike')!.classList.toggle('met', canAffordLightning && !onCooldown && !offGround);
+    // Mid-aim bankruptcy (mirrors the candle): if the player can no longer
+    // cover the strike while aiming it, drop out of aim mode rather than
+    // letting every map click error-beep.
+    if (state.pendingStrike && !canAffordLightning) state.pendingStrike = false;
   } else {
     lightningBtn.style.display = 'none';
   }
@@ -1637,6 +1641,20 @@ export function refreshUI(state: GameState) {
     if (boneCostEl) boneCostEl.classList.toggle('met', canAffordBone);
   }
 
+  // Mid-placement bankruptcy for ground buildings (mirrors the candle): if
+  // the armed kind can no longer be paid for — its price can even move under
+  // you (the Goblin Hole doubles per hole placed) — drop out of placement
+  // mode rather than letting every map click error-beep. Power headroom is
+  // deliberately NOT checked here: it fluctuates every tick (surges, water
+  // meters) and placement re-validates it anyway.
+  if (state.pendingBuild) {
+    const def = BUILDING_DEFS[state.pendingBuild.kind];
+    const canPay = state.money >= buildingMoneyCost(state, state.pendingBuild.kind)
+      && (!def.bloodCost || state.blood >= def.bloodCost)
+      && (!def.dragonBoneCost || state.dragonBone >= def.dragonBoneCost);
+    if (!canPay) state.pendingBuild = null;
+  }
+
   // Candle — the hell-view replacement for the Build list. 9 blood a piece;
   // lit (active) while placement mode is armed. First hell entry surfaces it
   // with the fade-in + "new" tag, and it attention-flashes while affordable
@@ -1672,6 +1690,9 @@ export function refreshUI(state: GameState) {
     orbitalBtn.disabled = !canAffordOrbital;
     orbitalBtn.classList.toggle('active', state.pendingOrbital);
     document.getElementById('cost-orbital')!.classList.toggle('met', canAffordOrbital);
+    // Mid-placement bankruptcy (mirrors the candle): can't pay any more →
+    // leave placement mode.
+    if (state.pendingOrbital && !canAffordOrbital) state.pendingOrbital = false;
     let anyPlatform = false;
     for (const sb of state.spaceBuildings.values()) {
       if (sb.building.kind === 'orbital_platform') { anyPlatform = true; break; }
