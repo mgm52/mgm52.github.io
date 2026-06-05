@@ -9,9 +9,9 @@ extensions.add(GifAsset);
 // game seconds. Used as a manual sprite-sheet — we pick the frame ourselves
 // each tick based on (state.now - spawnAt) so playback always starts at frame 0.
 type DeathFrames = { textures: Texture[]; ends: number[]; duration: number };
-import { AMBIENT_DRAGON, BUILDING_DEFS, BuildingKind, CELL, COLS, DEMON, DRAGON, GOBLIN, HELL, RENDER_SCALE, ROWS, MINOTAUR, SOUL_SIGIL, SPACE, TINYTAUR, WORLD, formatPower, sigilPortalOutput } from './config';
+import { AMBIENT_DRAGON, BUILDING_DEFS, BuildingKind, CELL, COLS, DEMON, DRAGON, GOBLIN, HELL, RENDER_SCALE, ROBOT, ROWS, MINOTAUR, SOUL_SIGIL, SPACE, TINYTAUR, WORLD, formatPower, sigilPortalOutput } from './config';
 import { ensureFontLoaded, fontFamilyById, getOptions, onOptionsChange, type FontConfig, type Options } from './options';
-import { Building, Demon, Dragon, GameState, Ghost, Goblin, HOLE_SIZE, Minotaur, SoulChair, SpaceBuilding, WaterSource, buildingCenter, candleSpotAt, cellCenter, defOf, holeCenter, isInPlayCell, maintainerCount } from './state';
+import { Building, Demon, Dragon, GameState, Ghost, Goblin, HOLE_SIZE, Minotaur, SoulChair, SpaceBuilding, SpaceUnit, WaterSource, buildingCenter, candleSpotAt, cellCenter, defOf, holeCenter, isInPlayCell, maintainerCount } from './state';
 import { getParlaySpeaker } from './demon-dialogue';
 
 export type Camera = { x: number; y: number };
@@ -296,7 +296,22 @@ type SpaceBuildingView = {
   container: Container;   // positioned at the space pos, in spaceLayer
   glow: Sprite;
   sprite: Sprite;
+  // Drawn fallback art — the Orbital Platform ships no PNG, so its deck is a
+  // Graphics. Undefined for every hauled-up building (they have sprites).
+  body?: Graphics;
+  // Construction bar + "needs robot" tag — only ever populated for an
+  // Orbital Platform mid-assembly.
+  progress: Graphics;
+  warning: Text;
   label: Text;
+  selectionRing: Graphics;
+};
+
+// A unit adrift in the space scene — a snatched goblin/minotaur on its vacuum
+// clock, or a robot (which survives, and builds).
+type SpaceUnitView = {
+  container: Container;
+  sprite: Sprite;
   selectionRing: Graphics;
 };
 
@@ -386,6 +401,7 @@ export type RenderContext = {
   spaceLayer: Container;
   spaceBg: Graphics;                 // starfield + nebula, drawn once
   spaceBuildingViews: Map<number, SpaceBuildingView>;
+  spaceUnitViews: Map<number, SpaceUnitView>;
   spaceCamera: Camera;
   // Decorative dragons drifting across the void, behind the floating buildings.
   // Renderer-owned and ephemeral — spawned while in space, cleared when not.
@@ -746,7 +762,7 @@ export async function createRender(parent: HTMLElement, state: GameState): Promi
     camera: { x: 0, y: 0 },
     viewport: { width: initW, height: initH },
     renderScale: initScale,
-    spaceLayer, spaceBg, spaceBuildingViews: new Map(),
+    spaceLayer, spaceBg, spaceBuildingViews: new Map(), spaceUnitViews: new Map(),
     spaceCamera: { x: 0, y: 0 },
     spaceAmbientLayer, ambientDragons: [], nextAmbientSpawnAt: 0, ambientIdSeq: 1,
     blackOverlay, skyLayer, skyGfx, cloudGfx, starGfx,
@@ -1016,6 +1032,10 @@ function makeGoblinView(g: Goblin): GoblinView {
   const sprite = new Sprite(startTex);
   sprite.anchor.set(0.5);
   sprite.scale.set(scale);
+  // Robots are grey: a plain tint can't desaturate the green goblin art, so
+  // run the sprite through the shared greyscale filter (the grey tint applied
+  // per-frame then sets the chassis tone).
+  if (g.robot) sprite.filters = [getBuildingGreyscaleFilter()];
 
   c.addChild(shadow);
   c.addChild(ring);
@@ -1683,6 +1703,14 @@ function makeBuildingView(b: Building): BuildingView {
   };
 }
 
+// Attach/detach the shared greyscale filter on a sprite without re-assigning
+// .filters every frame (each assignment rebuilds the filter pass). Used by
+// the dragon's carried-sprite, which swaps between buildings and robots.
+function setSpriteGreyscale(s: Sprite, want: boolean): void {
+  const has = Array.isArray(s.filters) && s.filters.length > 0;
+  if (want !== has) s.filters = want ? [getBuildingGreyscaleFilter()] : [];
+}
+
 // Shared full-desaturate filter applied to building sprites that aren't yet
 // running (constructing or dormant). One instance is reused across sprites —
 // Pixi handles a filter being attached to multiple display objects.
@@ -1931,7 +1959,8 @@ function positionParlaySpeech(
     let headTopHy: number;
     if (sp.kind === 'demon') {
       hx = sp.demon.hx;
-      headTopHy = sp.demon.hy - DEMON.displayPx * 0.5 * getOptions().demonScale;
+      headTopHy = sp.demon.hy
+        - DEMON.displayPx * 0.5 * getOptions().demonScale * (sp.demon.scale ?? 1);
     } else {
       const g = sp.ghost;
       hx = g.hx ?? worldToHellX(g.x + (g.offX ?? 0));
@@ -2055,6 +2084,31 @@ function makeSpaceBuildingView(sb: SpaceBuilding): SpaceBuildingView {
   sprite.anchor.set(0.5);
   sizeBuildingSprite(sprite, def.size);
 
+  // The Orbital Platform is born in space and ships no PNG — draw its grey
+  // deck directly instead of relying on a sprite.
+  let body: Graphics | undefined;
+  if (sb.building.kind === 'orbital_platform') {
+    body = new Graphics();
+    drawOrbitalPlatformBody(body, def.size);
+  }
+
+  // Construction bar + "needs robot" tag, only ever shown while an Orbital
+  // Platform is mid-assembly (driven from the sync loop each frame).
+  const progress = new Graphics();
+  const warning = new Text({
+    text: 'needs robot',
+    style: {
+      fontFamily: fontFamilyById(o.fonts.buildingWarning.family).css,
+      fontSize: buildingWarningSize(o.fonts.buildingWarning.scale * o.globalFontScale),
+      fill: 0xffb0b0,
+      fontWeight: 'bold',
+      stroke: { color: 0x000000, width: 3 },
+    },
+  });
+  warning.anchor.set(0.5);
+  warning.position.set(0, -def.size / 2 - 12);
+  warning.visible = false;
+
   const gs = o.globalFontScale;
   // Dragon Beacons stop being beacons the moment they're hoisted into orbit —
   // the haul-up severs whatever made them useful. Relabel to match the info
@@ -2073,9 +2127,45 @@ function makeSpaceBuildingView(sb: SpaceBuilding): SpaceBuildingView {
 
   container.addChild(glow);
   container.addChild(selectionRing);
+  if (body) container.addChild(body);
   container.addChild(sprite);
   container.addChild(label);
-  return { container, glow, sprite, label, selectionRing };
+  container.addChild(progress);
+  container.addChild(warning);
+  return { container, glow, sprite, body, progress, warning, label, selectionRing };
+}
+
+// The Orbital Platform's drawn art: a grey deck with support struts and a
+// beacon mast. Simple on purpose — it does nothing, and looks the part.
+function drawOrbitalPlatformBody(g: Graphics, size: number): void {
+  const half = size / 2;
+  g.clear();
+  // Support struts splaying down from the deck's underside.
+  g.moveTo(-half * 0.55, size * 0.08).lineTo(-half * 0.3, half * 0.7)
+    .moveTo(half * 0.55, size * 0.08).lineTo(half * 0.3, half * 0.7)
+    .stroke({ width: 4, color: 0x5a606a });
+  // The deck itself.
+  g.roundRect(-half, -size * 0.1, size, size * 0.2, 6)
+    .fill(0x4a505a)
+    .stroke({ width: 2, color: 0xb8bec6 });
+  // Beacon mast.
+  g.moveTo(0, -size * 0.1).lineTo(0, -half * 0.75).stroke({ width: 3, color: 0x8a9098 });
+  g.circle(0, -half * 0.75, 5).fill(0xffd96b);
+}
+
+function makeSpaceUnitView(su: SpaceUnit): SpaceUnitView {
+  const container = new Container();
+  const selectionRing = new Graphics();
+  selectionRing.circle(0, 0, 28).stroke({ width: 2, color: 0xffd96b });
+  selectionRing.visible = false;
+  const sprite = new Sprite(Texture.EMPTY);
+  sprite.anchor.set(0.5);
+  // Robots are grey — desaturate the green goblin art (the tint set per-frame
+  // then shades the grey), same trick the ground robots use.
+  if (su.robot) sprite.filters = [getBuildingGreyscaleFilter()];
+  container.addChild(selectionRing);
+  container.addChild(sprite);
+  return { container, sprite, selectionRing };
 }
 
 // ─── Space scene + climb transition ─────────────────────────────────
@@ -2332,16 +2422,18 @@ export function render(state: GameState, ctx: RenderContext) {
     }
     v.container.position.set(g.pos.x, g.pos.y);
     applyRingFlash(v.selectionRing, g.selected, g.commandFlashAt, state.now);
+    // Robots are scaled-down goblins (a small grey chassis).
+    const px = g.robot ? displayPx * ROBOT.scale : displayPx;
     // Shadow under the feet — anchored at sprite center, offset down to feet.
     v.shadow.visible = opts.goblinShadow;
     if (opts.goblinShadow) {
-      v.shadow.position.set(0, displayPx * 0.32);
-      const sy = displayPx / 64;
+      v.shadow.position.set(0, px * 0.32);
+      const sy = px / 64;
       v.shadow.scale.set(sy * 0.75, sy);
     }
     // Bob nametag follows the goblin scale — keep it just above the sprite's
     // top so it stays attached even when the player tunes goblinDisplayPx.
-    if (v.nametag) v.nametag.y = -displayPx * 0.55;
+    if (v.nametag) v.nametag.y = -px * 0.55;
     // Per-frame sprite-Y offset so the player can tune sprite-to-cell
     // alignment from the options panel. Outline copies preserve their
     // cardinal offsets relative to the sprite.
@@ -2365,7 +2457,7 @@ export function render(state: GameState, ctx: RenderContext) {
       const fpd = sheet.meta.framesPerDirection;
       const frame = Math.floor(state.now * sheet.fps) % fpd;
       const tex = sheet.frames[dir][frame];
-      const sc = displayPx / sheet.meta.spriteSize;
+      const sc = px / sheet.meta.spriteSize;
       v.sprite.texture = tex;
       v.sprite.scale.set(sc);
       if (opts.goblinOutline) {
@@ -2377,9 +2469,12 @@ export function render(state: GameState, ctx: RenderContext) {
     }
     for (const s of v.outline) s.visible = opts.goblinOutline;
     let tint = 0xffffff;
+    // Robots are always their flat grey — the chassis doesn't blush for
+    // water duty or anything else.
+    if (g.robot) tint = ROBOT.tint;
     // Water carriers tint blue only while actually hauling water back to the
     // DC (phase to_dc). On the outbound walk to the source they look normal.
-    if (g.state.kind === 'fetching_water' && g.state.phase === 'to_dc') tint = opts.waterGoblinColor;
+    else if (g.state.kind === 'fetching_water' && g.state.phase === 'to_dc') tint = opts.waterGoblinColor;
     else if (g.gold) tint = 0xffa800;
     else if (g.state.kind === 'building' || g.state.kind === 'going_to_build') tint = 0xfff0a8;
     else if (g.state.kind === 'maintaining' || g.state.kind === 'going_to_maintain') tint = 0xa8d8ff;
@@ -2477,8 +2572,27 @@ export function render(state: GameState, ctx: RenderContext) {
       const def = defOf(d.carrying);
       const tex = buildingTextures[d.carrying.kind];
       if (tex && v.carried.texture !== tex) { v.carried.texture = tex; sizeBuildingSprite(v.carried, def.size * 0.8); }
+      v.carried.tint = 0xffffff;
+      setSpriteGreyscale(v.carried, false);
       v.carried.visible = opts.buildingSpriteEnabled;
       v.carried.position.set(0, dragonPx * 0.38);
+    } else if (d.carryingUnit) {
+      // A snatched unit dangles where a hauled building would — drawn from
+      // its own walk/idle sheet (facing south, frame 0) with the unit's tint.
+      const u = d.carryingUnit;
+      const sheet = u.kind === 'minotaur' ? minotaurWalkSheet : (goblinIdleSheet ?? goblinWalkSheet);
+      if (sheet) {
+        const tex = sheet.frames[dirIndex(sheet.meta, Math.PI / 2)][0];
+        if (v.carried.texture !== tex) v.carried.texture = tex;
+        const px = u.kind === 'minotaur'
+          ? (u.tiny ? opts.minotaurDisplayPx * TINYTAUR.scale : opts.minotaurDisplayPx)
+          : (u.robot ? opts.goblinDisplayPx * ROBOT.scale : opts.goblinDisplayPx);
+        v.carried.scale.set(px / sheet.meta.spriteSize);
+        v.carried.tint = u.robot ? ROBOT.tint : u.gold ? 0xffa800 : 0xffffff;
+        setSpriteGreyscale(v.carried, !!u.robot);
+        v.carried.visible = true;
+        v.carried.position.set(0, dragonPx * 0.34);
+      }
     } else if (v.carried.visible) {
       v.carried.visible = false;
     }
@@ -2644,11 +2758,69 @@ export function render(state: GameState, ctx: RenderContext) {
     v.selectionRing.visible = sb.selected;
     v.sprite.visible = opts.buildingSpriteEnabled;
     v.label.visible = opts.buildingLabelEnabled;
+    // Orbital Platform assembly state: dim scaffold + yellow build bar while
+    // constructing, with a "needs robot" tag whenever no robot is on site.
+    const sbDef = BUILDING_DEFS[sb.building.kind];
+    v.progress.clear();
+    if (sb.building.state === 'constructing') {
+      if (v.body) v.body.alpha = 0.55;
+      const w = sbDef.size - 10;
+      const h = 5;
+      const y = sbDef.size / 2 + 8;
+      v.progress.rect(-w / 2, y, w, h).fill({ color: 0x000000, alpha: 0.6 }).stroke({ width: 1, color: 0x000000 });
+      v.progress.rect(-w / 2, y, w * sb.building.buildProgress, h).fill(0xffd96b);
+      let onSite = 0;
+      for (const su of state.spaceUnits.values()) {
+        if (!su.robot) continue;
+        if (Math.hypot(su.pos.x - sb.pos.x, su.pos.y - sb.pos.y) <= sbDef.size / 2 + ROBOT.buildRange) onSite++;
+      }
+      v.warning.visible = onSite === 0;
+    } else {
+      if (v.body) v.body.alpha = 1;
+      v.warning.visible = false;
+    }
   }
   for (const [id, v] of ctx.spaceBuildingViews) {
     if (!seenSB.has(id)) {
       v.container.destroy({ children: true });
       ctx.spaceBuildingViews.delete(id);
+    }
+  }
+
+  // Units adrift in the void: snatched goblins/minotaurs tumbling out their
+  // last seconds, and the robots that survive (squared-up and walking while
+  // they work a platform; tumbling like everyone else when idle).
+  const seenSU = new Set<number>();
+  for (const su of state.spaceUnits.values()) {
+    seenSU.add(su.id);
+    let v = ctx.spaceUnitViews.get(su.id);
+    if (!v) {
+      v = makeSpaceUnitView(su);
+      v.container.cullable = true;
+      ctx.spaceLayer.addChild(v.container);
+      ctx.spaceUnitViews.set(su.id, v);
+    }
+    v.container.position.set(su.pos.x, su.pos.y);
+    v.container.rotation = su.spin;
+    const suSheet = su.kind === 'minotaur' ? minotaurWalkSheet : (goblinIdleSheet ?? goblinWalkSheet);
+    if (suSheet) {
+      const dir = dirIndex(suSheet.meta, su.facing);
+      const frame = su.robot && su.workingOn !== undefined
+        ? Math.floor(state.now * suSheet.fps) % suSheet.meta.framesPerDirection
+        : 0;
+      v.sprite.texture = suSheet.frames[dir][frame];
+      const px = su.kind === 'minotaur'
+        ? (su.tiny ? opts.minotaurDisplayPx * TINYTAUR.scale : opts.minotaurDisplayPx)
+        : (su.robot ? opts.goblinDisplayPx * ROBOT.scale : opts.goblinDisplayPx);
+      v.sprite.scale.set(px / suSheet.meta.spriteSize);
+    }
+    v.sprite.tint = su.robot ? ROBOT.tint : su.gold ? 0xffa800 : 0xffffff;
+    v.selectionRing.visible = !!su.selected;
+  }
+  for (const [id, v] of ctx.spaceUnitViews) {
+    if (!seenSU.has(id)) {
+      v.container.destroy({ children: true });
+      ctx.spaceUnitViews.delete(id);
     }
   }
 
@@ -2747,9 +2919,10 @@ export function render(state: GameState, ctx: RenderContext) {
       ctx.demonViews.set(d.id, v);
     }
     v.container.position.set(d.hx, d.hy);
-    // Dev size dial: scale the whole view (sprite + shadow + selection ring)
+    // Per-demon size (the colossus is 1, demon L and her friend 0.5) times
+    // the dev size dial — scales the whole view (sprite + shadow + ring)
     // around the demon's hell position.
-    v.container.scale.set(opts.demonScale);
+    v.container.scale.set(opts.demonScale * (d.scale ?? 1));
     applyRingFlash(v.selectionRing, d.selected, d.commandFlashAt, state.now);
     v.shadow.visible = opts.goblinShadow;
     if (opts.goblinShadow) {

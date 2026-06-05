@@ -1,6 +1,6 @@
 import { playSound, preloadSounds, setCrackleEnabled, setInHellView, setMasterVolume, setMusicDepth, setMusicVolume, startBackgroundCrackle, startBackgroundMusic } from './audio';
 import {
-  AUTOSPAWN_TIERS, CAMERA_SPEED, CELL, DRAGON, GOBLIN, GOLD_KILL_REWARD, HELL, KILL_REWARD, START_CELL,
+  AUTOSPAWN_TIERS, CAMERA_SPEED, CELL, DRAGON, GOBLIN, GOLD_KILL_REWARD, HELL, KILL_REWARD, ROBOT, START_CELL,
   SUMMON_UPGRADES, TICK_MS, MINOTAUR, WORLD, digBloodCost, minotaurBloodCost,
 } from './config';
 import { setupInput } from './input';
@@ -9,8 +9,8 @@ import { playIntroSequence, setIntroPaused, skipIntro } from './intro';
 import { getOptions, onOptionsChange } from './options';
 import { relockOptionsCog, setupOptionsUI } from './options-ui';
 import { applyDomOptions, centerCameraOn, centerHellCameraOnWorld, centerSpaceCamera, clampCamera, clampHellCamera, clampSpaceCamera, createRender, currentHellScale, preloadRenderAssets, render, spaceCameraMaxY } from './render';
-import { appendLog, cellCenter, createInitialState, destroyBuilding, digDirection, earnBlood, earnDragonBone, earnMoney, getSpawnCapacity, pushDeathEffect, pushFloater, recordGhost, removeGoblin, type GameState } from './state';
-import { autoAssignAllIdle, spawnDragon, spawnMinotaur, spawnTinytaur, tick } from './sim';
+import { appendLog, cellCenter, countHypercentres, createInitialState, destroyBuilding, digDirection, earnBlood, earnDragonBone, earnMoney, getSpawnCapacity, pushDeathEffect, pushFloater, recordGhost, removeGoblin, type GameState } from './state';
+import { autoAssignAllIdle, spawnDragon, spawnMinotaur, spawnRobot, spawnTinytaur, tick } from './sim';
 import { ensureHellPortal, executeTaskSkip, refreshUI, setupUI } from './ui';
 import { clearSave, formatRelativeTime, getLastSaveStats, loadGame, saveGame, saveGameInBackground } from './save';
 
@@ -388,6 +388,25 @@ async function main() {
       playSound('ritual');
       appendLog(state, 'Dragon summon ritual begins...');
     },
+    onSummonRobot: () => {
+      // Gated on the late-game industrial base; costs money, arrives instantly
+      // (robots are manufactured, not incubated). spawnRobot beeps and returns
+      // false if every hole exit is blocked — nothing is charged then.
+      if (countHypercentres(state) < ROBOT.hypercentresRequired) { playSound('error'); return; }
+      if (state.money < ROBOT.moneyCost) { playSound('error'); return; }
+      if (!spawnRobot(state)) return;
+      state.money -= ROBOT.moneyCost;
+    },
+    onPlaceOrbital: () => {
+      // Toggle Orbital Platform placement (space view only — the button is
+      // hidden elsewhere); arming it cancels any other pending mode.
+      state.pendingOrbital = !state.pendingOrbital;
+      if (state.pendingOrbital) {
+        state.pendingBuild = null;
+        state.pendingStrike = false;
+        state.pendingCandle = false;
+      }
+    },
     onBuyAutoAssign: () => {
       if (state.autoAssignEnabled) return;
       const cost = SUMMON_UPGRADES.autoAssign.bloodCost;
@@ -467,6 +486,8 @@ async function main() {
     onKillGoblin: (id: number) => {
       const g = state.goblins.get(id);
       if (!g) return;
+      // Robots can't die — the kill button just bounces off the chassis.
+      if (g.robot) { playSound('error'); return; }
       const x = g.pos.x, y = g.pos.y;
       const reward = g.gold
         ? { money: GOLD_KILL_REWARD.money * state.goldgoblinMultiplier, blood: GOLD_KILL_REWARD.blood }
@@ -551,7 +572,7 @@ async function main() {
   // Dev-only debug handle for manual + automated testing. Stripped from
   // production builds (import.meta.env.DEV is false there).
   if (import.meta.env.DEV) {
-    (window as Window & { __game?: unknown }).__game = { state, ctx, spawnDragon, spawnMinotaur };
+    (window as Window & { __game?: unknown }).__game = { state, ctx, spawnDragon, spawnMinotaur, spawnRobot };
   }
 
   // Center the camera on the middle of the initial play area, not on the
@@ -627,6 +648,7 @@ async function main() {
   }
   function triggerDescendToSurface(now: number) {
     transitioning = true; transFrom = 1; transTo = 0; transStart = now; descendHold = 0;
+    state.pendingOrbital = false;
     playSound('ritual', 0.6, 0.6);
   }
   function triggerDescendToHell(now: number) {
@@ -752,7 +774,9 @@ async function main() {
   window.addEventListener('keydown', (e) => {
     const k = e.key.toLowerCase();
     if (e.key === 'Escape') {
-      if (state.pendingBuild || state.pendingStrike) return; // input.ts clears the ghost
+      // input.ts clears any pending placement/aim mode on ESC; only an ESC
+      // with nothing armed toggles pause.
+      if (state.pendingBuild || state.pendingStrike || state.pendingCandle || state.pendingOrbital) return;
       togglePause();
     } else if (k === 'p') {
       // Ignore P while typing in an input/select (options panel sliders, etc.)

@@ -317,8 +317,12 @@ export const DEFAULT_OPTIONS: Options = {
   hellGhostFallSpeed: 7,
   hellBloodColor: 0x4a8acf,
   demonScale: 1,
-  demonWalks: true,
-  demonFacing: 'down',
+  // Demons stand still by default now, each facing its own home direction
+  // (Demon.homeFacing — R faces left, L faces right). The walk toggle and the
+  // facing picker remain as dev overrides: walking resumes the old patrol,
+  // and the picker only applies to demons without a homeFacing of their own.
+  demonWalks: false,
+  demonFacing: 'left',
   demonSaturation: 1,
   demonBrightness: 1,
 };

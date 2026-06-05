@@ -57,6 +57,11 @@ export type Goblin = {
   // exactly like a normal goblin. Dies once like any goblin; his ghost in
   // hell stays still rather than drifting.
   bob?: boolean;
+  // A robot — a late-game money summon. Functions exactly like a goblin on
+  // the ground (builds, maintains, waters) but renders as a small grey unit
+  // and cannot die: every kill path skips it. Survives in space, where it's
+  // the only unit able to assemble an Orbital Platform.
+  robot?: boolean;
   // state.now when another unit was last commanded onto this one. The renderer
   // flashes the selection ring once so the player sees their command target.
   commandFlashAt?: number;
@@ -97,16 +102,29 @@ export function nearestCellInWaterSource(w: WaterSource, from: Cell): Cell {
   return { cx, cy };
 }
 
-// A demon — an uncommandable denizen of hell. For now a single giant Minotaur
-// that paces slowly up and down. Lives entirely in hell coordinates (no grid).
-// The player can only "parlay" with one by walking a goblin ghost up to it.
+// A demon — an uncommandable denizen of hell. Lives entirely in hell
+// coordinates (no grid). The player can only "parlay" with one by walking a
+// goblin ghost up to it. Three variants share the type: 'pit' is the original
+// colossus (demon R — speaks in ALL CAPS), 'l' is the half-size demon across
+// the abyss (speaks backwards, quizzes a talking soul on the real-world
+// clock), and 'friend' is L's identical corner-dwelling friend, whose
+// `greeted` flag is the truth L's friend-question is judged against.
+export type DemonVariant = 'pit' | 'l' | 'friend';
 export type Demon = {
   id: number;
   kind: 'minotaur';
+  // Which of the three demons this is. Optional for saves predating the
+  // roster — an absent variant means the original pit colossus.
+  variant?: DemonVariant;
+  // Render + collision scale vs the full colossus (1). L and her friend are 0.5.
+  scale?: number;
+  // Facing held while standing still (the default now — demons no longer
+  // patrol unless the dev toggle re-enables it). Radians, atan2 convention.
+  homeFacing?: number;
   hx: number; hy: number;   // absolute hell coordinates
   facing: number;           // radians (south = pacing downward)
   dir: 1 | -1;              // +1 pacing down, -1 pacing up
-  y0: number; y1: number;   // patrol bounds (hell-y)
+  y0: number; y1: number;   // patrol bounds (hell-y; dev walk toggle only)
   selected: boolean;
   // The "speak to me, damned soul" greeting only plays the very first time any
   // soul parlays with this demon; it's skipped on every parlay afterwards.
@@ -160,14 +178,33 @@ export type DragonState =
   // DRAGON.moveLingerTime once arrived (lingerUntil), then revert to seeking.
   | { kind: 'moving_to'; goal: Vec2; lingerUntil?: number }
   // Commanded: fly up to a unit and incinerate it, then revert to seeking.
-  // A dragon target is fratricide — the victim drops a Dragon Bone.
+  // Only dragon-on-dragon now — fratricide drops a Dragon Bone. (Goblins and
+  // minotaurs get snatched to space instead; the kinds stay in the union so
+  // a save written mid-order keeps decoding.)
   | { kind: 'going_to_kill'; targetKind: 'goblin' | 'minotaur' | 'dragon'; targetId: number; attackAt?: number }
+  // Commanded onto a non-dragon unit: fly to it and snatch it skyward. The
+  // victim rides the dragon into space, where it dies after a few seconds
+  // adrift — unless it's a robot, which survives the vacuum.
+  | { kind: 'going_to_unit'; targetKind: 'goblin' | 'minotaur'; targetId: number }
+  // Hauling a snatched unit straight up; past DRAGON.spaceY it's set adrift.
+  | { kind: 'carrying_unit' }
   // Commanded: hoist one specific building (even the Beacon) up to space.
   | { kind: 'going_to_building'; buildingId: number }
   // Entrance animation: spawned far above the goal and flies down fast. On
   // arrival flips to `seeking` with spawnAt reset, so the usual seek-delay
   // hover beat starts from the landing rather than from the summon click.
   | { kind: 'swooping_in'; goal: Vec2 };
+
+// Snapshot of a unit a dragon has snatched off the ground — just the flags
+// the space scene needs to render and resolve it (the live Goblin/Minotaur is
+// removed from the world at pickup).
+export type CarriedUnit = {
+  kind: 'goblin' | 'minotaur';
+  robot?: boolean;
+  gold?: boolean;
+  bob?: boolean;
+  tiny?: boolean;
+};
 
 export type Dragon = {
   id: number;
@@ -177,6 +214,9 @@ export type Dragon = {
   // The building this dragon has lifted off the grid, en route to space.
   // Held here (removed from state.buildings) until it crosses into space.
   carrying: Building | null;
+  // A unit (goblin/minotaur) snatched skyward, en route to space. Mutually
+  // exclusive with `carrying`. Optional for saves predating the mechanic.
+  carryingUnit?: CarriedUnit | null;
   selected: boolean;
   spawnAt: number;       // wing-flap phase offset / entry timing
   // state.now when another unit was last commanded onto this one — flashes its ring.
@@ -195,6 +235,30 @@ export type SpaceBuilding = {
   spinRate: number;      // radians/sec
   selected: boolean;
   nextIncomeAt?: number;
+};
+
+// A unit a dragon has hauled into space. Non-robots tumble helplessly and
+// suffocate after SPACE_UNIT.lifetime seconds (diesAt); robots live forever
+// and paddle toward any Orbital Platform under construction to assemble it.
+// pos/vel are in space-scene px, like SpaceBuilding.
+export type SpaceUnit = {
+  id: number;
+  kind: 'goblin' | 'minotaur';
+  robot?: boolean;
+  gold?: boolean;
+  bob?: boolean;
+  tiny?: boolean;
+  pos: Vec2;
+  vel: Vec2;
+  facing: number;        // radians — drives the sprite's direction row
+  spin: number;          // current render rotation (radians)
+  spinRate: number;      // radians/sec tumble
+  // state.now when this unit perishes in the vacuum. Undefined for robots.
+  diesAt?: number;
+  selected: boolean;
+  // Id of the constructing space building this robot is working toward/on.
+  // Recomputed every tick; only used to drive the walk animation.
+  workingOn?: number;
 };
 
 export type BuildingState = 'constructing' | 'active' | 'dormant';
@@ -431,7 +495,14 @@ export type GameState = {
   // `cell`, never touch the Map directly.
   buildingsVersion: number;
   // Buildings hauled into space by dragons — keyed by the original building id.
+  // Orbital Platforms (built in space, never on the grid) also live here.
   spaceBuildings: Map<number, SpaceBuilding>;
+  // Units snatched into space by dragons. Non-robots die off after a few
+  // seconds; robots persist (and build Orbital Platforms).
+  spaceUnits: Map<number, SpaceUnit>;
+  // True while the player is placing an Orbital Platform in the space view
+  // (the next tap on the void sets one down). Ephemeral — reset on load.
+  pendingOrbital: boolean;
   hole: Hole;
   // Ritual upgrades — sticky once bought, apply game-wide.
   autoAssignEnabled: boolean;
@@ -915,6 +986,8 @@ export function createInitialState(): GameState {
     buildings: new Map(),
     buildingsVersion: 0,
     spaceBuildings: new Map(),
+    spaceUnits: new Map(),
+    pendingOrbital: false,
     hole: {
       cell: { cx: START_CELL.cx, cy: START_CELL.cy },
       selected: false,
@@ -1006,22 +1079,47 @@ export function appendLog(state: GameState, msg: string) {
   if (state.log.length > 60) state.log.shift();
 }
 
-// Seed the hell denizens. For now a single giant Minotaur that paces up and
-// down, offset to one side of the landing zone (the centre of hell, where the
-// player arrives) so the player spots it without it sitting on the portal beam.
+// Per-demon size multiplier — the colossus is 1, demon L and her friend 0.5.
+// Every radius in DEMON (hit, body, parlay) scales by this.
+export function demonScaleOf(d: Demon): number { return d.scale ?? 1; }
+
+// Seed the hell denizens: the colossus (demon R) to the right of the landing
+// zone facing left, his half-size counterpart (demon L) mirrored on the other
+// side facing right — the pair eye each other across the abyss — and L's
+// identical friend standing alone in the corner of the map.
 export function createDemons(state: GameState): Map<number, Demon> {
   const demons = new Map<number, Demon>();
-  const cx = HELL.width / 2 + DEMON.spawnOffsetX;
   const cy = HELL.height / 2;
-  const id = state.nextId++;
-  demons.set(id, {
-    id, kind: 'minotaur',
-    hx: cx, hy: cy,
-    facing: Math.PI / 2, dir: 1,
-    y0: cy - DEMON.patrolHalf, y1: cy + DEMON.patrolHalf,
-    selected: false, greeted: false, hintedTryAnother: false, busyWith: null,
-  });
+  const make = (variant: DemonVariant, hx: number, hy: number, scale: number, homeFacing: number) => {
+    const id = state.nextId++;
+    demons.set(id, {
+      id, kind: 'minotaur', variant, scale, homeFacing,
+      hx, hy,
+      facing: homeFacing, dir: 1,
+      y0: hy - DEMON.patrolHalf * scale, y1: hy + DEMON.patrolHalf * scale,
+      selected: false, greeted: false, hintedTryAnother: false, busyWith: null,
+    });
+  };
+  make('pit', HELL.width / 2 + DEMON.spawnOffsetX, cy, 1, Math.PI);
+  make('l', HELL.width / 2 - DEMON.spawnOffsetX, cy, DEMON.smallScale, 0);
+  make('friend', DEMON.friendCorner.x, DEMON.friendCorner.y, DEMON.smallScale, Math.PI / 2);
   return demons;
+}
+
+// Bring an older save's demons up to the full roster: stamp variant defaults
+// onto the pre-roster lone demon (it was always the pit colossus) and add any
+// variant the save is missing. Persisted flags (greeted — the truth demon L's
+// friend-question is judged against) survive untouched.
+export function ensureDemonRoster(state: GameState): void {
+  for (const d of state.demons.values()) {
+    d.variant ??= 'pit';
+    d.scale ??= d.variant === 'pit' ? 1 : DEMON.smallScale;
+    d.homeFacing ??= d.variant === 'l' ? 0 : d.variant === 'friend' ? Math.PI / 2 : Math.PI;
+  }
+  const have = new Set([...state.demons.values()].map((d) => d.variant));
+  for (const d of createDemons(state).values()) {
+    if (!have.has(d.variant)) state.demons.set(d.id, d);
+  }
 }
 
 // Hell-coord centre of a Hell Portal's abyssal mirror — the portal's world
@@ -1128,14 +1226,16 @@ export function soulChairAt(state: GameState, hx: number, hy: number): SoulChair
   return best;
 }
 
-// Topmost demon within DEMON.hitRadius of a hell-coord point, or null.
+// Topmost demon whose (scale-adjusted) hit radius covers a hell-coord point,
+// or null. On overlap the nearest centre wins.
 export function demonAtHell(state: GameState, hx: number, hy: number): Demon | null {
   let best: Demon | null = null;
-  let bestD = DEMON.hitRadius * DEMON.hitRadius;
+  let bestD = Infinity;
   for (const d of state.demons.values()) {
+    const r = DEMON.hitRadius * demonScaleOf(d);
     const dx = d.hx - hx, dy = d.hy - hy;
     const dd = dx * dx + dy * dy;
-    if (dd <= bestD) { bestD = dd; best = d; }
+    if (dd <= r * r && dd < bestD) { bestD = dd; best = d; }
   }
   return best;
 }
@@ -1411,6 +1511,34 @@ export function spaceBuildingAt(state: GameState, x: number, y: number): SpaceBu
     }
   }
   return best;
+}
+
+// Drifting space unit within a generous tap radius of a SPACE-coord point, or
+// null. Checked before buildings so a small unit drifting over a platform can
+// still be picked.
+const SPACE_UNIT_HIT_RADIUS = 26;
+export function spaceUnitAt(state: GameState, x: number, y: number): SpaceUnit | null {
+  let best: SpaceUnit | null = null;
+  let bestD = SPACE_UNIT_HIT_RADIUS * SPACE_UNIT_HIT_RADIUS;
+  for (const su of state.spaceUnits.values()) {
+    const dx = x - su.pos.x, dy = y - su.pos.y;
+    const d = dx * dx + dy * dy;
+    if (d <= bestD) { bestD = d; best = su; }
+  }
+  return best;
+}
+
+// Hypercentres the player can point at — finished ground ones plus any hauled
+// into orbit. Gates the Robot summon ("needs 5 hypercentres").
+export function countHypercentres(state: GameState): number {
+  let n = 0;
+  for (const b of state.buildings.values()) {
+    if (b.kind === 'hypercentre' && b.state !== 'constructing') n++;
+  }
+  for (const sb of state.spaceBuildings.values()) {
+    if (sb.building.kind === 'hypercentre') n++;
+  }
+  return n;
 }
 
 // The first finished Dragon Beacon, if any — used as a dragon's launch point.
