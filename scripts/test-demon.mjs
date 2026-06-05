@@ -22,7 +22,7 @@ await page.waitForFunction(() => !!window.__game?.state, { timeout: 15000 });
 
 // Skip the intro hold so the tick loop runs.
 await page.evaluate(() => {
-  document.body.classList.remove('intro-hold', 'bob-cutscene-hold');
+  document.body.classList.remove('intro-hold', 'intro-cutscene-hold', 'bob-cutscene-hold');
   const { state, ctx } = window.__game;
   state.bobPickingHole = false;
   state.view = 'hell';
