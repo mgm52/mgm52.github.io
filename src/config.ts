@@ -104,12 +104,11 @@ export const TINYTAUR = {
 // minotaurs, kill orders and dragon fire all pass over it. Its real purpose
 // is orbit: a robot snatched to space by a dragon survives the vacuum and is
 // the only unit able to assemble an Orbital Platform.
+// Look + orbital speed live in options (robotScale / robotTint /
+// robotGreyscale / robotSpaceSpeed) so they're tunable from the dev menu.
 export const ROBOT = {
   moneyCost: 250_000,
   hypercentresRequired: 5,
-  scale: 0.72,        // render size vs a regular goblin
-  tint: 0x9aa3ad,     // flat grey chassis
-  spaceSpeed: 55,     // space-px/sec a robot pushes itself toward a platform
   buildRange: 30,     // px past a platform's edge that counts as "on site"
 };
 
@@ -254,7 +253,9 @@ export const DEMON = {
   // it on the other side. Nudged out so they stand clear of the soul sigil
   // at the centre of the abyss.
   spawnOffsetX: 620,
-  // Demon L (and her friend) render at this fraction of the colossus.
+  // Demon L (and her friend) render at this fraction of the colossus. This is
+  // the seed stamped onto the Demon record; the LIVE size is the demonLScale
+  // dev option (same default) — see demonScaleOf in state.ts.
   smallScale: 0.5,
   // Where L's friend stands — the top-left corner of the abyss.
   friendCorner: { x: 320, y: 460 },

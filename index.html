@@ -895,6 +895,32 @@
         font-size: 11px; text-transform: uppercase; letter-spacing: 2px;
         color: #8a9099; margin-bottom: 6px;
       }
+      /* Collapsible (admin-panel) sections: a <details> whose <summary> is the
+         section title with a rotating chevron. Collapsed sections pack tight
+         so the long panel scans as a table of contents. */
+      details.options-section { margin-bottom: 4px; }
+      details.options-section[open] { margin-bottom: 14px; }
+      details.options-section > summary.options-section-title {
+        cursor: pointer;
+        list-style: none;
+        user-select: none;
+        display: flex; align-items: center; gap: 6px;
+        margin-bottom: 0;
+        padding: 4px 0;
+        border-radius: 3px;
+      }
+      details.options-section > summary.options-section-title:hover { color: #c6ccd4; }
+      details.options-section > summary.options-section-title::-webkit-details-marker { display: none; }
+      details.options-section > summary.options-section-title::before {
+        content: "▸";
+        font-size: 9px;
+        color: #6a7080;
+        transition: transform 120ms ease;
+      }
+      details.options-section[open] > summary.options-section-title::before {
+        transform: rotate(90deg);
+      }
+      details.options-section[open] > summary.options-section-title { margin-bottom: 6px; }
       .options-row {
         display: flex; align-items: center; justify-content: space-between;
         gap: 8px; padding: 3px 0;

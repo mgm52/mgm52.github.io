@@ -11,7 +11,7 @@ extensions.add(GifAsset);
 type DeathFrames = { textures: Texture[]; ends: number[]; duration: number };
 import { AMBIENT_DRAGON, BUILDING_DEFS, BuildingKind, CELL, COLS, DEMON, DRAGON, GOBLIN, HELL, RENDER_SCALE, ROBOT, ROWS, MINOTAUR, SOUL_SIGIL, SPACE, TINYTAUR, WORLD, formatPower, sigilPortalOutput } from './config';
 import { ensureFontLoaded, fontFamilyById, getOptions, onOptionsChange, type FontConfig, type Options } from './options';
-import { Building, Demon, Dragon, GameState, Ghost, Goblin, HOLE_SIZE, Minotaur, SoulChair, SpaceBuilding, SpaceUnit, WaterSource, buildingCenter, candleSpotAt, cellCenter, defOf, holeCenter, isInPlayCell, maintainerCount } from './state';
+import { Building, Demon, Dragon, GameState, Ghost, Goblin, HOLE_SIZE, Minotaur, SoulChair, SpaceBuilding, SpaceUnit, WaterSource, buildingCenter, candleSpotAt, cellCenter, defOf, demonScaleOf, holeCenter, isInPlayCell, maintainerCount } from './state';
 import { getParlaySpeaker } from './demon-dialogue';
 
 export type Camera = { x: number; y: number };
@@ -1032,10 +1032,8 @@ function makeGoblinView(g: Goblin): GoblinView {
   const sprite = new Sprite(startTex);
   sprite.anchor.set(0.5);
   sprite.scale.set(scale);
-  // Robots are grey: a plain tint can't desaturate the green goblin art, so
-  // run the sprite through the shared greyscale filter (the grey tint applied
-  // per-frame then sets the chassis tone).
-  if (g.robot) sprite.filters = [getBuildingGreyscaleFilter()];
+  // Robots get the greyscale filter applied per-frame in the sync loop (it's
+  // a live dev option), so nothing to attach here.
 
   c.addChild(shadow);
   c.addChild(ring);
@@ -1960,7 +1958,7 @@ function positionParlaySpeech(
     if (sp.kind === 'demon') {
       hx = sp.demon.hx;
       headTopHy = sp.demon.hy
-        - DEMON.displayPx * 0.5 * getOptions().demonScale * (sp.demon.scale ?? 1);
+        - DEMON.displayPx * 0.5 * getOptions().demonScale * demonScaleOf(sp.demon);
     } else {
       const g = sp.ghost;
       hx = g.hx ?? worldToHellX(g.x + (g.offX ?? 0));
@@ -2153,16 +2151,14 @@ function drawOrbitalPlatformBody(g: Graphics, size: number): void {
   g.circle(0, -half * 0.75, 5).fill(0xffd96b);
 }
 
-function makeSpaceUnitView(su: SpaceUnit): SpaceUnitView {
+function makeSpaceUnitView(): SpaceUnitView {
   const container = new Container();
   const selectionRing = new Graphics();
   selectionRing.circle(0, 0, 28).stroke({ width: 2, color: 0xffd96b });
   selectionRing.visible = false;
   const sprite = new Sprite(Texture.EMPTY);
   sprite.anchor.set(0.5);
-  // Robots are grey — desaturate the green goblin art (the tint set per-frame
-  // then shades the grey), same trick the ground robots use.
-  if (su.robot) sprite.filters = [getBuildingGreyscaleFilter()];
+  // Robot greyscale is applied per-frame in the sync loop (live dev option).
   container.addChild(selectionRing);
   container.addChild(sprite);
   return { container, sprite, selectionRing };
@@ -2422,8 +2418,9 @@ export function render(state: GameState, ctx: RenderContext) {
     }
     v.container.position.set(g.pos.x, g.pos.y);
     applyRingFlash(v.selectionRing, g.selected, g.commandFlashAt, state.now);
-    // Robots are scaled-down goblins (a small grey chassis).
-    const px = g.robot ? displayPx * ROBOT.scale : displayPx;
+    // Robots are scaled-down goblins (a small grey chassis) — size, tint and
+    // the greyscale pass are all live dev options.
+    const px = g.robot ? displayPx * opts.robotScale : displayPx;
     // Shadow under the feet — anchored at sprite center, offset down to feet.
     v.shadow.visible = opts.goblinShadow;
     if (opts.goblinShadow) {
@@ -2471,7 +2468,7 @@ export function render(state: GameState, ctx: RenderContext) {
     let tint = 0xffffff;
     // Robots are always their flat grey — the chassis doesn't blush for
     // water duty or anything else.
-    if (g.robot) tint = ROBOT.tint;
+    if (g.robot) tint = opts.robotTint;
     // Water carriers tint blue only while actually hauling water back to the
     // DC (phase to_dc). On the outbound walk to the source they look normal.
     else if (g.state.kind === 'fetching_water' && g.state.phase === 'to_dc') tint = opts.waterGoblinColor;
@@ -2479,6 +2476,7 @@ export function render(state: GameState, ctx: RenderContext) {
     else if (g.state.kind === 'building' || g.state.kind === 'going_to_build') tint = 0xfff0a8;
     else if (g.state.kind === 'maintaining' || g.state.kind === 'going_to_maintain') tint = 0xa8d8ff;
     v.sprite.tint = tint;
+    setSpriteGreyscale(v.sprite, !!g.robot && opts.robotGreyscale);
   }
   for (const [id, v] of ctx.goblinViews) {
     if (!seenG.has(id)) {
@@ -2586,10 +2584,10 @@ export function render(state: GameState, ctx: RenderContext) {
         if (v.carried.texture !== tex) v.carried.texture = tex;
         const px = u.kind === 'minotaur'
           ? (u.tiny ? opts.minotaurDisplayPx * TINYTAUR.scale : opts.minotaurDisplayPx)
-          : (u.robot ? opts.goblinDisplayPx * ROBOT.scale : opts.goblinDisplayPx);
+          : (u.robot ? opts.goblinDisplayPx * opts.robotScale : opts.goblinDisplayPx);
         v.carried.scale.set(px / sheet.meta.spriteSize);
-        v.carried.tint = u.robot ? ROBOT.tint : u.gold ? 0xffa800 : 0xffffff;
-        setSpriteGreyscale(v.carried, !!u.robot);
+        v.carried.tint = u.robot ? opts.robotTint : u.gold ? 0xffa800 : 0xffffff;
+        setSpriteGreyscale(v.carried, !!u.robot && opts.robotGreyscale);
         v.carried.visible = true;
         v.carried.position.set(0, dragonPx * 0.34);
       }
@@ -2795,7 +2793,7 @@ export function render(state: GameState, ctx: RenderContext) {
     seenSU.add(su.id);
     let v = ctx.spaceUnitViews.get(su.id);
     if (!v) {
-      v = makeSpaceUnitView(su);
+      v = makeSpaceUnitView();
       v.container.cullable = true;
       ctx.spaceLayer.addChild(v.container);
       ctx.spaceUnitViews.set(su.id, v);
@@ -2811,10 +2809,11 @@ export function render(state: GameState, ctx: RenderContext) {
       v.sprite.texture = suSheet.frames[dir][frame];
       const px = su.kind === 'minotaur'
         ? (su.tiny ? opts.minotaurDisplayPx * TINYTAUR.scale : opts.minotaurDisplayPx)
-        : (su.robot ? opts.goblinDisplayPx * ROBOT.scale : opts.goblinDisplayPx);
+        : (su.robot ? opts.goblinDisplayPx * opts.robotScale : opts.goblinDisplayPx);
       v.sprite.scale.set(px / suSheet.meta.spriteSize);
     }
-    v.sprite.tint = su.robot ? ROBOT.tint : su.gold ? 0xffa800 : 0xffffff;
+    v.sprite.tint = su.robot ? opts.robotTint : su.gold ? 0xffa800 : 0xffffff;
+    setSpriteGreyscale(v.sprite, !!su.robot && opts.robotGreyscale);
     v.selectionRing.visible = !!su.selected;
   }
   for (const [id, v] of ctx.spaceUnitViews) {
@@ -2919,10 +2918,10 @@ export function render(state: GameState, ctx: RenderContext) {
       ctx.demonViews.set(d.id, v);
     }
     v.container.position.set(d.hx, d.hy);
-    // Per-demon size (the colossus is 1, demon L and her friend 0.5) times
-    // the dev size dial — scales the whole view (sprite + shadow + ring)
-    // around the demon's hell position.
-    v.container.scale.set(opts.demonScale * (d.scale ?? 1));
+    // Per-demon size (the colossus is 1; L and her friend ride the live
+    // demonLScale option) times the all-demons dev dial — scales the whole
+    // view (sprite + shadow + ring) around the demon's hell position.
+    v.container.scale.set(opts.demonScale * demonScaleOf(d));
     applyRingFlash(v.selectionRing, d.selected, d.commandFlashAt, state.now);
     v.shadow.visible = opts.goblinShadow;
     if (opts.goblinShadow) {

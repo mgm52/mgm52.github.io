@@ -988,11 +988,11 @@ function updateDemon(state: GameState, d: Demon) {
     }
     return;
   }
-  // Demons stand still by default now, each holding its home facing (R faces
-  // left, L faces right — the pair eye each other across the abyss). The dev
-  // "walks" toggle resumes the old slow vertical patrol; the dev facing
-  // picker only covers demons without a homeFacing of their own. A live
-  // parlay still turns the demon toward the speaker (handled above).
+  // Demons stand still by default now, each holding its own dev-tunable
+  // facing (R faces left, L faces right — the pair eye each other across the
+  // abyss; the friend faces down). The dev "walks" toggle resumes the old
+  // slow vertical patrol for all of them. A live parlay still turns the
+  // demon toward the speaker (handled above).
   const o = getOptions();
   if (o.demonWalks) {
     d.hy += d.dir * DEMON.speed * TICK_S;
@@ -1000,7 +1000,11 @@ function updateDemon(state: GameState, d: Demon) {
     else if (d.hy <= d.y0) { d.hy = d.y0; d.dir = 1; }
     d.facing = d.dir > 0 ? Math.PI / 2 : -Math.PI / 2;
   } else {
-    d.facing = d.homeFacing ?? DEMON_FACING_ANGLE[o.demonFacing];
+    const variant = d.variant ?? 'pit';
+    const facing = variant === 'l' ? o.demonLFacing
+      : variant === 'friend' ? o.demonFriendFacing
+      : o.demonFacing;
+    d.facing = DEMON_FACING_ANGLE[facing];
   }
   // Steer any approaching soul and open a parlay once one is close enough.
   for (const g of state.ghosts) {
@@ -1671,7 +1675,7 @@ function updateSpaceUnit(state: GameState, su: SpaceUnit) {
       // Park just inside the build range so the robot reads as ON the site.
       const hold = def.size / 2 + ROBOT.buildRange * 0.5;
       if (dist > hold) {
-        const step = Math.min(ROBOT.spaceSpeed * TICK_S, dist - hold);
+        const step = Math.min(getOptions().robotSpaceSpeed * TICK_S, dist - hold);
         su.pos.x += (dx / dist) * step;
         su.pos.y += (dy / dist) * step;
         su.facing = Math.atan2(dy, dx);

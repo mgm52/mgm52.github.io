@@ -4,6 +4,7 @@ import {
   INITIAL_PLAY_COLS, INITIAL_PLAY_ROWS, INITIAL_PLAY_X0, INITIAL_PLAY_Y0,
   START_CELL, START_GOBLINS, START_MONEY, WALL_BORDER, WORLD, formatPower,
 } from './config';
+import { getOptions } from './options';
 
 export type Vec2 = { x: number; y: number };
 export type Cell = { cx: number; cy: number };
@@ -116,10 +117,11 @@ export type Demon = {
   // Which of the three demons this is. Optional for saves predating the
   // roster — an absent variant means the original pit colossus.
   variant?: DemonVariant;
-  // Render + collision scale vs the full colossus (1). L and her friend are 0.5.
+  // Persisted seeds only — the LIVE size and standing facing come from the
+  // dev options (demonLScale; demonFacing / demonLFacing / demonFriendFacing)
+  // so they're tunable without touching saves. See demonScaleOf and
+  // updateDemon. scale: vs the full colossus (1); homeFacing: radians.
   scale?: number;
-  // Facing held while standing still (the default now — demons no longer
-  // patrol unless the dev toggle re-enables it). Radians, atan2 convention.
   homeFacing?: number;
   hx: number; hy: number;   // absolute hell coordinates
   facing: number;           // radians (south = pacing downward)
@@ -1079,9 +1081,12 @@ export function appendLog(state: GameState, msg: string) {
   if (state.log.length > 60) state.log.shift();
 }
 
-// Per-demon size multiplier — the colossus is 1, demon L and her friend 0.5.
-// Every radius in DEMON (hit, body, parlay) scales by this.
-export function demonScaleOf(d: Demon): number { return d.scale ?? 1; }
+// Per-demon size multiplier — the colossus is 1; demon L and her friend use
+// the live demonLScale dev option (default DEMON.smallScale). Every radius in
+// DEMON (hit, body, parlay) scales by this, as does the render scale.
+export function demonScaleOf(d: Demon): number {
+  return (d.variant ?? 'pit') === 'pit' ? 1 : getOptions().demonLScale;
+}
 
 // Seed the hell denizens: the colossus (demon R) to the right of the landing
 // zone facing left, his half-size counterpart (demon L) mirrored on the other

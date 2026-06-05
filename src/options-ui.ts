@@ -128,6 +128,8 @@ export function setupOptionsUI(root: HTMLElement, callbacks: OptionsUICallbacks)
 function rebuildPublicPanel(panel: HTMLElement): void {
   panel.innerHTML = '';
   const o = getOptions();
+  // Static (non-collapsible) section — the public panel is three rows; hiding
+  // them behind a fold would just add a click.
   panel.appendChild(section('Audio', [
     slider('Master volume', o.volume,         0, 1, 0.05, (v) => setOption('volume', v)),
     slider('Music volume',  o.musicVolume,    0, 1, 0.05, (v) => setOption('musicVolume', v)),
@@ -172,13 +174,21 @@ function unlockHint(): HTMLElement {
   return hint;
 }
 
+// Shared facing choices for the per-demon standing-direction pickers.
+const FACING_OPTS = [
+  { value: 'down',  label: 'Down' },
+  { value: 'up',    label: 'Up' },
+  { value: 'left',  label: 'Left' },
+  { value: 'right', label: 'Right' },
+];
+
 function rebuildPanel(panel: HTMLElement, callbacks: OptionsUICallbacks, refreshPublic?: () => void): void {
   panel.innerHTML = '';
   const o = getOptions();
 
   panel.appendChild(unlockHint());
 
-  panel.appendChild(section('Background', [
+  panel.appendChild(collapsibleSection('Background', [
     select('Pattern', o.bgPattern, [
       { value: 'solid', label: 'Solid' },
       { value: 'checker', label: 'Checker' },
@@ -188,14 +198,14 @@ function rebuildPanel(panel: HTMLElement, callbacks: OptionsUICallbacks, refresh
     color('Out-of-bounds', o.oobColor, (v) => setOption('oobColor', v)),
   ]));
 
-  panel.appendChild(section('Grid & walls', [
+  panel.appendChild(collapsibleSection('Grid & walls', [
     toggle('Grid visible', o.gridVisible, (v) => setOption('gridVisible', v)),
     color('Grid color', o.gridColor, (v) => setOption('gridColor', v)),
     slider('Grid alpha', o.gridAlpha, 0, 1, 0.05, (v) => setOption('gridAlpha', v)),
     color('Wall color', o.wallColor, (v) => setOption('wallColor', v)),
   ]));
 
-  panel.appendChild(section('Goblins', [
+  panel.appendChild(collapsibleSection('Goblins', [
     slider('Saturation', o.goblinSaturation, 0, 2, 0.05, (v) => setOption('goblinSaturation', v)),
     slider('Brightness', o.goblinBrightness, 0.2, 2, 0.05, (v) => setOption('goblinBrightness', v)),
     slider('Sprite size', o.goblinDisplayPx, 24, 96, 1, (v) => setOption('goblinDisplayPx', v)),
@@ -206,21 +216,21 @@ function rebuildPanel(panel: HTMLElement, callbacks: OptionsUICallbacks, refresh
     color('Blood color', o.bloodColor, (v) => setOption('bloodColor', v)),
   ]));
 
-  panel.appendChild(section('Minotaurs', [
+  panel.appendChild(collapsibleSection('Minotaurs', [
     slider('Saturation', o.minotaurSaturation, 0, 2, 0.05, (v) => setOption('minotaurSaturation', v)),
     slider('Brightness', o.minotaurBrightness, 0.2, 2, 0.05, (v) => setOption('minotaurBrightness', v)),
     slider('Sprite size', o.minotaurDisplayPx, 40, 200, 1, (v) => setOption('minotaurDisplayPx', v)),
     slider('Sprite Y offset', o.minotaurSpriteYOffset, -64, 64, 1, (v) => setOption('minotaurSpriteYOffset', v)),
   ]));
 
-  panel.appendChild(section('Dragons', [
+  panel.appendChild(collapsibleSection('Dragons', [
     slider('Saturation', o.dragonSaturation, 0, 2, 0.05, (v) => setOption('dragonSaturation', v)),
     slider('Brightness', o.dragonBrightness, 0.2, 2, 0.05, (v) => setOption('dragonBrightness', v)),
     slider('Sprite size', o.dragonDisplayPx, 48, 320, 1, (v) => setOption('dragonDisplayPx', v)),
     slider('Sprite Y offset', o.dragonSpriteYOffset, -64, 64, 1, (v) => setOption('dragonSpriteYOffset', v)),
   ]));
 
-  panel.appendChild(section('Buildings', [
+  panel.appendChild(collapsibleSection('Buildings', [
     slider('Saturation', o.buildingSaturation, 0, 2, 0.05, (v) => setOption('buildingSaturation', v)),
     slider('Brightness', o.buildingBrightness, 0.2, 2, 0.05, (v) => setOption('buildingBrightness', v)),
     toggle('Show sprite',      o.buildingSpriteEnabled, (v) => setOption('buildingSpriteEnabled', v)),
@@ -230,7 +240,7 @@ function rebuildPanel(panel: HTMLElement, callbacks: OptionsUICallbacks, refresh
     toggle('Show short label', o.buildingLabelEnabled,  (v) => setOption('buildingLabelEnabled', v)),
   ]));
 
-  panel.appendChild(section('Sidebar colors', [
+  panel.appendChild(collapsibleSection('Sidebar colors', [
     color('Background',     o.sidebarBg,           (v) => setOption('sidebarBg', v)),
     color('Border',         o.sidebarBorder,       (v) => setOption('sidebarBorder', v)),
     color('Button bg',      o.sidebarButtonBg,     (v) => setOption('sidebarButtonBg', v)),
@@ -244,13 +254,13 @@ function rebuildPanel(panel: HTMLElement, callbacks: OptionsUICallbacks, refresh
     color('Cut corner border', o.buttonCutBorderColor, (v) => setOption('buttonCutBorderColor', v)),
   ]));
 
-  panel.appendChild(section('Audio', [
+  panel.appendChild(collapsibleSection('Audio', [
     slider('Master volume', o.volume,         0, 1, 0.05, (v) => { setOption('volume', v);         refreshPublic?.(); }),
     slider('Music volume',  o.musicVolume,    0, 1, 0.05, (v) => { setOption('musicVolume', v);    refreshPublic?.(); }),
     toggle('Vinyl crackle', o.crackleEnabled,                (v) => { setOption('crackleEnabled', v); refreshPublic?.(); }),
   ]));
 
-  panel.appendChild(section('Hell', [
+  panel.appendChild(collapsibleSection('Hell', [
     color('BG top',          o.hellBgTop,           (v) => setOption('hellBgTop', v)),
     color('BG bottom',       o.hellBgBottom,        (v) => setOption('hellBgBottom', v)),
     color('Glow color',      o.hellGlowColor,       (v) => setOption('hellGlowColor', v)),
@@ -264,76 +274,48 @@ function rebuildPanel(panel: HTMLElement, callbacks: OptionsUICallbacks, refresh
     color('Blood splatter',  o.hellBloodColor,      (v) => setOption('hellBloodColor', v)),
   ]));
 
-  panel.appendChild(section('Demon', [
-    slider('Size', o.demonScale, 0.2, 3, 0.05, (v) => setOption('demonScale', v)),
-    toggle('Walks (patrols)', o.demonWalks, (v) => setOption('demonWalks', v)),
-    select('Facing (standing)', o.demonFacing, [
-      { value: 'down',  label: 'Down' },
-      { value: 'up',    label: 'Up' },
-      { value: 'left',  label: 'Left' },
-      { value: 'right', label: 'Right' },
-    ], (v) => setOption('demonFacing', v as Options['demonFacing'])),
+  panel.appendChild(collapsibleSection('Demons', [
+    slider('Size (all)', o.demonScale, 0.2, 3, 0.05, (v) => setOption('demonScale', v)),
+    toggle('Walk (patrol)', o.demonWalks, (v) => setOption('demonWalks', v)),
+    select('R facing (standing)', o.demonFacing, FACING_OPTS, (v) => setOption('demonFacing', v as Options['demonFacing'])),
     slider('Saturation', o.demonSaturation, 0, 3, 0.05, (v) => setOption('demonSaturation', v)),
     slider('Brightness', o.demonBrightness, 0, 3, 0.05, (v) => setOption('demonBrightness', v)),
+    // Demon L + her identical friend — size also rescales their parlay /
+    // click / body radii (demonScaleOf reads this live).
+    slider('L & friend size', o.demonLScale, 0.1, 2, 0.05, (v) => setOption('demonLScale', v)),
+    select('L facing (standing)', o.demonLFacing, FACING_OPTS, (v) => setOption('demonLFacing', v as Options['demonLFacing'])),
+    select('Friend facing (standing)', o.demonFriendFacing, FACING_OPTS, (v) => setOption('demonFriendFacing', v as Options['demonFriendFacing'])),
+  ]));
+
+  panel.appendChild(collapsibleSection('Robots', [
+    slider('Sprite scale', o.robotScale, 0.3, 1.5, 0.02, (v) => setOption('robotScale', v)),
+    color('Chassis tint', o.robotTint, (v) => setOption('robotTint', v)),
+    toggle('Greyscale art', o.robotGreyscale, (v) => setOption('robotGreyscale', v)),
+    slider('Orbital walk speed', o.robotSpaceSpeed, 10, 200, 5, (v) => setOption('robotSpaceSpeed', v)),
   ]));
 
   panel.appendChild(fontsSection(o));
 
-  const cheat = document.createElement('button');
-  cheat.type = 'button';
-  cheat.className = 'options-reset';
-  cheat.textContent = 'Cheat +Ƶ1,000,000';
-  cheat.addEventListener('click', () => callbacks.onCheatMoney());
-  panel.appendChild(cheat);
-
-  const cheatBlood = document.createElement('button');
-  cheatBlood.type = 'button';
-  cheatBlood.className = 'options-reset';
-  cheatBlood.textContent = 'Cheat +1,000 blood';
-  cheatBlood.addEventListener('click', () => callbacks.onCheatBlood());
-  panel.appendChild(cheatBlood);
-
-  const cheatPower = document.createElement('button');
-  cheatPower.type = 'button';
-  cheatPower.className = 'options-reset';
-  cheatPower.textContent = 'Cheat +1 GW power';
-  cheatPower.addEventListener('click', () => callbacks.onCheatPower());
-  panel.appendChild(cheatPower);
-
-  const cheatBones = document.createElement('button');
-  cheatBones.type = 'button';
-  cheatBones.className = 'options-reset';
-  cheatBones.textContent = 'Cheat +100 dragon bones';
-  cheatBones.addEventListener('click', () => callbacks.onCheatBones());
-  panel.appendChild(cheatBones);
-
-  const cheatBob = document.createElement('button');
-  cheatBob.type = 'button';
-  cheatBob.className = 'options-reset';
-  cheatBob.textContent = 'Cheat: trigger Bob on next building';
-  cheatBob.addEventListener('click', () => callbacks.onTriggerBob());
-  panel.appendChild(cheatBob);
-
-  const skipHell = document.createElement('button');
-  skipHell.type = 'button';
-  skipHell.className = 'options-reset';
-  skipHell.textContent = 'Cheat: skip to hell';
-  skipHell.addEventListener('click', () => callbacks.onSkipToHell());
-  panel.appendChild(skipHell);
-
-  const taskSkip = document.createElement('button');
-  taskSkip.type = 'button';
-  taskSkip.className = 'options-reset';
-  taskSkip.textContent = 'Work skip';
-  taskSkip.addEventListener('click', () => callbacks.onTaskSkip());
-  panel.appendChild(taskSkip);
-
-  const showTitle = document.createElement('button');
-  showTitle.type = 'button';
-  showTitle.className = 'options-reset';
-  showTitle.textContent = 'Show title screen';
-  showTitle.addEventListener('click', () => callbacks.onShowTitleScreen());
-  panel.appendChild(showTitle);
+  // Cheats + debug shortcuts, folded into their own section like everything
+  // else so the panel's tail doesn't sprawl.
+  const cheatButton = (label: string, onClick: () => void): HTMLElement => {
+    const b = document.createElement('button');
+    b.type = 'button';
+    b.className = 'options-reset';
+    b.textContent = label;
+    b.addEventListener('click', onClick);
+    return b;
+  };
+  panel.appendChild(collapsibleSection('Cheats', [
+    cheatButton('Cheat +Ƶ1,000,000', callbacks.onCheatMoney),
+    cheatButton('Cheat +1,000 blood', callbacks.onCheatBlood),
+    cheatButton('Cheat +1 GW power', callbacks.onCheatPower),
+    cheatButton('Cheat +100 dragon bones', callbacks.onCheatBones),
+    cheatButton('Cheat: trigger Bob on next building', callbacks.onTriggerBob),
+    cheatButton('Cheat: skip to hell', callbacks.onSkipToHell),
+    cheatButton('Work skip', callbacks.onTaskSkip),
+    cheatButton('Show title screen', callbacks.onShowTitleScreen),
+  ]));
 
   const reset = document.createElement('button');
   reset.type = 'button';
@@ -364,7 +346,7 @@ function fontsSection(o: Options): HTMLElement {
     const cfg = o.fonts[key];
     rows.push(fontRow(label, key, cfg.family, cfg.scale, familyOpts));
   }
-  return section('Fonts', rows);
+  return collapsibleSection('Fonts', rows);
 }
 
 function fontRow(
@@ -426,6 +408,40 @@ function section(title: string, rows: HTMLElement[]): HTMLElement {
   h.textContent = title;
   wrap.appendChild(h);
   for (const r of rows) wrap.appendChild(r);
+  return wrap;
+}
+
+// ─── Collapsible sections ───────────────────────────────────────────
+// The admin panel grew far past one screenful, so every section folds into a
+// native <details> with the title as its <summary>. Which sections are open
+// persists in localStorage (collapsed by default), surviving panel rebuilds
+// (Reset to defaults) and reloads alike.
+const OPEN_SECTIONS_KEY = 'gs.optionsPanel.openSections';
+let openSections: Set<string> | null = null;
+function getOpenSections(): Set<string> {
+  if (openSections) return openSections;
+  try {
+    openSections = new Set(JSON.parse(localStorage.getItem(OPEN_SECTIONS_KEY) ?? '[]') as string[]);
+  } catch {
+    openSections = new Set();
+  }
+  return openSections;
+}
+function collapsibleSection(title: string, rows: HTMLElement[]): HTMLElement {
+  const open = getOpenSections();
+  const wrap = document.createElement('details');
+  wrap.className = 'options-section';
+  wrap.open = open.has(title);
+  const summary = document.createElement('summary');
+  summary.className = 'options-section-title';
+  summary.textContent = title;
+  wrap.appendChild(summary);
+  for (const r of rows) wrap.appendChild(r);
+  wrap.addEventListener('toggle', () => {
+    if (wrap.open) open.add(title);
+    else open.delete(title);
+    try { localStorage.setItem(OPEN_SECTIONS_KEY, JSON.stringify([...open])); } catch { /* no-op */ }
+  });
   return wrap;
 }
 
