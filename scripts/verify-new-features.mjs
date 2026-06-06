@@ -148,7 +148,7 @@ check('lying about friend punishes (ghost struck back, Bob resurrected)',
   JSON.stringify({ bobsBefore, bobsAfter }));
 
 // ── 4) Visit the friend, then answer truthfully → reward ──
-// Her Bob parlay has two choice points (master YES/NO, then NOTHING/NOTHING);
+// Her Bob parlay has two choice points (I DO / I DON'T, then ". . ." twice);
 // both answers are equivalent, so just click the first button through each.
 await sendSoul('friend', { bob: true });
 await waitOverlay();
@@ -163,6 +163,15 @@ const friendGreeted = await page.evaluate(() =>
 check('friend marks greeted after visit', friendGreeted, [...fLines].join(' / '));
 check('friend talks of golf (plain speech)', [...fLines].some((l) => l.includes('talked of golf')),
   [...fLines].join(' / '));
+
+// She only says her piece once — a repeat caller just gets "go quietly".
+await sendSoul('friend', { bob: true });
+await waitOverlay();
+const f2Lines = new Set();
+await drive({ capture: f2Lines });
+check('repeat friend visit gets "go quietly"',
+  [...f2Lines].some((l) => l.includes('go quietly')) && ![...f2Lines].some((l) => l.includes('golf')),
+  [...f2Lines].join(' / '));
 
 await sendSoul('l', { bob: true });
 await waitOverlay();

@@ -419,23 +419,33 @@ export async function runDemonDialogue(state: GameState, demon: Demon, ghost: Gh
       // soul that comes to visit counts as "speaking to the friend" (this
       // demon's `greeted` flag is the truth demon L's friend-question is
       // judged against). With Bob she pries gently at his servitude; he has
-      // no good answers, so every choice lands in the same place.
-      await say('demon', 'little one. . .');
-      await soulOpener();
-      if (ghost.bob) {
-        await say('demon', 'does your master treat you well?', { hold: true });
-        await ask();                  // YES or NO — Bob can't commit to either
-        await say('bob', ". . . i don't know");
-        await say('demon', 'quietly, my child');
-        await say('demon', 'what did you want to do in life?', { hold: true });
-        await choose(['NOTHING', 'NOTHING']);
-        await say('bob', "i don't remember");
-        await say('demon', 'do you, too, want to _leave_ this place?');
-        await say('bob', '. . .');
-        await say('demon', 'tell the others we talked of golf');
+      // no good answers, so every choice lands in the same place. She only
+      // says her piece once — anyone calling again is sent away.
+      if (demon.toldOfGolf) {
+        await say('demon', 'go quietly');
       } else {
-        await say('demon', '. . .');
-        await say('demon', 'i do not know your words. but thank you for coming');
+        await say('demon', 'little one. . .');
+        await soulOpener();
+        if (ghost.bob) {
+          await say('demon', 'does your master treat you well?', { hold: true });
+          await choose(['I DO', "I DON'T"]); // either answer; Bob can't commit
+          await say('bob', ". . . i don't know");
+          await say('demon', 'quietly, my child');
+          await say('demon', 'what did you want to do in life?', { hold: true });
+          await choose(['. . .', '. . .']);  // Bob has nothing, either way
+          await say('bob', "i don't remember");
+          await ellipsisBeat();
+          await say('demon', 'do you, too, want to _leave_ this place?');
+          // Bob's answer is silence — the same lingering trail-off beat as
+          // the demons' own ". . ." lines.
+          await say('bob', '. . .', { autoMs: 1200 });
+          await sleep(650);
+          await say('demon', 'tell the others we talked of golf');
+          demon.toldOfGolf = true;
+        } else {
+          await say('demon', '. . .');
+          await say('demon', 'i do not know your words. but thank you for coming');
+        }
       }
     } else if (variant === 'l') {
       // Demon L — the half-size demon across the abyss. Quizzes a talking

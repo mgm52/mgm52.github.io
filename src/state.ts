@@ -139,6 +139,11 @@ export type Demon = {
   // Set after this demon's first failed parlay, when his brush-off ends with an
   // extra "try another" nudge. The extra line only ever plays once.
   hintedTryAnother: boolean;
+  // Corner demon (variant 'friend') only: set once Bob has heard her whole
+  // conversation through to "tell the others we talked of golf". She only says
+  // her piece once — every visitor afterwards is sent away with a curt "go
+  // quietly". Optional for saves predating the corner dialogue.
+  toldOfGolf?: boolean;
   // Id of the ghost currently mid-parlay, or null. Only one soul may speak at a
   // time; while set the demon stands still and faces the speaker.
   busyWith: number | null;
