@@ -14,7 +14,7 @@ import {
 } from './state';
 
 type Speaker = 'demon' | 'goblin' | 'bob';
-type Seg = { t: string; em: boolean };
+type Seg = { t: string; em: boolean; white: boolean };
 
 // ─── Demon voices ───────────────────────────────────────────────────
 // Every demon line is authored in plain lowercase English and run through the
@@ -159,13 +159,18 @@ function escapeHtml(s: string): string {
   return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
 }
 
-// Split on "*" so odd-indexed chunks render emphasised.
+// "*...*" wraps a phrase in hellfire-red emphasis; "_..._" in the corner
+// demon's pale white. Both markers toggle, so split on either and track which
+// is open.
 function parseEmphasis(text: string): Seg[] {
   const segs: Seg[] = [];
-  const parts = text.split('*');
-  for (let i = 0; i < parts.length; i++) {
-    if (parts[i].length === 0) continue;
-    segs.push({ t: parts[i], em: i % 2 === 1 });
+  let em = false;
+  let white = false;
+  for (const part of text.split(/([*_])/)) {
+    if (part === '*') { em = !em; continue; }
+    if (part === '_') { white = !white; continue; }
+    if (part.length === 0) continue;
+    segs.push({ t: part, em: em || white, white });
   }
   return segs;
 }
@@ -179,7 +184,7 @@ function renderTyped(segs: Seg[], count: number): string {
     if (remaining <= 0) break;
     const take = Math.min(seg.t.length, remaining);
     const part = escapeHtml(seg.t.slice(0, take));
-    html += seg.em ? `<em class="demon-em">${part}</em>` : part;
+    html += seg.em ? `<em class="demon-em${seg.white ? ' white' : ''}">${part}</em>` : part;
     remaining -= take;
   }
   return html;
@@ -371,8 +376,9 @@ export async function runDemonDialogue(state: GameState, demon: Demon, ghost: Gh
   await sleep(60);
 
   // The "speak to me" greeting only ever plays the first time a soul
-  // approaches the colossus. Demon L and her friend instead open EVERY
-  // conversation with their backwards "darling. . ." ("gnilrad. . .").
+  // approaches the colossus. Demon L instead opens EVERY conversation with
+  // her backwards "darling. . ." ("gnilrad. . ."), her corner friend with
+  // "little one. . ." ("elttil eno. . .").
   const greet = !demon.greeted;
   demon.greeted = true;
   const variant = demon.variant ?? 'pit';
@@ -407,16 +413,24 @@ export async function runDemonDialogue(state: GameState, demon: Demon, ghost: Gh
 
   try {
     if (variant === 'friend') {
-      // Demon L's friend — identical to her sister, but stationed alone in
-      // the corner of the abyss. Any soul that comes to visit counts as
-      // "speaking to the friend" (this demon's `greeted` flag is the truth
-      // demon L's friend-question is judged against).
-      await say('demon', 'darling. . .');
+      // Demon L's friend — stationed alone in the corner of the abyss. Any
+      // soul that comes to visit counts as "speaking to the friend" (this
+      // demon's `greeted` flag is the truth demon L's friend-question is
+      // judged against). With Bob she pries gently at his servitude; he has
+      // no good answers, so every choice lands in the same place.
+      await say('demon', 'little one. . .');
       await soulOpener();
       if (ghost.bob) {
-        await say('demon', 'it is so quiet in this corner');
-        await say('demon', 'thank you for coming to see me');
-        await say('demon', 'tell my sister i said hello');
+        await say('demon', 'does your master treat you well?', { hold: true });
+        await ask();                  // YES or NO — Bob can't commit to either
+        await say('bob', ". . . i don't know");
+        await say('demon', 'quietly, my child');
+        await say('demon', 'what did you want to do in life?', { hold: true });
+        await choose(['NOTHING', 'NOTHING']);
+        await say('bob', "i don't remember");
+        await say('demon', 'do you, too, want to _leave_ this place?');
+        await say('bob', '. . .');
+        await say('demon', 'tell the others we talked of golf');
       } else {
         await say('demon', '. . .');
         await say('demon', 'i do not know your words. but thank you for coming');

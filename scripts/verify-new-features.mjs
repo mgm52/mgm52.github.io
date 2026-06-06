@@ -26,6 +26,10 @@ await page.waitForFunction(() => !!window.__game?.state, { timeout: 15000 });
 await page.evaluate(() => {
   document.body.classList.remove('intro-hold', 'intro-cutscene-hold', 'bob-cutscene-hold');
   window.__game.state.bobPickingHole = false;
+  // Stripping the classes isn't enough: the intro sequence is still running
+  // in the background and re-freezes the tick loop (intro-cutscene-hold)
+  // when its goblin turns to face the player. Skip it outright.
+  window.__game.skipIntro();
 });
 
 // ── 1) Demon roster: three demons, standing, facings/scales/positions ──
@@ -144,13 +148,21 @@ check('lying about friend punishes (ghost struck back, Bob resurrected)',
   JSON.stringify({ bobsBefore, bobsAfter }));
 
 // ── 4) Visit the friend, then answer truthfully → reward ──
+// Her Bob parlay has two choice points (master YES/NO, then NOTHING/NOTHING);
+// both answers are equivalent, so just click the first button through each.
 await sendSoul('friend', { bob: true });
 await waitOverlay();
 const fLines = new Set();
-await drive({ capture: fLines });
+let fRes = await drive({ stopAtChoice: true, capture: fLines });
+while (fRes.choice) {
+  await page.click('#demon-yes');
+  fRes = await drive({ stopAtChoice: true, capture: fLines });
+}
 const friendGreeted = await page.evaluate(() =>
   [...window.__game.state.demons.values()].find((d) => d.variant === 'friend').greeted);
 check('friend marks greeted after visit', friendGreeted, [...fLines].join(' / '));
+check('friend talks of golf (backwards)', [...fLines].some((l) => l.includes('flog')),
+  [...fLines].join(' / '));
 
 await sendSoul('l', { bob: true });
 await waitOverlay();
@@ -308,7 +320,8 @@ const uiBits = await page.evaluate(() => {
     orbitalVisibleInSpace: orbitalBtn && orbitalBtn.style.display !== 'none',
   };
 });
-check('robot button + "needs 5 hypercentres" banner', uiBits.robotBtnExists && uiBits.warnText === 'needs 5 hypercentres', JSON.stringify(uiBits));
+// The banner renders ROBOT.hypercentresRequired — don't pin the number here.
+check('robot button + "needs N hypercentres" banner', uiBits.robotBtnExists && /^needs \d+ hypercentres$/.test(uiBits.warnText ?? ''), JSON.stringify(uiBits));
 check('orbital platform button shows in space view', uiBits.orbitalExists && uiBits.orbitalVisibleInSpace);
 
 await browser.close();

@@ -585,9 +585,12 @@ async function main() {
   }
 
   // Dev-only debug handle for manual + automated testing. Stripped from
-  // production builds (import.meta.env.DEV is false there).
+  // production builds (import.meta.env.DEV is false there). skipIntro lets
+  // test scripts cut the new-game intro short — left running, it re-freezes
+  // the tick loop (intro-cutscene-hold) when the goblin turns to face the
+  // player, stalling any sim-driven checks in flight at that moment.
   if (import.meta.env.DEV) {
-    (window as Window & { __game?: unknown }).__game = { state, ctx, spawnDragon, spawnMinotaur, spawnRobot };
+    (window as Window & { __game?: unknown }).__game = { state, ctx, spawnDragon, spawnMinotaur, spawnRobot, skipIntro };
   }
 
   // Center the camera on the middle of the initial play area, not on the
