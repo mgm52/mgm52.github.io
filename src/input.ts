@@ -17,6 +17,9 @@ type ActivePointer = {
   startX: number; startY: number;
   x: number; y: number;
   worldStartX: number; worldStartY: number;
+  // True for touch pointers — only these are reconciled against the browser's
+  // TouchEvent.touches list (see reconcileTouchPointers in setupInput).
+  touch: boolean;
 };
 
 type InputState = {
@@ -98,6 +101,7 @@ export function setupInput(
       startX: e.global.x, startY: e.global.y,
       x: e.global.x, y: e.global.y,
       worldStartX: local.x, worldStartY: local.y,
+      touch: e.pointerType === 'touch',
     });
 
     // No world building/commanding while looking at space — but a single
@@ -506,6 +510,52 @@ export function setupInput(
   app.stage.on('pointerupoutside', onPointerUp);
   app.stage.on('pointercancel', onPointerUp);
 
+  // ── Stale-pointer reconciliation ────────────────────────────────────────
+  // iOS Safari can swallow a touch's pointerup/pointercancel entirely when a
+  // system gesture takes over mid-press (revealing the bottom toolbar with an
+  // edge swipe, app switch, notification pull). The orphaned entry then sits
+  // in input.pointers forever, after which every one-finger tap counts as a
+  // "second finger": pointerdown takes the two-finger-pan branch and
+  // pointerup hits the wasPanning early-return — and the wasPanning path only
+  // deletes the NEW pointer, so the canvas stays dead until a reload. The
+  // browser's TouchEvent.touches list is authoritative, so on every touch
+  // transition drop the oldest tracked touches until the map matches it.
+  // (A finger's pointer events fire before its compatibility touch events,
+  // so by touchstart the new finger is already in the map and never pruned.)
+  const reconcileTouchPointers = (e: TouchEvent) => {
+    const live = e.touches.length;
+    let tracked = 0;
+    for (const p of input.pointers.values()) if (p.touch) tracked++;
+    if (tracked <= live) return;
+    // Map iteration follows insertion order — the oldest entries are the
+    // stale ones. Mouse/pen pointers get reliable up events; skip them.
+    for (const [id, p] of input.pointers) {
+      if (tracked <= live) break;
+      if (!p.touch) continue;
+      input.pointers.delete(id);
+      tracked--;
+    }
+    if (input.pointers.size < 2) input.panLast = null;
+    if (input.pointers.size === 0) resetGestureState(input);
+  };
+  window.addEventListener('touchstart', reconcileTouchPointers, { capture: true, passive: true });
+  window.addEventListener('touchend', reconcileTouchPointers, { capture: true, passive: true });
+  window.addEventListener('touchcancel', reconcileTouchPointers, { capture: true, passive: true });
+
+  // No touch survives the page going to the background — drop every tracked
+  // pointer outright so a gesture interrupted by an app/tab switch can't
+  // leave the map poisoned even if the touch listeners above never fire.
+  const dropAllPointers = () => {
+    input.pointers.clear();
+    input.panLast = null;
+    resetGestureState(input);
+  };
+  window.addEventListener('blur', dropAllPointers);
+  window.addEventListener('pagehide', dropAllPointers);
+  document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState === 'hidden') dropAllPointers();
+  });
+
   window.addEventListener('keydown', (e) => {
     if (e.key === 'Escape') {
       state.pendingBuild = null;
@@ -672,6 +722,18 @@ function scheduleLongPress(
       handleRightClick(state, world.x, world.y);
     }
   }, LONG_PRESS_MS);
+}
+
+// Abandon any in-flight single-pointer gesture (drag-select, pending tap,
+// long-press) without touching the pointers map itself. Used when pointer
+// tracking is reset wholesale (stale-pointer reconciliation, tab hidden).
+function resetGestureState(input: InputState) {
+  cancelLongPress(input);
+  input.longPressFired = false;
+  input.isDragging = false;
+  input.spaceTapStart = null;
+  input.selectionGfx.clear();
+  input.spaceSelectionGfx.clear();
 }
 
 function cancelLongPress(input: InputState) {
