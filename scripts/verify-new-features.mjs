@@ -161,7 +161,7 @@ while (fRes.choice) {
 const friendGreeted = await page.evaluate(() =>
   [...window.__game.state.demons.values()].find((d) => d.variant === 'friend').greeted);
 check('friend marks greeted after visit', friendGreeted, [...fLines].join(' / '));
-check('friend talks of golf (backwards)', [...fLines].some((l) => l.includes('flog')),
+check('friend talks of golf (plain speech)', [...fLines].some((l) => l.includes('talked of golf')),
   [...fLines].join(' / '));
 
 await sendSoul('l', { bob: true });

@@ -19,16 +19,18 @@ type Seg = { t: string; em: boolean; white: boolean };
 // ─── Demon voices ───────────────────────────────────────────────────
 // Every demon line is authored in plain lowercase English and run through the
 // speaker's voice at say-time. The pit colossus (demon R) BELLOWS IN ALL
-// CAPS; demon L and her corner-dwelling friend speak each word backwards in
-// lowercase — "darling…" comes out as "gnilrad…". Punctuation, spacing, and
-// the *emphasis* markers stay where they are, so the ". . ." beats and the
-// <em> styling survive both voices.
+// CAPS; demon L speaks each word backwards in lowercase — "darling…" comes
+// out as "gnilrad…". Her corner-dwelling friend speaks plainly. Punctuation,
+// spacing, and the *emphasis* markers stay where they are, so the ". . ."
+// beats and the <em> styling survive every voice.
 function backwardsSpeech(text: string): string {
   return text.toLowerCase().replace(/[a-z0-9']+/g, (w) => [...w].reverse().join(''));
 }
 function demonVoice(demon: Demon, text: string): string {
   const variant = demon.variant ?? 'pit';
-  return variant === 'pit' ? text.toUpperCase() : backwardsSpeech(text);
+  if (variant === 'pit') return text.toUpperCase();
+  if (variant === 'friend') return text;
+  return backwardsSpeech(text);
 }
 
 // Who is currently speaking in the live parlay, so the renderer can float the
@@ -310,8 +312,8 @@ export async function runDemonDialogue(state: GameState, demon: Demon, ghost: Gh
   // hold: leave the line on screen (no click/auto, speech stays visible) — used
   // for the question line so it remains readable while the answer buttons show.
   // Demon lines are authored in plain lowercase and pass through the speaking
-  // demon's voice (ALL CAPS for the colossus, backwards words for L and her
-  // friend) on the way to the bubble.
+  // demon's voice (ALL CAPS for the colossus, backwards words for L, plain
+  // speech for her corner friend) on the way to the bubble.
   async function say(who: Speaker, text: string, opts: { autoMs?: number; hold?: boolean } = {}): Promise<void> {
     // Anchor the speech bubble over whoever's talking: the demon for its lines,
     // the approaching soul for goblin/bob lines.
@@ -377,8 +379,8 @@ export async function runDemonDialogue(state: GameState, demon: Demon, ghost: Gh
 
   // The "speak to me" greeting only ever plays the first time a soul
   // approaches the colossus. Demon L instead opens EVERY conversation with
-  // her backwards "darling. . ." ("gnilrad. . ."), her corner friend with
-  // "little one. . ." ("elttil eno. . .").
+  // her backwards "darling. . ." ("gnilrad. . ."), her corner friend with a
+  // plain-spoken "little one. . .".
   const greet = !demon.greeted;
   demon.greeted = true;
   const variant = demon.variant ?? 'pit';

@@ -47,7 +47,7 @@ for (let i = 0; i < 400; i++) {
   });
   if (s.whiteEm) {
     sawWhiteEm = true;
-    if (!shot && s.line.includes('ecalp')) { // full line typed
+    if (!shot && s.line.includes('place')) { // full line typed
       await page.screenshot({ path: 'screenshots/corner-demon-leave.png' });
       shot = true;
       console.log('white em content:', JSON.stringify(s.whiteEm));
