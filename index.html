@@ -1394,8 +1394,11 @@
         opacity: 1;
         pointer-events: auto;
       }
+      /* min-width keeps the short YES/NO answers symmetric while letting a
+         longer label ("I DON'T") widen its button instead of wrapping. */
       #demon-buttons .build-button {
-        width: 130px;
+        width: auto;
+        min-width: 130px;
         box-shadow:
           0 6px 18px rgba(0, 0, 0, 0.55),
           0 2px 6px rgba(0, 0, 0, 0.45);
@@ -1405,6 +1408,7 @@
         font-size: 22px;
         letter-spacing: 0.2em;
         text-align: center;
+        white-space: nowrap;
       }
 
       /* ───────── Portrait phones — stacked layout ─────────
