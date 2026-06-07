@@ -298,6 +298,16 @@ export function revealSecretSettings(state: GameState): void {
   );
 }
 
+// Click-to-skip bookkeeping for the WORK COMPLETE overlay. Each in-flight
+// celebration parks its timers + completion work here so a click on the
+// overlay can fast-forward the whole stack straight to the unlock reveal.
+// The short buffer stops a click that was already in flight as the overlay
+// popped from blowing past it unseen.
+const OVERLAY_SKIP_BUFFER_MS = 300;
+let overlayShownAt = 0;
+type PendingCelebration = { taskId: string; fadeTimer: number; armTimer: number };
+const pendingCelebrations: PendingCelebration[] = [];
+
 // Plays the "TASK COMPLETE" overlay + a short Skyrim-ish drum-then-fanfare
 // tap. Idempotent in the sense that re-triggers stack the timer; the overlay
 // just stays "shown" longer if multiple tasks complete in quick succession.
@@ -318,14 +328,16 @@ function playTaskCompleteAnimation(taskId: string): void {
   const subtitleEl = overlay.querySelector('.task-complete-subtitle');
   if (subtitleEl) subtitleEl.textContent = task?.text ?? '';
   overlay.classList.add('shown');
+  overlayShownAt = performance.now();
   // "Level Up/Mission Complete (Resistance)" by Dylan Kelk (freesound 672801).
   playSound('task_complete', 1);
+  const entry: PendingCelebration = { taskId, fadeTimer: 0, armTimer: 0 };
   // Hold the overlay for ~2.5s, then fade out (CSS handles the 600ms fade). As it
   // starts fading we snap the build panel back to the top: the staged reveal
   // that follows smooth-scrolls down to each unlock in turn, so starting from
   // the top turns the walk into one clean downward sweep. The jump happens
   // behind the still-opaque overlay, so it isn't visible as a lurch.
-  window.setTimeout(() => {
+  entry.fadeTimer = window.setTimeout(() => {
     overlay.classList.remove('shown');
     buildScrollContainer().scrollTo({ top: 0, behavior: 'auto' });
   }, 2700);
@@ -333,11 +345,35 @@ function playTaskCompleteAnimation(taskId: string): void {
   // next refreshUI pass collects every freshly-shown item into revealQueue
   // (held invisible via .reveal-hidden) and then kicks off the staged
   // one-by-one reveal at the end of that same pass.
-  window.setTimeout(() => {
-    revealedTaskIds.add(taskId);
-    celebrationsInFlight = Math.max(0, celebrationsInFlight - 1);
-    revealArmed = true;
-  }, 3300);
+  entry.armTimer = window.setTimeout(() => finishCelebration(entry), 3300);
+  pendingCelebrations.push(entry);
+}
+
+// The post-overlay bookkeeping: the task's unlocks may now take effect and
+// the staged reveal arms. Shared by the natural timer and the click-skip.
+function finishCelebration(entry: PendingCelebration): void {
+  const i = pendingCelebrations.indexOf(entry);
+  if (i >= 0) pendingCelebrations.splice(i, 1);
+  revealedTaskIds.add(entry.taskId);
+  celebrationsInFlight = Math.max(0, celebrationsInFlight - 1);
+  revealArmed = true;
+}
+
+// Click-to-skip: a click on the shown overlay (after the short buffer) drops
+// it immediately and fast-forwards every stacked celebration, so the next
+// refreshUI pass kicks the staged unlock reveal right away.
+function skipCelebrationOverlay(): void {
+  const overlay = document.getElementById('task-complete-overlay');
+  if (!overlay?.classList.contains('shown')) return;
+  if (performance.now() - overlayShownAt < OVERLAY_SKIP_BUFFER_MS) return;
+  if (pendingCelebrations.length === 0) return;
+  overlay.classList.remove('shown');
+  buildScrollContainer().scrollTo({ top: 0, behavior: 'auto' });
+  for (const entry of [...pendingCelebrations]) {
+    window.clearTimeout(entry.fadeTimer);
+    window.clearTimeout(entry.armTimer);
+    finishCelebration(entry);
+  }
 }
 
 // Pulls the next element due a staged reveal: queued unlocks first (in visual
@@ -534,7 +570,7 @@ const TASKS: Task[] = [
     // one dragon incinerates another, so this needs the Dragon Beacon
     // (build_hypercentre) first. Grants no building.
     id: 'collect_dragon_bones',
-    text: 'Collect 5 dragon bones',
+    text: 'Collect 5 dragon bones (somehow…)',
     unlocks: [],
     isDone: (s) => s.dragonBoneEarned >= 5,
     prereq: ['build_hypercentre'],
@@ -575,6 +611,12 @@ export function setupUI(state: GameState, callbacks: UICallbacks) {
       'scroll', () => updateScrollAffordances(lastPanelBuildVisible), { passive: true },
     );
   }
+
+  // The WORK COMPLETE overlay is click-to-skip (after a short buffer) —
+  // see skipCelebrationOverlay. While shown it also soaks up the click so
+  // it can't reach the buttons underneath (CSS pointer-events in index.html).
+  document.getElementById('task-complete-overlay')
+    ?.addEventListener('click', skipCelebrationOverlay);
 
   // Tapping a scroll-cue arrow nudges the panel by most of a page in that
   // direction, so each doubles as a control, not just an indicator.
@@ -2284,6 +2326,10 @@ function describeGoblinState(state: GameState, s: GoblinState): string {
         ? `Fetching water for ${buildingLabel(state, s.buildingId)}`
         : `Delivering water to ${buildingLabel(state, s.buildingId)}`;
     case 'going_to_kill': return `Hunting goblin #${s.targetId}`;
+    case 'firing_laser': {
+      const noun = s.targetKind === 'goblin' ? 'goblin' : s.targetKind === 'minotaur' ? 'Minotaur' : 'Dragon';
+      return `Firing laser at ${noun} #${s.targetId}`;
+    }
   }
 }
 

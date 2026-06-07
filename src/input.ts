@@ -1138,10 +1138,15 @@ function handleRightClick(state: GameState, x: number, y: number) {
     : null;
   if (goblinHostBuilding) targetGoblin = null;
   const targetMinotaur = (targetGoblin || goblinHostBuilding) ? null : minotaurAt(state, x, y);
-  // A dragon target for fratricide: any non-selected dragon under the cursor.
-  // Only meaningful when dragons are selected; skip the scan otherwise.
+  // Robots fire lasers at any unit they're commanded onto — including
+  // dragons — so the dragon-under-cursor scan also runs for them.
+  const selectedRobots = selectedGoblins.filter((g) => g.robot);
+  // A dragon target for fratricide (or a robot's laser): any non-selected
+  // dragon under the cursor. Only meaningful when dragons or robots are
+  // selected; skip the scan otherwise.
   let targetDragon: Dragon | null = null;
-  if (!targetGoblin && !targetMinotaur && !goblinHostBuilding && selectedDragons.length > 0) {
+  if (!targetGoblin && !targetMinotaur && !goblinHostBuilding
+    && (selectedDragons.length > 0 || selectedRobots.length > 0)) {
     const selIds = new Set(selectedDragons.map((d) => d.id));
     for (const d of state.dragons.values()) {
       if (selIds.has(d.id)) continue;
@@ -1301,12 +1306,37 @@ function handleRightClick(state: GameState, x: number, y: number) {
 
   if (selectedGoblins.length === 0) return;
 
+  // Robot laser order: commanding a robot onto any unit — goblin, minotaur,
+  // or even a dragon — has it stand fast and shoot a laser instead of the
+  // melee chase. (Another robot is no target: nothing can kill a robot, so
+  // a click on one falls through to the plain move order below.)
+  const laserTarget =
+    (targetGoblin && !targetGoblin.robot) ? { kind: 'goblin' as const, unit: targetGoblin, label: `goblin #${targetGoblin.id}` }
+    : targetMinotaur ? { kind: 'minotaur' as const, unit: targetMinotaur, label: `Minotaur #${targetMinotaur.id}` }
+    : targetDragon ? { kind: 'dragon' as const, unit: targetDragon, label: `Dragon #${targetDragon.id}` }
+    : null;
+  const lasering = selectedRobots.length > 0 && laserTarget !== null;
+  if (lasering) {
+    laserTarget.unit.commandFlashAt = state.now;
+    for (const r of selectedRobots) {
+      releaseFromBuilding(state, r);
+      r.goal = null;
+      r.path = [];
+      r.state = { kind: 'firing_laser', targetKind: laserTarget.kind, targetId: laserTarget.unit.id };
+    }
+    appendLog(state, `${selectedRobots.length} robot(s) lock lasers on ${laserTarget.label}.`);
+  }
+  // Robots with a firing order are spoken for; the rest of the click applies
+  // to the remaining selection.
+  const commandables = lasering ? selectedGoblins.filter((g) => !g.robot) : selectedGoblins;
+  if (commandables.length === 0) return;
+
   // Kill order: right-click on another goblin sends every selected attacker
   // toward it. The target itself, even if selected, is excluded so the order
   // never resolves to "kill yourself". Robots can't die — a click on one
   // falls through to a plain move order instead of an unwinnable hunt.
   if (targetGoblin && !targetGoblin.robot) {
-    const attackers = selectedGoblins.filter(g => g.id !== targetGoblin.id);
+    const attackers = commandables.filter(g => g.id !== targetGoblin.id);
     if (attackers.length > 0) {
       targetGoblin.commandFlashAt = state.now;
       for (const g of attackers) {
@@ -1322,10 +1352,10 @@ function handleRightClick(state: GameState, x: number, y: number) {
 
   if (targetBuilding) {
     targetBuilding.commandFlashAt = state.now;
-    assignToBuilding(state, selectedGoblins, targetBuilding);
+    assignToBuilding(state, commandables, targetBuilding);
   } else {
     const reserved = new Set<string>();
-    for (const g of selectedGoblins) {
+    for (const g of commandables) {
       releaseFromBuilding(state, g);
       const cell = findFreeCellNear(state, targetCell.cx, targetCell.cy, g.id, reserved, 600);
       if (cell) {

@@ -33,7 +33,11 @@ export type GoblinState =
   // collectingSince records when the goblin first stepped into the water on
   // the current trip; they have to dwell for 1s before phase flips to to_dc.
   | { kind: 'fetching_water'; buildingId: number; sourceId: number; phase: 'to_source' | 'to_dc'; firstLoopDone?: boolean; initialTarget?: Cell; collectingSince?: number }
-  | { kind: 'going_to_kill'; targetId: number; attackAt?: number };
+  | { kind: 'going_to_kill'; targetId: number; attackAt?: number }
+  // Robot-only: stand fast and shoot the target with a laser. Hitscan — no
+  // chase, no range limit — so a commanded robot can swat even a dragon out
+  // of the sky. fireAt is the end of the charge-up beat.
+  | { kind: 'firing_laser'; targetKind: 'goblin' | 'minotaur' | 'dragon'; targetId: number; fireAt?: number };
 
 export type Goblin = {
   id: number;
@@ -436,6 +440,17 @@ export type LightningBolt = {
   lifetime: number;
 };
 
+// One-shot straight red beam from a robot's chassis to its victim. Like a
+// LightningBolt, purely visual: spawned at the kill instant and faded out by
+// the renderer over `lifetime`.
+export type LaserBeam = {
+  id: number;
+  from: Vec2;
+  to: Vec2;
+  spawnAt: number;
+  lifetime: number;
+};
+
 // A decaying power surge (Lightning Strike). Contributes `peak` watts at
 // spawn, ramping linearly to 0 over `duration` seconds.
 export type PowerBoost = {
@@ -563,6 +578,8 @@ export type GameState = {
   floaters: Floater[];
   deathEffects: DeathEffect[];
   lightningBolts: LightningBolt[];
+  // One-shot robot laser zaps, faded out by the renderer like lightningBolts.
+  laserBeams: LaserBeam[];
   // Active Lightning Strike power surges, summed into production each tick.
   powerBoosts: PowerBoost[];
   // True while the player is aiming a Lightning Strike (next map click fires
@@ -1031,6 +1048,7 @@ export function createInitialState(): GameState {
     floaters: [],
     deathEffects: [],
     lightningBolts: [],
+    laserBeams: [],
     powerBoosts: [],
     pendingStrike: false,
     minotaursBought: 0,
@@ -1430,6 +1448,18 @@ export function pushLightningBolt(state: GameState, x: number, y: number) {
     points,
     spawnAt: state.now,
     lifetime: 0.45,
+  });
+}
+
+// A straight red beam from a robot to its laser victim. Endpoints are frozen
+// at fire time — the zap is instantaneous, only the afterglow lingers.
+export function pushLaserBeam(state: GameState, fx: number, fy: number, tx: number, ty: number) {
+  state.laserBeams.push({
+    id: state.nextId++,
+    from: { x: fx, y: fy },
+    to: { x: tx, y: ty },
+    spawnAt: state.now,
+    lifetime: 0.35,
   });
 }
 

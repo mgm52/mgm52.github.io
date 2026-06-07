@@ -164,6 +164,8 @@ export function loadGame(): { state: GameState; savedAt: number } | null {
     // Defaults for fields added after a save was written, so resuming an older
     // save doesn't hit undefined arrays/flags.
     env.state.lightningBolts ??= [];
+    // Robot laser zaps — added with the robot laser command.
+    env.state.laserBeams ??= [];
     env.state.powerBoosts ??= [];
     env.state.moneyEarned ??= 0;
     env.state.bloodEarned ??= 0;
