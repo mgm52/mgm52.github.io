@@ -8,7 +8,7 @@ import {
   earnBlood, earnDragonBone, earnMoney, findHoleEmergenceCell,
   getSpawnCapacity, holeBlockedByBuilding, holeCenter, isCellBlocked, isCellInBuilding, isCellInWaterSource,
   isInBounds, maintainerCount, markBuildingsChanged, nearestCellInWaterSource, occupyCell, pushDeathEffect, pushFloater,
-  hellMirrorCenter, pruneSoulChairs, pushLightningBolt, recordGhost, releaseCell, removeDragon, removeGoblin,
+  hellMirrorCenter, pruneSoulChairs, pushLaserBeam, pushLightningBolt, recordGhost, releaseCell, removeDragon, removeGoblin,
   waterCarrierCount,
 } from './state';
 
@@ -219,6 +219,10 @@ export function tick(state: GameState) {
   for (let i = state.lightningBolts.length - 1; i >= 0; i--) {
     const lb = state.lightningBolts[i];
     if (state.now - lb.spawnAt >= lb.lifetime) state.lightningBolts.splice(i, 1);
+  }
+  for (let i = state.laserBeams.length - 1; i >= 0; i--) {
+    const beam = state.laserBeams[i];
+    if (state.now - beam.spawnAt >= beam.lifetime) state.laserBeams.splice(i, 1);
   }
   for (let i = state.powerBoosts.length - 1; i >= 0; i--) {
     const pb = state.powerBoosts[i];
@@ -1489,6 +1493,59 @@ function dragonKill(state: GameState, d: Dragon, kind: 'goblin' | 'minotaur' | '
   }
 }
 
+// A robot's laser connects. Mirrors dragonKill's reward semantics: goblins
+// and minotaurs pay their usual kill rewards, a dragon drops a Dragon Bone —
+// so a robot is a second (much cheaper-per-shot) route to the bone grind.
+function robotLaserKill(state: GameState, r: Goblin, kind: 'goblin' | 'minotaur' | 'dragon', id: number) {
+  if (kind === 'dragon') {
+    const victim = state.dragons.get(id);
+    if (!victim) return;
+    const tx = victim.pos.x, ty = victim.pos.y;
+    const bones = DRAGON_KILL_REWARD.dragonBone;
+    recordGhost(state, 'dragon', tx, ty, victim.facing);
+    removeDragon(state, id);
+    earnDragonBone(state, bones);
+    state.dragonBoneUnlocked = true;
+    pushFloater(state, tx, ty, `+${bones} dragon bone${bones === 1 ? '' : 's'}`, 0xeae0c0, 1.8);
+    pushDeathEffect(state, tx, ty);
+    playSound('goblin_death', 0.85, 0.22);
+    appendLog(state, `Dragon #${id} lasered out of the sky by Robot #${r.id} — a bone clatters to earth.`);
+    return;
+  }
+  if (kind === 'goblin') {
+    const g = state.goblins.get(id);
+    if (!g || g.robot) return; // robots can't be lasered (or otherwise killed)
+    const tx = g.pos.x, ty = g.pos.y;
+    const reward = goblinKillReward(state, g);
+    const wasGold = !!g.gold;
+    recordGhost(state, 'goblin', tx, ty, g.facing, { gold: g.gold, bob: g.bob });
+    removeGoblin(state, id);
+    earnMoney(state, reward.money);
+    earnBlood(state, reward.blood);
+    state.bloodUnlocked = true;
+    pushFloater(state, tx, ty, `+Ƶ${reward.money.toLocaleString('en-US')}`, 0xffd96b, 1.6);
+    pushFloater(state, tx, ty - 14, `+${reward.blood} blood`, 0xff8a8a, 1.6);
+    pushDeathEffect(state, tx, ty);
+    playDecayingGoblinDeath();
+    if (wasGold) playDecayingGoldKillCash();
+    appendLog(state, `Goblin #${id} lasered by Robot #${r.id}.`);
+  } else {
+    const m = state.minotaurs.get(id);
+    if (!m) return;
+    const tx = m.pos.x, ty = m.pos.y;
+    recordGhost(state, 'minotaur', tx, ty, m.facing, { tiny: m.tiny });
+    state.minotaurs.delete(id);
+    earnMoney(state, MINOTAUR_KILL_REWARD.money);
+    earnBlood(state, MINOTAUR_KILL_REWARD.blood);
+    state.bloodUnlocked = true;
+    pushFloater(state, tx, ty, `+Ƶ${MINOTAUR_KILL_REWARD.money.toLocaleString('en-US')}`, 0xffd96b, 1.6);
+    pushFloater(state, tx, ty - 14, `+${MINOTAUR_KILL_REWARD.blood} blood`, 0xff8a8a, 1.6);
+    pushDeathEffect(state, tx, ty);
+    playSound('goblin_death', 0.6, 0.4);
+    appendLog(state, `Minotaur #${id} lasered by Robot #${r.id}.`);
+  }
+}
+
 function updateDragon(state: GameState, d: Dragon) {
   // Player-issued orders fly at the snappier manualSpeed so commands feel
   // responsive; the default auto-collecting path stays at the calmer speed.
@@ -2222,6 +2279,39 @@ function updateGoblin(state: GameState, g: Goblin) {
         g.path = [];
       }
       planStep(state, g);
+      return;
+    }
+
+    case 'firing_laser': {
+      // Robot-only: stand fast and shoot the target with a hitscan laser —
+      // no chase, no range limit, so even a dragon on the wing is fair game.
+      const target =
+        s.targetKind === 'goblin' ? state.goblins.get(s.targetId)
+        : s.targetKind === 'minotaur' ? state.minotaurs.get(s.targetId)
+        : state.dragons.get(s.targetId);
+      // A vanished target (or a robot target — nothing kills a robot, and
+      // only robots fire lasers in the first place) stands the unit down.
+      if (!g.robot || !target || (s.targetKind === 'goblin' && (target as Goblin).robot)) {
+        g.state = { kind: 'idle' };
+        g.goal = null;
+        g.path = [];
+        return;
+      }
+      g.goal = null;
+      g.path = [];
+      // Track the target through the windup so the shot lands where they are,
+      // not where they were when the order came in.
+      g.facing = Math.atan2(target.pos.y - g.pos.y, target.pos.x - g.pos.x);
+      if (s.fireAt === undefined) {
+        // Charge-up beat — gives the renderer's glow flare a moment to read.
+        s.fireAt = state.now + ROBOT.laserWindup;
+        return;
+      }
+      if (state.now < s.fireAt) return;
+      pushLaserBeam(state, g.pos.x, g.pos.y - 6, target.pos.x, target.pos.y);
+      playSound('lightning', 0.45, 2.1);
+      robotLaserKill(state, g, s.targetKind, s.targetId);
+      g.state = { kind: 'idle' };
       return;
     }
 

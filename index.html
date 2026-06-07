@@ -146,8 +146,18 @@
         transition: opacity 600ms ease;
       }
       /* Show instantly (no in-fade), but on removal the base transition
-         kicks in so the overlay still fades out. */
-      #task-complete-overlay.shown { opacity: 1; transition: none; }
+         kicks in so the overlay still fades out. While shown it takes the
+         pointer itself: clicks can't pass through to the buttons underneath,
+         and a click on the black (after a short buffer — see
+         skipCelebrationOverlay in ui.ts) skips ahead to the unlock reveal. */
+      #task-complete-overlay.shown {
+        opacity: 1; transition: none;
+        pointer-events: auto; cursor: pointer;
+      }
+      /* The whole celebration ceremony — overlay plus the staged unlock
+         reveal that follows — locks the sidebar's controls so nothing can be
+         clicked mid-sequence. The overlay child re-enables itself above. */
+      body.unlock-reveal-hold #sidebar { pointer-events: none; }
       #task-complete-overlay .task-complete-text {
         color: #fff;
         font-family: var(--font-display);

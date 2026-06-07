@@ -115,6 +115,10 @@ export const ROBOT = {
   // mirroring the Minotaur's single-slot ritual track).
   spawnTime: 2,
   spawnCapacity: 1,
+  // Commanded onto another unit, a robot stands fast and shoots it with a
+  // hitscan laser (no chase, no range limit — even a dragon on the wing).
+  // The windup is the charge-up beat before the beam fires.
+  laserWindup: 0.5,
 };
 
 // Units hauled to space by a dragon. Anything that isn't a robot suffocates

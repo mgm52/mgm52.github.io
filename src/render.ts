@@ -126,6 +126,9 @@ function dirIndex(meta: SheetMeta, facing: number): number {
 type GoblinView = {
   container: Container;
   shadow: Sprite;
+  // Soft white halo behind a robot's chassis (pulsed per-frame; flares red
+  // through a laser windup). Absent for flesh-and-blood goblins.
+  glow?: Sprite;
   outline: Sprite[];   // 4 cardinal-offset copies, black-tinted
   sprite: Sprite;
   selectionRing: Graphics;
@@ -1061,15 +1064,24 @@ function makeGoblinView(g: Goblin): GoblinView {
   const sprite = new Sprite(startTex);
   sprite.anchor.set(0.5);
   sprite.scale.set(scale);
-  // Robots get the greyscale filter applied per-frame in the sync loop (it's
-  // a live dev option), so nothing to attach here.
+  // Robots get the white filter applied per-frame in the sync loop (it's
+  // a live dev option), so nothing to attach here — but they do get a soft
+  // glow sprite, sized/pulsed per-frame alongside the filter.
+  let glow: Sprite | undefined;
+  if (g.robot) {
+    glow = new Sprite(getGlowTexture());
+    glow.anchor.set(0.5);
+    glow.tint = 0xffffff;
+    glow.alpha = 0.3;
+  }
 
   c.addChild(shadow);
+  if (glow) c.addChild(glow);
   c.addChild(ring);
   for (const s of outline) c.addChild(s);
   c.addChild(sprite);
 
-  return { container: c, shadow, outline, sprite, selectionRing: ring };
+  return { container: c, shadow, glow, outline, sprite, selectionRing: ring };
 }
 
 // Yellow "bob" label above the head — used wherever Bob currently is (alive,
@@ -1786,12 +1798,13 @@ function makeBuildingView(b: Building): BuildingView {
   };
 }
 
-// Attach/detach the shared greyscale filter on a sprite without re-assigning
-// .filters every frame (each assignment rebuilds the filter pass). Used by
-// the dragon's carried-sprite, which swaps between buildings and robots.
-function setSpriteGreyscale(s: Sprite, want: boolean): void {
-  const has = Array.isArray(s.filters) && s.filters.length > 0;
-  if (want !== has) s.filters = want ? [getBuildingGreyscaleFilter()] : [];
+// Attach/detach a shared filter on a sprite without re-assigning .filters
+// every frame (each assignment rebuilds the filter pass). Used by the robot
+// chassis and the dragon's carried-sprite, which swaps between buildings
+// (no filter) and robots (white filter).
+function setSpriteFilter(s: Sprite, f: ColorMatrixFilter | null): void {
+  const cur = Array.isArray(s.filters) && s.filters.length > 0 ? s.filters[0] : null;
+  if (cur !== f) s.filters = f ? [f] : [];
 }
 
 // Shared full-desaturate filter applied to building sprites that aren't yet
@@ -1803,6 +1816,19 @@ function getBuildingGreyscaleFilter(): ColorMatrixFilter {
   const f = new ColorMatrixFilter();
   f.saturate(-1, false);
   buildingGreyscaleFilter = f;
+  return f;
+}
+
+// Robots get their own shared filter: the same full desaturate, then pushed
+// well past unity brightness so the chassis reads gleaming white rather than
+// flat grey. One instance reused across every robot sprite.
+let robotWhiteFilter: ColorMatrixFilter | null = null;
+function getRobotWhiteFilter(): ColorMatrixFilter {
+  if (robotWhiteFilter) return robotWhiteFilter;
+  const f = new ColorMatrixFilter();
+  f.saturate(-1, false);
+  f.brightness(2.2, true);
+  robotWhiteFilter = f;
   return f;
 }
 
@@ -1991,6 +2017,18 @@ function drawLightning(ctx: RenderContext, state: GameState) {
         g.lineTo(bolt.points[i].x, bolt.points[i].y);
       }
       g.stroke({ width: pass.w, color: 0xffffff, alpha: pass.a });
+    }
+  }
+  // Robot laser zaps share the canvas: straight red beams with the same
+  // two-pass treatment — a wide soft glow under a thin hot core.
+  for (const beam of state.laserBeams) {
+    const age = state.now - beam.spawnAt;
+    const alpha = Math.max(0, 1 - age / beam.lifetime);
+    if (alpha <= 0) continue;
+    for (const pass of [{ w: 6, a: alpha * 0.35, c: 0xff3030 }, { w: 2, a: alpha, c: 0xffc0c0 }]) {
+      g.moveTo(beam.from.x, beam.from.y)
+        .lineTo(beam.to.x, beam.to.y)
+        .stroke({ width: pass.w, color: pass.c, alpha: pass.a });
     }
   }
 }
@@ -2552,7 +2590,18 @@ export function render(state: GameState, ctx: RenderContext) {
     else if (g.state.kind === 'building' || g.state.kind === 'going_to_build') tint = 0xfff0a8;
     else if (g.state.kind === 'maintaining' || g.state.kind === 'going_to_maintain') tint = 0xa8d8ff;
     v.sprite.tint = tint;
-    setSpriteGreyscale(v.sprite, !!g.robot && opts.robotGreyscale);
+    setSpriteFilter(v.sprite, g.robot && opts.robotGreyscale ? getRobotWhiteFilter() : null);
+    // Robots carry a soft white halo behind the chassis, pulsing gently — and
+    // flaring hot (with a red shift) through a laser windup so the shot
+    // telegraphs before the beam lands.
+    if (v.glow) {
+      v.glow.scale.set(px * 2.0 / 128);
+      const charging = g.state.kind === 'firing_laser' && g.state.fireAt !== undefined;
+      v.glow.tint = charging ? 0xff6050 : 0xffffff;
+      v.glow.alpha = charging
+        ? 0.7 + 0.2 * Math.sin(state.now * 24)
+        : 0.28 + 0.1 * Math.sin(state.now * 3 + g.id);
+    }
   }
   for (const [id, v] of ctx.goblinViews) {
     if (!seenG.has(id)) {
@@ -2647,7 +2696,7 @@ export function render(state: GameState, ctx: RenderContext) {
       const tex = buildingTextures[d.carrying.kind];
       if (tex && v.carried.texture !== tex) { v.carried.texture = tex; sizeBuildingSprite(v.carried, def.size * 0.8); }
       v.carried.tint = 0xffffff;
-      setSpriteGreyscale(v.carried, false);
+      setSpriteFilter(v.carried, null);
       v.carried.visible = opts.buildingSpriteEnabled;
       v.carried.position.set(0, dragonPx * 0.38);
     } else if (d.carryingUnit) {
@@ -2663,7 +2712,7 @@ export function render(state: GameState, ctx: RenderContext) {
           : (u.robot ? opts.goblinDisplayPx * opts.robotScale : opts.goblinDisplayPx);
         v.carried.scale.set(px / sheet.meta.spriteSize);
         v.carried.tint = u.robot ? opts.robotTint : u.gold ? 0xffa800 : 0xffffff;
-        setSpriteGreyscale(v.carried, !!u.robot && opts.robotGreyscale);
+        setSpriteFilter(v.carried, u.robot && opts.robotGreyscale ? getRobotWhiteFilter() : null);
         v.carried.visible = true;
         v.carried.position.set(0, dragonPx * 0.34);
       }
@@ -2889,7 +2938,7 @@ export function render(state: GameState, ctx: RenderContext) {
       v.sprite.scale.set(px / suSheet.meta.spriteSize);
     }
     v.sprite.tint = su.robot ? opts.robotTint : su.gold ? 0xffa800 : 0xffffff;
-    setSpriteGreyscale(v.sprite, !!su.robot && opts.robotGreyscale);
+    setSpriteFilter(v.sprite, su.robot && opts.robotGreyscale ? getRobotWhiteFilter() : null);
     v.selectionRing.visible = !!su.selected;
   }
   for (const [id, v] of ctx.spaceUnitViews) {
