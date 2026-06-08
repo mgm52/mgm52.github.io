@@ -21,6 +21,13 @@ export const INITIAL_PLAY_Y0 = DIG_GROWTH_CELLS;
 export const CAMERA_SPEED = 700; // px/sec when panning with WASD
 export const RENDER_SCALE = 1.3; // visual zoom factor applied to the world layer
 
+// Hard cap on how many units the player can have selected at once — ground
+// creatures (goblins, minotaurs, dragons), souls in hell, and drifting units
+// in space all count against it; buildings and other scenery don't. A
+// box-select fills up to the cap and drops the overflow; shift-clicking one
+// more unit onto a full selection refuses outright.
+export const MAX_SELECTED_UNITS = 30;
+
 // Seconds after the first dig before the pan-hint (WASD/arrows) appears, if
 // the player hasn't already panned the camera to bring water into view.
 export const WATER_HINT_DELAY_SEC = 4;
