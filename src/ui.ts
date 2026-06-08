@@ -10,7 +10,7 @@ import {
   earnDragonBone, getSpawnCapacity, holeBlockedByBuilding, isCellBlocked, isInBounds,
   maintainerCount, markBuildingsChanged, nextBuildingDisplayNum, occupyCell, waterCarrierCount,
 } from './state';
-import { spawnDragon, spawnMinotaur } from './sim';
+import { spawnDragon, spawnMinotaur, unseatSoulFromChair } from './sim';
 import { unlockOptionsCog } from './options-ui';
 
 // Build buttons appear in this fixed order, mostly cheapest-first. goblin_hole
@@ -1084,6 +1084,19 @@ export function setupUI(state: GameState, callbacks: UICallbacks) {
     const ids = [...state.goblins.values()].filter(g => g.selected).map(g => g.id);
     for (const id of ids) callbacks.onKillGoblin(id);
   });
+
+  // Free-soul button — unseats the bound soul from the selected chair. The
+  // freed ghost takes over the selection so the panel flips straight to it
+  // and the player can command it without hunting it down on the ring.
+  document.getElementById('info-unseat')!.addEventListener('click', () => {
+    const chair = state.soulChairs.find((c) => c.selected && c.occupied);
+    if (!chair) return;
+    const ghost = unseatSoulFromChair(state, chair);
+    if (ghost) {
+      chair.selected = false;
+      ghost.selected = true;
+    }
+  });
 }
 
 function btnId(kind: BuildingKind): string { return `btn-build-${kind}`; }
@@ -1920,8 +1933,10 @@ function refreshInfoPanel(state: GameState) {
 
   const destroyBtn = document.getElementById('info-destroy')!;
   const killBtn = document.getElementById('info-kill')!;
+  const unseatBtn = document.getElementById('info-unseat')!;
   destroyBtn.style.display = 'none';
   killBtn.style.display = 'none';
+  unseatBtn.style.display = 'none';
   const selectedDemon = [...state.demons.values()].find((d) => d.selected) ?? null;
   const selectedChair = state.soulChairs.find((c) => c.selected) ?? null;
   if (selectedDemon) {
@@ -1930,6 +1945,7 @@ function refreshInfoPanel(state: GameState) {
     showHellPortal(state, selectedHellPortal, panel, portrait, name, stateEl, extra);
   } else if (selectedChair) {
     showSoulChair(state, selectedChair, panel, portrait, name, stateEl, extra);
+    if (selectedChair.occupied) unseatBtn.style.display = '';
   } else if (selectedGhosts.length === 1) {
     showGhost(selectedGhosts[0], panel, portrait, name, stateEl, extra);
   } else if (selectedGhosts.length > 1) {
@@ -2149,9 +2165,11 @@ function showSoulChair(state: GameState, c: SoulChair, panel: HTMLElement, portr
   stateEl.textContent = c.occupied ? 'Bound' : ringDone ? 'Hungry for a soul' : 'Waiting on the ring';
   // An occupied chair reports its own soul's multiplier; an empty one
   // advertises the range so the player knows stronger souls bind bigger.
+  // Chairs from saves predating the soul snapshot have no kind on record.
+  const soulKind = c.soul ? (c.soul.tiny ? 'tinytaur' : c.soul.gold ? 'gold goblin' : c.soul.kind) : null;
   const lines = ringDone
     ? [`<span style="color:#ff8a6a">${filled}/${SOUL_SIGIL.count} bound${c.occupied
-        ? ` · this soul: x${c.mult ?? SOUL_SIGIL.soulMultipliers.strong}`
+        ? ` · this soul: x${c.mult ?? SOUL_SIGIL.soulMultipliers.strong}${soulKind ? ` (${soulKind})` : ''}`
         : ` · x${SOUL_SIGIL.soulMultipliers.weak}–x${SOUL_SIGIL.soulMultipliers.veryStrong} by soul strength`}</span>`]
     : [`<span style="color:#ff4a3a">needs ${SOUL_SIGIL.count - ring.length} more candle${SOUL_SIGIL.count - ring.length === 1 ? '' : 's'}</span>`];
   if (ringDone && !c.occupied) {

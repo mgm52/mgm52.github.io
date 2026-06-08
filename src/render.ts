@@ -2710,10 +2710,13 @@ export function ghostHellPos(state: GameState, g: Ghost): { x: number; y: number
 }
 
 // Pick the topmost ghost under a hell-coord point, or null if none is within
-// HELL.ghostHitRadius. Used by input.ts to resolve a tap in the hell view.
-export function ghostAtHell(state: GameState, hx: number, hy: number): Ghost | null {
+// `radius` (default HELL.ghostHitRadius). Used by input.ts to resolve a tap in
+// the hell view; input passes a widened radius when the point is inside a
+// demon's hit halo, so souls standing on/under him stay clickable.
+export function ghostAtHell(state: GameState, hx: number, hy: number,
+                            radius = HELL.ghostHitRadius): Ghost | null {
   let best: Ghost | null = null;
-  let bestD = HELL.ghostHitRadius * HELL.ghostHitRadius;
+  let bestD = radius * radius;
   for (const g of state.ghosts) {
     // Vanished between an untruth strike and its respawn — not clickable.
     if (g.respawnAt !== undefined && state.now < g.respawnAt) continue;

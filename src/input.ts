@@ -1,5 +1,5 @@
 import { Application, Container, FederatedPointerEvent, Graphics } from 'pixi.js';
-import { playSound, playMinotaurCommand } from './audio';
+import { playSound, playGhostCommand, playMinotaurCommand } from './audio';
 import { flashCursor } from './cursor-fx';
 import { bobOverworldBark, demonRebuke } from './demon-dialogue';
 import { BUILDABLE_KINDS, BUILDING_DEFS, BuildingKind, CELL, DRAGON, GOBLIN, HELL, LIGHTNING, MINOTAUR, SOUL_SIGIL, SPACE, SPACE_UNIT, WORLD, formatPower } from './config';
@@ -49,6 +49,12 @@ const LONG_PRESS_MOVE_TOL = 10; // screen-space px
 // Screen-space px a space-view pointer must travel before a tap becomes a
 // rubber-band drag-select (also the tap-vs-drag cutoff resolved on pointerup).
 const SPACE_DRAG_TOL = 6;
+// Hit-radius multiplier for souls/chairs when the click also lands inside a
+// demon's hit halo. The demon's halo (DEMON.hitRadius, 390 hell-px) dwarfs a
+// soul's (24) or candle's (28), so without this forgiveness the demon swallows
+// every near-miss and things under him are effectively unclickable. He only
+// claims the click when nothing else is within the widened radii.
+const UNDER_DEMON_RADIUS_MULT = 3;
 
 export function setupInput(
   state: GameState,
@@ -364,13 +370,18 @@ export function setupInput(
             // A small precise ghost wins over the giant demon hit box behind it,
             // so a soul standing on the demon can still be picked. The Hell
             // Beacon (portal mirror) is likewise a small target that beats the
-            // demon, but a soul on top of it still takes priority.
-            const gh = ghostAtHell(state, hp.x, hp.y);
+            // demon, but a soul on top of it still takes priority. Inside the
+            // demon's vast halo the small targets also get widened hit radii
+            // (see underDemonMult) — without that, anything but a pixel-perfect
+            // click on a soul/chair sharing his footprint resolves to him.
+            const dmHit = demonAtHell(state, hp.x, hp.y);
+            const mult = dmHit ? UNDER_DEMON_RADIUS_MULT : 1;
+            const gh = ghostAtHell(state, hp.x, hp.y, HELL.ghostHitRadius * mult);
             const portal = gh ? null : hellPortalAt(state, hp.x, hp.y);
             // Soul chairs beat the giant demon behind them but yield to a soul
             // or the beacon sitting on top.
-            const chair = (gh || portal) ? null : soulChairAt(state, hp.x, hp.y);
-            const dm = (gh || portal || chair) ? null : demonAtHell(state, hp.x, hp.y);
+            const chair = (gh || portal) ? null : soulChairAt(state, hp.x, hp.y, SOUL_SIGIL.chairRadius * mult);
+            const dm = (gh || portal || chair) ? null : dmHit;
             if (!e.shiftKey) clearSelection(state);
             if (gh) { selectGhost(state, gh); playSound('select', 0.33); }
             else if (portal) { portal.selected = true; playSound('select', 0.33); }
@@ -910,6 +921,17 @@ function tryPlaceOrbital(state: GameState, x: number, y: number) {
   appendLog(state, `${def.name} #${b.displayNum} scaffold deployed — only a robot can assemble it.`);
 }
 
+// Commanded souls answer with their living cry made distant — the same per-kind
+// command bursts as surface units, sent through the ghostly reverb (see
+// playGhostCommand in audio.ts). One burst per kind present in the group.
+function playGhostCommandBurst(ghosts: Ghost[]) {
+  const tally: Record<Ghost['kind'], number> = { goblin: 0, minotaur: 0, dragon: 0 };
+  for (const g of ghosts) tally[g.kind]++;
+  for (const kind of ['goblin', 'minotaur', 'dragon'] as const) {
+    if (tally[kind] > 0) playGhostCommand(kind, tally[kind]);
+  }
+}
+
 // Right-click in hell view: walk every selected ghost to the clicked hell-coord.
 // Multiple ghosts get a small per-ghost offset so they don't pile up exactly on
 // the same point. No-op (with an error beep) if nothing is selected.
@@ -917,12 +939,19 @@ function handleHellRightClick(state: GameState, hx: number, hy: number) {
   const selected = state.ghosts.filter((g) => g.selected);
   if (selected.length === 0) { playSound('error'); return; }
 
+  // Resolve the demon up front purely to widen the chair/soul hit radii when
+  // the click lands inside his vast halo (see UNDER_DEMON_RADIUS_MULT) — he
+  // stays the lowest-priority target, claiming the command only when no chair
+  // or soul is anywhere near the click.
+  const demonUnderClick = demonAtHell(state, hx, hy);
+  const radiusMult = demonUnderClick ? UNDER_DEMON_RADIUS_MULT : 1;
+
   // Right-clicking a soul chair seats a single soul in it. Sending a whole
   // selection at one chair would just pile them up, so only the NEAREST
   // eligible soul of the group actually walks over; the rest keep their orders.
   // Bob is exempt — he's no fuel for the sigil. Until all five candles stand
   // on the ring there are no chairs to bind — only waiting candles.
-  const chair = soulChairAt(state, hx, hy);
+  const chair = soulChairAt(state, hx, hy, SOUL_SIGIL.chairRadius * radiusMult);
   if (chair) {
     const ringSize = state.soulChairs.filter((c) => c.portalId === chair.portalId).length;
     if (ringSize < SOUL_SIGIL.count) {
@@ -961,7 +990,7 @@ function handleHellRightClick(state: GameState, hx: number, hy: number) {
     nearest.commanded = true;
     chair.claimedBy = nearest.id;
     chair.commandFlashAt = state.now;
-    playSound('select', 0.4);
+    playGhostCommandBurst([nearest]);
     appendLog(state, 'A soul shuffles toward the sigil.');
     return;
   }
@@ -973,7 +1002,7 @@ function handleHellRightClick(state: GameState, hx: number, hy: number) {
   // orders. A click on a soul that's part of the selection falls through to
   // a plain move instead. Checked before the demon so a soul standing inside
   // the demon's generous hit radius is still chattable.
-  const target = ghostAtHell(state, hx, hy);
+  const target = ghostAtHell(state, hx, hy, HELL.ghostHitRadius * radiusMult);
   if (target && !target.selected) {
     if (target.hx === undefined || target.hy === undefined) {
       const p = ghostHellPos(state, target);
@@ -998,7 +1027,7 @@ function handleHellRightClick(state: GameState, hx: number, hy: number) {
     nearest.goal = { x: target.hx, y: target.hy };
     nearest.commanded = true;
     target.commandFlashAt = state.now;
-    playSound('select', 0.4);
+    playGhostCommandBurst([nearest]);
     appendLog(state, 'A soul shuffles over for a chat.');
     return;
   }
@@ -1006,7 +1035,7 @@ function handleHellRightClick(state: GameState, hx: number, hy: number) {
   // Right-clicking on (or near) a demon sends the group to it, but only the
   // first soul that can actually speak — a goblin/Bob ghost — parlays. The
   // rest just gather nearby. The demon also has to be free (one soul at a time).
-  const demon = demonAtHell(state, hx, hy);
+  const demon = demonUnderClick;
   if (demon) {
     // Only one soul may approach the demon at a time. Sending a crowd is
     // refused outright — nobody is commanded and the demon barks them back.
@@ -1036,7 +1065,7 @@ function handleHellRightClick(state: GameState, hx: number, hy: number) {
     for (const c of state.soulChairs) if (c.claimedBy === g.id) c.claimedBy = undefined;
     g.parlayDemonId = canSpeak ? demon.id : undefined;
     g.commanded = true;
-    playSound('select', 0.4);
+    playGhostCommandBurst([g]);
     if (canSpeak) appendLog(state, 'A soul shuffles forth to parlay with the demon.');
     else appendLog(state, 'The demon is already locked in parlay.');
     return;
@@ -1061,7 +1090,7 @@ function handleHellRightClick(state: GameState, hx: number, hy: number) {
     }
     g.commanded = true;
   }
-  playSound('select', 0.4);
+  playGhostCommandBurst(selected);
   appendLog(state, `${selected.length} ghost(s) drift toward the cursor.`);
 }
 

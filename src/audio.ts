@@ -108,7 +108,54 @@ function unlockAudio(): void {
   if (audioCtx && audioCtx.state !== 'running') void audioCtx.resume();
 }
 
-export function playSound(name: SoundName, volume = 1, playbackRate?: number) {
+// ─── Ghostly reverb send ────────────────────────────────────────────
+// A shared effects bus for sounds that should read as coming from somewhere
+// far off in the underworld: input → lowpass (distance eats the highs) →
+// convolver reverb (synthetic cavern impulse, so no extra asset to fetch),
+// with a small dry tap so attacks aren't completely washed out. Built lazily
+// on first use; per-voice gains still carry masterVolume, this bus only adds
+// the distance/space colouring on top.
+const GHOST_SEND_GAIN = 0.45;   // overall "it's far away" attenuation
+const GHOST_LOWPASS_HZ = 1100;  // muffle: roughly "heard through a cavern"
+const GHOST_IR_SECONDS = 2.8;   // long tail — hell is a big room
+const GHOST_DRY_TAP = 0.25;     // just enough direct signal to keep the attack
+let ghostBusInput: GainNode | null = null;
+
+// Exponentially decaying stereo noise — the classic synthetic reverb impulse.
+// pow(3) on the envelope gives a fast early drop with a long whispering tail.
+function buildGhostImpulse(ctx: AudioContext): AudioBuffer {
+  const len = Math.max(1, Math.floor(ctx.sampleRate * GHOST_IR_SECONDS));
+  const ir = ctx.createBuffer(2, len, ctx.sampleRate);
+  for (let ch = 0; ch < 2; ch++) {
+    const data = ir.getChannelData(ch);
+    for (let i = 0; i < len; i++) {
+      data[i] = (Math.random() * 2 - 1) * Math.pow(1 - i / len, 3);
+    }
+  }
+  return ir;
+}
+
+function getGhostBus(ctx: AudioContext): GainNode {
+  if (ghostBusInput) return ghostBusInput;
+  const input = ctx.createGain();
+  input.gain.value = GHOST_SEND_GAIN;
+  const lowpass = ctx.createBiquadFilter();
+  lowpass.type = 'lowpass';
+  lowpass.frequency.value = GHOST_LOWPASS_HZ;
+  input.connect(lowpass);
+  const convolver = ctx.createConvolver();
+  convolver.buffer = buildGhostImpulse(ctx);
+  lowpass.connect(convolver);
+  convolver.connect(ctx.destination);
+  const dry = ctx.createGain();
+  dry.gain.value = GHOST_DRY_TAP;
+  lowpass.connect(dry);
+  dry.connect(ctx.destination);
+  ghostBusInput = input;
+  return input;
+}
+
+export function playSound(name: SoundName, volume = 1, playbackRate?: number, ghostly = false) {
   if (muted) return;
   if (inHellView && name === 'goblin_spawn') return;
   const ctx = audioCtx;
@@ -130,7 +177,7 @@ export function playSound(name: SoundName, volume = 1, playbackRate?: number) {
   const gain = ctx.createGain();
   gain.gain.value = Math.max(0, Math.min(1, masterVolume * volume));
   src.connect(gain);
-  gain.connect(ctx.destination);
+  gain.connect(ghostly ? getGhostBus(ctx) : ctx.destination);
   let voices = activeVoices.get(name);
   if (!voices) { voices = []; activeVoices.set(name, voices); }
   if (voices.length >= MAX_VOICES) {
@@ -191,6 +238,21 @@ export function playMinotaurCommand(count = 1): void {
       const rate = 0.28 + Math.random() * 0.16;
       playSound('command_3', 1, rate);
     }, delay);
+  }
+}
+
+// Commanding a soul in hell — the unit's living command cry, heard from far
+// away. Same staggers and pitch ranges as the surface bursts (playGruntBurst /
+// playDragonRoarBurst in input.ts and playMinotaurCommand above), but routed
+// through the ghostly reverb send so the cries arrive distant and cavernous.
+export function playGhostCommand(kind: 'goblin' | 'minotaur' | 'dragon', count = 1): void {
+  const stagger = kind === 'dragon' ? 160 : kind === 'minotaur' ? 140 : 100;
+  for (let i = 0; i < count; i++) {
+    setTimeout(() => {
+      if (kind === 'dragon') playSound('ritual', 0.6, 0.4 + Math.random() * 0.1, true);
+      else if (kind === 'minotaur') playSound('command_3', 1, 0.28 + Math.random() * 0.16, true);
+      else playSound('command_3', 1, 0.5 + Math.random(), true);
+    }, i * stagger);
   }
 }
 
