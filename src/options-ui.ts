@@ -296,6 +296,9 @@ function rebuildPanel(panel: HTMLElement, callbacks: OptionsUICallbacks, refresh
   panel.appendChild(collapsibleSection('Audio', [
     slider('Master volume', o.volume,         0, 1, 0.05, (v) => { setOption('volume', v);         refreshPublic?.(); }),
     slider('Music volume',  o.musicVolume,    0, 1, 0.05, (v) => { setOption('musicVolume', v);    refreshPublic?.(); }),
+    // Gain on the ghostly reverb send carrying hell's command cries — can run
+    // past 1 (it feeds a heavily attenuating convolver, not the master bus).
+    slider('Hell command volume', o.hellCommandVolume, 0, 4, 0.05, (v) => setOption('hellCommandVolume', v)),
     toggle('Vinyl crackle', o.crackleEnabled,                (v) => { setOption('crackleEnabled', v); refreshPublic?.(); }),
   ]));
 

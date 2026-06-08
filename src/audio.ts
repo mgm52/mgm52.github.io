@@ -115,11 +115,23 @@ function unlockAudio(): void {
 // with a small dry tap so attacks aren't completely washed out. Built lazily
 // on first use; per-voice gains still carry masterVolume, this bus only adds
 // the distance/space colouring on top.
-const GHOST_SEND_GAIN = 0.45;   // overall "it's far away" attenuation
+// Gain on the send. The original 0.45 "far away" attenuation read as too
+// quiet in practice — the cries got lost under the music — so the default
+// rides 3× hotter; the convolver+lowpass still carry the distance feel.
+// Runtime-tunable via the dev menu (see setGhostSendGain).
+const GHOST_SEND_GAIN_DEFAULT = 1.35;
 const GHOST_LOWPASS_HZ = 1100;  // muffle: roughly "heard through a cavern"
 const GHOST_IR_SECONDS = 2.8;   // long tail — hell is a big room
 const GHOST_DRY_TAP = 0.25;     // just enough direct signal to keep the attack
+let ghostSendGain = GHOST_SEND_GAIN_DEFAULT;
 let ghostBusInput: GainNode | null = null;
+
+// Dev-menu dial for the hell command cries: sets the ghostly send's input
+// gain, applied live to the bus if it's already been built.
+export function setGhostSendGain(v: number): void {
+  ghostSendGain = Math.max(0, v);
+  if (ghostBusInput) ghostBusInput.gain.value = ghostSendGain;
+}
 
 // Exponentially decaying stereo noise — the classic synthetic reverb impulse.
 // pow(3) on the envelope gives a fast early drop with a long whispering tail.
@@ -138,7 +150,7 @@ function buildGhostImpulse(ctx: AudioContext): AudioBuffer {
 function getGhostBus(ctx: AudioContext): GainNode {
   if (ghostBusInput) return ghostBusInput;
   const input = ctx.createGain();
-  input.gain.value = GHOST_SEND_GAIN;
+  input.gain.value = ghostSendGain;
   const lowpass = ctx.createBiquadFilter();
   lowpass.type = 'lowpass';
   lowpass.frequency.value = GHOST_LOWPASS_HZ;

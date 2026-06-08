@@ -209,6 +209,9 @@ export type Options = {
   volume: number;        // master — applied to both SFX and music
   musicVolume: number;   // additional multiplier on background music + crackle
   crackleEnabled: boolean; // toggle the vinyl-crackle ambience layer
+  // Gain on the ghostly reverb send that carries the hell command cries
+  // (see setGhostSendGain in audio.ts). Master volume still applies on top.
+  hellCommandVolume: number;
   // Hell visuals — live-tunable from the admin cog so the underworld's
   // contrast can be dialled in. drawHellBackground re-runs on any change.
   hellBgTop: number;          // top of the vertical gradient (dim by default)
@@ -417,6 +420,8 @@ export const DEFAULT_OPTIONS: Options = {
   // earlier music-at-master-volume default.
   musicVolume: 0.7,
   crackleEnabled: true,
+  // 3× the original 0.45 send — the distant cries were getting lost.
+  hellCommandVolume: 1.35,
   // Hell defaults — pulled down from the earlier "way too light" pass so the
   // underworld reads as oppressive: a near-black maroon gradient with a few
   // dim red blooms and a sparse ember dust. Tunable from the admin cog.
