@@ -1715,9 +1715,9 @@ seatedSoulFilter.brightness(2.6, true);
 
 // A spectre of the soul bound into a candle: the first frame of the unit's
 // own sheet (facing the viewer; the dragon's fly sheet only has profiles, so
-// it shows its east one), whitened by the shared filter and sized to stand
-// inside the wax pool whatever the kind. Returns null while the sheet is
-// still loading — the caller just retries next frame.
+// it shows its east one), whitened by the shared filter and standing in the
+// wax pool at its usual ghost size. Returns null while the sheet is still
+// loading — the caller just retries next frame.
 function makeSeatedSoulSprite(chair: SoulChair): Sprite | null {
   const soul = chairSoulSnapshot(chair);
   const sheet = soul.kind === 'goblin' ? (goblinIdleSheet ?? goblinWalkSheet)
@@ -1727,9 +1727,12 @@ function makeSeatedSoulSprite(chair: SoulChair): Sprite | null {
   const heading = soul.kind === 'dragon' ? 0 : Math.PI / 2;
   const sprite = new Sprite(sheet.frames[dirIndex(sheet.meta, heading)][0]);
   sprite.anchor.set(0.5);
-  // One size for every kind (a dragon shrinks a lot to fit); a tinytaur
-  // keeps its small stature.
-  const px = SOUL_SIGIL.chairRadius * 2.3 * (soul.tiny ? TINYTAUR.scale : 1);
+  // Same per-kind display size the drifting ghosts use (makeGhostView), so a
+  // soul keeps its full stature when it takes the chair — a bound dragon
+  // looms over its candle just like it loomed in life.
+  const px = soul.kind === 'goblin' ? getOptions().goblinDisplayPx
+    : soul.kind === 'minotaur' ? getOptions().minotaurDisplayPx * (soul.tiny ? TINYTAUR.scale : 1)
+    : DRAGON.displayPx;
   sprite.scale.set(px / sheet.meta.spriteSize);
   sprite.alpha = 0.92;
   sprite.filters = [seatedSoulFilter];
