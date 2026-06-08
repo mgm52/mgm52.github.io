@@ -9,7 +9,7 @@ import { playIntroSequence, setIntroPaused, skipIntro } from './intro';
 import { getOptions, onOptionsChange } from './options';
 import { getRestartInHell, relockOptionsCog, setupOptionsUI } from './options-ui';
 import { applyDomOptions, centerCameraOn, centerHellCameraOnWorld, centerSpaceCamera, clampCamera, clampHellCamera, clampSpaceCamera, createRender, currentHellScale, preloadRenderAssets, render, spaceCameraMaxY } from './render';
-import { appendLog, buildingCenter, cellCenter, countHypercentres, createInitialState, destroyBuilding, digDirection, earnBlood, earnDragonBone, earnMoney, getSpawnCapacity, pushDeathEffect, pushFloater, recordGhost, removeGoblin, type GameState, type Ghost } from './state';
+import { appendLog, buildingCenter, cellCenter, createInitialState, destroyBuilding, digDirection, earnBlood, earnDragonBone, earnMoney, getSpawnCapacity, pushDeathEffect, pushFloater, recordGhost, removeGoblin, type GameState, type Ghost } from './state';
 import { autoAssignAllIdle, spawnDragon, spawnMinotaur, spawnRobot, spawnTinytaur, tick } from './sim';
 import { ensureHellPortal, executeTaskSkip, refreshUI, setupUI } from './ui';
 import { clearSave, formatRelativeTime, getLastSaveStats, loadGame, saveGame, saveGameInBackground } from './save';
@@ -469,10 +469,10 @@ async function main() {
       appendLog(state, 'Dragon summon ritual begins...');
     },
     onSummonRobot: () => {
-      // Gated on the late-game industrial base; costs money up front and
-      // assembles on a timed track like the other summons (the queue in
-      // sim.ts retries if every hole exit is blocked when assembly finishes).
-      if (countHypercentres(state) < ROBOT.hypercentresRequired) { playSound('error'); return; }
+      // Unlocked with the Build-a-Hypercentre task (the button only shows
+      // once that task is revealed); costs money up front and assembles on a
+      // timed track like the other summons (the queue in sim.ts retries if
+      // every hole exit is blocked when assembly finishes).
       if (state.money < ROBOT.moneyCost) { playSound('error'); return; }
       if (state.robotSpawnQueue.length >= ROBOT.spawnCapacity) { playSound('error'); return; }
       state.money -= ROBOT.moneyCost;

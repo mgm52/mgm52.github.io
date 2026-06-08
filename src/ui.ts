@@ -6,7 +6,7 @@ import {
 } from './config';
 import {
   Building, Cell, Demon, DragonState, GameState, Ghost, Goblin, GoblinState, SoulChair, SpaceBuilding, SpaceUnit, WaterSource,
-  appendLog, buildingCenter, buildingLabel, buildingMoneyCost, cellCenter, cellKey, countHypercentres, countIdle, defOf, digDirection,
+  appendLog, buildingCenter, buildingLabel, buildingMoneyCost, cellCenter, cellKey, countIdle, defOf, digDirection,
   earnDragonBone, getSpawnCapacity, holeBlockedByBuilding, isCellBlocked, isInBounds,
   maintainerCount, markBuildingsChanged, nextBuildingDisplayNum, occupyCell, waterCarrierCount,
 } from './state';
@@ -756,11 +756,10 @@ export function setupUI(state: GameState, callbacks: UICallbacks) {
   dragonBtn.addEventListener('click', (e) => { playSound('click', 1, 0.75); flashSummonClick(dragonBtn); emanateAtCursor(e.clientX, e.clientY); callbacks.onSummonDragon(); });
   summonList.appendChild(dragonBtn);
 
-  // Robot — late-game money summon, revealed with the Hypercentre era. The
-  // "needs 5 hypercentres" banner sits on the button until the industrial
-  // base is big enough. A robot is a small grey goblin that cannot die; its
-  // real purpose is being dragon-snatched to orbit, where (unlike everything
-  // else) it survives — and can assemble an Orbital Platform.
+  // Robot — late-game money summon, unlocked by completing the
+  // Build-a-Hypercentre task. A robot is a small grey goblin that cannot die;
+  // its real purpose is being dragon-snatched to orbit, where (unlike
+  // everything else) it survives — and can assemble an Orbital Platform.
   const robotBtn = document.createElement('button');
   robotBtn.className = 'build-button build-button-compact';
   robotBtn.id = 'btn-summon-robot';
@@ -773,7 +772,6 @@ export function setupUI(state: GameState, callbacks: UICallbacks) {
       </div>
       <div class="build-cost-side"><span class="build-cost" id="cost-summon-robot">Ƶ${ROBOT.moneyCost.toLocaleString('en-US')}</span></div>
     </div>
-    <div class="build-warning" id="warn-summon-robot" style="display:none">needs ${ROBOT.hypercentresRequired} hypercentres</div>
   `;
   robotBtn.addEventListener('click', (e) => { playSound('click', 1, 0.75); flashSummonClick(robotBtn); emanateAtCursor(e.clientX, e.clientY, 'white'); callbacks.onSummonRobot(); });
   summonList.appendChild(robotBtn);
@@ -1443,28 +1441,24 @@ export function refreshUI(state: GameState) {
     setBuyFlash('btn-summon-dragon', false);
   }
 
-  // Robot button — revealed by the Build-a-Hypercentre task, but stays banner-
-  // gated ("needs 5 hypercentres") until the industrial base reaches
-  // ROBOT.hypercentresRequired (ground + orbit combined). Costs money.
+  // Robot button — unlocked outright by the Build-a-Hypercentre task.
+  // Costs money.
   const robotBtn = document.getElementById('btn-summon-robot') as HTMLButtonElement;
   if (revealedTaskIds.has('build_hypercentre')) {
     robotBtn.style.display = '';
     applyFadeInOnFirstShow('btn-summon-robot');
-    const hcs = countHypercentres(state);
-    const enoughHCs = hcs >= ROBOT.hypercentresRequired;
     const canAffordRobot = state.money >= ROBOT.moneyCost;
     // Assembly runs on a timed track like the other summons — one at a time.
     const robotQueued = state.robotSpawnQueue.length;
-    robotBtn.disabled = !enoughHCs || !canAffordRobot || robotQueued >= ROBOT.spawnCapacity;
+    robotBtn.disabled = !canAffordRobot || robotQueued >= ROBOT.spawnCapacity;
     robotBtn.classList.toggle('in-progress', robotQueued > 0);
     const robotRemaining = robotQueued > 0 ? state.robotSpawnQueue[0].remaining : ROBOT.spawnTime;
     const robotFill = robotQueued > 0 ? 1 - robotRemaining / ROBOT.spawnTime : 0;
     setFillWidth('fill-summon-robot-0', Math.max(0, Math.min(1, robotFill)));
-    document.getElementById('warn-summon-robot')!.style.display = enoughHCs ? 'none' : '';
     const robotCost = document.getElementById('cost-summon-robot')!;
-    robotCost.classList.toggle('met', canAffordRobot && enoughHCs && robotQueued === 0);
-    // Nudge once the gate finally opens and the player has never built one.
-    setBuyFlash('btn-summon-robot', enoughHCs && canAffordRobot && robotQueued === 0 && ![...state.goblins.values()].some((g) => g.robot) && state.spaceUnits.size === 0);
+    robotCost.classList.toggle('met', canAffordRobot && robotQueued === 0);
+    // Nudge once the task reveals it and the player has never built one.
+    setBuyFlash('btn-summon-robot', canAffordRobot && robotQueued === 0 && ![...state.goblins.values()].some((g) => g.robot) && state.spaceUnits.size === 0);
   } else {
     robotBtn.style.display = 'none';
     setBuyFlash('btn-summon-robot', false);

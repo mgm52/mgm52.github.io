@@ -923,14 +923,20 @@ export function autoAssignAllIdle(state: GameState) {
       const source = nearestWaterSourceTo(state, dr.b)!;
       while (waterCarrierCount(state, dr.b) < dr.target && idle.length > 0) {
         const c = buildingCenter(dr.b);
+        // Robots take watering duty ahead of any goblin, however far away —
+        // they're the fastest carriers and nothing can kill one en route.
+        // Within a class (robot vs goblin), nearest still wins.
         let pickI = 0;
         let pickD = Infinity;
+        let pickRobot = false;
         for (let i = 0; i < idle.length; i++) {
           const g = idle[i];
+          const isRobot = !!g.robot;
+          if (pickRobot && !isRobot) continue;
           const dx = g.pos.x - c.x;
           const dy = g.pos.y - c.y;
           const d = dx * dx + dy * dy;
-          if (d < pickD) { pickD = d; pickI = i; }
+          if ((isRobot && !pickRobot) || d < pickD) { pickD = d; pickI = i; pickRobot = isRobot; }
         }
         const g = idle.splice(pickI, 1)[0];
         dr.b.assignedGoblins.push(g.id);

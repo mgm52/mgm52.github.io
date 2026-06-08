@@ -317,20 +317,21 @@ await page.evaluate(() => {
 await sleep(600);
 await page.screenshot({ path: 'screenshots/new-2-orbital-platform.png' });
 
-// ── 7) UI: robot summon + orbital buttons exist; warning text correct ──
+// ── 7) UI: robot summon + orbital buttons exist; no hypercentre banner ──
 const uiBits = await page.evaluate(() => {
   const robotBtn = document.getElementById('btn-summon-robot');
   const warn = document.getElementById('warn-summon-robot');
   const orbitalBtn = document.getElementById('btn-place-orbital');
   return {
     robotBtnExists: !!robotBtn,
-    warnText: warn?.textContent,
+    warnExists: !!warn,
     orbitalExists: !!orbitalBtn,
     orbitalVisibleInSpace: orbitalBtn && orbitalBtn.style.display !== 'none',
   };
 });
-// The banner renders ROBOT.hypercentresRequired — don't pin the number here.
-check('robot button + "needs N hypercentres" banner', uiBits.robotBtnExists && /^needs \d+ hypercentres$/.test(uiBits.warnText ?? ''), JSON.stringify(uiBits));
+// The robot unlocks with the Build-a-Hypercentre task itself now — no
+// "needs N hypercentres" banner should exist at all.
+check('robot button exists with no hypercentre banner', uiBits.robotBtnExists && !uiBits.warnExists, JSON.stringify(uiBits));
 check('orbital platform button shows in space view', uiBits.orbitalExists && uiBits.orbitalVisibleInSpace);
 
 await browser.close();
