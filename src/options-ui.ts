@@ -330,7 +330,10 @@ function rebuildPanel(panel: HTMLElement, callbacks: OptionsUICallbacks, refresh
     color('Veil color',        o.hellDarknessColor, (v) => setOption('hellDarknessColor', v)),
     slider('Mirror light radius', o.hellDarknessMirrorRadius, 50, 1500, 10, (v) => setOption('hellDarknessMirrorRadius', v)),
     slider('Demon light radius',  o.hellDarknessDemonRadius, 50, 1500, 10, (v) => setOption('hellDarknessDemonRadius', v)),
+    slider('Parlay light radius', o.hellDarknessParlayRadius, 50, 1500, 10, (v) => setOption('hellDarknessParlayRadius', v)),
     slider('Light strength',   o.hellDarknessLightAlpha, 0, 1, 0.02, (v) => setOption('hellDarknessLightAlpha', v)),
+    // The canvas-side darkening during a parlay / soul chat (speakers exempt).
+    slider('Parlay dim alpha', o.hellParlayDimAlpha, 0, 1, 0.02, (v) => setOption('hellParlayDimAlpha', v)),
   ]));
 
   // The Demons section grew enough dials that it reads as four mini-panels:
@@ -341,6 +344,10 @@ function rebuildPanel(panel: HTMLElement, callbacks: OptionsUICallbacks, refresh
     slider('Hue', o.demonHue, -180, 180, 1, (v) => setOption('demonHue', v)),
     slider('Saturation', o.demonSaturation, 0, 3, 0.05, (v) => setOption('demonSaturation', v)),
     slider('Brightness', o.demonBrightness, 0, 3, 0.05, (v) => setOption('demonBrightness', v)),
+    // The per-letter speech rumble (0 volume silences it).
+    slider('Voice volume', o.demonVoiceVolume, 0, 1, 0.02, (v) => setOption('demonVoiceVolume', v)),
+    slider('Voice pitch', o.demonVoicePitch, 0.05, 2, 0.01, (v) => setOption('demonVoicePitch', v)),
+    slider('Voice pitch wobble', o.demonVoicePitchWobble, 0, 0.5, 0.01, (v) => setOption('demonVoicePitchWobble', v)),
     toggle('Walk (patrol)', o.demonWalks, (v) => setOption('demonWalks', v)),
     slider('Walk speed', o.demonWalkSpeed, 0.1, 5, 0.1, (v) => setOption('demonWalkSpeed', v)),
     slider('Anim speed', o.demonAnimSpeed, 0, 4, 0.1, (v) => setOption('demonAnimSpeed', v)),

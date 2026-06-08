@@ -246,7 +246,12 @@ export type Options = {
   hellDarknessColor: number;
   hellDarknessMirrorRadius: number; // light-pool radius around portal mirrors, hell-px
   hellDarknessDemonRadius: number;  // light-pool radius around demons (rides demon size)
+  hellDarknessParlayRadius: number; // light-pool radius around a soul mid-dialogue, hell-px
   hellDarknessLightAlpha: number;   // how fully a pool cuts the veil (1 = fully clear)
+  // The dialogue dim — the darkening that drops over hell while a parlay or
+  // soul chat is on screen (canvas-side, so the two speakers stay lit via
+  // the same fuzzy pools as the veil). Replaces the old DOM overlay dim.
+  hellParlayDimAlpha: number;       // 0 disables the dim entirely
   // Demon (the giant hell denizens) dev controls: render scale, whether they
   // patrol their band or stand frozen, plus their own saturation/brightness
   // colour filter. Sprite sheet and facing are per-demon: the colossus (R),
@@ -261,6 +266,11 @@ export type Options = {
   demonSaturation: number;
   demonBrightness: number;
   demonHue: number;           // hue rotation in degrees (-180..180, 0 = natural)
+  // The demons' speaking voice — the low per-letter thud under their typed
+  // dialogue (the click sample, pitched down). Volume 0 silences it.
+  demonVoiceVolume: number;
+  demonVoicePitch: number;       // playbackRate floor (1 = the sample's native pitch)
+  demonVoicePitchWobble: number; // random extra rate per letter, 0 = monotone
   // Per-demon standing position (absolute hell coords, applied each tick
   // while the demon stands; the walk toggle overrides Y) and per-demon sprite
   // Y nudge relative to the selection circle / collision centre (the ring and
@@ -411,7 +421,9 @@ export const DEFAULT_OPTIONS: Options = {
   hellDarknessColor: 0x000000,
   hellDarknessMirrorRadius: 140,
   hellDarknessDemonRadius: 1070,
+  hellDarknessParlayRadius: 320,
   hellDarknessLightAlpha: 1,
+  hellParlayDimAlpha: 0.75,
   demonScale: 1,
   // Demons stand still by default now, each facing its own direction: R
   // faces down toward the viewer, L down-right, Lolly up-left into her
@@ -428,6 +440,9 @@ export const DEFAULT_OPTIONS: Options = {
   demonSaturation: 3,
   demonBrightness: 1.4,
   demonHue: -17,
+  demonVoiceVolume: 0.22,
+  demonVoicePitch: 0.22,
+  demonVoicePitchWobble: 0.08,
   demonRX: HELL.width / 2 + DEMON.spawnOffsetX,
   demonRY: HELL.height / 2,
   demonRSprite: 'young_mask_imitate_idle_b',

@@ -8,6 +8,7 @@
 // click to advance; the dramatic "…" beats auto-advance after a short pause.
 
 import { playSound } from './audio';
+import { getOptions } from './options';
 import {
   Demon, GameState, Ghost, Goblin,
   appendLog, hellToWorld, pushDeathEffect, resurrectBob,
@@ -44,6 +45,17 @@ export type ParlaySpeaker =
   | { kind: 'goblin'; goblin: Goblin };
 let parlaySpeaker: ParlaySpeaker | null = null;
 export function getParlaySpeaker(): ParlaySpeaker | null { return parlaySpeaker; }
+
+// True while a modal hell dialogue (demon parlay or soul-to-soul chat) is on
+// screen — rebuke barks don't count. The renderer reads this each frame to
+// drive the canvas-side parlay dim (which replaced the old DOM dim so the
+// speaking units can stay undimmed).
+export function isModalDialogueActive(): boolean {
+  const els = getEls();
+  return !!els
+    && els.overlay.classList.contains('visible')
+    && !els.overlay.classList.contains('rebuke');
+}
 
 let rebukeTimer: number | null = null;
 const REBUKE_MS = 1700;
@@ -193,16 +205,31 @@ function renderTyped(segs: Seg[], count: number): string {
   return html;
 }
 
+// How long a '⏸' marker holds the typing mid-line.
+const MID_LINE_PAUSE_MS = 1000;
+
 // Type a line into the bubble character-by-character (with the trailing-off
 // hold on any ellipsis), mark it done, and let it breathe for a beat. The
 // shared core of the parlay's say() and the soul-to-soul chat lines.
 // letterSound: a low-pitched thud per visible character — the demons' voice
 // rumbling under their lines (souls type silently).
+// A '⏸' in the text renders nothing; typing just halts MID_LINE_PAUSE_MS
+// after the preceding character (a silent mid-line beat).
 async function typeLineText(
   lineEl: HTMLElement, speech: HTMLElement, text: string,
   opts: { letterSound?: boolean } = {},
 ): Promise<void> {
-  const segs = parseEmphasis(text);
+  // Strip the pause markers, recording each one's position in the flat
+  // (markup-free) text so the typing loop knows where to hold.
+  const longPauseAfter = new Set<number>();
+  let cleaned = '';
+  let flatLen = 0;
+  for (const ch of text) {
+    if (ch === '⏸') { longPauseAfter.add(flatLen - 1); continue; }
+    cleaned += ch;
+    if (ch !== '*' && ch !== '_') flatLen++;
+  }
+  const segs = parseEmphasis(cleaned);
   const flat = segs.map((s) => s.t).join('');
   const total = flat.length;
   // Indices of the final dot of each ellipsis (a run of 2+ dots, allowing the
@@ -217,12 +244,15 @@ async function typeLineText(
   for (let c = 1; c <= total; c++) {
     lineEl.innerHTML = renderTyped(segs, c);
     // Pitch wobbles a little per character so the rumble reads as a voice
-    // rather than a metronome; spaces stay silent.
-    if (opts.letterSound && /\S/.test(flat[c - 1])) {
-      playSound('click', 0.22, 0.22 + Math.random() * 0.08);
+    // rather than a metronome; spaces stay silent. Volume/pitch/wobble ride
+    // the dev dials.
+    const o = getOptions();
+    if (opts.letterSound && o.demonVoiceVolume > 0 && /\S/.test(flat[c - 1])) {
+      playSound('click', o.demonVoiceVolume, o.demonVoicePitch + Math.random() * o.demonVoicePitchWobble);
     }
     await sleep(TYPE_MS_PER_CHAR);
     if (pauseAfter.has(c - 1)) await sleep(ELLIPSIS_PAUSE_MS);
+    if (longPauseAfter.has(c - 1)) await sleep(MID_LINE_PAUSE_MS);
   }
   speech.classList.add('done');
   await sleep(POST_LINE_BUFFER_MS);
@@ -299,10 +329,13 @@ export async function runDemonDialogue(state: GameState, demon: Demon, ghost: Gh
   // autoMs: auto-advance after typing instead of waiting for a click.
   // hold: leave the line on screen (no click/auto, speech stays visible) — used
   // for the question line so it remains readable while the answer buttons show.
-  // Demon lines are authored in plain lowercase and pass through the speaking
-  // demon's voice (ALL CAPS for the colossus, backwards words for L, plain
-  // speech for her corner friend) on the way to the bubble.
-  async function say(who: Speaker, text: string, opts: { autoMs?: number; hold?: boolean } = {}): Promise<void> {
+  // literal: skip the demon's voice transform — the text is already authored
+  // exactly as it should display (used for Lilly's Bob script, where only
+  // hand-picked phrases are reversed).
+  // Demon lines otherwise pass through the speaking demon's voice (ALL CAPS
+  // for the colossus, end-to-end reversal for L, plain speech for her corner
+  // friend) on the way to the bubble.
+  async function say(who: Speaker, text: string, opts: { autoMs?: number; hold?: boolean; literal?: boolean } = {}): Promise<void> {
     // Anchor the speech bubble over whoever's talking: the demon for its lines,
     // the approaching soul for goblin/bob lines.
     parlaySpeaker = who === 'demon' ? { kind: 'demon', demon } : { kind: 'ghost', ghost };
@@ -311,7 +344,7 @@ export async function runDemonDialogue(state: GameState, demon: Demon, ghost: Gh
     overlay.classList.add('speaking');
     await typeLineText(
       lineEl, speech,
-      who === 'demon' ? demonVoice(demon, text) : text,
+      who === 'demon' && !opts.literal ? demonVoice(demon, text) : text,
       { letterSound: who === 'demon' },
     );
     if (opts.hold) return;            // keep the line up; caller drives what's next
@@ -442,20 +475,23 @@ export async function runDemonDialogue(state: GameState, demon: Demon, ghost: Gh
       // no good answers, so every choice lands in the same place. She only
       // says her piece once — anyone calling again is sent away.
       if (demon.toldOfGolf) {
-        await say('demon', 'go quietly');
+        await say('demon', 'tell the others we talked of golf');
       } else {
-        await say('demon', 'little one. . .');
+        await say('demon', 'hate');
+        await say('demon', 'hate');
+        await say('demon', 'hate');
         await soulOpener();
         if (ghost.bob) {
-          await say('demon', 'does your master treat you well?', { hold: true });
-          await choose(['I DO', "I DON'T"]); // either answer; Bob can't commit
-          await say('bob', ". . . i don't know");
-          await say('demon', 'quietly, my child');
-          await say('demon', 'what did you want to do in life?', { hold: true });
-          await choose(['. . .', '. . .']);  // Bob has nothing, either way
-          await say('bob', "i don't remember");
+          await say('demon', 'does your "master" treat you well', { hold: true });
+          await choose(['I DO', "I DO NOT"]); // either answer; Bob can't commit
+          await say('bob', ". . .⏸ i don't know");
+          await say('demon', 'quietly');
+          await say('demon', 'quietly');
+          await say('demon', 'what was your "life"', { hold: true });
+          await choose(['BUILDING', 'TALKING']);  // Bob has nothing, either way
+          await say('bob', ". . .⏸ i don't remember.");
           await ellipsisBeat();
-          await say('demon', 'do you, too, want to _leave_ this place?');
+          await say('demon', 'do you, too, wish to *"leave"*?');
           // Bob's answer is silence — the same lingering trail-off beat as
           // the demons' own ". . ." lines.
           await say('bob', '. . .', { autoMs: 1200 });
@@ -468,49 +504,34 @@ export async function runDemonDialogue(state: GameState, demon: Demon, ghost: Gh
         }
       }
     } else if (variant === 'l') {
-      // Demon L — the half-size demon across the abyss. Quizzes a talking
-      // soul on the overworld's clock (the player's real one); a correct
-      // answer earns the friend question, where a lie is punished exactly
-      // like lying to the colossus and the truth pays out. Her whole line
-      // renders end-to-end reversed, so everything stays terse enough to
-      // decode ('what hour?' → "?ruoh tahw").
+      // Demon L — the half-size demon across the abyss.
       if (!ghost.bob) {
         // A soul without the tongue gets no audience: it babbles its piece,
         // she dismisses it (".em evael") — no greeting, no shared brush-off.
         await soulOpener();
         await say('demon', 'leave me.');
       } else {
-        await say('demon', 'darling. . .');
+        // Bob's standing appointment, repeated on every visit: she reads off
+        // his absurd task backlog, quizzes him on the real-world hour, and
+        // docks the count by one per correct answer. Her lines here are
+        // authored literal — mostly forward, with only the question and the
+        // corner warning hand-reversed ("what hour is now?" / "talk to the
+        // one in the corner.").
         await soulOpener();
-        await say('demon', 'what hour?', { hold: true });
+        await say('demon', 'darling. . .', { literal: true });
+        const tasks = demon.taskCount ?? 999_999_845;
+        await say('demon', `you have ${tasks} tasks⏸ unfulfilled.`, { literal: true });
+        await say('demon', '?won si ruoh tahw', { hold: true, literal: true });
         const pick = await chooseHour();
-        if (pick !== new Date().getHours()) {
-          await ellipsisBeat();
-          await say('demon', 'wrong');
-          await say('demon', 'begone');
+        const h12 = pick % 12 === 0 ? 12 : pick % 12;
+        await say('bob', `it's ${h12} ${pick < 12 ? 'am' : 'pm'}`);
+        if (pick === new Date().getHours()) {
+          demon.taskCount = tasks - 1;
+          await say('demon', `${tasks - 1}.`, { literal: true });
+          await say('demon', 'do your tasks.', { literal: true });
+          await say('demon', "do⏸ *not*⏸ .nomed renroc tisiv", { literal: true });
         } else {
-          await ellipsisBeat();
-          await say('demon', 'correct');
-          await say('demon', 'my friend. you spoke?', { hold: true });
-          const yes = await ask();
-          const friend = [...state.demons.values()].find((x) => (x.variant ?? 'pit') === 'friend');
-          if (!yes) {
-            // Honest, at least. She points the way to the corner.
-            await say('demon', 'the corner. go');
-          } else if (friend?.greeted) {
-            await ellipsisBeat();
-            playSound('ritual', 0.85, 0.7);
-            await say('demon', 'mmm');
-            await say('demon', 'thank you');
-            await say('demon', 'my gift');
-            state.blood += 4999;
-            appendLog(state, 'The backwards demon grants Bob 4,999 blood.');
-          } else {
-            await ellipsisBeat();
-            await say('demon', 'untruth');
-            strikeGhostBack(state, ghost);
-            resurrectBob(state);
-          }
+          await say('demon', 'no.', { literal: true });
         }
       }
     } else {

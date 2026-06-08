@@ -13,7 +13,7 @@ import { AMBIENT_DRAGON, BUILDING_DEFS, BuildingKind, CELL, COLS, DEMON, DRAGON,
 import { DEFAULT_OPTIONS, ensureFontLoaded, fontFamilyById, getOptions, onOptionsChange, type FontConfig, type Options } from './options';
 import { loadDemonSheetList } from './demon-sheets';
 import { Building, Demon, DemonVariant, Dragon, GameState, Ghost, Goblin, HOLE_SIZE, Minotaur, SoulChair, SpaceBuilding, SpaceUnit, WaterSource, buildingCenter, candleSpotAt, cellCenter, defOf, demonScaleOf, holeCenter, isInPlayCell, maintainerCount } from './state';
-import { getParlaySpeaker } from './demon-dialogue';
+import { getParlaySpeaker, isModalDialogueActive } from './demon-dialogue';
 
 export type Camera = { x: number; y: number };
 
@@ -507,6 +507,11 @@ export type RenderContext = {
   hellDarknessLayer: Container;
   hellDarknessGfx: Graphics;
   hellLightMask: Container;
+  // Parlay dim: same construction, shown only during a modal hell dialogue
+  // with pools over the two speakers (syncParlayDim).
+  hellParlayDimLayer: Container;
+  hellParlayDimGfx: Graphics;
+  hellParlayLights: Container;
   // The soul sigil: a central inner ring + outer candle ring + the pentagram
   // edges that spring between placed candles. Two Graphics (lines/rings +
   // candle discs) are redrawn each frame for the flicker/seat/completion VFX;
@@ -783,6 +788,20 @@ export async function createRender(parent: HTMLElement, state: GameState): Promi
   // included — so his soul stays findable behind the colossi.
   const hellTagLayer = new Container();
   hellLayer.addChild(hellTagLayer);
+  // Parlay dim — the darkening that drops over hell while a modal dialogue
+  // is on screen. Canvas-side (it used to be a DOM gradient on the overlay)
+  // so the two units actually talking can be erased out of it with the same
+  // fuzzy light pools the veil uses. Topmost in hellLayer, covering the
+  // nametags just like the DOM dim did; syncParlayDim drives it.
+  const hellParlayDimLayer = new Container();
+  const hellParlayDimGfx = new Graphics();
+  const hellParlayLights = new Container();
+  hellParlayDimLayer.addChild(hellParlayDimGfx);
+  hellParlayDimLayer.addChild(hellParlayLights);
+  hellParlayDimLayer.filters = [new AlphaFilter()];
+  hellParlayDimLayer.visible = false;
+  hellParlayDimLayer.alpha = 0;
+  hellLayer.addChild(hellParlayDimLayer);
   hellLayer.scale.set(initScale);
   hellLayer.visible = false;
   // Hell sits between the ground and the sky/space stack so the descent's
@@ -877,6 +896,7 @@ export async function createRender(parent: HTMLElement, state: GameState): Promi
     hellSideBeamGfx,
     hellPortalMirrorLayer,
     hellDarknessLayer, hellDarknessGfx, hellLightMask,
+    hellParlayDimLayer, hellParlayDimGfx, hellParlayLights,
     hellPortalMirrors: new Map(),
     soulSigilLayer, soulSigilGfx, soulChairGfx, soulChairLabels: new Map(),
     sigilPowerLabels: new Map(),
@@ -986,6 +1006,14 @@ function applyOptions(ctx: RenderContext, o: Options) {
   if (o.hellDarknessEnabled) {
     ctx.hellDarknessGfx.rect(0, 0, HELL.width, HELL.height)
       .fill({ color: o.hellDarknessColor, alpha: o.hellDarknessAlpha });
+  }
+  // Parlay dim rect — near-black with the abyss's red cast (matching the old
+  // DOM gradient's deep end). Strength rides the dial; the layer's own alpha
+  // is faded in/out per frame by syncParlayDim.
+  ctx.hellParlayDimGfx.clear();
+  if (o.hellParlayDimAlpha > 0) {
+    ctx.hellParlayDimGfx.rect(0, 0, HELL.width, HELL.height)
+      .fill({ color: 0x0c0101, alpha: o.hellParlayDimAlpha });
   }
   applyDomOptions(o);
   applyFonts(ctx, o);
@@ -1595,7 +1623,70 @@ function syncHellDarkness(ctx: RenderContext, state: GameState): void {
     // Pool size rides the same per-demon × all-demons scaling as the sprite.
     place(d.hx, d.hy, o.hellDarknessDemonRadius * demonScaleOf(d) * o.demonScale);
   }
+  // Dialogue participants stay lit: the soul a demon is mid-parlay with
+  // (busyWith), and whoever currently holds the speech bubble (covers the
+  // souls in a ghost-to-ghost chat). Ghost views were positioned earlier
+  // this frame, so read the rendered position rather than re-deriving drift.
+  const litGhost = (id: number) => {
+    const v = ctx.ghostViews.get(id);
+    if (v) place(v.container.position.x, v.container.position.y, o.hellDarknessParlayRadius);
+  };
+  for (const d of state.demons.values()) {
+    if (d.busyWith !== null && d.busyWith !== undefined) litGhost(d.busyWith);
+  }
+  const speaker = getParlaySpeaker();
+  if (speaker?.kind === 'ghost') litGhost(speaker.ghost.id);
   for (let i = used; i < mask.children.length; i++) mask.children[i].visible = false;
+}
+
+// Drive the parlay dim: fade toward visible while a modal hell dialogue is
+// on screen, with fuzzy light pools kept over the participants — the busy
+// demon(s), the soul each is talking to, and (for soul-to-soul chats) the
+// current speaker and its chat partner. Everything else dims, replacing the
+// old whole-screen DOM gradient that darkened the speakers too.
+function syncParlayDim(ctx: RenderContext, state: GameState): void {
+  const o = getOptions();
+  const layer = ctx.hellParlayDimLayer;
+  const active = o.hellParlayDimAlpha > 0 && isModalDialogueActive();
+  // Ease toward shown/hidden (~the 400ms feel the DOM transition had).
+  const target = active ? 1 : 0;
+  layer.alpha += (target - layer.alpha) * 0.16;
+  if (!active && layer.alpha < 0.01) { layer.visible = false; return; }
+  layer.visible = true;
+  const lights = ctx.hellParlayLights;
+  let used = 0;
+  const place = (x: number, y: number, radius: number) => {
+    let s = lights.children[used] as Sprite | undefined;
+    if (!s) {
+      s = new Sprite(getLightTexture());
+      s.anchor.set(0.5);
+      s.blendMode = 'erase';
+      lights.addChild(s);
+    }
+    s.visible = true;
+    s.position.set(x, y);
+    s.scale.set((radius * 2) / LIGHT_TEX_SIZE);
+    used++;
+  };
+  const litGhost = (id: number) => {
+    const v = ctx.ghostViews.get(id);
+    if (v) place(v.container.position.x, v.container.position.y, o.hellDarknessParlayRadius);
+  };
+  for (const d of state.demons.values()) {
+    if (d.busyWith === null || d.busyWith === undefined) continue;
+    // The demon's pool wraps its whole body; the soul gets the parlay dial.
+    place(d.hx, d.hy, DEMON.displayPx * 0.7 * demonScaleOf(d) * o.demonScale);
+    litGhost(d.busyWith);
+  }
+  const speaker = getParlaySpeaker();
+  if (speaker?.kind === 'ghost') {
+    litGhost(speaker.ghost.id);
+    if (speaker.ghost.chatTargetId !== undefined) litGhost(speaker.ghost.chatTargetId);
+    for (const g of state.ghosts) {
+      if (g.chatTargetId === speaker.ghost.id) litGhost(g.id);
+    }
+  }
+  for (let i = used; i < lights.children.length; i++) lights.children[i].visible = false;
 }
 
 // Redraw the soul sigil every frame: the central inner ring, the outer candle
@@ -3305,6 +3396,8 @@ export function render(state: GameState, ctx: RenderContext) {
   // Darkness veil light pools — re-positioned every frame so they track
   // walking demons (and any new portals).
   syncHellDarkness(ctx, state);
+  // Parlay dim — darkens hell around the two units in dialogue.
+  syncParlayDim(ctx, state);
 
   // Scene cross-fades driven by altitude (0 ground … 1 space) and depth
   // (0 ground … 1 hell). The climb runs in three overlapping phases so

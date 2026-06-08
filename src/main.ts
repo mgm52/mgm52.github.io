@@ -325,10 +325,12 @@ async function main() {
     // Skip enough of the work chain that candles are usable on arrival —
     // placement needs blood unlocked and at least one candle's worth. On a
     // fresh run that's two skips (earn_100, then run_phone_farm); a run
-    // that's already mid-game may need none.
+    // that's already mid-game may need none. Then top the pool up to a full
+    // sigil's worth (five candles) so the ritual is actually completable.
     for (let i = 0; i < 8 && !(state.bloodUnlocked && state.blood >= SOUL_SIGIL.candleBloodCost); i++) {
       executeTaskSkip(state);
     }
+    state.blood = Math.max(state.blood, SOUL_SIGIL.candleBloodCost * SOUL_SIGIL.count);
     if (!ensureHellPortal(state)) {
       appendLog(state, 'Cheat: nowhere to fit a Hell Portal.');
       return;

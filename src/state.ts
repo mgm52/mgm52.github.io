@@ -116,9 +116,8 @@ export function nearestCellInWaterSource(w: WaterSource, from: Cell): Cell {
 // coordinates (no grid). The player can only "parlay" with one by walking a
 // goblin ghost up to it. Three variants share the type: 'pit' is the original
 // colossus (demon R — speaks in ALL CAPS), 'l' is the half-size demon across
-// the abyss (speaks backwards, quizzes a talking soul on the real-world
-// clock), and 'friend' is L's identical corner-dwelling friend, whose
-// `greeted` flag is the truth L's friend-question is judged against.
+// the abyss (speaks backwards, runs Bob through her hour quiz and warns him
+// off the corner), and 'friend' is L's identical corner-dwelling friend.
 export type DemonVariant = 'pit' | 'l' | 'friend';
 export type Demon = {
   id: number;
@@ -148,6 +147,10 @@ export type Demon = {
   // her piece once — every visitor afterwards is sent away with a curt "go
   // quietly". Optional for saves predating the corner dialogue.
   toldOfGolf?: boolean;
+  // Demon L only: Bob's absurd outstanding-task backlog. Starts at
+  // 999,999,845 and drops by one for every correct answer to her hour quiz.
+  // Optional for saves predating the quiz rework.
+  taskCount?: number;
   // Id of the ghost currently mid-parlay, or null. Only one soul may speak at a
   // time; while set the demon stands still and faces the speaker.
   busyWith: number | null;

@@ -1319,21 +1319,16 @@
         transition: opacity 400ms ease;
       }
       #demon-overlay.visible { opacity: 1; }
-      /* Dim the abyss behind the text so the speech stays legible. */
-      #demon-overlay::before {
-        content: "";
-        position: absolute; inset: 0;
-        background: radial-gradient(ellipse at center, rgba(28, 3, 4, 0.35), rgba(6, 1, 1, 0.86));
-      }
+      /* The abyss-dimming behind the text lives in the canvas now (the
+         parlay dim layer in render.ts) so the two units actually talking
+         stay undimmed — a DOM overlay here couldn't exempt them. */
       #demon-clickwall {
         position: absolute; inset: 0;
         pointer-events: none;
       }
       #demon-overlay.visible #demon-clickwall { pointer-events: auto; }
-      /* Rebuke mode is a quick non-modal bark: don't dim the abyss and let
-         clicks pass straight through to the canvas. Declared after the rules
-         above so it wins on equal specificity. */
-      #demon-overlay.rebuke::before { display: none; }
+      /* Rebuke mode is a quick non-modal bark: let clicks pass straight
+         through to the canvas. */
       #demon-overlay.rebuke #demon-clickwall { pointer-events: none; }
       #demon-overlay.click-armed #demon-clickwall {
         cursor: url('assets/GloveCursor-24.png') 9 1, pointer;
@@ -1370,17 +1365,14 @@
       #demon-speech.demon #demon-line { color: #ff2a22; text-shadow: 0 0 14px rgba(255, 40, 30, 0.6); }
       #demon-speech.goblin #demon-line { color: #d6ecc4; }
       #demon-speech.bob #demon-line { color: #ffe7ad; }
-      /* Emphasised phrase inside a demon line — the *slain two dragons* bit. */
+      /* Emphasised phrase inside a demon line — the *slain two dragons* bit.
+         No italics (the markup is an <em>, so the browser's built-in italic
+         needs overriding); both the * and _ markers just glow yellow. */
       .demon-em {
-        font-style: italic;
+        font-style: normal;
         font-weight: 600;
-        color: #ff5a44;
-        text-shadow: 0 0 18px rgba(255, 80, 40, 0.9);
-      }
-      /* Pale variant — the corner demon's _leave_ glows white, not hellfire. */
-      .demon-em.white {
-        color: #ffffff;
-        text-shadow: 0 0 18px rgba(255, 255, 255, 0.85);
+        color: #ffd96b;
+        text-shadow: 0 0 18px rgba(255, 210, 90, 0.85);
       }
       /* Blinking caret, hidden once the line finishes (.done). Reuses the
          intro-caret keyframes. */

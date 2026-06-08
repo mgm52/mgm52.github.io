@@ -1803,31 +1803,34 @@ export function refreshUI(state: GameState) {
   // nudge: after PAN_HINT_DELAY_SEC of total play if the player has never
   // moved the camera at all; hides forever (sticky `cameraPanSeen`) on the
   // first pan — keyboard or two-finger drag.
+  // A run that dev-skipped to hell jumped past the early game entirely —
+  // every onboarding nudge below (pan, spawn, drag-select, multi-spawn) is
+  // stale noise there, so they all stay suppressed for the rest of the run.
+  const skippedToHell = !!state.devSkippedToHell;
   const panHint = document.getElementById('pan-hint')!;
   const dugDelayElapsed = state.firstDugAt != null && (state.now - state.firstDugAt) >= WATER_HINT_DELAY_SEC;
   const waterNudge = dugDelayElapsed && !state.waterSeen;
   const neverPannedNudge = !state.cameraPanSeen && state.now >= PAN_HINT_DELAY_SEC;
-  panHint.style.display = (waterNudge || neverPannedNudge) ? 'block' : 'none';
+  panHint.style.display = !skippedToHell && (waterNudge || neverPannedNudge) ? 'block' : 'none';
 
   // Spawn-hint — onboarding nudge that fades in once either timeout trips.
   // First task is `earn_100`; check sticky completion as well as live state
   // so a save resumed mid-game doesn't pop the hint back up. Earning any
   // blood (sticky bloodUnlocked) means the player has already commanded
-  // violence, so the hint would be stale noise — never show it again. A run
-  // that dev-skipped to hell jumped past the early game entirely, so the
-  // nudge stays suppressed there too.
+  // violence, so the hint would be stale noise — never show it again.
   const spawnHint = document.getElementById('spawn-hint')!;
   const earn100Done = completedTaskIds.has('earn_100') || TASKS[0].isDone(state);
   const noSpawnTrip = state.spawnsCompleted === 0 && state.now >= SPAWN_HINT_NO_SPAWN_SEC;
   const noTaskTrip = !earn100Done && state.now >= SPAWN_HINT_NO_TASK_SEC;
   spawnHint.classList.toggle('visible',
-    !state.bloodUnlocked && !state.devSkippedToHell && (noSpawnTrip || noTaskTrip));
+    !state.bloodUnlocked && !skippedToHell && (noSpawnTrip || noTaskTrip));
 
   // Drag-select hint — once past the first task, surface after DRAG_SELECT_HINT_DELAY_SEC
   // of play if the player still hasn't done a 2+ multi-select. Sticky-hidden
   // forever after the first successful multi-drag.
   const dragSelectHint = document.getElementById('drag-select-hint')!;
   const dragSelectTrip = earn100Done
+    && !skippedToHell
     && !state.multiSelectSeen
     && state.now >= DRAG_SELECT_HINT_DELAY_SEC;
   dragSelectHint.classList.toggle('visible', dragSelectTrip);
@@ -1837,6 +1840,7 @@ export function refreshUI(state: GameState) {
   // goblin in the spawn queue at a time. Sticky-hidden once they queue 2+.
   const multiSpawnHint = document.getElementById('multi-spawn-hint')!;
   const multiSpawnTrip = state.spawnsCompleted > 0
+    && !skippedToHell
     && !state.multiSpawnSeen
     && state.now >= MULTI_SPAWN_HINT_DELAY_SEC;
   multiSpawnHint.classList.toggle('visible', multiSpawnTrip);
