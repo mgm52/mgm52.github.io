@@ -1,5 +1,5 @@
 import { Application, Container, FederatedPointerEvent, Graphics } from 'pixi.js';
-import { playSound, playMinotaurCommand } from './audio';
+import { playSound, playGhostCommand, playMinotaurCommand } from './audio';
 import { flashCursor } from './cursor-fx';
 import { bobOverworldBark, demonRebuke } from './demon-dialogue';
 import { BUILDABLE_KINDS, BUILDING_DEFS, BuildingKind, CELL, DRAGON, GOBLIN, HELL, LIGHTNING, MINOTAUR, SOUL_SIGIL, SPACE, SPACE_UNIT, WORLD, formatPower } from './config';
@@ -910,6 +910,17 @@ function tryPlaceOrbital(state: GameState, x: number, y: number) {
   appendLog(state, `${def.name} #${b.displayNum} scaffold deployed — only a robot can assemble it.`);
 }
 
+// Commanded souls answer with their living cry made distant — the same per-kind
+// command bursts as surface units, sent through the ghostly reverb (see
+// playGhostCommand in audio.ts). One burst per kind present in the group.
+function playGhostCommandBurst(ghosts: Ghost[]) {
+  const tally: Record<Ghost['kind'], number> = { goblin: 0, minotaur: 0, dragon: 0 };
+  for (const g of ghosts) tally[g.kind]++;
+  for (const kind of ['goblin', 'minotaur', 'dragon'] as const) {
+    if (tally[kind] > 0) playGhostCommand(kind, tally[kind]);
+  }
+}
+
 // Right-click in hell view: walk every selected ghost to the clicked hell-coord.
 // Multiple ghosts get a small per-ghost offset so they don't pile up exactly on
 // the same point. No-op (with an error beep) if nothing is selected.
@@ -961,7 +972,7 @@ function handleHellRightClick(state: GameState, hx: number, hy: number) {
     nearest.commanded = true;
     chair.claimedBy = nearest.id;
     chair.commandFlashAt = state.now;
-    playSound('select', 0.4);
+    playGhostCommandBurst([nearest]);
     appendLog(state, 'A soul shuffles toward the sigil.');
     return;
   }
@@ -998,7 +1009,7 @@ function handleHellRightClick(state: GameState, hx: number, hy: number) {
     nearest.goal = { x: target.hx, y: target.hy };
     nearest.commanded = true;
     target.commandFlashAt = state.now;
-    playSound('select', 0.4);
+    playGhostCommandBurst([nearest]);
     appendLog(state, 'A soul shuffles over for a chat.');
     return;
   }
@@ -1036,7 +1047,7 @@ function handleHellRightClick(state: GameState, hx: number, hy: number) {
     for (const c of state.soulChairs) if (c.claimedBy === g.id) c.claimedBy = undefined;
     g.parlayDemonId = canSpeak ? demon.id : undefined;
     g.commanded = true;
-    playSound('select', 0.4);
+    playGhostCommandBurst([g]);
     if (canSpeak) appendLog(state, 'A soul shuffles forth to parlay with the demon.');
     else appendLog(state, 'The demon is already locked in parlay.');
     return;
@@ -1061,7 +1072,7 @@ function handleHellRightClick(state: GameState, hx: number, hy: number) {
     }
     g.commanded = true;
   }
-  playSound('select', 0.4);
+  playGhostCommandBurst(selected);
   appendLog(state, `${selected.length} ghost(s) drift toward the cursor.`);
 }
 
