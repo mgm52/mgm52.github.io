@@ -1032,7 +1032,6 @@ export function setupUI(state: GameState, callbacks: UICallbacks) {
           <span class="build-cost build-gold-cost" id="cost-orbital">Ƶ${orbitalDef.cost.toLocaleString('en-US')}</span>
         </div>
       </div>
-      <div class="build-yields"><span class="yield-power">robot-built</span></div>
     </div>
   `;
   orbitalBtn.addEventListener('click', () => { playSound('click', 1, 0.75); callbacks.onPlaceOrbital(); });
@@ -1055,7 +1054,7 @@ export function setupUI(state: GameState, callbacks: UICallbacks) {
           <span class="build-cost build-gold-cost" id="cost-space-centre">Ƶ${spaceCentreDef.cost.toLocaleString('en-US')}</span> · <span class="build-power-cost" id="power-cost-space-centre">${formatPower(-spaceCentreDef.powerOutput)}</span>
         </div>
       </div>
-      <div class="build-yields"><span class="yield-money">+Ƶ${spaceCentreDef.income.toLocaleString('en-US')}/s</span><br><span class="yield-power">needs platform</span></div>
+      <div class="build-yields"><span class="yield-money">+Ƶ${spaceCentreDef.income.toLocaleString('en-US')}/s</span></div>
     </div>
   `;
   spaceCentreBtn.addEventListener('click', () => { playSound('click', 1, 0.75); callbacks.onPlaceSpaceCentre(); });
@@ -1793,8 +1792,8 @@ export function refreshUI(state: GameState) {
   }
 
   // Space Centre — sits under the Orbital Platform in the space view's Build
-  // menu. Shown whenever the player is in orbit (its "needs platform" tag and
-  // the red "no platform" refusal floater teach the placement rule). Flashes
+  // menu. Shown whenever the player is in orbit (the red "no platform"
+  // refusal floater teaches the placement rule). Flashes
   // for attention once it's affordable AND there's a completed platform to
   // stand it on, until the first Centre exists; leaving the view disarms
   // placement like the others.
