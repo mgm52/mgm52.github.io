@@ -172,7 +172,7 @@ export type Minotaur = {
   state: MinotaurState;
   nextWanderAt: number;
   selected: boolean;
-  // Stuck detection: minotaurs step greedily (Chebyshev-toward-target) with
+  // Stuck detection: minotaurs step greedily (octile-toward-target) with
   // only a wall-following detour for obstacles — no real pathfinding — so a
   // pathological pinch can still trap one in a tiny area. We periodically
   // sample the cell and bail back to `wander` when the sample stays inside a

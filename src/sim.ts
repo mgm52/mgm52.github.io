@@ -1048,7 +1048,7 @@ function rotDir(d: Dir, k: number): Dir {
   return ((((d + k) % 8) + 8) % 8) as Dir;
 }
 
-// One movement step toward whatever `distFn` measures (Chebyshev to a cell,
+// One movement step toward whatever `distFn` measures (octile to a cell,
 // or to a building's footprint). Same cost class as the old pure-greedy step:
 // a constant handful of neighbor checks, no search, no allocation beyond the
 // returned cell.
@@ -1132,9 +1132,23 @@ function minotaurStep(
   return best;
 }
 
+// Octile distance — the length of an unobstructed 8-way path where diagonal
+// steps cost their true √2. Plain Chebyshev made the greedy step veer off on
+// huge diagonals: toward a target due east, NE "improves" the distance just
+// as much as E does and is probed first (ALL_DIRS is clockwise from north),
+// so a minotaur would climb a long diagonal until the axes balanced and then
+// ride another diagonal back down — a big triangle instead of a straight
+// line. Charging diagonals √2 makes greedy pick the natural
+// diagonal-while-it-helps, straight-once-aligned line.
+const DIAG_EXTRA = Math.SQRT2 - 1;
+function octile(dx: number, dy: number): number {
+  const ax = Math.abs(dx), ay = Math.abs(dy);
+  return Math.max(ax, ay) + DIAG_EXTRA * Math.min(ax, ay);
+}
+
 function minotaurStepToward(state: GameState, t: Minotaur, target: Cell, tag: number): Cell | null {
   return minotaurStep(state, t, tag, (cx, cy) =>
-    Math.max(Math.abs(cx - target.cx), Math.abs(cy - target.cy)));
+    octile(cx - target.cx, cy - target.cy));
 }
 
 function minotaurWanderStep(state: GameState, t: Minotaur): Cell | null {
@@ -1199,6 +1213,9 @@ function assignMinotaurTargets(state: GameState): Map<number, number> {
   return result;
 }
 
+// Chebyshev stays the *adjacency* metric — a diagonally-touching minotaur is
+// in smashing range — while octile (below) is the *movement* metric. Both are
+// kept allocation-free: the step distFn runs once per probed neighbor.
 function chebyshevToBuilding(cell: Cell, b: Building): number {
   const n = defOf(b).cellSize;
   const right = b.cell.cx + n - 1;
@@ -1208,16 +1225,25 @@ function chebyshevToBuilding(cell: Cell, b: Building): number {
   return Math.max(dx, dy);
 }
 
+function octileToBuilding(cell: Cell, b: Building): number {
+  const n = defOf(b).cellSize;
+  const right = b.cell.cx + n - 1;
+  const bottom = b.cell.cy + n - 1;
+  const dx = Math.max(0, b.cell.cx - cell.cx, cell.cx - right);
+  const dy = Math.max(0, b.cell.cy - cell.cy, cell.cy - bottom);
+  return octile(dx, dy);
+}
+
 function minotaurStepTowardBuilding(state: GameState, t: Minotaur, b: Building): Cell | null {
   // One shared probe cell so the distFn doesn't allocate per neighbor.
   const probe: Cell = { cx: 0, cy: 0 };
   return minotaurStep(state, t, b.id, (cx, cy) => {
     probe.cx = cx; probe.cy = cy;
-    return chebyshevToBuilding(probe, b);
+    return octileToBuilding(probe, b);
   });
 }
 
-// Stuck detection. Minotaurs step greedily (Chebyshev-toward-target) with only
+// Stuck detection. Minotaurs step greedily (octile-toward-target) with only
 // a wall-following detour for obstacles (see minotaurStep) — no real
 // pathfinding — so a pathological pinch — minotaurs blocking each other in a
 // corridor, a fully sealed-off target — can still trap one in a tiny area. Every
