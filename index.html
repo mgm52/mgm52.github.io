@@ -694,14 +694,14 @@
       }
       #quick-travel.visible { opacity: 1; pointer-events: auto; }
       #quick-travel button {
-        background: rgba(6, 8, 20, 0.72); color: #e6eeff;
-        border: 1px solid rgba(150, 180, 255, 0.35); border-radius: 4px;
+        background: rgba(6, 8, 20, 0.72); color: #9aa0aa;
+        border: 1px solid rgba(154, 160, 170, 0.35); border-radius: 4px;
         font-family: var(--font-body); font-size: calc(14px * var(--font-body-scale));
         letter-spacing: 1px; padding: 7px 12px; cursor: pointer;
         text-align: center;
-        text-shadow: 0 0 8px rgba(120, 160, 255, 0.6);
+        text-shadow: 0 0 8px rgba(154, 160, 170, 0.4);
       }
-      #quick-travel button:hover:not(:disabled) { border-color: rgba(210, 225, 255, 0.85); }
+      #quick-travel button:hover:not(:disabled) { border-color: rgba(210, 215, 225, 0.85); }
       /* Fresh-unlock attention: the strip pulses gold from the moment it
          unlocks until the player's first quick hop, so the new buttons can't
          be missed tucked up in the corner (ui.ts toggles .attention off the
@@ -711,14 +711,9 @@
         0%, 100% { box-shadow: 0 0 0 0 rgba(255, 217, 107, 0); }
         50% { box-shadow: 0 0 14px 2px rgba(255, 217, 107, 0.6); border-color: #ffd96b; }
       }
-      #quick-travel #qt-hell {
-        background: rgba(28, 4, 6, 0.78); color: #ffd0c8;
-        border-color: rgba(255, 80, 80, 0.45);
-        text-shadow: 0 0 8px rgba(255, 80, 80, 0.6);
-      }
       #quick-travel button.active {
-        border-color: #ffd96b; color: #ffd96b; cursor: default;
-        text-shadow: 0 0 8px rgba(255, 217, 107, 0.5);
+        border-color: #ffffff; color: #ffffff; cursor: default;
+        text-shadow: 0 0 8px rgba(255, 255, 255, 0.5);
       }
       /* Finger-sized hops on touch, matching the travel hints' treatment. */
       @media (pointer: coarse) {
