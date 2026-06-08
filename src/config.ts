@@ -745,7 +745,7 @@ export const BUILDING_DEFS = {
     buildersRequired: 1,
     buildTime: 30,
     maintainersRequired: 1,
-    income: 5_000_000,
+    income: 250_000,
     powerOutput: -10_000_000_000, // 10 GW draw
     wanderInterval: 0,
     wanderJitter: 0,
