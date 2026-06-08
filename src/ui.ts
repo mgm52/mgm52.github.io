@@ -11,6 +11,7 @@ import {
   maintainerCount, markBuildingsChanged, nextBuildingDisplayNum, occupyCell, waterCarrierCount,
 } from './state';
 import { spawnDragon, spawnMinotaur, unseatSoulFromChair } from './sim';
+import { isModalDialogueActive } from './demon-dialogue';
 import { unlockOptionsCog } from './options-ui';
 
 // Build buttons appear in this fixed order, mostly cheapest-first. goblin_hole
@@ -105,6 +106,14 @@ let initialButtonsSeeded = false;
 // Joined ids of the currently-active tasks, so a change (a fresh task surfacing
 // at the bottom of the sidebar) can flag the task line as new content.
 let lastActiveTaskKey = '';
+// Lilly's optional-Work handout rides the same staged reveal a completed
+// task's unlocks get. `lastLillyTasksGiven` spots the flag flipping true
+// mid-parlay (null until the first refresh seeds it, so a resumed save that
+// already has the tasks doesn't replay the ceremony); the pending flag then
+// holds the walk until her dialogue overlay is gone, so the reveal doesn't
+// fire underneath the conversation.
+let lastLillyTasksGiven: boolean | null = null;
+let lillyHandoutRevealPending = false;
 // Last-written innerHTML for the power readout / task line — assigning the
 // same markup again still rebuilds the DOM nodes, so both writes are gated.
 let lastPowerHtml = '';
@@ -1636,6 +1645,26 @@ export function refreshUI(state: GameState) {
     document.getElementById('task-text')?.classList.add('reveal-hidden');
   }
   lastActiveTaskKey = activeTaskKey;
+
+  // Lilly's optional-Work handout: the instant the flag flips (mid-parlay,
+  // with no celebration overlay to hold things), hide the freshly grown task
+  // line and mark it pending so it can't just pop in plainly. The walk itself
+  // waits below until her dialogue closes.
+  if (lastLillyTasksGiven === false && state.lillyTasksGiven) {
+    lillyHandoutRevealPending = true;
+    taskTextPendingReveal = true;
+    document.getElementById('task-text')?.classList.add('reveal-hidden');
+  }
+  lastLillyTasksGiven = state.lillyTasksGiven;
+  // Dialogue gone — arm the staged reveal exactly like a cleared WORK
+  // COMPLETE overlay does (finishCelebration): freeze game time and let this
+  // pass's kick at the bottom of refreshUI walk the sequence, landing the
+  // task line with the usual dim + glow + chime.
+  if (lillyHandoutRevealPending && !isModalDialogueActive()) {
+    lillyHandoutRevealPending = false;
+    document.body.classList.add('unlock-reveal-hold');
+    revealArmed = true;
+  }
 
   // Scroll cues — muted chevrons at the top/bottom of the build panel whenever
   // any content sits off-screen in that direction (iOS/macOS hide overlay
