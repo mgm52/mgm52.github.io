@@ -433,7 +433,7 @@ export const DEFAULT_OPTIONS: Options = {
   hellDarknessLightAlpha: 1,
   hellParlayDimAlpha: 0.75,
   hellSpriteShadowGhosts: true,
-  hellSpriteShadowDemons: false,
+  hellSpriteShadowDemons: true,
   hellSpriteShadowAlpha: 0.28,
   hellSpriteShadowTint: 0x000000,
   hellSpriteShadowSquash: 0.75,
