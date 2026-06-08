@@ -300,6 +300,8 @@ function rebuildPanel(panel: HTMLElement, callbacks: OptionsUICallbacks, refresh
     // past 1 (it feeds a heavily attenuating convolver, not the master bus).
     slider('Hell command volume', o.hellCommandVolume, 0, 4, 0.05, (v) => setOption('hellCommandVolume', v)),
     toggle('Vinyl crackle', o.crackleEnabled,                (v) => { setOption('crackleEnabled', v); refreshPublic?.(); }),
+    // The sample slowed way down when a struck Nuclear Reactor goes critical.
+    select('Meltdown sfx (slowed)', o.meltdownSound, VOICE_SOUND_OPTS, (v) => setOption('meltdownSound', v as SoundName)),
   ]));
 
   panel.appendChild(collapsibleSection('Hell', [

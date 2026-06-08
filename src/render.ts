@@ -12,7 +12,7 @@ type DeathFrames = { textures: Texture[]; ends: number[]; duration: number };
 import { AMBIENT_DRAGON, BUILDING_DEFS, BuildingKind, CELL, COLS, DEMON, DRAGON, GOBLIN, HELL, REACTOR_MELTDOWN, RENDER_SCALE, ROBOT, ROWS, MINOTAUR, SOUL_SIGIL, SPACE, SPACE_UNIT, TINYTAUR, WORLD, formatPower, sigilPortalOutput } from './config';
 import { DEFAULT_OPTIONS, ensureFontLoaded, fontFamilyById, getOptions, onOptionsChange, type FontConfig, type Options } from './options';
 import { loadDemonSheetList } from './demon-sheets';
-import { Building, Demon, DemonVariant, Dragon, GameState, Ghost, Goblin, HOLE_SIZE, Minotaur, SoulChair, SpaceBuilding, SpaceUnit, WaterSource, buildingCenter, candleSpotAt, cellCenter, defOf, demonScaleOf, freePlatformAt, holeCenter, isInPlayCell, maintainerCount } from './state';
+import { Building, Demon, DemonVariant, Dragon, GameState, Ghost, Goblin, HOLE_SIZE, Minotaur, SoulChair, SpaceBuilding, SpaceUnit, WaterSource, buildingCenter, candleSpotAt, cellCenter, chairSoulSnapshot, defOf, demonScaleOf, freePlatformAt, holeCenter, isInPlayCell, maintainerCount } from './state';
 import { getParlaySpeaker, isModalDialogueActive } from './demon-dialogue';
 
 export type Camera = { x: number; y: number };
@@ -570,6 +570,10 @@ export type RenderContext = {
   soulSigilGfx: Graphics;
   soulChairGfx: Graphics;
   soulChairLabels: Map<number, Text>;
+  // Pale white spectre of the soul bound into each occupied candle, keyed by
+  // chair id — so the player can see WHO is trapped in there. Created when a
+  // chair fills, destroyed when it empties (see syncSoulSigil).
+  seatedSoulSprites: Map<number, Sprite>;
   // Live wattage readout on each portal's mirror ("1 W" → × each seated
   // soul's strength), keyed by portalId.
   sigilPowerLabels: Map<number, Text>;
@@ -964,6 +968,7 @@ export async function createRender(parent: HTMLElement, state: GameState): Promi
     hellParlayDimLayer, hellParlayDimGfx, hellParlayLights,
     hellPortalMirrors: new Map(),
     soulSigilLayer, soulSigilGfx, soulChairGfx, soulChairLabels: new Map(),
+    seatedSoulSprites: new Map(),
     sigilPowerLabels: new Map(),
     candleCursor: null,
     candlePreviewLabel: null,
@@ -1701,6 +1706,36 @@ function makeGhostView(g: Ghost): GhostView | null {
   return { container, shadow, sprite, selectionRing };
 }
 
+// Shared whitening filter for the bound-soul spectres in the candles:
+// desaturated and brightened hard so any unit reads as a pale white
+// apparition trapped in the wax, whatever its living colours were.
+const seatedSoulFilter = new ColorMatrixFilter();
+seatedSoulFilter.desaturate();
+seatedSoulFilter.brightness(2.6, true);
+
+// A spectre of the soul bound into a candle: the first frame of the unit's
+// own sheet (facing the viewer; the dragon's fly sheet only has profiles, so
+// it shows its east one), whitened by the shared filter and sized to stand
+// inside the wax pool whatever the kind. Returns null while the sheet is
+// still loading — the caller just retries next frame.
+function makeSeatedSoulSprite(chair: SoulChair): Sprite | null {
+  const soul = chairSoulSnapshot(chair);
+  const sheet = soul.kind === 'goblin' ? (goblinIdleSheet ?? goblinWalkSheet)
+    : soul.kind === 'minotaur' ? minotaurWalkSheet
+    : dragonFlySheet;
+  if (!sheet) return null;
+  const heading = soul.kind === 'dragon' ? 0 : Math.PI / 2;
+  const sprite = new Sprite(sheet.frames[dirIndex(sheet.meta, heading)][0]);
+  sprite.anchor.set(0.5);
+  // One size for every kind (a dragon shrinks a lot to fit); a tinytaur
+  // keeps its small stature.
+  const px = SOUL_SIGIL.chairRadius * 2.3 * (soul.tiny ? TINYTAUR.scale : 1);
+  sprite.scale.set(px / sheet.meta.spriteSize);
+  sprite.alpha = 0.92;
+  sprite.filters = [seatedSoulFilter];
+  return sprite;
+}
+
 // Build the hell-side mirror of an overworld hell_portal — a darker copy of
 // the building's footprint with a pulsing red interior, positioned at the
 // portal's world coord mapped into hell space. Used once at creation;
@@ -1863,6 +1898,7 @@ function syncSoulSigil(ctx: RenderContext, state: GameState): void {
 
   const seenLabels = new Set<number>();
   const seenPower = new Set<number>();
+  const seenSpectres = new Set<number>();
   for (const portal of state.buildings.values()) {
     if (portal.kind !== 'hell_portal' || portal.state === 'constructing') continue;
     const ctr = buildingCenter(portal);
@@ -1943,6 +1979,23 @@ function syncSoulSigil(ctx: RenderContext, state: GameState): void {
           : 0.5 + 0.25 * Math.sin(now * 2.5);
         cg.circle(hx, hy, chairRadius * 0.55).fill({ color: 0xff5a2a, alpha: 0.5 * pulse + 0.2 });
         cg.circle(hx, hy, chairRadius * 0.28).fill({ color: 0xffd6a0, alpha: 0.45 * pulse + 0.25 });
+        // The trapped soul itself, a pale white spectre standing in the wax —
+        // so the player can see who is bound in each candle. A chair can only
+        // change occupant via an unoccupied frame in between (the freed/new
+        // soul has to walk), so the sprite never goes stale.
+        let spectre = ctx.seatedSoulSprites.get(chair.id);
+        if (!spectre) {
+          const made = makeSeatedSoulSprite(chair);
+          if (made) {
+            ctx.soulSigilLayer.addChild(made);
+            ctx.seatedSoulSprites.set(chair.id, made);
+            spectre = made;
+          }
+        }
+        if (spectre) {
+          spectre.position.set(hx, hy - 10);
+          seenSpectres.add(chair.id);
+        }
       }
       // Selection ring — matches the gold highlight other selected things
       // get — or, when a soul was just commanded onto this chair, the same
@@ -2088,6 +2141,13 @@ function syncSoulSigil(ctx: RenderContext, state: GameState): void {
     if (!seenPower.has(id)) {
       label.destroy();
       ctx.sigilPowerLabels.delete(id);
+    }
+  }
+  // …and spectres whose chair emptied (soul freed) or is gone entirely.
+  for (const [id, spectre] of ctx.seatedSoulSprites) {
+    if (!seenSpectres.has(id)) {
+      spectre.destroy();
+      ctx.seatedSoulSprites.delete(id);
     }
   }
 }

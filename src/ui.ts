@@ -6,7 +6,7 @@ import {
 } from './config';
 import {
   Building, Cell, Demon, DragonState, GameState, Ghost, Goblin, GoblinState, SoulChair, SpaceBuilding, SpaceUnit, WaterSource,
-  appendLog, buildingCenter, buildingLabel, buildingMoneyCost, cellCenter, cellKey, countHypercentres, countIdle, defOf, digDirection,
+  appendLog, buildingCenter, buildingLabel, buildingMoneyCost, cellCenter, cellKey, chairSoulSnapshot, countHypercentres, countIdle, defOf, digDirection,
   earnDragonBone, getSpawnCapacity, holeBlockedByBuilding, isCellBlocked, isInBounds,
   maintainerCount, markBuildingsChanged, nextBuildingDisplayNum, occupyCell, waterCarrierCount,
 } from './state';
@@ -2200,19 +2200,30 @@ function showHellPortal(state: GameState, b: Building, panel: HTMLElement, portr
   // The portal puts out a deadpan 1 W on its own — its real output is the
   // soul sigil ringed around its mirror: every seated soul multiplies the
   // wattage by its own strength (x66 weak / x100 strong / x144 very strong).
+  // The card reads as a live status report: what it's giving the grid right
+  // now, how full the candle ring is, and who exactly is bound in it.
   const ring = state.soulChairs.filter((c) => c.portalId === b.id);
-  const seated = ring.filter((c) => c.occupied).length;
-  const power = `Power output: ${formatPower(sigilPortalOutput(def.powerOutput, ring))}`;
+  const seated = ring.filter((c) => c.occupied);
+  const power = `Currently giving: ${formatPower(sigilPortalOutput(def.powerOutput, ring))}`;
   const lines = [
     `<span style="color:#ff8a6a">Its light pierces down into the abyss</span>`,
     `<span style="color:#8acfff">${power}</span>`,
   ];
-  if (b.state !== 'constructing' && ring.length < SOUL_SIGIL.count) {
+  if (b.state !== 'constructing') {
     lines.push(`<span style="color:#ff8a6a">${ring.length}/${SOUL_SIGIL.count} candles on its outer ring</span>`);
-  } else if (seated > 0) {
-    lines.push(`<span style="color:#8acfff">x${SOUL_SIGIL.soulMultipliers.weak}–x${SOUL_SIGIL.soulMultipliers.veryStrong} per bound soul (${seated}/${SOUL_SIGIL.count})</span>`);
+    if (seated.length > 0) {
+      const souls = [...seated].sort((a, c) => a.index - c.index).map(chairSoulLabel).join(', ');
+      lines.push(`<span style="color:#8acfff">Bound souls (${seated.length}/${SOUL_SIGIL.count}): ${souls}</span>`);
+    }
   }
   extra.innerHTML = lines.join('<br>');
+}
+
+// Human label for the soul bound into an occupied chair — the snapshot when
+// recorded, reconstructed from the multiplier on older saves.
+function chairSoulLabel(c: SoulChair): string {
+  const s = chairSoulSnapshot(c);
+  return s.tiny ? 'tinytaur' : s.gold ? 'gold goblin' : s.kind;
 }
 
 // A candle (→ soul chair) in the abyssal sigil — a deliberately minimal info
@@ -2230,15 +2241,17 @@ function showSoulChair(state: GameState, c: SoulChair, panel: HTMLElement, portr
   stateEl.textContent = c.occupied ? 'Bound' : ringDone ? 'Hungry for a soul' : 'Waiting on the ring';
   // An occupied chair reports its own soul's multiplier; an empty one
   // advertises the range so the player knows stronger souls bind bigger.
-  // Chairs from saves predating the soul snapshot have no kind on record.
-  const soulKind = c.soul ? (c.soul.tiny ? 'tinytaur' : c.soul.gold ? 'gold goblin' : c.soul.kind) : null;
   const lines = ringDone
     ? [`<span style="color:#ff8a6a">${filled}/${SOUL_SIGIL.count} bound${c.occupied
-        ? ` · this soul: x${c.mult ?? SOUL_SIGIL.soulMultipliers.strong}${soulKind ? ` (${soulKind})` : ''}`
+        ? ` · this soul: x${c.mult ?? SOUL_SIGIL.soulMultipliers.strong} (${chairSoulLabel(c)})`
         : ` · x${SOUL_SIGIL.soulMultipliers.weak}–x${SOUL_SIGIL.soulMultipliers.veryStrong} by soul strength`}</span>`]
     : [`<span style="color:#ff4a3a">needs ${SOUL_SIGIL.count - ring.length} more candle${SOUL_SIGIL.count - ring.length === 1 ? '' : 's'}</span>`];
   if (ringDone && !c.occupied) {
     lines.push(`<span style="color:#6a7080">${TOUCH_PRIMARY ? 'Long tap' : 'Right click'} to bind a soul</span>`);
+  } else if (c.occupied) {
+    // The freeing command mirrors the binding one: order the bound soul away
+    // from its candle and it steps right back out.
+    lines.push(`<span style="color:#6a7080">${TOUCH_PRIMARY ? 'Long tap' : 'Right click'} away to free the soul</span>`);
   }
   extra.innerHTML = lines.join('<br>');
 }

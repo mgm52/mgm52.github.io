@@ -5,7 +5,7 @@ import { bobOverworldBark, demonRebuke } from './demon-dialogue';
 import { BUILDABLE_KINDS, BUILDING_DEFS, BuildingKind, CELL, DRAGON, GOBLIN, HELL, LIGHTNING, MAX_SELECTED_UNITS, MINOTAUR, SOUL_SIGIL, SPACE, SPACE_UNIT, WORLD, formatPower } from './config';
 import { runBobCutscene } from './intro';
 import { RenderContext, ambientDragonAt, clampCamera, clampHellCamera, clampSpaceCamera, currentHellScale, ghostAtHell, ghostHellPos } from './render';
-import { autoAssignAllIdle, lightningStrike, spawnBob } from './sim';
+import { autoAssignAllIdle, lightningStrike, spawnBob, unseatSoulFromChair } from './sim';
 import {
   Building, Cell, Dragon, GameState, Ghost, Goblin, Minotaur, SpaceUnit, WaterSource,
   appendLog, buildingAtCell, buildingMoneyCost, candleSpotAt, cellKey, defOf, demonAtHell, findFreeCellNear,
@@ -1084,6 +1084,21 @@ function playGhostCommandBurst(ghosts: Ghost[]) {
 // Multiple ghosts get a small per-ghost offset so they don't pile up exactly on
 // the same point. No-op (with an error beep) if nothing is selected.
 function handleHellRightClick(state: GameState, hx: number, hy: number) {
+  // Commanding a bound chair away from its candle frees the soul: any
+  // selected occupied chair unseats its occupant on the spot, and the freed
+  // ghost inherits the selection so it takes the walk order (and the info
+  // panel) like any other soul. A command onto the chair itself isn't
+  // "away" — the soul stays bound.
+  for (const chair of state.soulChairs) {
+    if (!chair.selected || !chair.occupied) continue;
+    if (Math.hypot(hx - chair.hx, hy - chair.hy) <= SOUL_SIGIL.chairRadius) continue;
+    const freed = unseatSoulFromChair(state, chair);
+    if (freed) {
+      chair.selected = false;
+      freed.selected = true;
+    }
+  }
+
   const selected = state.ghosts.filter((g) => g.selected);
   if (selected.length === 0) { playSound('error'); return; }
 

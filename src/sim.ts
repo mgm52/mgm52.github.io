@@ -4,7 +4,7 @@ import { DEMON_FACING_ANGLE, getOptions } from './options';
 import {
   ALL_DIRS, Building, Cell, DX, DY, Demon, Dir, Dragon, GameState, Ghost, Goblin, HOLE_SIZE, Minotaur, SoulChair, SpaceBuilding, SpaceUnit, WaterSource,
   appendLog, buildingAtCell, buildingCenter, buildingFootprint, buildingPerimeter,
-  cellCenter, cellKey, constructedDragonBeacon, currentPowerBoost, defOf, demonScaleOf, destroyBuilding, dragonTargetBuilding,
+  cellCenter, cellKey, chairSoulSnapshot, constructedDragonBeacon, currentPowerBoost, defOf, demonScaleOf, destroyBuilding, dragonTargetBuilding,
   earnBlood, earnDragonBone, earnMoney, findHoleEmergenceCell,
   getSpawnCapacity, holeBlockedByBuilding, holeCenter, isCellBlocked, isCellInBuilding, isCellInWaterSource,
   isInBounds, maintainerCount, markBuildingsChanged, nearestCellInWaterSource, occupyCell, pushDeathEffect, pushFloater,
@@ -52,7 +52,13 @@ export function tick(state: GameState) {
   }
 
   // ── 1. Spawn queue ────────────────────────────────────────────────
-  if (state.autoSpawnEnabled) {
+  // After a reactor meltdown, autospawn holds its breath until the green
+  // radiation wash has fully faded (REACTOR_MELTDOWN.tintSeconds) — no point
+  // hatching goblins straight into the shockwave. The cadence timer simply
+  // stops ticking, so spawning resumes at its normal rhythm afterwards.
+  const meltdownFading = state.lastMeltdownAt !== undefined
+    && state.now - state.lastMeltdownAt < REACTOR_MELTDOWN.tintSeconds;
+  if (state.autoSpawnEnabled && !meltdownFading) {
     state.autoSpawnTimer -= TICK_S;
     // Higher multipliers fire more often (interval / multiplier) instead of
     // queuing N goblins simultaneously — staggered cadence keeps the holes
@@ -456,10 +462,7 @@ function seatSoulInChair(state: GameState, chair: SoulChair, soul: Ghost) {
 // Returns the freed ghost, or null if the chair was empty.
 export function unseatSoulFromChair(state: GameState, chair: SoulChair): Ghost | null {
   if (!chair.occupied) return null;
-  const snap = chair.soul ?? (
-    chair.mult === SOUL_SIGIL.soulMultipliers.weak ? { kind: 'goblin' as const }
-    : chair.mult === SOUL_SIGIL.soulMultipliers.veryStrong ? { kind: 'dragon' as const }
-    : { kind: 'minotaur' as const });
+  const snap = chairSoulSnapshot(chair);
   chair.occupied = false;
   chair.mult = undefined;
   chair.soul = undefined;
@@ -698,10 +701,11 @@ function detonateReactor(state: GameState, reactor: Building): void {
   );
   pushFloater(state, c.x, c.y - CELL * 2, 'MELTDOWN!', 0xff4040, 4, undefined, false, false, 3);
 
-  // The power-up sample ('online') dragged to the resampler's floor — a long
-  // electric groan as a gigawatt leaves all at once. The strike's own
+  // A sample dragged to the resampler's floor — a long electric groan as a
+  // gigawatt leaves all at once (the building power-up chime by default;
+  // pickable from the dev menu's Audio section). The strike's own
   // thunderclap covers the treble.
-  playSound('online', 1, 0.25);
+  playSound(getOptions().meltdownSound, 1, 0.25);
   appendLog(state, `${name} goes critical! A shockwave races out from the core...`);
 
   // Whole-screen radiation wash — faded back out by the renderer.

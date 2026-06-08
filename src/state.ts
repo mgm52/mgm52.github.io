@@ -1268,6 +1268,18 @@ export function hellMirrorCenter(b: Building): Vec2 {
   };
 }
 
+// The soul bound into an occupied chair: the snapshot recorded at binding, or
+// — for saves predating it — a reconstruction from the recorded multiplier (a
+// very-strong dragon is indistinguishable from a tinytaur there; the dragon
+// wins). Shared by the unseat path, the candle spectre renderer, and the
+// info-panel soul labels.
+export function chairSoulSnapshot(c: SoulChair): NonNullable<SoulChair['soul']> {
+  return c.soul ?? (
+    c.mult === SOUL_SIGIL.soulMultipliers.weak ? { kind: 'goblin' }
+    : c.mult === SOUL_SIGIL.soulMultipliers.veryStrong ? { kind: 'dragon' }
+    : { kind: 'minotaur' });
+}
+
 // Drop candles (and completion marks) belonging to portals that no longer
 // exist or are still constructing. Cheap to run each tick — there are rarely
 // more than a handful of portals.
