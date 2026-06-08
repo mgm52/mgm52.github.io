@@ -367,7 +367,7 @@ export const AUTOSPAWN_TIERS: { multiplier: number; bloodCost: number }[] = [
 // subsequent digs cost a small fortune so the player can't trivially
 // surround everything with water.
 export const DIG = {
-  firstBloodCost: 100,
+  firstBloodCost: 50,
   secondBloodCost: 500,
   laterBloodCost: 2000,
   cells: DIG_GROWTH_CELLS,
