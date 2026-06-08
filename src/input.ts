@@ -10,7 +10,7 @@ import {
   Building, Cell, Dragon, GameState, Ghost, Goblin, Minotaur, SpaceUnit, WaterSource,
   appendLog, buildingAtCell, buildingMoneyCost, candleSpotAt, cellKey, defOf, demonAtHell, findFreeCellNear,
   hellPortalAt, holeAtCell, isInBounds, markBuildingsChanged, nextBuildingDisplayNum, pixelToCell, placeCandle, pushFloater,
-  soulChairAt, spaceBuildingAt, spaceUnitAt, waterCarrierCount, waterSourceAtCell,
+  soulChairAt, spaceBuildingAt, spaceStructureOverlapAt, spaceUnitAt, waterCarrierCount, waterSourceAtCell,
   freePlatformAt,
 } from './state';
 
@@ -975,6 +975,12 @@ function tryPlaceOrbital(state: GameState, x: number, y: number) {
   const halfClamp = Math.max(SPACE_UNIT.margin, def.size / 2);
   const px = Math.max(halfClamp, Math.min(SPACE.width - halfClamp, x));
   const py = Math.max(halfClamp, Math.min(SPACE.height - halfClamp, y));
+  // Platforms are anchored — two may never share deck space.
+  if (spaceStructureOverlapAt(state, 'orbital_platform', px, py)) {
+    refusePlacement(state, px, py, 'overlaps a platform',
+      'Orbital Platforms cannot overlap each other.', 'space');
+    return;
+  }
   state.money -= def.cost;
   const b: Building = {
     id: state.nextId++,
@@ -1012,6 +1018,14 @@ function tryPlaceSpaceCentre(state: GameState, x: number, y: number) {
   if (!platform) {
     refusePlacement(state, x, y, 'no platform',
       'A Space Centre can only be built on a free, completed Orbital Platform.', 'space');
+    return;
+  }
+  // Centres snap to their platform's center, so with non-overlapping
+  // platforms this can't trip — but platforms placed before the overlap rule
+  // existed may still share deck space, and two Centres must never overlap.
+  if (spaceStructureOverlapAt(state, 'space_centre', platform.pos.x, platform.pos.y)) {
+    refusePlacement(state, x, y, 'overlaps a centre',
+      'Space Centres cannot overlap each other.', 'space');
     return;
   }
   if (state.money < def.cost) {

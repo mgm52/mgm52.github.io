@@ -12,7 +12,7 @@ type DeathFrames = { textures: Texture[]; ends: number[]; duration: number };
 import { AMBIENT_DRAGON, BUILDING_DEFS, BuildingKind, CELL, COLS, DEMON, DRAGON, GOBLIN, HELL, REACTOR_MELTDOWN, RENDER_SCALE, ROBOT, ROWS, MINOTAUR, SOUL_SIGIL, SPACE, SPACE_UNIT, TINYTAUR, WORLD, formatPower, sigilPortalOutput } from './config';
 import { DEFAULT_OPTIONS, ensureFontLoaded, fontFamilyById, getOptions, onOptionsChange, type FontConfig, type Options } from './options';
 import { loadDemonSheetList } from './demon-sheets';
-import { Building, Demon, DemonVariant, Dragon, GameState, Ghost, Goblin, HOLE_SIZE, Minotaur, SoulChair, SpaceBuilding, SpaceUnit, WaterSource, buildingCenter, candleSpotAt, cellCenter, chairSoulSnapshot, defOf, demonScaleOf, freePlatformAt, holeCenter, isInPlayCell, maintainerCount } from './state';
+import { Building, Demon, DemonVariant, Dragon, GameState, Ghost, Goblin, HOLE_SIZE, Minotaur, SoulChair, SpaceBuilding, SpaceUnit, WaterSource, buildingCenter, candleSpotAt, cellCenter, chairSoulSnapshot, defOf, demonScaleOf, freePlatformAt, holeCenter, isInPlayCell, maintainerCount, spaceCentreMaintained, spaceStructureOverlapAt } from './state';
 import { getParlaySpeaker, isModalDialogueActive } from './demon-dialogue';
 
 export type Camera = { x: number; y: number };
@@ -397,9 +397,11 @@ type SpaceBuildingView = {
 };
 
 // A unit adrift in the space scene — a snatched goblin/minotaur on its vacuum
-// clock, or a robot (which survives, and builds).
+// clock, or a robot (which survives, and builds). Robots keep the soft white
+// halo their ground selves carry, pulsed per-frame in the sync loop.
 type SpaceUnitView = {
   container: Container;
+  glow?: Sprite;
   sprite: Sprite;
   selectionRing: Graphics;
 };
@@ -2801,17 +2803,27 @@ function drawSpaceCentreBody(g: Graphics, state: Building['state']): void {
   }
 }
 
-function makeSpaceUnitView(): SpaceUnitView {
+function makeSpaceUnitView(robot: boolean): SpaceUnitView {
   const container = new Container();
   const selectionRing = new Graphics();
   selectionRing.circle(0, 0, 28).stroke({ width: 2, color: 0xffd96b });
   selectionRing.visible = false;
+  // Robots keep the soft white halo their ground selves carry — sized and
+  // pulsed per-frame in the sync loop, like the ground version.
+  let glow: Sprite | undefined;
+  if (robot) {
+    glow = new Sprite(getGlowTexture());
+    glow.anchor.set(0.5);
+    glow.tint = 0xffffff;
+    glow.alpha = 0.3;
+  }
   const sprite = new Sprite(Texture.EMPTY);
   sprite.anchor.set(0.5);
   // Robot greyscale is applied per-frame in the sync loop (live dev option).
+  if (glow) container.addChild(glow);
   container.addChild(selectionRing);
   container.addChild(sprite);
-  return { container, sprite, selectionRing };
+  return { container, glow, sprite, selectionRing };
 }
 
 // ─── Space scene + climb transition ─────────────────────────────────
@@ -3458,7 +3470,10 @@ export function render(state: GameState, ctx: RenderContext) {
       v.warning.visible = onSite === 0;
     } else {
       if (v.body) v.body.alpha = 1;
-      v.warning.visible = false;
+      // A finished Space Centre re-uses the tag as its crew warning: it needs
+      // one robot stationed on the deck to run (see spaceCentreMaintained).
+      v.warning.visible = sb.building.kind === 'space_centre'
+        && !spaceCentreMaintained(state, sb);
     }
   }
   for (const [id, v] of ctx.spaceBuildingViews) {
@@ -3476,7 +3491,7 @@ export function render(state: GameState, ctx: RenderContext) {
     seenSU.add(su.id);
     let v = ctx.spaceUnitViews.get(su.id);
     if (!v) {
-      v = makeSpaceUnitView();
+      v = makeSpaceUnitView(!!su.robot);
       v.container.cullable = true;
       ctx.spaceLayer.addChild(v.container);
       ctx.spaceUnitViews.set(su.id, v);
@@ -3484,6 +3499,7 @@ export function render(state: GameState, ctx: RenderContext) {
     v.container.position.set(su.pos.x, su.pos.y);
     v.container.rotation = su.spin;
     const suSheet = su.kind === 'minotaur' ? minotaurWalkSheet : (goblinIdleSheet ?? goblinWalkSheet);
+    let suPx = opts.goblinDisplayPx;
     if (suSheet) {
       const dir = dirIndex(suSheet.meta, su.facing);
       // Robots animate while on the move or on the job (walking covers
@@ -3492,10 +3508,16 @@ export function render(state: GameState, ctx: RenderContext) {
         ? Math.floor(state.now * suSheet.fps) % suSheet.meta.framesPerDirection
         : 0;
       v.sprite.texture = suSheet.frames[dir][frame];
-      const px = su.kind === 'minotaur'
+      suPx = su.kind === 'minotaur'
         ? (su.tiny ? opts.minotaurDisplayPx * TINYTAUR.scale : opts.minotaurDisplayPx)
         : (su.robot ? opts.goblinDisplayPx * opts.robotScale : opts.goblinDisplayPx);
-      v.sprite.scale.set(px / suSheet.meta.spriteSize);
+      v.sprite.scale.set(suPx / suSheet.meta.spriteSize);
+    }
+    // The same gentle white pulse a ground robot's halo carries (no laser
+    // charge-up in orbit — robots don't shoot up here).
+    if (v.glow) {
+      v.glow.scale.set(suPx * 2.0 / 128);
+      v.glow.alpha = 0.28 + 0.1 * Math.sin(state.now * 3 + su.id);
     }
     v.sprite.tint = su.robot ? opts.robotTint : su.gold ? 0xffa800 : 0xffffff;
     setSpriteFilter(v.sprite, su.robot && opts.robotGreyscale ? getRobotWhiteFilter() : null);
@@ -3522,7 +3544,8 @@ export function render(state: GameState, ctx: RenderContext) {
       const halfClamp = Math.max(SPACE_UNIT.margin, def.size / 2);
       const px = Math.max(halfClamp, Math.min(SPACE.width - halfClamp, ctx.orbitalCursor.x));
       const py = Math.max(halfClamp, Math.min(SPACE.height - halfClamp, ctx.orbitalCursor.y));
-      const valid = state.money >= def.cost;
+      const valid = state.money >= def.cost
+        && !spaceStructureOverlapAt(state, 'orbital_platform', px, py);
       const color = valid ? 0x6a8eb0 : 0xd96b6b;
       const half = def.size / 2;
       og.rect(px - half, py - half, def.size, def.size)
@@ -3539,7 +3562,8 @@ export function render(state: GameState, ctx: RenderContext) {
       const platform = freePlatformAt(state, ctx.orbitalCursor.x, ctx.orbitalCursor.y);
       const px = platform ? platform.pos.x : ctx.orbitalCursor.x;
       const py = platform ? platform.pos.y : ctx.orbitalCursor.y;
-      const valid = platform !== null && state.money >= def.cost;
+      const valid = platform !== null && state.money >= def.cost
+        && !spaceStructureOverlapAt(state, 'space_centre', px, py);
       const color = valid ? 0x6a8eb0 : 0xd96b6b;
       const half = def.size / 2;
       og.rect(px - half, py - half, def.size, def.size)

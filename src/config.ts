@@ -105,7 +105,7 @@ export const TINYTAUR = {
 };
 
 // Robot — a late-game summon unlocked alongside the Hypercentre era. Costs
-// money (not blood) and demands a serious industrial base (4 Hypercentres)
+// money (not blood) and demands an industrial base (2 Hypercentres)
 // before the button even arms. On the ground a robot is just a small white
 // goblin — same jobs, same pathfinding, faster servos — except it's all but
 // unkillable: lightning, minotaurs, kill orders and dragon fire all pass over
@@ -117,7 +117,7 @@ export const TINYTAUR = {
 // robotGreyscale / robotSpaceSpeed) so they're tunable from the dev menu.
 export const ROBOT = {
   moneyCost: 250_000,
-  hypercentresRequired: 4,
+  hypercentresRequired: 2,
   speed: 200,         // px/sec on the ground — near-double GOBLIN.speed (110)
   buildRange: 30,     // px past a platform's edge that counts as "on site"
   // Each robot actively building a ground site multiplies the build time by
@@ -733,17 +733,19 @@ export const BUILDING_DEFS = {
   // top of a completed Orbital Platform (one Centre per platform — tapping
   // bare void refuses with a "no platform" floater). Bigger than a
   // Hypercentre but a bit smaller than its platform, so robots still fit on
-  // the deck around it. Robot-assembled like the platform under it, and a
-  // glutton: each one draws 10 GW from the ground grid but pays out a
-  // fortune while the power link holds.
+  // the deck around it. Robot-assembled like the platform under it, and once
+  // running it needs one robot stationed on its deck as crew
+  // (maintainersRequired — only robots survive up there, so only they count).
+  // A glutton: each one draws 10 GW from the ground grid but pays out a
+  // fortune while the power link holds and the crew stays aboard.
   space_centre: def(7, {
     name: 'Space Centre',
     short: 'SC',
     cost: 25_000_000,
     buildersRequired: 1,
     buildTime: 30,
-    maintainersRequired: 0,
-    income: 500_000,
+    maintainersRequired: 1,
+    income: 5_000_000,
     powerOutput: -10_000_000_000, // 10 GW draw
     wanderInterval: 0,
     wanderJitter: 0,
