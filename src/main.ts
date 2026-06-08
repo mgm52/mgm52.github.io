@@ -1,4 +1,4 @@
-import { getAudioDebugInfo, playSound, preloadSounds, setCrackleEnabled, setInHellView, setMasterVolume, setMusicDepth, setMusicVolume, startBackgroundCrackle, startBackgroundMusic } from './audio';
+import { getAudioDebugInfo, playSound, preloadSounds, setCrackleEnabled, setGhostSendGain, setInHellView, setMasterVolume, setMusicDepth, setMusicVolume, startBackgroundCrackle, startBackgroundMusic } from './audio';
 import {
   AUTOSPAWN_TIERS, CAMERA_SPEED, CELL, DRAGON, GOBLIN, GOLD_KILL_REWARD, HELL, KILL_REWARD, ROBOT, SOUL_SIGIL,
   START_CELL, SUMMON_UPGRADES, TICK_MS, MINOTAUR, WORLD, digBloodCost, minotaurBloodCost,
@@ -243,10 +243,12 @@ async function main() {
   setMasterVolume(getOptions().volume);
   setMusicVolume(getOptions().musicVolume);
   setCrackleEnabled(getOptions().crackleEnabled);
+  setGhostSendGain(getOptions().hellCommandVolume);
   onOptionsChange((o) => {
     setMasterVolume(o.volume);
     setMusicVolume(o.musicVolume);
     setCrackleEnabled(o.crackleEnabled);
+    setGhostSendGain(o.hellCommandVolume);
   });
 
   // Now that sounds are queued, see what the player picked. Resume swaps
