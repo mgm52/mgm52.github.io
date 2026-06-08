@@ -487,6 +487,19 @@ async function main() {
         state.pendingBuild = null;
         state.pendingStrike = false;
         state.pendingCandle = false;
+        state.pendingSpaceCentre = false;
+      }
+    },
+    onPlaceSpaceCentre: () => {
+      // Toggle Space Centre placement (space view only — the button is hidden
+      // elsewhere); arming it cancels any other pending mode. The next tap
+      // must land on a completed Orbital Platform.
+      state.pendingSpaceCentre = !state.pendingSpaceCentre;
+      if (state.pendingSpaceCentre) {
+        state.pendingBuild = null;
+        state.pendingStrike = false;
+        state.pendingCandle = false;
+        state.pendingOrbital = false;
       }
     },
     onBuyAutoAssign: () => {
@@ -736,6 +749,7 @@ async function main() {
     transitioning = true; transFrom = 1; transTo = 0; transStart = now; descendHold = 0;
     state.viewTransitioning = true;
     state.pendingOrbital = false;
+    state.pendingSpaceCentre = false;
     playSound('ritual', 0.6, 0.6);
   }
   function triggerDescendToHell(now: number) {
@@ -876,7 +890,7 @@ async function main() {
     if (e.key === 'Escape') {
       // input.ts clears any pending placement/aim mode on ESC; only an ESC
       // with nothing armed toggles pause.
-      if (state.pendingBuild || state.pendingStrike || state.pendingCandle || state.pendingOrbital) return;
+      if (state.pendingBuild || state.pendingStrike || state.pendingCandle || state.pendingOrbital || state.pendingSpaceCentre) return;
       togglePause();
     } else if (k === 'p') {
       // Ignore P while typing in an input/select (options panel sliders, etc.)

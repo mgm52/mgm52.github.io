@@ -647,8 +647,10 @@ export const BUILDING_DEFS = {
   // up to it. Its button replaces the Build list while the player is in
   // orbit (mirroring how the Candle takes over in hell). Requires 1 builder,
   // and the vacuum means only robots qualify — the player has to have a
-  // dragon snatch a robot up first. Does nothing once assembled. For now.
-  orbital_platform: def(3, {
+  // dragon snatch a robot up first. Once assembled it's the foundation a
+  // Space Centre can be set down on — its footprint matches the Centre's
+  // exactly, so the Centre sits flush on its deck.
+  orbital_platform: def(7, {
     name: 'Orbital Platform',
     short: 'OP',
     cost: 1_000_000,
@@ -662,6 +664,29 @@ export const BUILDING_DEFS = {
     colors: {
       active: 0x4a505a, activeBorder: 0xb8bec6,
       dormant: 0x3a3f47, dormantBorder: 0x808890,
+      constructing: 0x3a3f47, constructingBorder: 0x808890,
+    },
+  }),
+  // Space Centre — the endgame income building, built in orbit and ONLY on
+  // top of a completed Orbital Platform (one Centre per platform — tapping
+  // bare void refuses with a "no platform" floater). Bigger than a
+  // Hypercentre, robot-assembled like the platform under it, and a glutton:
+  // each one draws 10 GW from the ground grid but pays out a fortune while
+  // the power link holds.
+  space_centre: def(7, {
+    name: 'Space Centre',
+    short: 'SC',
+    cost: 25_000_000,
+    buildersRequired: 1,
+    buildTime: 30,
+    maintainersRequired: 0,
+    income: 500_000,
+    powerOutput: -10_000_000_000, // 10 GW draw
+    wanderInterval: 0,
+    wanderJitter: 0,
+    colors: {
+      active: 0x1a5a6a, activeBorder: 0x6ae0ff,
+      dormant: 0x2a3f4a, dormantBorder: 0x5a8090,
       constructing: 0x3a3f47, constructingBorder: 0x808890,
     },
   }),

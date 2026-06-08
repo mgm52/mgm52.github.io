@@ -12,7 +12,7 @@ type DeathFrames = { textures: Texture[]; ends: number[]; duration: number };
 import { AMBIENT_DRAGON, BUILDING_DEFS, BuildingKind, CELL, COLS, DEMON, DRAGON, GOBLIN, HELL, RENDER_SCALE, ROBOT, ROWS, MINOTAUR, SOUL_SIGIL, SPACE, SPACE_UNIT, TINYTAUR, WORLD, formatPower, sigilPortalOutput } from './config';
 import { DEFAULT_OPTIONS, ensureFontLoaded, fontFamilyById, getOptions, onOptionsChange, type FontConfig, type Options } from './options';
 import { loadDemonSheetList } from './demon-sheets';
-import { Building, Demon, DemonVariant, Dragon, GameState, Ghost, Goblin, HOLE_SIZE, Minotaur, SoulChair, SpaceBuilding, SpaceUnit, WaterSource, buildingCenter, candleSpotAt, cellCenter, defOf, demonScaleOf, holeCenter, isInPlayCell, maintainerCount } from './state';
+import { Building, Demon, DemonVariant, Dragon, GameState, Ghost, Goblin, HOLE_SIZE, Minotaur, SoulChair, SpaceBuilding, SpaceUnit, WaterSource, buildingCenter, candleSpotAt, cellCenter, defOf, demonScaleOf, freePlatformAt, holeCenter, isInPlayCell, maintainerCount } from './state';
 import { getParlaySpeaker, isModalDialogueActive } from './demon-dialogue';
 
 export type Camera = { x: number; y: number };
@@ -381,11 +381,15 @@ type SpaceBuildingView = {
   container: Container;   // positioned at the space pos, in spaceLayer
   glow: Sprite;
   sprite: Sprite;
-  // Drawn fallback art — the Orbital Platform ships no PNG, so its deck is a
-  // Graphics. Undefined for every hauled-up building (they have sprites).
+  // Drawn fallback art — the Orbital Platform and Space Centre ship no PNG,
+  // so their decks are Graphics. Undefined for every hauled-up building
+  // (they have sprites).
   body?: Graphics;
-  // Construction bar + "needs robot" tag — only ever populated for an
-  // Orbital Platform mid-assembly.
+  // The building state the Space Centre's body was last drawn for — its fill
+  // tracks active/dormant, so the sync loop redraws on transitions.
+  bodyState?: Building['state'];
+  // Construction bar + "needs robot" tag — only ever populated for a
+  // robot-built structure mid-assembly.
   progress: Graphics;
   warning: Text;
   label: Text;
@@ -2549,12 +2553,15 @@ function makeSpaceBuildingView(sb: SpaceBuilding): SpaceBuildingView {
   sprite.anchor.set(0.5);
   sizeBuildingSprite(sprite, def.size);
 
-  // The Orbital Platform is born in space and ships no PNG — draw its grey
-  // deck directly instead of relying on a sprite.
+  // The Orbital Platform and Space Centre are born in space and ship no PNG —
+  // draw their bodies directly instead of relying on a sprite.
   let body: Graphics | undefined;
   if (sb.building.kind === 'orbital_platform') {
     body = new Graphics();
     drawOrbitalPlatformBody(body, def.size);
+  } else if (sb.building.kind === 'space_centre') {
+    body = new Graphics();
+    drawSpaceCentreBody(body, sb.building.state);
   }
 
   // Construction bar + "needs robot" tag, only ever shown while an Orbital
@@ -2601,14 +2608,34 @@ function makeSpaceBuildingView(sb: SpaceBuilding): SpaceBuildingView {
 }
 
 // The Orbital Platform's drawn art: one big flat rectangular deck plate
-// filling the footprint. Deliberately plain — later on it'll be possible to
-// set buildings down on top of it, so the platform is just floor.
+// filling the footprint. Deliberately plain — a Space Centre can be set down
+// on top of it, so the platform is just floor.
 function drawOrbitalPlatformBody(g: Graphics, size: number): void {
   const half = size / 2;
   g.clear();
   g.rect(-half, -half, size, size)
     .fill(0x4a505a)
     .stroke({ width: 3, color: 0xb8bec6 });
+}
+
+// The Space Centre's drawn art: the building-body treatment the ground
+// buildings get (state-tinted fill + border, Datacentre-style rack rows),
+// inset slightly so the platform's deck reads as a rim around it.
+function drawSpaceCentreBody(g: Graphics, state: Building['state']): void {
+  const def = BUILDING_DEFS.space_centre;
+  const size = def.size - 24;
+  const half = size / 2;
+  const c = def.colors;
+  let fill = c.constructing, border = c.constructingBorder;
+  if (state === 'active') { fill = c.active; border = c.activeBorder; }
+  else if (state === 'dormant') { fill = c.dormant; border = c.dormantBorder; }
+  g.clear();
+  g.rect(-half, -half, size, size)
+    .fill(fill)
+    .stroke({ width: 3, color: border });
+  for (let row = -2; row <= 2; row++) {
+    g.rect(-half + 18, row * 24 - 5, size - 36, 10).fill({ color: 0x000000, alpha: 0.28 });
+  }
 }
 
 function makeSpaceUnitView(): SpaceUnitView {
@@ -3229,7 +3256,12 @@ export function render(state: GameState, ctx: RenderContext) {
     v.selectionRing.visible = sb.selected;
     v.sprite.visible = opts.buildingSpriteEnabled;
     v.label.visible = opts.buildingLabelEnabled;
-    // Orbital Platform assembly state: dim scaffold + yellow build bar while
+    // Space Centre body fill tracks active/dormant — redraw on transitions.
+    if (sb.building.kind === 'space_centre' && v.body && v.bodyState !== sb.building.state) {
+      drawSpaceCentreBody(v.body, sb.building.state);
+      v.bodyState = sb.building.state;
+    }
+    // Robot-built assembly state: dim scaffold + yellow build bar while
     // constructing, with a "needs robot" tag whenever no robot is on site.
     const sbDef = BUILDING_DEFS[sb.building.kind];
     v.progress.clear();
@@ -3296,9 +3328,10 @@ export function render(state: GameState, ctx: RenderContext) {
     }
   }
 
-  // Orbital Platform placement ghost — mirrors the ground building ghost:
-  // a translucent footprint rect under the cursor, blue when the deploy
-  // would land (clamped into bounds, affordably) and red when Ƶ runs short.
+  // Orbital Platform / Space Centre placement ghost — mirrors the ground
+  // building ghost: a translucent footprint rect under the cursor, blue when
+  // the deploy would land and red when it wouldn't (Ƶ short, or — for the
+  // Centre — no free completed platform under the cursor).
   {
     const og = ctx.orbitalGhostGfx;
     og.clear();
@@ -3306,8 +3339,9 @@ export function render(state: GameState, ctx: RenderContext) {
       const def = BUILDING_DEFS.orbital_platform;
       // Same clamp tryPlaceOrbital applies, so the preview sits exactly where
       // the platform would actually land.
-      const px = Math.max(SPACE_UNIT.margin, Math.min(SPACE.width - SPACE_UNIT.margin, ctx.orbitalCursor.x));
-      const py = Math.max(SPACE_UNIT.margin, Math.min(SPACE.height - SPACE_UNIT.margin, ctx.orbitalCursor.y));
+      const halfClamp = Math.max(SPACE_UNIT.margin, def.size / 2);
+      const px = Math.max(halfClamp, Math.min(SPACE.width - halfClamp, ctx.orbitalCursor.x));
+      const py = Math.max(halfClamp, Math.min(SPACE.height - halfClamp, ctx.orbitalCursor.y));
       const valid = state.money >= def.cost;
       const color = valid ? 0x6a8eb0 : 0xd96b6b;
       const half = def.size / 2;
@@ -3316,6 +3350,21 @@ export function render(state: GameState, ctx: RenderContext) {
         .stroke({ width: 2, color });
       // Building views are appended to spaceLayer as they're created —
       // re-append the ghost while armed so it always draws on top.
+      ctx.spaceLayer.addChild(og);
+    } else if (state.view === 'space' && state.pendingSpaceCentre && ctx.orbitalCursor) {
+      const def = BUILDING_DEFS.space_centre;
+      // Snap the preview onto the platform the drop would land on, exactly
+      // like tryPlaceSpaceCentre; free-floating (red) under the raw cursor
+      // when no free completed platform is there.
+      const platform = freePlatformAt(state, ctx.orbitalCursor.x, ctx.orbitalCursor.y);
+      const px = platform ? platform.pos.x : ctx.orbitalCursor.x;
+      const py = platform ? platform.pos.y : ctx.orbitalCursor.y;
+      const valid = platform !== null && state.money >= def.cost;
+      const color = valid ? 0x6a8eb0 : 0xd96b6b;
+      const half = def.size / 2;
+      og.rect(px - half, py - half, def.size, def.size)
+        .fill({ color, alpha: 0.25 })
+        .stroke({ width: 2, color });
       ctx.spaceLayer.addChild(og);
     }
   }

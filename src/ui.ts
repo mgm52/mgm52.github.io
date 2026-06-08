@@ -587,6 +587,7 @@ export type UICallbacks = {
   onSummonDragon: () => void;
   onSummonRobot: () => void;
   onPlaceOrbital: () => void;
+  onPlaceSpaceCentre: () => void;
   onLightningStrike: () => void;
   onBuyAutoAssign: () => void;
   onBuyAutoWater: () => void;
@@ -1036,6 +1037,29 @@ export function setupUI(state: GameState, callbacks: UICallbacks) {
   `;
   orbitalBtn.addEventListener('click', () => { playSound('click', 1, 0.75); callbacks.onPlaceOrbital(); });
   buildList.appendChild(orbitalBtn);
+
+  // Space Centre — joins the Orbital Platform in the space view's Build menu.
+  // Arms placement mode: the next tap must land on a free, completed Orbital
+  // Platform (bare void refuses with a red "no platform" floater). Robot-built
+  // like the platform, draws 10 GW from the ground grid, prints money.
+  const spaceCentreDef = BUILDING_DEFS.space_centre;
+  const spaceCentreBtn = document.createElement('button');
+  spaceCentreBtn.className = 'build-button';
+  spaceCentreBtn.id = 'btn-place-space-centre';
+  spaceCentreBtn.style.display = 'none';
+  spaceCentreBtn.innerHTML = `
+    <div class="build-content">
+      <div class="build-text">
+        <div class="build-name">${spaceCentreDef.name}</div>
+        <div class="build-meta">
+          <span class="build-cost build-gold-cost" id="cost-space-centre">Ƶ${spaceCentreDef.cost.toLocaleString('en-US')}</span> · <span class="build-power-cost" id="power-cost-space-centre">${formatPower(-spaceCentreDef.powerOutput)}</span>
+        </div>
+      </div>
+      <div class="build-yields"><span class="yield-money">+Ƶ${spaceCentreDef.income.toLocaleString('en-US')}/s</span><br><span class="yield-power">needs platform</span></div>
+    </div>
+  `;
+  spaceCentreBtn.addEventListener('click', () => { playSound('click', 1, 0.75); callbacks.onPlaceSpaceCentre(); });
+  buildList.appendChild(spaceCentreBtn);
 
   // Destroy button on the info panel — instead of instantly tearing down the
   // building, allocate the nearest minotaur to smash it. Without one, flash
@@ -1768,6 +1792,37 @@ export function refreshUI(state: GameState) {
     if (state.pendingOrbital) state.pendingOrbital = false;
   }
 
+  // Space Centre — sits under the Orbital Platform in the space view's Build
+  // menu. Shown whenever the player is in orbit (its "needs platform" tag and
+  // the red "no platform" refusal floater teach the placement rule). Flashes
+  // for attention once it's affordable AND there's a completed platform to
+  // stand it on, until the first Centre exists; leaving the view disarms
+  // placement like the others.
+  const spaceCentreBtn = document.getElementById('btn-place-space-centre') as HTMLButtonElement;
+  spaceCentreBtn.style.display = (inSpace && viewArrived) ? '' : 'none';
+  if (inSpace && viewArrived) {
+    applyFadeInOnFirstShow('btn-place-space-centre');
+    let anyCompletedPlatform = false;
+    let anySpaceCentre = false;
+    for (const sb of state.spaceBuildings.values()) {
+      if (sb.building.kind === 'orbital_platform' && sb.building.state !== 'constructing') anyCompletedPlatform = true;
+      if (sb.building.kind === 'space_centre') anySpaceCentre = true;
+    }
+    const centreCost = BUILDING_DEFS.space_centre.cost;
+    const canAffordCentre = state.money >= centreCost;
+    spaceCentreBtn.disabled = !canAffordCentre;
+    spaceCentreBtn.classList.toggle('active', state.pendingSpaceCentre);
+    document.getElementById('cost-space-centre')!.classList.toggle('met', canAffordCentre);
+    // Mid-placement bankruptcy (mirrors the platform): can't pay any more →
+    // leave placement mode.
+    if (state.pendingSpaceCentre && !canAffordCentre) state.pendingSpaceCentre = false;
+    setBuyFlash('btn-place-space-centre', canAffordCentre && anyCompletedPlatform && !anySpaceCentre);
+  } else {
+    setBuyFlash('btn-place-space-centre', false);
+    // Left orbit with placement still armed — disarm it.
+    if (state.pendingSpaceCentre) state.pendingSpaceCentre = false;
+  }
+
   // Hide separators that mark a task boundary the player hasn't crossed yet.
   // Hide separators that don't actually sit between two visible buttons.
   // Walks the live DOM so this stays correct regardless of how visibility
@@ -1814,6 +1869,9 @@ export function refreshUI(state: GameState) {
   } else if (state.pendingOrbital) {
     hint.style.display = 'block';
     hint.textContent = 'Tap the void to deploy an Orbital Platform · tap the button again or press ESC to cancel';
+  } else if (state.pendingSpaceCentre) {
+    hint.style.display = 'block';
+    hint.textContent = 'Tap an Orbital Platform to build a Space Centre · tap the button again or press ESC to cancel';
   } else {
     hint.style.display = 'none';
   }
@@ -2306,7 +2364,7 @@ function showSpaceBuilding(_state: GameState, sb: SpaceBuilding, panel: HTMLElem
   const b = sb.building;
   const def = defOf(b);
   const isActive = b.state === 'active';
-  const cls = isActive ? 'active' : 'dormant';
+  const cls = b.state === 'constructing' ? 'constructing' : isActive ? 'active' : 'dormant';
   // A Dragon Beacon in orbit can't summon anything — its tether to the ground
   // is broken — so it's relabelled to make its uselessness obvious.
   const isOrbitalBeacon = b.kind === 'dragon_beacon';
@@ -2317,6 +2375,14 @@ function showSpaceBuilding(_state: GameState, sb: SpaceBuilding, panel: HTMLElem
   if (isOrbitalBeacon) {
     stateEl.textContent = 'Dormant — uselessly orbiting';
     extra.innerHTML = 'I love pollution';
+    return;
+  }
+  // Robot-assembled structures (Orbital Platform, Space Centre) pass through
+  // a constructing phase in orbit; nothing hauled up by a dragon does.
+  if (b.state === 'constructing') {
+    const pct = Math.round(b.buildProgress * 100);
+    stateEl.textContent = `Constructing — ${pct}%`;
+    extra.innerHTML = 'Only a robot can assemble it.';
     return;
   }
   // Consumers in orbit still need the ground grid — `state` reflects whether
@@ -2330,6 +2396,7 @@ function showSpaceBuilding(_state: GameState, sb: SpaceBuilding, panel: HTMLElem
     stateEl.textContent = isActive ? 'Active' : 'Dormant';
   }
   const lines: string[] = [];
+  if (def.income > 0) lines.push(`Income: Ƶ${def.income.toLocaleString('en-US')}/s`);
   if (def.powerOutput > 0) lines.push(`Power output: ${formatPower(def.powerOutput)}`);
   else if (def.powerOutput < 0) lines.push(`Power draw: ${formatPower(-def.powerOutput)}`);
   lines.push('No one can hear it scream.');

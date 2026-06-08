@@ -259,6 +259,9 @@ export type SpaceBuilding = {
   spinRate: number;      // radians/sec
   selected: boolean;
   nextIncomeAt?: number;
+  // Space Centres only: the id of the Orbital Platform this Centre was set
+  // down on. One Centre per platform — placement checks this for occupancy.
+  platformId?: number;
 };
 
 // A unit a dragon has hauled into space. Non-robots tumble helplessly and
@@ -555,6 +558,10 @@ export type GameState = {
   // True while the player is placing an Orbital Platform in the space view
   // (the next tap on the void sets one down). Ephemeral — reset on load.
   pendingOrbital: boolean;
+  // True while the player is placing a Space Centre in the space view (the
+  // next tap on a completed Orbital Platform sets one down — bare void
+  // refuses). Ephemeral — reset on load.
+  pendingSpaceCentre: boolean;
   hole: Hole;
   // Ritual upgrades — sticky once bought, apply game-wide.
   autoAssignEnabled: boolean;
@@ -1058,6 +1065,7 @@ export function createInitialState(): GameState {
     spaceBuildings: new Map(),
     spaceUnits: new Map(),
     pendingOrbital: false,
+    pendingSpaceCentre: false,
     hole: {
       cell: { cx: START_CELL.cx, cy: START_CELL.cy },
       selected: false,
@@ -1597,8 +1605,11 @@ export function dragonTargetBuilding(state: GameState): Building | null {
 }
 
 // Floating building whose (unrotated) footprint contains the given point, in
-// SPACE coordinates. On overlap, the one whose center is nearest wins. Used to
-// click-select buildings while looking at the void.
+// SPACE coordinates. On overlap, the one whose center is nearest wins — with
+// one exception: an Orbital Platform always yields to anything sitting on it
+// (a Space Centre shares its footprint exactly, so the Centre must win the
+// tap or it could never be selected). Used to click-select buildings while
+// looking at the void.
 export function spaceBuildingAt(state: GameState, x: number, y: number): SpaceBuilding | null {
   let best: SpaceBuilding | null = null;
   let bestD = Infinity;
@@ -1607,10 +1618,29 @@ export function spaceBuildingAt(state: GameState, x: number, y: number): SpaceBu
     const dx = x - sb.pos.x, dy = y - sb.pos.y;
     if (Math.abs(dx) <= half && Math.abs(dy) <= half) {
       const d = dx * dx + dy * dy;
-      if (d < bestD) { bestD = d; best = sb; }
+      if (d < bestD || (best !== null && best.building.kind === 'orbital_platform' && sb.building.kind !== 'orbital_platform')) {
+        bestD = d; best = sb;
+      }
     }
   }
   return best;
+}
+
+// The completed, unoccupied Orbital Platform whose deck contains the given
+// SPACE-coord point, or null. `occupied` means a Space Centre already claims
+// it (each platform hosts at most one Centre). Used by Space Centre placement.
+export function freePlatformAt(state: GameState, x: number, y: number): SpaceBuilding | null {
+  for (const sb of state.spaceBuildings.values()) {
+    if (sb.building.kind !== 'orbital_platform' || sb.building.state === 'constructing') continue;
+    const half = BUILDING_DEFS.orbital_platform.size / 2;
+    if (Math.abs(x - sb.pos.x) > half || Math.abs(y - sb.pos.y) > half) continue;
+    let occupied = false;
+    for (const other of state.spaceBuildings.values()) {
+      if (other.building.kind === 'space_centre' && other.platformId === sb.id) { occupied = true; break; }
+    }
+    if (!occupied) return sb;
+  }
+  return null;
 }
 
 // Drifting space unit within a generous tap radius of a SPACE-coord point, or

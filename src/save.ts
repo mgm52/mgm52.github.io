@@ -202,8 +202,10 @@ export function loadGame(): { state: GameState; savedAt: number } | null {
     // dragon-snatch mechanic. Selection is ephemeral.
     env.state.spaceUnits ??= new Map();
     for (const su of env.state.spaceUnits.values()) su.selected = false;
-    // Orbital Platform placement mode is ephemeral — never resume armed.
+    // Orbital Platform / Space Centre placement modes are ephemeral — never
+    // resume armed.
     env.state.pendingOrbital = false;
+    env.state.pendingSpaceCentre = false;
     // Strike side-tasks switched from a single struck13Goblins boolean to a
     // maxStruckAtOnce counter. Carry old progress forward (a true flag meant
     // the player had struck 13 at once, which clears the new 5-goblin tier).
