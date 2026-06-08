@@ -425,11 +425,15 @@ function seatSoulInChair(state: GameState, chair: SoulChair, soul: Ghost) {
   // over the mirror (whose live wattage label ticks up underneath it) while
   // the soul's strength label flashes over the chair it just took. Rendered
   // much bigger than a regular floater (sizeMult) so the surge reads even at
-  // hell's zoomed-out scale.
+  // hell's zoomed-out scale, and held far longer than the 1.4s default — the
+  // player has just watched a slow walk-and-bind and deserves time to read
+  // the payoff (the linear fade means roughly the first two-thirds of the
+  // lifetime is comfortably legible).
+  const SOUL_FLOATER_LIFETIME = 6;
   if (portal) {
     const c = hellMirrorCenter(portal);
-    pushFloater(state, c.x, c.y - SOUL_SIGIL.chairRadius * 1.5, `x${chair.mult}`, 0x8acfff, 1.6, undefined, false, true, 4);
-    pushFloater(state, chair.hx, chair.hy - SOUL_SIGIL.chairRadius * 1.5, SOUL_STRENGTH_LABEL[strength], 0x8acfff, 1.6, undefined, false, true, 2);
+    pushFloater(state, c.x, c.y - SOUL_SIGIL.chairRadius * 1.5, `x${chair.mult}`, 0x8acfff, SOUL_FLOATER_LIFETIME, undefined, false, true, 4);
+    pushFloater(state, chair.hx, chair.hy - SOUL_SIGIL.chairRadius * 1.5, SOUL_STRENGTH_LABEL[strength], 0x8acfff, SOUL_FLOATER_LIFETIME, undefined, false, true, 2);
   }
   if (filled === SOUL_SIGIL.count && !state.soulSigilCompletedAt.has(chair.portalId)) {
     state.soulSigilCompletedAt.set(chair.portalId, state.now);
