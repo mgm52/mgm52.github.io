@@ -3131,14 +3131,26 @@ export function render(state: GameState, ctx: RenderContext) {
     setSpriteFilter(v.sprite, g.robot && opts.robotGreyscale ? getRobotWhiteFilter() : null);
     // Robots carry a soft white halo behind the chassis, pulsing gently — and
     // flaring hot (with a red shift) through a laser windup so the shot
-    // telegraphs before the beam lands.
+    // telegraphs before the beam lands. A terminator's halo is its targeting
+    // lamp instead: a tight red glow pinned to the head, always burning,
+    // strobing through the windup.
     if (v.glow) {
-      v.glow.scale.set(px * 2.0 / 128);
       const charging = g.state.kind === 'firing_laser' && g.state.fireAt !== undefined;
-      v.glow.tint = charging ? 0xff6050 : 0xffffff;
-      v.glow.alpha = charging
-        ? 0.7 + 0.2 * Math.sin(state.now * 24)
-        : 0.28 + 0.1 * Math.sin(state.now * 3 + g.id);
+      if (g.terminator) {
+        v.glow.scale.set(px * 1.1 / 128);
+        v.glow.position.set(0, -px * 0.42);
+        v.glow.tint = 0xff2018;
+        v.glow.alpha = charging
+          ? 0.85 + 0.15 * Math.sin(state.now * 24)
+          : 0.55 + 0.18 * Math.sin(state.now * 5 + g.id);
+      } else {
+        v.glow.scale.set(px * 2.0 / 128);
+        v.glow.position.set(0, 0);
+        v.glow.tint = charging ? 0xff6050 : 0xffffff;
+        v.glow.alpha = charging
+          ? 0.7 + 0.2 * Math.sin(state.now * 24)
+          : 0.28 + 0.1 * Math.sin(state.now * 3 + g.id);
+      }
     }
   }
   for (const [id, v] of ctx.goblinViews) {

@@ -58,13 +58,16 @@ export function tick(state: GameState) {
   // stops ticking, so spawning resumes at its normal rhythm afterwards.
   const meltdownFading = state.lastMeltdownAt !== undefined
     && state.now - state.lastMeltdownAt < REACTOR_MELTDOWN.tintSeconds;
-  if (state.autoSpawnEnabled && !meltdownFading) {
+  // The cadence runs at autoSpawnLevel — pinned to the purchased multiplier
+  // until Lilly's prevent-spawning reward slider lets the player throttle it
+  // down to a lower owned tier, or 0 (paused).
+  if (state.autoSpawnEnabled && state.autoSpawnLevel > 0 && !meltdownFading) {
     state.autoSpawnTimer -= TICK_S;
     // Higher multipliers fire more often (interval / multiplier) instead of
     // queuing N goblins simultaneously — staggered cadence keeps the holes
     // pulsing evenly. One spawn per fire.
     if (state.autoSpawnTimer <= 0) {
-      const cadence = SUMMON_UPGRADES.autoSpawn.intervalSeconds / Math.max(1, state.autoSpawnMultiplier);
+      const cadence = SUMMON_UPGRADES.autoSpawn.intervalSeconds / Math.max(1, state.autoSpawnLevel);
       state.autoSpawnTimer += cadence;
       const cap = getSpawnCapacity(state);
       if (state.spawnQueue.length < cap) {
@@ -103,6 +106,26 @@ export function tick(state: GameState) {
   }
 
   // ── 1c. Dragon spawn queue ───────────────────────────────────────
+  // Autodragon (Lilly's destroy-a-robot reward): every intervalSeconds, queue
+  // a dragon summon through the same gates the manual button enforces —
+  // blood for the ritual, and an active Dragon Beacon with a free slot.
+  if (state.autoDragonEnabled) {
+    state.autoDragonTimer -= TICK_S;
+    if (state.autoDragonTimer <= 0) {
+      state.autoDragonTimer += SUMMON_UPGRADES.autoDragon.intervalSeconds;
+      let activeBeacons = 0;
+      for (const b of state.buildings.values()) {
+        if (b.kind === 'dragon_beacon' && b.state === 'active') activeBeacons++;
+      }
+      if (activeBeacons > 0
+          && state.blood >= DRAGON.bloodCost
+          && state.dragonSpawnQueue.length < activeBeacons) {
+        state.blood -= DRAGON.bloodCost;
+        state.dragonSpawnQueue.push({ remaining: DRAGON.spawnTime });
+        appendLog(state, 'Autodragon: a summon ritual begins...');
+      }
+    }
+  }
   for (let i = state.dragonSpawnQueue.length - 1; i >= 0; i--) {
     state.dragonSpawnQueue[i].remaining -= TICK_S;
     if (state.dragonSpawnQueue[i].remaining <= 0) {
@@ -125,8 +148,28 @@ export function tick(state: GameState) {
       }
     }
   }
+  // Terminators assemble on their own single-slot track, same retry rule.
+  for (let i = state.terminatorSpawnQueue.length - 1; i >= 0; i--) {
+    state.terminatorSpawnQueue[i].remaining -= TICK_S;
+    if (state.terminatorSpawnQueue[i].remaining <= 0) {
+      if (spawnRobot(state, true)) {
+        state.terminatorSpawnQueue.splice(i, 1);
+      } else {
+        state.terminatorSpawnQueue[i].remaining = 0.5;
+      }
+    }
+  }
 
   // ── 2. Goblin updates ─────────────────────────────────────────────
+  // Terminator pass first: any idle terminator locks its laser onto the
+  // nearest non-robot unit. The regular firing_laser state machine handles
+  // the windup/shot and drops back to idle, so this re-acquires every kill —
+  // a terminator simply never stops hunting while prey remains.
+  for (const g of state.goblins.values()) {
+    if (!g.terminator || g.state.kind !== 'idle') continue;
+    const target = nearestTerminatorTarget(state, g);
+    if (target) g.state = { kind: 'firing_laser', targetKind: target.kind, targetId: target.id };
+  }
   for (const g of state.goblins.values()) updateGoblin(state, g);
 
   // ── 2b. Minotaur updates ─────────────────────────────────────────────
@@ -881,8 +924,10 @@ export function spawnBob(state: GameState, holeCell: Cell): boolean {
 // Assemble a robot at the main hole — the late-game money summon. Uses the
 // same emergence-cell flood as a hatching goblin so it can't land on top of
 // anyone. Returns false silently when every hole exit is blocked — the
-// assembly queue in tick() retries shortly after.
-export function spawnRobot(state: GameState): boolean {
+// assembly queue in tick() retries shortly after. With `terminator` set the
+// chassis comes out hunting instead: red head-lamp, no jobs, lasers for
+// everything fleshy (see the terminator pass in tick).
+export function spawnRobot(state: GameState, terminator = false): boolean {
   const h = state.hole.cell;
   const cell = findHoleEmergenceCell(state, h.cx, h.cy);
   if (!cell) return false;
@@ -892,14 +937,38 @@ export function spawnRobot(state: GameState): boolean {
     path: [], facing: Math.PI / 2,
     state: { kind: 'idle' }, selected: false, idleSince: null, lastCellChangedAt: state.now,
     robot: true,
+    terminator: terminator || undefined,
   };
   state.goblins.set(id, g);
   occupyCell(state, cell.cx, cell.cy, id);
   // No sound here — the robotic chirp plays at queue time (onSummonRobot),
   // like the Minotaur's ritual sting, rather than when the bar completes.
-  appendLog(state, `Robot #${id} whirrs to life.`);
+  appendLog(state, terminator
+    ? `Terminator #${id} online. It begins scanning for targets.`
+    : `Robot #${id} whirrs to life.`);
   if (state.autoAssignEnabled) autoAssignAllIdle(state);
   return true;
+}
+
+// Nearest non-robot unit to a terminator — goblins (flesh ones), minotaurs,
+// and dragons are all prey; robots and fellow terminators are kin. Null once
+// the world is picked clean.
+function nearestTerminatorTarget(
+  state: GameState, t: Goblin,
+): { kind: 'goblin' | 'minotaur' | 'dragon'; id: number } | null {
+  let best: { kind: 'goblin' | 'minotaur' | 'dragon'; id: number } | null = null;
+  let bestD = Infinity;
+  const consider = (kind: 'goblin' | 'minotaur' | 'dragon', id: number, x: number, y: number) => {
+    const d = (x - t.pos.x) * (x - t.pos.x) + (y - t.pos.y) * (y - t.pos.y);
+    if (d < bestD) { bestD = d; best = { kind, id }; }
+  };
+  for (const g of state.goblins.values()) {
+    if (g.robot) continue;
+    consider('goblin', g.id, g.pos.x, g.pos.y);
+  }
+  for (const m of state.minotaurs.values()) consider('minotaur', m.id, m.pos.x, m.pos.y);
+  for (const d of state.dragons.values()) consider('dragon', d.id, d.pos.x, d.pos.y);
+  return best;
 }
 
 // How many carriers Autowater should keep on a drinking building. Close to the
@@ -949,6 +1018,9 @@ export function autoAssignAllIdle(state: GameState) {
   }
   const idle: Goblin[] = [];
   for (const g of state.goblins.values()) {
+    // Terminators take no jobs — between kills they're "idle" only in the
+    // instant before the hunting pass re-locks their laser.
+    if (g.terminator) continue;
     if (g.state.kind === 'idle') idle.push(g);
   }
   if (idle.length === 0) return;
@@ -1881,6 +1953,7 @@ function dragonKill(state: GameState, d: Dragon, kind: 'goblin' | 'minotaur' | '
 // and minotaurs pay their usual kill rewards, a dragon drops a Dragon Bone —
 // so a robot is a second (much cheaper-per-shot) route to the bone grind.
 function robotLaserKill(state: GameState, r: Goblin, kind: 'goblin' | 'minotaur' | 'dragon', id: number) {
+  const shooter = r.terminator ? `Terminator #${r.id}` : `Robot #${r.id}`;
   if (kind === 'dragon') {
     const victim = state.dragons.get(id);
     if (!victim) return;
@@ -1893,7 +1966,7 @@ function robotLaserKill(state: GameState, r: Goblin, kind: 'goblin' | 'minotaur'
     pushFloater(state, tx, ty, `+${bones} dragon bone${bones === 1 ? '' : 's'}`, 0xeae0c0, 1.8);
     pushDeathEffect(state, tx, ty);
     playSound('goblin_death', 0.85, 0.22);
-    appendLog(state, `Dragon #${id} lasered out of the sky by Robot #${r.id} — a bone clatters to earth.`);
+    appendLog(state, `Dragon #${id} lasered out of the sky by ${shooter} — a bone clatters to earth.`);
     return;
   }
   if (kind === 'goblin') {
@@ -1912,7 +1985,7 @@ function robotLaserKill(state: GameState, r: Goblin, kind: 'goblin' | 'minotaur'
     pushDeathEffect(state, tx, ty);
     playDecayingGoblinDeath();
     if (wasGold) playDecayingGoldKillCash();
-    appendLog(state, `Goblin #${id} lasered by Robot #${r.id}.`);
+    appendLog(state, `Goblin #${id} lasered by ${shooter}.`);
   } else {
     const m = state.minotaurs.get(id);
     if (!m) return;
@@ -1926,7 +1999,7 @@ function robotLaserKill(state: GameState, r: Goblin, kind: 'goblin' | 'minotaur'
     pushFloater(state, tx, ty - 14, `+${MINOTAUR_KILL_REWARD.blood} blood`, 0xff8a8a, 1.6);
     pushDeathEffect(state, tx, ty);
     playSound('goblin_death', 0.6, 0.4);
-    appendLog(state, `Minotaur #${id} lasered by Robot #${r.id}.`);
+    appendLog(state, `Minotaur #${id} lasered by ${shooter}.`);
   }
 }
 

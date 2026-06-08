@@ -143,6 +143,21 @@ export const ROBOT = {
   arriveDist: 3,
 };
 
+// Terminator — the endgame killer, unlocked by completing the Collect
+// 9,999,999 blood task. A terminator is a robot under the chrome (same
+// servos, same laser, same single allergy to radioactive waste) wearing a
+// red targeting lamp on its head — and it doesn't take jobs: it hunts,
+// automatically locking its laser onto the nearest non-robot unit (goblins,
+// minotaurs, even dragons on the wing) until nothing fleshy is left.
+// Spawning demands a serious orbital base before the button arms.
+export const TERMINATOR = {
+  moneyCost: 2_500_000,
+  spaceCentresRequired: 2,
+  // Assembles on the same single-slot timed track as a robot.
+  spawnTime: 3,
+  spawnCapacity: 1,
+};
+
 // Units hauled to space by a dragon. Anything that isn't a robot suffocates
 // after `lifetime` seconds adrift; until then it tumbles gently like the
 // floating buildings do.
@@ -364,6 +379,11 @@ export const SUMMON_UPGRADES = {
   autoWater: { bloodCost: 128 },
   goldgoblins: { bloodCost: 26 },
   goldgoblinsX10: { bloodCost: 128, multiplier: 10 },
+  // Autodragon — unlocked by Lilly's "Destroy a robot" optional task. Once
+  // bought, a dragon summon is queued automatically every intervalSeconds,
+  // provided the player can cover the usual DRAGON.bloodCost and an active
+  // Dragon Beacon has a free ritual slot (same gates as the manual button).
+  autoDragon: { bloodCost: 256, intervalSeconds: 5 },
 };
 
 // Tier ladder for the Autospawn ritual. Each subsequent purchase replaces the

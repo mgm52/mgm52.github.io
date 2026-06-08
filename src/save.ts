@@ -187,6 +187,12 @@ export function loadGame(): { state: GameState; savedAt: number } | null {
     env.state.dragonSpawnQueue ??= [];
     // Robot assembly queue — added with the robot cooldown track.
     env.state.robotSpawnQueue ??= [];
+    // Terminator track + Lilly's task rewards (autospawn throttle pins to the
+    // purchased multiplier on older saves; Autodragon starts unbought).
+    env.state.terminatorSpawnQueue ??= [];
+    env.state.autoSpawnLevel ??= env.state.autoSpawnMultiplier;
+    env.state.autoDragonEnabled ??= false;
+    env.state.autoDragonTimer ??= 0;
     env.state.minotaursBought ??= 0;
     // minotaursSummoned (rituals that actually finished) was added when the
     // Summon-2-Minotaurs task stopped counting purchases. Old saves counted

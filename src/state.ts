@@ -68,6 +68,12 @@ export type Goblin = {
   // shockwave (every other kill path skips it). Survives in space, where it's
   // the only unit able to assemble an Orbital Platform.
   robot?: boolean;
+  // A terminator — a robot (the flag above is always set alongside this one)
+  // wearing a red targeting lamp, unlocked by the Collect-9,999,999-blood
+  // task. Takes no jobs (Autobuild skips it); instead it automatically locks
+  // its laser onto the nearest non-robot unit, over and over, until nothing
+  // fleshy is left (see the terminator pass in sim's tick).
+  terminator?: boolean;
   // state.now when another unit was last commanded onto this one. The renderer
   // flashes the selection ring once so the player sees their command target.
   commandFlashAt?: number;
@@ -651,6 +657,16 @@ export type GameState = {
   // hole (main + each completed Goblin Hole building, round-robin).
   spawnHoleRotation: number;
   autoSpawnMultiplier: number; // 1 baseline; 2 with x2; 4 with x4
+  // The multiplier autospawn actually RUNS at — normally pinned to
+  // autoSpawnMultiplier (each purchase re-pins it), but once Lilly's
+  // "Prevent goblin spawning" task is done a slider under the Autospawn
+  // button lets the player throttle it down to any owned tier, or 0 (off).
+  autoSpawnLevel: number;
+  // Autodragon — Lilly's "Destroy a robot" reward, bought as a one-shot
+  // ritual: queues a dragon summon every SUMMON_UPGRADES.autoDragon
+  // .intervalSeconds while the blood + active-beacon gates allow it.
+  autoDragonEnabled: boolean;
+  autoDragonTimer: number;
   // Set of dig directions already purchased ('n'|'e'|'s'|'w'); each expands
   // the play area by DIG.cells in that direction and reveals a water source.
   dugDirections: Set<'n' | 'e' | 's' | 'w'>;
@@ -688,6 +704,9 @@ export type GameState = {
   // Robots assemble on the same kind of timed track (money charged at queue
   // time; capacity ROBOT.spawnCapacity).
   robotSpawnQueue: { remaining: number }[];
+  // Terminators get their own single-slot track (capacity
+  // TERMINATOR.spawnCapacity) so a hunt order doesn't block robot assembly.
+  terminatorSpawnQueue: { remaining: number }[];
   pendingBuild: PendingBuild;
   // True while the player is placing hell candles (the Candle option in the
   // hell-view Build panel; each tap on a mirror's outer ring places one for
@@ -1154,6 +1173,9 @@ export function createInitialState(): GameState {
     goldgoblinMultiplier: 1,
     autoSpawnTimer: 0,
     autoSpawnMultiplier: 0,
+    autoSpawnLevel: 0,
+    autoDragonEnabled: false,
+    autoDragonTimer: 0,
     spawnHoleRotation: 0,
     dugDirections: new Set(),
     playArea: initialPlayArea(),
@@ -1171,6 +1193,7 @@ export function createInitialState(): GameState {
     minotaurSpawnQueue: [],
     dragonSpawnQueue: [],
     robotSpawnQueue: [],
+    terminatorSpawnQueue: [],
     pendingBuild: null,
     pendingCandle: false,
     buildingCounts: emptyBuildingCounts(),
@@ -1753,6 +1776,17 @@ export function countHypercentres(state: GameState): number {
   }
   for (const sb of state.spaceBuildings.values()) {
     if (sb.building.kind === 'hypercentre') n++;
+  }
+  return n;
+}
+
+// Completed Space Centres in orbit — the industrial gate on Terminator
+// assembly (TERMINATOR.spaceCentresRequired). Space Centres only ever exist
+// as space buildings, so there's no ground pass to make.
+export function countSpaceCentres(state: GameState): number {
+  let n = 0;
+  for (const sb of state.spaceBuildings.values()) {
+    if (sb.building.kind === 'space_centre' && sb.building.state !== 'constructing') n++;
   }
   return n;
 }
