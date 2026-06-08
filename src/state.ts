@@ -189,6 +189,11 @@ export type Demon = {
   // state.lillyTasksGiven); every visit afterwards gets only the curt
   // "get back to kroW". Optional for saves predating the alibi.
   heardOfGolf?: boolean;
+  // Demon R only: set once Bob has completed the colossus's 5-dragon-bone
+  // trade (the 9,999,999-blood "gift") at least once. One of the three beats
+  // behind Bob & Lolly's quiet exit from hell (see maybeDepartBobAndLolly in
+  // sim.ts). Optional for saves predating the exit.
+  boneGiftGiven?: boolean;
   // Id of the ghost currently mid-parlay, or null. Only one soul may speak at a
   // time; while set the demon stands still and faces the speaker.
   busyWith: number | null;
@@ -799,6 +804,13 @@ export type GameState = {
   // One-shot — the button retires, Bob comes back for one last word, and
   // Lolly is loosed on the overworld.
   gabbonsawBought: boolean;
+  // Sticky: Bob's soul and Lolly have slipped out of hell together — set once
+  // all three of their hell beats are done (Lolly's corner conversation heard
+  // through, Lilly's optional Work handed down, and demon R's bone trade
+  // completed at least once) and both were off screen to vanish unseen. They
+  // stay gone until the Pain Gabbonsaw ritual reunites them on the overworld.
+  // See maybeDepartBobAndLolly in sim.ts.
+  bobLollyDeparted: boolean;
   // Lolly's overworld rampage (with Bob riding on top), spawned by the Pain
   // Gabbonsaw ritual. Null/absent until then. Persisted — she does not stop.
   lolly?: Lolly | null;
@@ -1258,6 +1270,7 @@ export function createInitialState(): GameState {
     bobPickingHole: false,
     bobCheatPending: false,
     gabbonsawBought: false,
+    bobLollyDeparted: false,
     lolly: null,
     holeDestroyed: false,
     ghosts: [],
@@ -1346,6 +1359,14 @@ export function ensureDemonRoster(state: GameState): void {
   const have = new Set([...state.demons.values()].map((d) => d.variant));
   for (const d of createDemons(state).values()) {
     if (!have.has(d.variant)) state.demons.set(d.id, d);
+  }
+  // Once Bob and Lolly have slipped out of hell, the roster stays a duo —
+  // without this, the top-up above (and the corrupt-save reseed in load) would
+  // quietly resurrect her in the corner.
+  if (state.bobLollyDeparted) {
+    for (const d of [...state.demons.values()]) {
+      if (d.variant === 'friend') state.demons.delete(d.id);
+    }
   }
 }
 

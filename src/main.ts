@@ -10,7 +10,7 @@ import { getOptions, onOptionsChange } from './options';
 import { getRestartInHell, relockOptionsCog, setupOptionsUI } from './options-ui';
 import { applyDomOptions, centerCameraOn, centerHellCameraOnWorld, centerSpaceCamera, clampCamera, clampHellCamera, clampSpaceCamera, createRender, currentHellScale, preloadRenderAssets, render, spaceCameraMaxY } from './render';
 import { appendLog, buildingCenter, cellCenter, countHypercentres, countSpaceCentres, createInitialState, destroyBuilding, digDirection, earnBlood, earnDragonBone, earnMoney, getSpawnCapacity, pushDeathEffect, pushFloater, recordGhost, removeGoblin, type GameState, type Ghost } from './state';
-import { autoAssignAllIdle, spawnDragon, spawnLollyRampage, spawnMinotaur, spawnRobot, spawnTinytaur, tick } from './sim';
+import { autoAssignAllIdle, maybeDepartBobAndLolly, spawnDragon, spawnLollyRampage, spawnMinotaur, spawnRobot, spawnTinytaur, tick } from './sim';
 import { ensureHellPortal, executeTaskSkip, refreshUI, setupUI } from './ui';
 import { clearSave, formatRelativeTime, getLastSaveStats, loadGame, saveGame, saveGameInBackground } from './save';
 
@@ -346,7 +346,8 @@ async function main() {
     // Bob waits below — the demons' best material is written for him. A
     // living Bob is claimed by the descent (his soul records where he
     // stood); a never-summoned Bob gets his ghost conjured by the mirror.
-    if (!state.ghosts.some((g) => g.bob)) {
+    // Unless he's already slipped out of hell with Lolly — then he stays gone.
+    if (!state.bobLollyDeparted && !state.ghosts.some((g) => g.bob)) {
       const liveBob = [...state.goblins.values()].find((g) => g.bob);
       if (liveBob) {
         recordGhost(state, 'goblin', liveBob.pos.x, liveBob.pos.y, liveBob.facing, { bob: true });
@@ -1056,6 +1057,24 @@ async function main() {
         tick(state);
         acc -= TICK_MS;
       }
+      // Bob & Lolly's quiet exit — once their three hell beats are done they
+      // slip away the moment both are off screen. Runs here (not in tick)
+      // because "off screen" needs the renderer's hell camera, and only while
+      // the world is live so a frozen parlay can never vanish its speakers.
+      maybeDepartBobAndLolly(
+        state,
+        state.view === 'hell'
+          ? (() => {
+              const scale = currentHellScale(ctx);
+              return {
+                x0: ctx.hellCamera.x,
+                y0: ctx.hellCamera.y,
+                x1: ctx.hellCamera.x + ctx.viewport.width / scale,
+                y1: ctx.hellCamera.y + ctx.viewport.height / scale,
+              };
+            })()
+          : null,
+      );
       if (fpsHud) frameTimings.tickMs = performance.now() - tickStart;
       saveAcc += dt;
       if (saveAcc >= SAVE_INTERVAL_MS) backgroundSave();

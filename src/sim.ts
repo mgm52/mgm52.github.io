@@ -1522,6 +1522,58 @@ function updateDemon(state: GameState, d: Demon) {
   }
 }
 
+// ─── Bob & Lolly's quiet exit ───────────────────────────────────────
+// Once Bob has worked through all three of his hell beats — heard Lolly's
+// corner conversation through to "tell the others we talked of golf", been
+// handed Lilly's optional Work, and completed demon R's 5-bone trade at least
+// once — he and Lolly slip out of hell together. The vanishing is never shown:
+// they only go while both are off screen (or the player isn't looking at hell
+// at all), so the player simply finds the corner empty. Sticky — they stay
+// gone until the Pain Gabbonsaw ritual reunites them on the overworld
+// (spawnLollyRampage). Called every frame from main.ts with the hell-coord
+// rect currently visible, or null when the hell scene isn't on screen.
+export function maybeDepartBobAndLolly(
+  state: GameState,
+  visible: { x0: number; y0: number; x1: number; y1: number } | null,
+): void {
+  if (state.bobLollyDeparted || state.gabbonsawBought) return;
+  const demons = [...state.demons.values()];
+  const lolly = demons.find((d) => d.variant === 'friend');
+  if (!lolly?.toldOfGolf) return;
+  if (!state.lillyTasksGiven) return;
+  if (!demons.some((d) => (d.variant ?? 'pit') === 'pit' && d.boneGiftGiven)) return;
+  const bob = state.ghosts.find((g) => g.bob);
+  // Never vanish anyone mid-engagement: Lolly locked in (or awaiting) a
+  // parlay, or Bob walking under a live command / holding a conversation.
+  if (lolly.busyWith !== null) return;
+  if (bob !== undefined) {
+    if (bob.parlayDemonId !== undefined || bob.chatTargetId !== undefined
+        || bob.targetChairId !== undefined || bob.goal !== undefined) return;
+    if (demons.some((d) => d.busyWith === bob.id)) return;
+  }
+  // Off-screen check. Margins are generous half-sprite reaches so neither can
+  // pop out while a sliver of them is still in view.
+  const offScreen = (hx: number, hy: number, margin: number): boolean =>
+    visible === null
+    || hx < visible.x0 - margin || hx > visible.x1 + margin
+    || hy < visible.y0 - margin || hy > visible.y1 + margin;
+  if (!offScreen(lolly.hx, lolly.hy, DEMON.displayPx * demonScaleOf(lolly))) return;
+  if (bob !== undefined) {
+    // A Bob hidden by the untruth strike is off screen by definition.
+    const hidden = bob.respawnAt !== undefined && state.now < bob.respawnAt;
+    // Bob's hell position: his commanded hx/hy when set, otherwise his death
+    // spot mapped into hell space (he never drifts — see recordGhost).
+    const hx = bob.hx ?? bob.x + (HELL.width - WORLD.width) / 2;
+    const hy = bob.hy ?? bob.y + (HELL.height - WORLD.height) / 2;
+    if (!hidden && !offScreen(hx, hy, HELL.bobPaceRange + 60)) return;
+  }
+  // Both unseen — they go. No log line: the disappearance is meant to be
+  // discovered, not announced.
+  state.bobLollyDeparted = true;
+  state.demons.delete(lolly.id);
+  state.ghosts = state.ghosts.filter((g) => !g.bob);
+}
+
 // ─── Lolly's rampage ────────────────────────────────────────────────
 // The Pain Gabbonsaw ritual's payoff: Lolly arrives on the overworld with
 // Bob riding on top. She works like a Minotaur — walk to the nearest prey,

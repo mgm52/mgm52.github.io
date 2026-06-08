@@ -602,7 +602,10 @@ export async function runDemonDialogue(state: GameState, demon: Demon, ghost: Gh
         if (!yes) {
           await say('demon', 'begone and be useful');
         } else if (state.dragonBone >= 5) {
-          // He takes the bones — the gift is a trade, not a blessing.
+          // He takes the bones — the gift is a trade, not a blessing. The
+          // completed trade is one of the three beats behind Bob & Lolly's
+          // quiet exit from hell (see maybeDepartBobAndLolly in sim.ts).
+          demon.boneGiftGiven = true;
           state.dragonBone -= 5;
           await ellipsisBeat();
           playSound('ritual', 0.85, 0.55);

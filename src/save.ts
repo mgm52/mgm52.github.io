@@ -226,6 +226,10 @@ export function loadGame(): { state: GameState; savedAt: number } | null {
     // Pain Gabbonsaw ritual + Lolly's rampage — added together. The rampage
     // itself persists (she does not stop), so only seed the defaults.
     env.state.gabbonsawBought ??= false;
+    // Bob & Lolly's quiet exit from hell — must default before
+    // ensureDemonRoster below, which uses it to keep a departed Lolly from
+    // being re-seeded into the corner.
+    env.state.bobLollyDeparted ??= false;
     env.state.lolly ??= null;
     env.state.holeDestroyed ??= false;
     env.state.ghosts ??= [];
