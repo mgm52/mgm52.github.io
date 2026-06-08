@@ -339,6 +339,13 @@ function rebuildPanel(panel: HTMLElement, callbacks: OptionsUICallbacks, refresh
     slider('Light strength',   o.hellDarknessLightAlpha, 0, 1, 0.02, (v) => setOption('hellDarknessLightAlpha', v)),
     // The canvas-side darkening during a parlay / soul chat (speakers exempt).
     slider('Parlay dim alpha', o.hellParlayDimAlpha, 0, 1, 0.02, (v) => setOption('hellParlayDimAlpha', v)),
+    // The arrival vignette: tight on landing, expands with the zoom-out.
+    subheader('Arrival vignette'),
+    toggle('Enabled', o.hellVignetteEnabled, (v) => setOption('hellVignetteEnabled', v)),
+    slider('Strength', o.hellVignetteAlpha, 0, 1, 0.02, (v) => setOption('hellVignetteAlpha', v)),
+    color('Color', o.hellVignetteColor, (v) => setOption('hellVignetteColor', v)),
+    slider('Start radius', o.hellVignetteStartRadius, 0.05, 1, 0.01, (v) => setOption('hellVignetteStartRadius', v)),
+    slider('End radius', o.hellVignetteEndRadius, 0.2, 2, 0.05, (v) => setOption('hellVignetteEndRadius', v)),
     // Sprite shadows: each soul's/demon's own art flipped vertically under
     // its feet, like a reflection in the abyss.
     subheader('Sprite shadows'),

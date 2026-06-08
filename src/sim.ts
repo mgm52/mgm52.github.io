@@ -824,6 +824,9 @@ export function spawnMinotaur(state: GameState, tiny = false): boolean {
   if (!cell) return false;
   const t = makeMinotaur(state, cell, tiny);
   state.minotaurs.set(t.id, t);
+  // The Summon-2-Minotaurs task counts rituals that actually finished, not
+  // purchases — this is the moment the minotaur exists.
+  if (!tiny) state.minotaursSummoned++;
   appendLog(state, tiny ? `Tinytaur #${t.id} skitters out of the hole.` : `Minotaur #${t.id} crawls out of the hole.`);
   playSound('goblin_spawn', tiny ? 2.2 : 1.4, 0.3);
   return true;

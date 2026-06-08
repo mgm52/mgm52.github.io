@@ -186,6 +186,10 @@ export function loadGame(): { state: GameState; savedAt: number } | null {
     // Robot assembly queue — added with the robot cooldown track.
     env.state.robotSpawnQueue ??= [];
     env.state.minotaursBought ??= 0;
+    // minotaursSummoned (rituals that actually finished) was added when the
+    // Summon-2-Minotaurs task stopped counting purchases. Old saves counted
+    // at purchase, so seed from minotaursBought to preserve their progress.
+    env.state.minotaursSummoned ??= env.state.minotaursBought;
     // First-Minotaur mercy discount — saves predating it decide on the next
     // refresh (no-op if the player already owns Minotaurs, since the discount
     // only ever applies to purchase #1).

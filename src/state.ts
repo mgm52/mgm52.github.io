@@ -568,7 +568,12 @@ export type GameState = {
   lightningUnlocked: boolean;
   // Number of Minotaurs summoned this run — the first summon can be
   // discounted (see minotaurFirstDiscount), the rest cost the flat price.
+  // Counted at purchase (queue time); drives the cost ladder.
   minotaursBought: number;
+  // Number of Minotaurs that actually emerged from the hole (the ritual
+  // takes MINOTAUR.spawnTime). Drives the Summon-2-Minotaurs task, so a
+  // purchase mid-ritual doesn't complete it early. Cumulative for the run.
+  minotaursSummoned: number;
   // Mercy discount on the first Minotaur: decided once at the moment the
   // summon unlocks (null = not yet unlocked). True if the player was sitting
   // on less than the discounted price in blood at that moment — their first
@@ -1068,6 +1073,7 @@ export function createInitialState(): GameState {
     powerBoosts: [],
     pendingStrike: false,
     minotaursBought: 0,
+    minotaursSummoned: 0,
     minotaurFirstDiscount: null,
     spawnQueue: [],
     minotaurSpawnQueue: [],

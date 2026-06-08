@@ -554,12 +554,14 @@ const TASKS: Task[] = [
   {
     // Optional side-task: unlocks after Phase 3 (build_gas_engine). Grants the
     // Goblin Hole (a Ritual purchase) plus the Goldblins ritual (gated in
-    // refreshUI). minotaursBought is cumulative for the run, so this stays
-    // complete once reached even if those Minotaurs later die.
+    // refreshUI). minotaursSummoned counts rituals that actually finished
+    // (not purchases, so a summon mid-ritual doesn't complete this early)
+    // and is cumulative for the run, so the task stays complete once reached
+    // even if those Minotaurs later die.
     id: 'summon_minotaurs',
     text: 'Summon 2 Minotaurs',
     unlocks: ['goblin_hole'],
-    isDone: (s) => s.minotaursBought >= 2,
+    isDone: (s) => s.minotaursSummoned >= 2,
     prereq: ['build_gas_engine'],
     optional: true,
   },

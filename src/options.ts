@@ -253,6 +253,14 @@ export type Options = {
   // soul chat is on screen (canvas-side, so the two speakers stay lit via
   // the same fuzzy pools as the veil). Replaces the old DOM overlay dim.
   hellParlayDimAlpha: number;       // 0 disables the dim entirely
+  // Arrival vignette — a tight dark ring around the landing spot when you
+  // descend into hell, expanding off-screen as the camera zooms out (rides
+  // hellZoom). Radii are fractions of the smaller viewport dimension.
+  hellVignetteEnabled: boolean;
+  hellVignetteAlpha: number;        // strength of the dark ring (1 = opaque)
+  hellVignetteColor: number;
+  hellVignetteStartRadius: number;  // hole radius at arrival (zoomed in)
+  hellVignetteEndRadius: number;    // hole radius once fully zoomed out (>1.1 clears the corners)
   // Sprite shadows — each ghost's / demon's own art flipped vertically,
   // tinted dark, and mirrored about its feet like a reflection in the abyss.
   hellSpriteShadowGhosts: boolean;  // flipped-copy shadows under the souls
@@ -446,6 +454,11 @@ export const DEFAULT_OPTIONS: Options = {
   hellDarknessParlayRadius: 320,
   hellDarknessLightAlpha: 1,
   hellParlayDimAlpha: 0.75,
+  hellVignetteEnabled: true,
+  hellVignetteAlpha: 1,
+  hellVignetteColor: 0x000000,
+  hellVignetteStartRadius: 0.22,
+  hellVignetteEndRadius: 1.35,
   hellSpriteShadowGhosts: true,
   hellSpriteShadowDemons: true,
   hellSpriteShadowAlpha: 0.28,

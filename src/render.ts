@@ -197,6 +197,36 @@ function getGlowTexture(): Texture {
   return glowTexture;
 }
 
+// Inverse radial gradient for the hell arrival vignette: a fully clear hole
+// ramping to opaque white at the texture edge (tinted at use). The fade band
+// spans 3× the hole radius with S-curve stops, so the ring reads as a wide
+// blur rather than a hard iris. The sprite is scaled so the hole tracks the
+// desired screen radius; a Graphics patch covers the viewport beyond the
+// texture's square.
+let vignetteTexture: Texture | null = null;
+function getVignetteTexture(): Texture {
+  if (vignetteTexture) return vignetteTexture;
+  const s = 1024;
+  const canvas = document.createElement('canvas');
+  canvas.width = s; canvas.height = s;
+  const c = canvas.getContext('2d')!;
+  const grad = c.createRadialGradient(s / 2, s / 2, s / 8, s / 2, s / 2, s / 2);
+  grad.addColorStop(0, 'rgba(255,255,255,0)');
+  grad.addColorStop(0.25, 'rgba(255,255,255,0.1)');
+  grad.addColorStop(0.5, 'rgba(255,255,255,0.36)');
+  grad.addColorStop(0.75, 'rgba(255,255,255,0.72)');
+  grad.addColorStop(1, 'rgba(255,255,255,1)');
+  c.fillStyle = grad;
+  c.fillRect(0, 0, s, s);
+  vignetteTexture = Texture.from(canvas);
+  return vignetteTexture;
+}
+// Texture px from the centre to where the vignette's hole ends (the gradient
+// start) and to the texture's edge (fully opaque) — the scale anchors for
+// syncHellVignette.
+const VIGNETTE_HOLE_TEX_RADIUS = 128;
+const VIGNETTE_TEX_HALF = 512;
+
 // Radial "light pool" for the hell darkness veil: fully opaque core with a
 // fuzzy falloff. Separate from getGlowTexture (whose centre peaks at 0.9) —
 // used as an inverse alpha mask, an opaque core is what cuts a fully clear
@@ -498,6 +528,12 @@ export type RenderContext = {
   // 0 = camera at the normal RENDER_SCALE, 1 = eased out to HELL.zoomedOutScale.
   // Animated by main.ts after the descent transition completes.
   hellZoom: number;
+  // Screen-space arrival vignette: a dark ring tight around the landing spot
+  // that expands off-screen as hellZoom eases out. Gradient sprite centred on
+  // the viewport plus a Graphics patch covering the screen beyond its square.
+  hellVignette: Container;
+  hellVignetteSprite: Sprite;
+  hellVignettePatch: Graphics;
   // The portal-to-abyss beam: a red line drawn from each hell_portal's
   // bottom-center straight down toward the world's edge. Animates in over
   // HELL.lineDrawMs ms after a portal finishes constructing.
@@ -819,6 +855,18 @@ export async function createRender(parent: HTMLElement, state: GameState): Promi
   // read correctly.
   app.stage.addChildAt(hellLayer, app.stage.getChildIndex(spaceLayer));
 
+  // Arrival vignette (screen-space): sits just above the hell scene so the
+  // descent's black overlay can still cover everything during the
+  // transition. Geometry/alpha are driven each frame by syncHellVignette.
+  const hellVignette = new Container();
+  const hellVignetteSprite = new Sprite(getVignetteTexture());
+  hellVignetteSprite.anchor.set(0.5);
+  const hellVignettePatch = new Graphics();
+  hellVignette.addChild(hellVignettePatch);
+  hellVignette.addChild(hellVignetteSprite);
+  hellVignette.visible = false;
+  app.stage.addChildAt(hellVignette, app.stage.getChildIndex(spaceLayer));
+
   // ─── Climb transition overlays (screen-space) ───
   // Phase 1: blackOverlay fades in over the ground so the play area visibly
   // dims toward black before any bright sky appears. Sits between worldLayer
@@ -901,6 +949,7 @@ export async function createRender(parent: HTMLElement, state: GameState): Promi
     hellCamera: { x: 0, y: 0 },
     depth: 0,
     hellZoom: 0,
+    hellVignette, hellVignetteSprite, hellVignettePatch,
     hellBeamGfx,
     hellSideBeamGfx,
     hellPortalMirrorLayer,
@@ -3522,7 +3571,55 @@ export function render(state: GameState, ctx: RenderContext) {
   ctx.hellLayer.alpha = hellFade;
   ctx.skyLayer.visible = skyFade > 0.001;
   ctx.skyLayer.alpha = skyFade;
+  syncHellVignette(ctx, hellFade);
   if (ctx.skyLayer.visible) drawTransition(ctx, a, state.now);
+}
+
+// The hell arrival vignette: a dark ring tight around the landing spot when
+// the underworld first fades up, expanding past the screen corners as the
+// camera zoom-out (ctx.hellZoom) eases. Rides hellFade so it appears and
+// departs with the scene; the gradient sprite carries the soft ring and the
+// patch fills the viewport beyond the sprite's square with solid colour.
+function syncHellVignette(ctx: RenderContext, hellFade: number): void {
+  const o = getOptions();
+  const v = ctx.hellVignette;
+  const alpha = o.hellVignetteAlpha * hellFade;
+  if (!o.hellVignetteEnabled || alpha <= 0.001) {
+    v.visible = false;
+    return;
+  }
+  v.visible = true;
+  v.alpha = alpha;
+  const W = ctx.viewport.width;
+  const H = ctx.viewport.height;
+  const k = Math.max(0, Math.min(1, ctx.hellZoom));
+  // Hole radius in screen px — start tight, ease out with the zoom. The
+  // release begins during the arrival fade itself (hellFade ramps over the
+  // descent's tail), so the ring is already opening before the camera
+  // zoom-out kicks in; the zoom then carries it the rest of the way. The
+  // quadratic ease-in keeps the ring tight through the front half and lets
+  // it sprint off-screen at the end, so the reveal reads as a slow opening
+  // rather than tracking the camera linearly.
+  const PRE_RELEASE = 0.3; // share of the release spent during the fade-in
+  const p = Math.min(1, hellFade * PRE_RELEASE + k * (1 - PRE_RELEASE));
+  const grow = p * p;
+  const r = Math.min(W, H) * (o.hellVignetteStartRadius + (o.hellVignetteEndRadius - o.hellVignetteStartRadius) * grow);
+  const s = r / VIGNETTE_HOLE_TEX_RADIUS;
+  ctx.hellVignetteSprite.position.set(W / 2, H / 2);
+  ctx.hellVignetteSprite.scale.set(s);
+  ctx.hellVignetteSprite.tint = o.hellVignetteColor;
+  // Fill whatever viewport lies outside the scaled sprite's square.
+  const half = s * VIGNETTE_TEX_HALF;
+  const left = W / 2 - half, right = W / 2 + half;
+  const top = H / 2 - half, bottom = H / 2 + half;
+  const g = ctx.hellVignettePatch;
+  g.clear();
+  if (left > 0 || top > 0 || right < W || bottom < H) {
+    if (top > 0) g.rect(0, 0, W, top).fill(o.hellVignetteColor);
+    if (bottom < H) g.rect(0, bottom, W, H - bottom).fill(o.hellVignetteColor);
+    if (left > 0) g.rect(0, Math.max(0, top), left, Math.min(H, bottom) - Math.max(0, top)).fill(o.hellVignetteColor);
+    if (right < W) g.rect(right, Math.max(0, top), W - right, Math.min(H, bottom) - Math.max(0, top)).fill(o.hellVignetteColor);
+  }
 }
 
 // Paint the red beam(s) from every built Hell Portal: a downward shaft on
