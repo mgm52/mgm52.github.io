@@ -114,6 +114,14 @@ let lastActiveTaskKey = '';
 // fire underneath the conversation.
 let lastLillyTasksGiven: boolean | null = null;
 let lillyHandoutRevealPending = false;
+// The three tasks Lilly hands out, in the order they should land. Each gets
+// its own step in the staged reveal walk (one line popping in per chime)
+// rather than the whole batch appearing at once: lines whose ids sit in
+// `pendingTaskLineReveals` render hidden (re-applied across innerHTML
+// rebuilds) until runUnlockRevealSequence reveals their div and clears them.
+const LILLY_TASK_IDS = ['prevent_spawning', 'destroy_robot', 'feed_hell_core'];
+const pendingTaskLineReveals = new Set<string>();
+function taskLineElId(taskId: string): string { return `task-line-${taskId}`; }
 // Last-written innerHTML for the power readout / task line — assigning the
 // same markup again still rebuilds the DOM nodes, so both writes are gated.
 let lastPowerHtml = '';
@@ -441,6 +449,15 @@ function runUnlockRevealSequence(step = 0): void {
   revealSequenceActive = true;
   sidebar?.classList.add('unlock-reveal-dim');
   el.classList.remove('reveal-hidden');
+  // A revealed task line is no longer pending — without this, the per-line
+  // re-hide in the task renderer would snap it invisible again next refresh.
+  if (el.id.startsWith('task-line-')) {
+    pendingTaskLineReveals.delete(el.id.slice('task-line-'.length));
+    // The sidebar dim fades the whole .task-text container; lift it so the
+    // line's pop reads at full strength. Retired with the other highlights
+    // when the walk ends.
+    el.parentElement?.classList.add('reveal-highlight');
+  }
   el.classList.add('reveal-highlight');
   // The item's "new" tag (created when the walk kicked off) pops in with it —
   // .reveal-lit punches it through the sidebar dim, and the sync makes it
@@ -1647,21 +1664,28 @@ export function refreshUI(state: GameState) {
   lastActiveTaskKey = activeTaskKey;
 
   // Lilly's optional-Work handout: the instant the flag flips (mid-parlay,
-  // with no celebration overlay to hold things), hide the freshly grown task
-  // line and mark it pending so it can't just pop in plainly. The walk itself
-  // waits below until her dialogue closes.
+  // with no celebration overlay to hold things), mark each of her three task
+  // lines pending so none of them just pops in plainly — the render below
+  // keeps pending lines invisible. The walk itself waits until her dialogue
+  // closes.
   if (lastLillyTasksGiven === false && state.lillyTasksGiven) {
     lillyHandoutRevealPending = true;
-    taskTextPendingReveal = true;
-    document.getElementById('task-text')?.classList.add('reveal-hidden');
+    for (const id of LILLY_TASK_IDS) pendingTaskLineReveals.add(id);
   }
   lastLillyTasksGiven = state.lillyTasksGiven;
   // Dialogue gone — arm the staged reveal exactly like a cleared WORK
-  // COMPLETE overlay does (finishCelebration): freeze game time and let this
-  // pass's kick at the bottom of refreshUI walk the sequence, landing the
-  // task line with the usual dim + glow + chime.
+  // COMPLETE overlay does (finishCelebration): freeze game time, queue each
+  // still-pending line as its own walk step, and let this pass's kick at the
+  // bottom of refreshUI run the sequence — the lines land one by one, each
+  // with the usual dim + glow + chime.
   if (lillyHandoutRevealPending && !isModalDialogueActive()) {
     lillyHandoutRevealPending = false;
+    for (const id of LILLY_TASK_IDS) {
+      const elId = taskLineElId(id);
+      if (pendingTaskLineReveals.has(id) && !revealQueue.includes(elId)) {
+        revealQueue.push(elId);
+      }
+    }
     document.body.classList.add('unlock-reveal-hold');
     revealArmed = true;
   }
@@ -1749,12 +1773,19 @@ export function refreshUI(state: GameState) {
       .map(t => {
         const label = t.optional ? 'Optional' : 'Work';
         const text = t.dynamicText ? t.dynamicText(state) : t.text;
-        return `<div><strong>${label}:</strong> ${text}</div>`;
+        return `<div id="${taskLineElId(t.id)}"><strong>${label}:</strong> ${text}</div>`;
       })
       .join('');
     if (taskHtml !== lastTaskHtml) {
       lastTaskHtml = taskHtml;
       taskEl.innerHTML = taskHtml;
+    }
+    // Lines awaiting their step in the staged reveal walk (Lilly's handout)
+    // stay invisible — re-applied here so an innerHTML rebuild can't flash
+    // them in early. runUnlockRevealSequence clears each id as it lands.
+    for (const t of activeTasks) {
+      if (!pendingTaskLineReveals.has(t.id)) continue;
+      document.getElementById(taskLineElId(t.id))?.classList.add('reveal-hidden');
     }
   } else {
     taskEl.style.display = 'none';
