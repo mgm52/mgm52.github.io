@@ -104,8 +104,9 @@ export const TINYTAUR = {
   scale: 0.5,       // render size multiplier vs a full Minotaur
 };
 
-// Robot — a late-game summon unlocked by completing the Build-a-Hypercentre
-// task. Costs money (not blood). On the ground a robot is just a small white
+// Robot — a late-game summon unlocked alongside the Hypercentre era. Costs
+// money (not blood) and demands a serious industrial base (4 Hypercentres)
+// before the button even arms. On the ground a robot is just a small white
 // goblin — same jobs, same pathfinding, faster servos — except it cannot die:
 // lightning, minotaurs, kill orders and dragon fire all pass over it. Its
 // real purpose is orbit: a robot snatched to space by a dragon survives the
@@ -114,8 +115,13 @@ export const TINYTAUR = {
 // robotGreyscale / robotSpaceSpeed) so they're tunable from the dev menu.
 export const ROBOT = {
   moneyCost: 250_000,
+  hypercentresRequired: 4,
   speed: 200,         // px/sec on the ground — near-double GOBLIN.speed (110)
   buildRange: 30,     // px past a platform's edge that counts as "on site"
+  // Each robot actively building a ground site multiplies the build time by
+  // this factor, compounding — two robots run a build at 1/0.49 ≈ 2× rate.
+  // Announced by the white "fast build" floater when a robot sets to work.
+  buildTimeMult: 0.7,
   // Robots assemble on a timed queue like the other summons (one at a time,
   // mirroring the Minotaur's single-slot ritual track).
   spawnTime: 2,

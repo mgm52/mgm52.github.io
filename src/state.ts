@@ -1677,6 +1677,19 @@ export function spaceUnitAt(state: GameState, x: number, y: number): SpaceUnit |
   return best;
 }
 
+// Hypercentres the player can point at — finished ground ones plus any hauled
+// into orbit. Gates the Robot summon ("needs 4 hypercentres").
+export function countHypercentres(state: GameState): number {
+  let n = 0;
+  for (const b of state.buildings.values()) {
+    if (b.kind === 'hypercentre' && b.state !== 'constructing') n++;
+  }
+  for (const sb of state.spaceBuildings.values()) {
+    if (sb.building.kind === 'hypercentre') n++;
+  }
+  return n;
+}
+
 // The first finished Dragon Beacon, if any — used as a dragon's launch point.
 export function constructedDragonBeacon(state: GameState): Building | null {
   for (const b of state.buildings.values()) {
