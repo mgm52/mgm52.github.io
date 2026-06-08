@@ -808,12 +808,15 @@ function cancelLongPress(input: InputState) {
 }
 
 // One grunt per goblin, staggered ~90ms apart with a touch of jitter so a group
-// command sounds like a chorus instead of a single overlapped blob.
-function playGruntBurst(count: number) {
+// command sounds like a chorus instead of a single overlapped blob. Robots
+// answer with the same sample resampled well above the goblin range
+// (1.6–2.4× vs 0.5–1.5×), so the chrome chirps read distinctly against the
+// flesh-and-blood grunts in a mixed selection.
+function playGruntBurst(count: number, robot = false) {
   for (let i = 0; i < count; i++) {
     const delay = i * 100;
     setTimeout(() => {
-      const rate = 0.5 + Math.random();
+      const rate = robot ? 1.6 + Math.random() * 0.8 : 0.5 + Math.random();
       playSound('command_3', 1, rate);
     }, delay);
   }
@@ -1060,8 +1063,9 @@ function handleSpaceRightClick(state: GameState, x: number, y: number) {
       y: Math.max(m, Math.min(SPACE.height - m, y + dy)),
     };
   });
-  // Robots are goblins under the chrome — same command grunts, one per unit.
-  playGruntBurst(robots.length);
+  // Robots are goblins under the chrome — same command sample, one per unit,
+  // chirped up into the robot register.
+  playGruntBurst(robots.length, true);
   appendLog(state, `${robots.length} robot${robots.length === 1 ? '' : 's'} ordered across the void.`);
 }
 
@@ -1298,7 +1302,11 @@ function handleRightClick(state: GameState, x: number, y: number) {
   const selectedMinotaurs = [...state.minotaurs.values()].filter((m) => m.selected);
   const selectedDragons = [...state.dragons.values()].filter((d) => d.selected);
   if (selectedGoblins.length === 0 && selectedMinotaurs.length === 0 && selectedDragons.length === 0) return;
-  if (selectedGoblins.length > 0) playGruntBurst(selectedGoblins.length);
+  // Robots chirp above the goblin grunts — split the burst by class.
+  // (selectedRobots itself is declared below for the laser-target scan.)
+  const robotCount = selectedGoblins.reduce((n, g) => n + (g.robot ? 1 : 0), 0);
+  if (selectedGoblins.length - robotCount > 0) playGruntBurst(selectedGoblins.length - robotCount);
+  if (robotCount > 0) playGruntBurst(robotCount, true);
   if (selectedMinotaurs.length > 0) playMinotaurCommand(selectedMinotaurs.length);
   if (selectedDragons.length > 0) playDragonRoarBurst(selectedDragons.length);
 

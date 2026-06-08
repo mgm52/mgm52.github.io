@@ -840,7 +840,8 @@ export function spawnRobot(state: GameState): boolean {
   };
   state.goblins.set(id, g);
   occupyCell(state, cell.cx, cell.cy, id);
-  playSound('online', 0.6, 1.4);
+  // No sound here — the robotic chirp plays at queue time (onSummonRobot),
+  // like the Minotaur's ritual sting, rather than when the bar completes.
   appendLog(state, `Robot #${id} whirrs to life.`);
   if (state.autoAssignEnabled) autoAssignAllIdle(state);
   return true;
@@ -962,20 +963,27 @@ export function autoAssignAllIdle(state: GameState) {
 
     // Construction sites poach idle robots ahead of any goblin, however far
     // away — their compounding 0.7× build-time bonus beats a goblin's head
-    // start. Within a class (and for non-build needs), nearest wins.
+    // start. Maintain needs are the inverse: robots are never auto-assigned
+    // to them (a robot maintains no better than a goblin, so it'd be a waste
+    // of one — manual commands can still do it). Within a class, nearest wins.
     const wantRobot = best.b.state === 'constructing';
-    let pickI = 0;
+    let pickI = -1;
     let pickD = Infinity;
     let pickRobot = false;
     for (let i = 0; i < idle.length; i++) {
       const g = idle[i];
       const isRobot = !!g.robot;
+      if (!wantRobot && isRobot) continue;
       if (wantRobot && pickRobot && !isRobot) continue;
       const dx = g.pos.x - best.center.x;
       const dy = g.pos.y - best.center.y;
       const d = dx * dx + dy * dy;
       if ((wantRobot && isRobot && !pickRobot) || d < pickD) { pickD = d; pickI = i; pickRobot = isRobot; }
     }
+    // Only robots left in the pool and a maintain slot on the table: nothing
+    // eligible. Retire this need and move on, so the loop can't stall (or
+    // worse, draft a robot at index 0 by default).
+    if (pickI === -1) { best.slots = 0; continue; }
     const g = idle.splice(pickI, 1)[0];
     best.b.assignedGoblins.push(g.id);
     g.goal = null;
@@ -2972,13 +2980,18 @@ function updateConstruction(state: GameState, b: Building) {
     b.buildProgress = 1;
     const keep = def.maintainersRequired;
     const newAssigned: number[] = [];
-    for (let i = 0; i < b.assignedGoblins.length; i++) {
-      const gid = b.assignedGoblins[i];
+    let kept = 0;
+    for (const gid of b.assignedGoblins) {
       const g = state.goblins.get(gid);
       if (!g) continue;
-      if (i < keep) {
+      // Robots never roll into maintaining — they bring nothing over a goblin
+      // there (unlike builds), so they idle out instead and the auto-assign
+      // sweep routes them to the next construction site within a couple of
+      // seconds. A manual command can still put one on maintain duty.
+      if (!g.robot && kept < keep) {
         newAssigned.push(gid);
         g.state = { kind: 'going_to_maintain', buildingId: b.id };
+        kept++;
       } else {
         g.state = { kind: 'idle' };
       }

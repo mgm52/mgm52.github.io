@@ -477,6 +477,9 @@ async function main() {
       if (state.robotSpawnQueue.length >= ROBOT.spawnCapacity) { playSound('error'); return; }
       state.money -= ROBOT.moneyCost;
       state.robotSpawnQueue.push({ remaining: ROBOT.spawnTime });
+      // Robotic sting right at queue time, à la the Minotaur's ritual sound —
+      // the bar completing is silent (the assembled robot just walks out).
+      playSound('online', 0.7, 1.8);
       appendLog(state, 'Robot assembly begins...');
     },
     onPlaceOrbital: () => {
