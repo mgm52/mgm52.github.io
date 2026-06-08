@@ -703,6 +703,10 @@
         border-color: #ffd96b; color: #ffd96b; cursor: default;
         text-shadow: 0 0 8px rgba(255, 217, 107, 0.5);
       }
+      /* Finger-sized hops on touch, matching the travel hints' treatment. */
+      @media (pointer: coarse) {
+        #quick-travel button { padding: 12px 18px; }
+      }
       /* Quick-travel blink: main.ts drives opacity to 1, snaps the view, then
          back to 0 — the 150ms transitions make the whole hop read ~0.3s. */
       #quick-travel-fade {

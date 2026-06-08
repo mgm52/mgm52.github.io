@@ -428,6 +428,15 @@ function rebuildPanel(panel: HTMLElement, callbacks: OptionsUICallbacks, refresh
     color('Chassis tint', o.robotTint, (v) => setOption('robotTint', v)),
     toggle('Greyscale art', o.robotGreyscale, (v) => setOption('robotGreyscale', v)),
     slider('Orbital walk speed', o.robotSpaceSpeed, 10, 200, 5, (v) => setOption('robotSpaceSpeed', v)),
+    // Terminators — the endgame hunters: size, tint, the red head lamp, and
+    // the per-shot charge-up (their effective kill rate while auto-hunting).
+    subheader('Terminators'),
+    slider('Sprite scale', o.terminatorScale, 0.5, 2.5, 0.05, (v) => setOption('terminatorScale', v)),
+    color('Chassis tint', o.terminatorTint, (v) => setOption('terminatorTint', v)),
+    color('Lamp color', o.terminatorLampColor, (v) => setOption('terminatorLampColor', v)),
+    slider('Lamp size', o.terminatorLampScale, 0.2, 3, 0.05, (v) => setOption('terminatorLampScale', v)),
+    slider('Lamp height', o.terminatorLampHeight, 0, 1, 0.02, (v) => setOption('terminatorLampHeight', v)),
+    slider('Laser windup (s)', o.terminatorLaserWindup, 0.05, 3, 0.05, (v) => setOption('terminatorLaserWindup', v)),
   ]));
 
   panel.appendChild(fontsSection(o));
