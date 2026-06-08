@@ -172,13 +172,22 @@ export type Minotaur = {
   state: MinotaurState;
   nextWanderAt: number;
   selected: boolean;
-  // Stuck detection: minotaurs only step greedily (Chebyshev-toward-target)
-  // with no real pathfinding, so an obstacle can trap them ping-ponging in a
-  // tiny area. We periodically sample the cell and bail back to `wander`
-  // when the sample stays inside a small box for too long. See updateMinotaur.
+  // Stuck detection: minotaurs step greedily (Chebyshev-toward-target) with
+  // only a wall-following detour for obstacles — no real pathfinding — so a
+  // pathological pinch can still trap one in a tiny area. We periodically
+  // sample the cell and bail back to `wander` when the sample stays inside a
+  // small box for too long. See updateMinotaur.
   stuckSampleCell: Cell | null;
   stuckSampleAt: number;
   stuckStreak: number;
+  // Wall-following detour, set while the greedy step toward the target is
+  // blocked by an obstacle (building face, wall): `tag` identifies the
+  // pursuit the detour belongs to (target id / goal key — a new order starts
+  // fresh), `dir` is the turn sense being followed (+1 clockwise), `hitDist`
+  // the distance-to-goal where the obstacle was hit (we leave the wall once a
+  // step would beat it), and `lastDir` the previous step's direction. See
+  // minotaurStep in sim.ts. Optional for saves predating it.
+  detour?: { tag: number; dir: 1 | -1; hitDist: number; lastDir: Dir } | null;
   // Tinytaur variant: a tiny, much faster Minotaur. Shares all Minotaur
   // behaviour except movement/attack speed and render scale.
   tiny?: boolean;

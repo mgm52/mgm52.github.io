@@ -874,6 +874,7 @@ function makeMinotaur(state: GameState, cell: Cell, tiny: boolean): Minotaur {
     stuckSampleCell: null,
     stuckSampleAt: state.now,
     stuckStreak: 0,
+    detour: null,
     tiny: tiny || undefined,
   };
 }
@@ -926,18 +927,98 @@ function minotaurWalkable(state: GameState, cx: number, cy: number, selfId?: num
   return true;
 }
 
-function minotaurStepToward(state: GameState, t: Minotaur, target: Cell): Cell | null {
-  // Pick the 8-neighbor with smallest Chebyshev distance to the target cell.
+// Rotate an 8-way direction by k steps of 45° (positive = clockwise).
+function rotDir(d: Dir, k: number): Dir {
+  return ((((d + k) % 8) + 8) % 8) as Dir;
+}
+
+// One movement step toward whatever `distFn` measures (Chebyshev to a cell,
+// or to a building's footprint). Same cost class as the old pure-greedy step:
+// a constant handful of neighbor checks, no search, no allocation beyond the
+// returned cell.
+//
+// Greedy alone ping-pongs against building faces — every walkable neighbor
+// ties with the current distance, so the minotaur jitters in place until the
+// stuck-check gives up on the order. Instead, when no neighbor makes strict
+// progress we start a Bug-style detour: pick the turn sense whose side opens
+// up first and then hug the obstacle hand-on-wall (sharpest turn back toward
+// the wall first, so corners wrap tightly), leaving the wall as soon as a
+// step would land strictly closer than where we hit it (`hitDist`). Each
+// detour therefore exits closer to the goal than the last began, so progress
+// is monotone across detours; the stuck-check stays on as the backstop for
+// genuinely unreachable targets. `tag` names the pursuit (target id / goal
+// key) — a detour only persists while the tag matches, so new orders never
+// inherit stale wall-following state.
+function minotaurStep(
+  state: GameState,
+  t: Minotaur,
+  tag: number,
+  distFn: (cx: number, cy: number) => number,
+): Cell | null {
+  if (t.detour && t.detour.tag !== tag) t.detour = null;
+  // Greedy candidate: walkable 8-neighbor with the smallest distance.
   let best: Cell | null = null;
   let bestDist = Infinity;
+  let walkableCount = 0;
   for (const d of ALL_DIRS) {
     const nx = t.cell.cx + DX[d];
     const ny = t.cell.cy + DY[d];
     if (!minotaurWalkable(state, nx, ny, t.id)) continue;
-    const dist = Math.max(Math.abs(nx - target.cx), Math.abs(ny - target.cy));
+    walkableCount++;
+    const dist = distFn(nx, ny);
     if (dist < bestDist) { bestDist = dist; best = { cx: nx, cy: ny }; }
   }
+  if (!best) return null; // fully boxed in
+  if (t.detour) {
+    // Leave the wall once a step beats the distance where we hit it — or if
+    // there's no wall left to follow (the obstacle was a unit that moved on),
+    // in which case greedy progress is guaranteed: the ideal direction is
+    // walkable, so following further would just spiral in open space.
+    if (bestDist < t.detour.hitDist || walkableCount === 8) {
+      t.detour = null;
+      return best;
+    }
+    // Hand-on-wall: the obstacle sits on the -dir side of our heading, so try
+    // the sharpest turn toward it first (wraps corners), straight ahead next,
+    // then progressively away — full reverse only as a dead-end last resort.
+    const s = t.detour.dir;
+    for (let i = -2; i <= 5; i++) {
+      const d = rotDir(t.detour.lastDir, i * s);
+      const nx = t.cell.cx + DX[d];
+      const ny = t.cell.cy + DY[d];
+      if (!minotaurWalkable(state, nx, ny, t.id)) continue;
+      t.detour.lastDir = d;
+      return { cx: nx, cy: ny };
+    }
+    return best; // unreachable: `best` is itself walkable
+  }
+  const curDist = distFn(t.cell.cx, t.cell.cy);
+  if (bestDist < curDist) return best; // clear progress — no detour needed
+  // Ran into an obstacle. The desired heading is the (possibly unwalkable)
+  // direction that closes distance fastest; probe rotations alternating
+  // outward from it and commit to whichever turn sense opens up first.
+  let idealDir: Dir = 0;
+  let idealDist = Infinity;
+  for (const d of ALL_DIRS) {
+    const dist = distFn(t.cell.cx + DX[d], t.cell.cy + DY[d]);
+    if (dist < idealDist) { idealDist = dist; idealDir = d; }
+  }
+  for (let r = 1; r <= 4; r++) {
+    for (const s of [1, -1] as const) {
+      const d = rotDir(idealDir, r * s);
+      const nx = t.cell.cx + DX[d];
+      const ny = t.cell.cy + DY[d];
+      if (!minotaurWalkable(state, nx, ny, t.id)) continue;
+      t.detour = { tag, dir: s, hitDist: curDist, lastDir: d };
+      return { cx: nx, cy: ny };
+    }
+  }
   return best;
+}
+
+function minotaurStepToward(state: GameState, t: Minotaur, target: Cell, tag: number): Cell | null {
+  return minotaurStep(state, t, tag, (cx, cy) =>
+    Math.max(Math.abs(cx - target.cx), Math.abs(cy - target.cy)));
 }
 
 function minotaurWanderStep(state: GameState, t: Minotaur): Cell | null {
@@ -1012,21 +1093,18 @@ function chebyshevToBuilding(cell: Cell, b: Building): number {
 }
 
 function minotaurStepTowardBuilding(state: GameState, t: Minotaur, b: Building): Cell | null {
-  let best: Cell | null = null;
-  let bestDist = Infinity;
-  for (const d of ALL_DIRS) {
-    const nx = t.cell.cx + DX[d];
-    const ny = t.cell.cy + DY[d];
-    if (!minotaurWalkable(state, nx, ny, t.id)) continue;
-    const dist = chebyshevToBuilding({ cx: nx, cy: ny }, b);
-    if (dist < bestDist) { bestDist = dist; best = { cx: nx, cy: ny }; }
-  }
-  return best;
+  // One shared probe cell so the distFn doesn't allocate per neighbor.
+  const probe: Cell = { cx: 0, cy: 0 };
+  return minotaurStep(state, t, b.id, (cx, cy) => {
+    probe.cx = cx; probe.cy = cy;
+    return chebyshevToBuilding(probe, b);
+  });
 }
 
-// Stuck detection. Minotaurs only step greedily (Chebyshev-toward-target) with
-// no real pathfinding, so any obstacle pinch — a wall corner, a goblin huddle
-// blocking a doorway — can trap them ping-ponging in a tiny area. Every
+// Stuck detection. Minotaurs step greedily (Chebyshev-toward-target) with only
+// a wall-following detour for obstacles (see minotaurStep) — no real
+// pathfinding — so a pathological pinch — minotaurs blocking each other in a
+// corridor, a fully sealed-off target — can still trap one in a tiny area. Every
 // STUCK_SAMPLE_PERIOD we snapshot the cell; if the cell hasn't moved more than
 // STUCK_BOX_RADIUS in STUCK_THRESHOLD consecutive samples, drop the current
 // order and fall back to `wander`. Wander itself never triggers this — it's
@@ -1040,6 +1118,9 @@ function applyMinotaurStuckCheck(state: GameState, t: Minotaur): boolean {
     t.stuckStreak = 0;
     t.stuckSampleCell = t.cell;
     t.stuckSampleAt = state.now;
+    // No pursuit — drop any wall-following detour so a later order (even one
+    // re-acquiring the same target) starts fresh.
+    t.detour = null;
     return false;
   }
   // Defensive defaults for saves persisted before these fields existed.
@@ -1063,6 +1144,7 @@ function applyMinotaurStuckCheck(state: GameState, t: Minotaur): boolean {
     appendLog(state, `Minotaur #${t.id} can't find a path — standing down.`);
     t.state = { kind: 'wander' };
     t.target = null;
+    t.detour = null;
     t.nextWanderAt = state.now + MINOTAUR.wanderInterval;
     t.stuckStreak = 0;
     t.stuckSampleCell = t.cell;
@@ -1161,7 +1243,9 @@ function updateMinotaur(state: GameState, t: Minotaur, autoTargets: Map<number, 
       t.nextWanderAt = state.now + MINOTAUR.wanderInterval;
       return;
     }
-    const next = minotaurStepToward(state, t, goal);
+    // Tag in negative space so a goal-cell key can never collide with an
+    // entity id used as a tag by the kill pursuits.
+    const next = minotaurStepToward(state, t, goal, -1 - nkey(goal.cx, goal.cy));
     if (next) {
       t.target = next;
       t.facing = Math.atan2(next.cy - t.cell.cy, next.cx - t.cell.cx);
@@ -1239,7 +1323,7 @@ function updateMinotaur(state: GameState, t: Minotaur, autoTargets: Map<number, 
       t.nextWanderAt = state.now + MINOTAUR.wanderInterval;
       return;
     }
-    const next = minotaurStepToward(state, t, target.cell);
+    const next = minotaurStepToward(state, t, target.cell, target.id);
     if (next) {
       t.target = next;
       t.facing = Math.atan2(next.cy - t.cell.cy, next.cx - t.cell.cx);
@@ -1290,7 +1374,7 @@ function updateMinotaur(state: GameState, t: Minotaur, autoTargets: Map<number, 
       return;
     }
     // Step one cell toward the target.
-    const next = minotaurStepToward(state, t, target.cell);
+    const next = minotaurStepToward(state, t, target.cell, target.id);
     if (next) {
       t.target = next;
       t.facing = Math.atan2(next.cy - t.cell.cy, next.cx - t.cell.cx);
