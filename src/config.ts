@@ -415,13 +415,16 @@ export const LIGHTNING = {
 };
 
 // Striking a completed Nuclear Reactor with Lightning ruptures the core: the
-// reactor detonates, levelling itself and killing every unit in the overworld
-// — even robots, which nothing else in the game can touch. The blast paints a
-// fallout splatter around the crater, hurls extra bolts skyward, and dumps
-// one final decaying surge into the grid as the core lets go.
+// reactor detonates, and a green/white shockwave radiates out from its
+// centre at waveSpeed, killing every unit in the overworld as the front
+// reaches it — even robots, which nothing else in the game can touch. The
+// wave paints fallout splatter as it crosses the crater zone, extra bolts
+// are hurled skyward at the rupture, and one final decaying surge is dumped
+// into the grid as the core lets go (to a super pitched-down power-up tone).
 export const REACTOR_MELTDOWN = {
   splatterCells: 20,                // fallout splatter diameter, in cells
   boltCount: 6,                     // extra bolts thrown up around the rupture
+  waveSpeed: 450,                   // shockwave expansion, px/sec
   powerBoostWatts: 10_000_000_000,  // 10 GW peak death-surge
   powerBoostSeconds: 10,            // surge decays to 0 over this many seconds
 };

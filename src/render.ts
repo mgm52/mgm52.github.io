@@ -9,7 +9,7 @@ extensions.add(GifAsset);
 // game seconds. Used as a manual sprite-sheet — we pick the frame ourselves
 // each tick based on (state.now - spawnAt) so playback always starts at frame 0.
 type DeathFrames = { textures: Texture[]; ends: number[]; duration: number };
-import { AMBIENT_DRAGON, BUILDING_DEFS, BuildingKind, CELL, COLS, DEMON, DRAGON, GOBLIN, HELL, RENDER_SCALE, ROBOT, ROWS, MINOTAUR, SOUL_SIGIL, SPACE, SPACE_UNIT, TINYTAUR, WORLD, formatPower, sigilPortalOutput } from './config';
+import { AMBIENT_DRAGON, BUILDING_DEFS, BuildingKind, CELL, COLS, DEMON, DRAGON, GOBLIN, HELL, REACTOR_MELTDOWN, RENDER_SCALE, ROBOT, ROWS, MINOTAUR, SOUL_SIGIL, SPACE, SPACE_UNIT, TINYTAUR, WORLD, formatPower, sigilPortalOutput } from './config';
 import { DEFAULT_OPTIONS, ensureFontLoaded, fontFamilyById, getOptions, onOptionsChange, type FontConfig, type Options } from './options';
 import { loadDemonSheetList } from './demon-sheets';
 import { Building, Demon, DemonVariant, Dragon, GameState, Ghost, Goblin, HOLE_SIZE, Minotaur, SoulChair, SpaceBuilding, SpaceUnit, WaterSource, buildingCenter, candleSpotAt, cellCenter, defOf, demonScaleOf, freePlatformAt, holeCenter, isInPlayCell, maintainerCount } from './state';
@@ -2393,6 +2393,29 @@ function drawFloaters(ctx: RenderContext, state: GameState) {
 function drawLightning(ctx: RenderContext, state: GameState) {
   const g = ctx.lightningGfx;
   g.clear();
+  // Reactor meltdown shockwaves — drawn first so bolts/lasers stay on top.
+  // Each wave is a green annulus riding the kill front (its radius comes
+  // straight from the sim's expansion numbers), backed by a white-hot inner
+  // ring and a green-tinted core flash that fades as the front travels.
+  for (const m of state.meltdowns) {
+    const radius = (state.now - m.startAt) * REACTOR_MELTDOWN.waveSpeed;
+    if (radius <= 0) continue;
+    // Fade the whole wave out over its trip across the world.
+    const maxRadius = Math.hypot(WORLD.width, WORLD.height);
+    const fade = Math.max(0, 1 - radius / maxRadius);
+    // Outer front: thick toxic-green ring with a soft halo.
+    g.circle(m.x, m.y, radius).stroke({ width: 26, color: 0x4aff90, alpha: 0.18 + 0.22 * fade });
+    g.circle(m.x, m.y, radius).stroke({ width: 10, color: 0x6affb0, alpha: 0.35 + 0.35 * fade });
+    // Inner front: thin white-hot ring trailing just behind the green.
+    g.circle(m.x, m.y, radius * 0.88).stroke({ width: 4, color: 0xffffff, alpha: 0.5 + 0.4 * fade });
+    // Core flash: a green-white bloom over the crater for the first beats.
+    const age = state.now - m.startAt;
+    const coreAlpha = Math.max(0, 1 - age / 1.2);
+    if (coreAlpha > 0) {
+      g.circle(m.x, m.y, CELL * 4).fill({ color: 0xffffff, alpha: coreAlpha * 0.55 });
+      g.circle(m.x, m.y, CELL * 7).fill({ color: 0x4aff90, alpha: coreAlpha * 0.3 });
+    }
+  }
   for (const bolt of state.lightningBolts) {
     if (bolt.points.length < 2) continue;
     const age = state.now - bolt.spawnAt;

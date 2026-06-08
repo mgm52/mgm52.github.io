@@ -495,6 +495,24 @@ export type LaserBeam = {
   lifetime: number;
 };
 
+// A reactor meltdown in progress: a shockwave expanding from the ruptured
+// core at REACTOR_MELTDOWN.waveSpeed. The sim advances `lastRadius` each tick,
+// killing every overworld unit the front passes and painting fallout as it
+// goes; the renderer draws the green/white wave from the same numbers. The
+// kill tallies accumulate until the wave clears the map, then fold into the
+// strike stats (maxStruckAtOnce, slewTwoDragonsInOneStrike).
+export type Meltdown = {
+  id: number;
+  x: number;
+  y: number;
+  startAt: number;
+  // How far the front had reached last tick — kills/splatter are applied to
+  // the (lastRadius, radius] annulus so nothing is processed twice.
+  lastRadius: number;
+  killed: number;
+  dragonsKilled: number;
+};
+
 // A decaying power surge (Lightning Strike). Contributes `peak` watts at
 // spawn, ramping linearly to 0 over `duration` seconds.
 export type PowerBoost = {
@@ -633,6 +651,10 @@ export type GameState = {
   lightningBolts: LightningBolt[];
   // One-shot robot laser zaps, faded out by the renderer like lightningBolts.
   laserBeams: LaserBeam[];
+  // Active reactor meltdowns — green/white shockwaves expanding from a
+  // ruptured Nuclear Reactor, killing every overworld unit the front passes.
+  // Advanced in sim's updateMeltdowns, drawn alongside the lightning bolts.
+  meltdowns: Meltdown[];
   // Active Lightning Strike power surges, summed into production each tick.
   powerBoosts: PowerBoost[];
   // True while the player is aiming a Lightning Strike (next map click fires
@@ -1107,6 +1129,7 @@ export function createInitialState(): GameState {
     deathEffects: [],
     lightningBolts: [],
     laserBeams: [],
+    meltdowns: [],
     powerBoosts: [],
     pendingStrike: false,
     minotaursBought: 0,
