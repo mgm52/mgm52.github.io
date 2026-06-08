@@ -151,6 +151,11 @@ export type Demon = {
   // 999,999,845 and drops by one for every correct answer to her hour quiz.
   // Optional for saves predating the quiz rework.
   taskCount?: number;
+  // Demon L only: set once Bob has answered her "where have you been" with
+  // the corner demon's golf alibi (his long-winded birdie). Every visit
+  // afterwards gets only the curt "get back to Work". Optional for saves
+  // predating the alibi.
+  heardOfGolf?: boolean;
   // Id of the ghost currently mid-parlay, or null. Only one soul may speak at a
   // time; while set the demon stands still and faces the speaker.
   busyWith: number | null;

@@ -541,6 +541,24 @@ export async function runDemonDialogue(state: GameState, demon: Demon, ghost: Gh
         // she dismisses it (".em evael") — no greeting, no shared brush-off.
         await soulOpener();
         await say('demon', 'leave me.');
+      } else if (
+        [...state.demons.values()].some((d) => d.variant === 'friend' && d.toldOfGolf)
+      ) {
+        // Once Bob has heard the corner demon's whole piece (and her "tell
+        // the others we talked of golf" coaching), the alibi supersedes the
+        // hour quiz: Lilly demands to know where he's been, Bob over-explains
+        // his birdie, and after a pause she sends him back to work. Every
+        // visit after the first gets only the curt dismissal.
+        state.bobParlayed = true;
+        if (demon.heardOfGolf) {
+          await say('demon', 'get back to Work', { literal: true });
+        } else {
+          await say('demon', 'where have you been, darling?', { literal: true });
+          await say('bob', 'i achieved score of 1 stroke under par on a hole, colloquially known as a birdie, on a beautiful green lawn of plentiful sporting delight');
+          await sleep(900);   // her pause, taking that in
+          await say('demon', 'get back to work', { literal: true });
+          demon.heardOfGolf = true;
+        }
       } else {
         // Bob's standing appointment, repeated on every visit: she reads off
         // his absurd task backlog, quizzes him on the real-world hour, and
