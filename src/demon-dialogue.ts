@@ -564,7 +564,7 @@ export async function runDemonDialogue(state: GameState, demon: Demon, ghost: Gh
           }
           await say('demon', 'you need more Work', { literal: true });
           state.lillyTasksGiven = true;
-          appendLog(state, 'Lilly hands down new optional Work: prevent goblin spawning · destroy a robot · fully feed a hell core.');
+          appendLog(state, 'Lilly hands down new optional Work: destroy a robot · fully feed a hell core · prevent goblin spawning.');
         }
       } else {
         // Bob's standing appointment, repeated on every visit: she reads off

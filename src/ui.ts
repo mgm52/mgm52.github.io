@@ -119,7 +119,7 @@ let lillyHandoutRevealPending = false;
 // rather than the whole batch appearing at once: lines whose ids sit in
 // `pendingTaskLineReveals` render hidden (re-applied across innerHTML
 // rebuilds) until runUnlockRevealSequence reveals their div and clears them.
-const LILLY_TASK_IDS = ['prevent_spawning', 'destroy_robot', 'feed_hell_core'];
+const LILLY_TASK_IDS = ['destroy_robot', 'feed_hell_core', 'prevent_spawning'];
 const pendingTaskLineReveals = new Set<string>();
 function taskLineElId(taskId: string): string { return `task-line-${taskId}`; }
 // Last-written innerHTML for the power readout / task line — assigning the
@@ -619,19 +619,8 @@ const TASKS: Task[] = [
   // Handed out by demon L the first time she rules "you need more Work"
   // (see the golf-alibi beat in demon-dialogue.ts); hidden until then via
   // the `available` gate on state.lillyTasksGiven. None of them unlock
-  // anything — they're Work for Work's sake.
-  {
-    // Spawning is "prevented" when no hole can produce a goblin: every hole
-    // built over, walled off, or buried under so many bodies that no
-    // reachable free cell remains (the same emergence test spawnGoblin uses
-    // — see goblinSpawningBlocked).
-    id: 'prevent_spawning',
-    text: 'Prevent goblin spawning',
-    unlocks: [],
-    isDone: (s) => goblinSpawningBlocked(s),
-    available: (s) => s.lillyTasksGiven,
-    optional: true,
-  },
+  // anything — they're Work for Work's sake. Listed (and revealed — see
+  // LILLY_TASK_IDS) in this order: destroy, feed, prevent.
   {
     // Robots shrug off every other kill path — only a reactor meltdown's
     // radioactive shockwave can destroy one (strike a completed Nuclear
@@ -660,6 +649,18 @@ const TASKS: Task[] = [
       }
       return false;
     },
+    available: (s) => s.lillyTasksGiven,
+    optional: true,
+  },
+  {
+    // Spawning is "prevented" when no hole can produce a goblin: every hole
+    // built over, walled off, or buried under so many bodies that no
+    // reachable free cell remains (the same emergence test spawnGoblin uses
+    // — see goblinSpawningBlocked).
+    id: 'prevent_spawning',
+    text: 'Prevent goblin spawning',
+    unlocks: [],
+    isDone: (s) => goblinSpawningBlocked(s),
     available: (s) => s.lillyTasksGiven,
     optional: true,
   },
@@ -1426,16 +1427,21 @@ export function refreshUI(state: GameState) {
   powerEl.style.color = '#8acfff';
 
   // Spawn Goblin button — sidebar, always visible. Surfaces a "Hole blocked"
-  // warning when a building is on the hole.
+  // warning when a building is on the hole, or "No room" when no hole can
+  // yield a free emergence cell at all (walled in, built over, or buried
+  // under so many bodies the flood finds nowhere to land — the same test
+  // Lilly's "Prevent goblin spawning" task is judged against).
   const spawnInProgress = state.spawnQueue.length;
   const spawnBtn = document.getElementById('btn-spawn-goblin') as HTMLButtonElement;
   const canAffordGoblin = state.money >= GOBLIN.spawnCost;
   const holeBlocked = holeBlockedByBuilding(state);
+  const noRoom = !holeBlocked && goblinSpawningBlocked(state);
   const cap = getSpawnCapacity(state);
-  spawnBtn.disabled = !canAffordGoblin || holeBlocked || spawnInProgress >= cap;
+  spawnBtn.disabled = !canAffordGoblin || holeBlocked || noRoom || spawnInProgress >= cap;
   spawnBtn.classList.toggle('in-progress', spawnInProgress > 0);
   const warnEl = document.getElementById('warn-spawn-goblin')!;
-  warnEl.style.display = holeBlocked ? '' : 'none';
+  warnEl.textContent = holeBlocked ? 'Hole blocked' : 'No room';
+  warnEl.style.display = (holeBlocked || noRoom) ? '' : 'none';
   const spawnBySlot: Record<number, number> = {};
   for (const item of state.spawnQueue) {
     spawnBySlot[item.slot] = 1 - item.remaining / GOBLIN.spawnTime;
