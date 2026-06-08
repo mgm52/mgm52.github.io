@@ -3073,9 +3073,12 @@ export function render(state: GameState, ctx: RenderContext) {
     }
     v.container.position.set(g.pos.x, g.pos.y);
     applyRingFlash(v.selectionRing, g.selected, g.commandFlashAt, state.now);
-    // Robots are scaled-down goblins (a small grey chassis) — size, tint and
-    // the greyscale pass are all live dev options.
-    const px = g.robot ? displayPx * opts.robotScale : displayPx;
+    // Robots are scaled-down goblins (a small grey chassis); terminators are
+    // scaled-UP ones that loom over their prey — size, tint and the greyscale
+    // pass are all live dev options.
+    const px = g.terminator ? displayPx * opts.terminatorScale
+      : g.robot ? displayPx * opts.robotScale
+      : displayPx;
     // Shadow under the feet — anchored at sprite center, offset down to feet.
     v.shadow.visible = opts.goblinShadow;
     if (opts.goblinShadow) {
@@ -3119,8 +3122,8 @@ export function render(state: GameState, ctx: RenderContext) {
     for (const s of v.outline) s.visible = opts.goblinOutline;
     let tint = 0xffffff;
     // Robots are always their flat grey — the chassis doesn't blush for
-    // water duty or anything else.
-    if (g.robot) tint = opts.robotTint;
+    // water duty or anything else. Terminators carry their own tint dial.
+    if (g.robot) tint = g.terminator ? opts.terminatorTint : opts.robotTint;
     // Water carriers tint blue only while actually hauling water back to the
     // DC (phase to_dc). On the outbound walk to the source they look normal.
     else if (g.state.kind === 'fetching_water' && g.state.phase === 'to_dc') tint = opts.waterGoblinColor;
@@ -3137,9 +3140,9 @@ export function render(state: GameState, ctx: RenderContext) {
     if (v.glow) {
       const charging = g.state.kind === 'firing_laser' && g.state.fireAt !== undefined;
       if (g.terminator) {
-        v.glow.scale.set(px * 1.1 / 128);
-        v.glow.position.set(0, -px * 0.42);
-        v.glow.tint = 0xff2018;
+        v.glow.scale.set(px * opts.terminatorLampScale / 128);
+        v.glow.position.set(0, -px * opts.terminatorLampHeight);
+        v.glow.tint = opts.terminatorLampColor;
         v.glow.alpha = charging
           ? 0.85 + 0.15 * Math.sin(state.now * 24)
           : 0.55 + 0.18 * Math.sin(state.now * 5 + g.id);

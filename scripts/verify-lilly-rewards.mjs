@@ -3,6 +3,11 @@
 // Autodragon ritual, the Terminator's auto-hunt, the UI gating of each
 // reward (slider / Autodragon button / quick-travel strip / Terminator
 // button) once the matching task reveals, and the quick-travel blink.
+//
+// NOTE: run against a FRESHLY-STARTED dev server. Editing source files while
+// the server is up makes the page import HMR-timestamped module URLs, so the
+// script's import('/src/ui.ts') would get a SECOND ui.ts instance with its
+// own task sets — and the task-skip gating checks go flaky.
 import { chromium } from 'playwright';
 import { mkdirSync } from 'fs';
 

@@ -339,6 +339,15 @@ export type Options = {
   robotTint: number;        // chassis tint, applied over the (greyscaled) art
   robotGreyscale: boolean;  // desaturate the goblin art (off = tint over green)
   robotSpaceSpeed: number;  // space-px/sec a robot paddles toward a platform
+  // Terminators — the endgame hunters. Bigger than a regular goblin by
+  // default (where a plain robot is smaller), with their own chassis tint,
+  // the red head-lamp dials, and a live laser charge-up time.
+  terminatorScale: number;       // sprite size multiplier vs a regular goblin
+  terminatorTint: number;        // chassis tint (robotGreyscale still applies)
+  terminatorLampColor: number;   // head targeting-lamp colour
+  terminatorLampScale: number;   // lamp glow size, as a multiplier on the sprite px
+  terminatorLampHeight: number;  // lamp centre above sprite centre, fraction of px
+  terminatorLaserWindup: number; // seconds of charge-up per auto-shot
 };
 
 // A sheet base-name from assets/demons/ (auto-discovered via the manifest —
@@ -532,6 +541,15 @@ export const DEFAULT_OPTIONS: Options = {
   robotTint: 0xffffff,
   robotGreyscale: true,
   robotSpaceSpeed: 55,
+  // Terminator defaults: a chassis that LOOMS — noticeably bigger than the
+  // goblins it hunts — with the red lamp burning on its head and the stock
+  // robot windup on its laser.
+  terminatorScale: 1.3,
+  terminatorTint: 0xffffff,
+  terminatorLampColor: 0xff2018,
+  terminatorLampScale: 1.1,
+  terminatorLampHeight: 0.42,
+  terminatorLaserWindup: 0.5,
 };
 
 // Set every font key to the same family at once. Convenience for the options

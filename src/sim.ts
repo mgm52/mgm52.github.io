@@ -2830,7 +2830,11 @@ function updateGoblin(state: GameState, g: Goblin) {
       g.facing = Math.atan2(target.pos.y - g.pos.y, target.pos.x - g.pos.x);
       if (s.fireAt === undefined) {
         // Charge-up beat — gives the renderer's glow flare a moment to read.
-        s.fireAt = state.now + ROBOT.laserWindup;
+        // Terminators run on their own live dev dial, since the windup IS
+        // their kill rate when auto-hunting.
+        s.fireAt = state.now + (g.terminator
+          ? getOptions().terminatorLaserWindup
+          : ROBOT.laserWindup);
         return;
       }
       if (state.now < s.fireAt) return;
