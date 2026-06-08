@@ -119,6 +119,14 @@ export const ROBOT = {
   // hitscan laser (no chase, no range limit — even a dragon on the wing).
   // The windup is the charge-up beat before the beam fires.
   laserWindup: 0.5,
+  // In orbit, an idle robot paddles to the nearest completed Orbital
+  // Platform and parks on its deck, at a per-robot spot on a ring this far
+  // (px) inside the deck edge — out on the walkable rim a Space Centre
+  // leaves uncovered.
+  parkInset: 18,
+  // A commanded robot (see SpaceUnit.goal) counts as arrived within this
+  // many px of its goal, then stands fast there.
+  arriveDist: 3,
 };
 
 // Units hauled to space by a dragon. Anything that isn't a robot suffocates
@@ -647,8 +655,10 @@ export const BUILDING_DEFS = {
   // up to it. Its button replaces the Build list while the player is in
   // orbit (mirroring how the Candle takes over in hell). Requires 1 builder,
   // and the vacuum means only robots qualify — the player has to have a
-  // dragon snatch a robot up first. Does nothing once assembled. For now.
-  orbital_platform: def(3, {
+  // dragon snatch a robot up first. Once assembled it's the foundation a
+  // Space Centre can be set down on — its deck is a bit wider than the
+  // Centre's footprint, leaving a walkable rim where robots park.
+  orbital_platform: def(9, {
     name: 'Orbital Platform',
     short: 'OP',
     cost: 1_000_000,
@@ -662,6 +672,30 @@ export const BUILDING_DEFS = {
     colors: {
       active: 0x4a505a, activeBorder: 0xb8bec6,
       dormant: 0x3a3f47, dormantBorder: 0x808890,
+      constructing: 0x3a3f47, constructingBorder: 0x808890,
+    },
+  }),
+  // Space Centre — the endgame income building, built in orbit and ONLY on
+  // top of a completed Orbital Platform (one Centre per platform — tapping
+  // bare void refuses with a "no platform" floater). Bigger than a
+  // Hypercentre but a bit smaller than its platform, so robots still fit on
+  // the deck around it. Robot-assembled like the platform under it, and a
+  // glutton: each one draws 10 GW from the ground grid but pays out a
+  // fortune while the power link holds.
+  space_centre: def(7, {
+    name: 'Space Centre',
+    short: 'SC',
+    cost: 25_000_000,
+    buildersRequired: 1,
+    buildTime: 30,
+    maintainersRequired: 0,
+    income: 500_000,
+    powerOutput: -10_000_000_000, // 10 GW draw
+    wanderInterval: 0,
+    wanderJitter: 0,
+    colors: {
+      active: 0x1a5a6a, activeBorder: 0x6ae0ff,
+      dormant: 0x2a3f4a, dormantBorder: 0x5a8090,
       constructing: 0x3a3f47, constructingBorder: 0x808890,
     },
   }),

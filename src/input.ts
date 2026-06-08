@@ -11,6 +11,7 @@ import {
   appendLog, buildingAtCell, buildingMoneyCost, candleSpotAt, cellKey, defOf, demonAtHell, findFreeCellNear,
   hellPortalAt, holeAtCell, isInBounds, markBuildingsChanged, nextBuildingDisplayNum, pixelToCell, placeCandle, pushFloater,
   soulChairAt, spaceBuildingAt, spaceUnitAt, waterCarrierCount, waterSourceAtCell,
+  freePlatformAt,
 } from './state';
 
 type ActivePointer = {
@@ -122,10 +123,10 @@ export function setupInput(
       const singlePrimary = e.button === 0 && input.pointers.size < 2;
       if (singlePrimary) {
         input.spaceTapStart = { x: e.global.x, y: e.global.y };
-        // Touch has no right-click. In hell, a long-press is the command
-        // gesture (mirroring the ground view) — without this, touch players
-        // can select souls but have no way to order them around.
-        if (e.pointerType === 'touch' && state.view === 'hell') {
+        // Touch has no right-click. In hell and space, a long-press is the
+        // command gesture (mirroring the ground view) — without this, touch
+        // players can select souls/robots but have no way to order them around.
+        if (e.pointerType === 'touch') {
           scheduleLongPress(input, e.pointerId, state, ctx, worldLayer);
         }
       } else {
@@ -137,8 +138,8 @@ export function setupInput(
           const pts = [...input.pointers.values()];
           input.panLast = { x: (pts[0].x + pts[1].x) / 2, y: (pts[0].y + pts[1].y) / 2 };
         }
-        // Hell view: right-click is a "walk here" command for any selected ghosts.
-        // (Space view has no analogous command; ignored there.) While candle
+        // Hell view: right-click is a "walk here" command for any selected
+        // ghosts (the space view mirrors this for robots below). While candle
         // placement is armed, right-click cancels it instead (mirroring how a
         // pending strike is cancelled on the ground).
         if (e.button === 2 && state.view === 'hell' && input.pointers.size < 2) {
@@ -147,11 +148,19 @@ export function setupInput(
           const hp = e.getLocalPosition(ctx.hellLayer);
           handleHellRightClick(state, hp.x, hp.y);
         }
-        // Space view: right-click cancels a pending Orbital Platform placement
-        // (mirroring how a pending candle/strike is cancelled elsewhere).
-        if (e.button === 2 && state.view === 'space' && input.pointers.size < 2 && state.pendingOrbital) {
+        // Space view: right-click cancels a pending Orbital Platform / Space
+        // Centre placement (mirroring how a pending candle/strike is
+        // cancelled elsewhere); with nothing armed it's a "walk here" command
+        // for any selected robots, just like the ground view.
+        if (e.button === 2 && state.view === 'space' && input.pointers.size < 2) {
           flashCursor(e.clientX, e.clientY);
-          state.pendingOrbital = false;
+          if (state.pendingOrbital || state.pendingSpaceCentre) {
+            state.pendingOrbital = false;
+            state.pendingSpaceCentre = false;
+            return;
+          }
+          const sp = e.getLocalPosition(ctx.spaceLayer);
+          handleSpaceRightClick(state, sp.x, sp.y);
         }
       }
       return;
@@ -277,10 +286,10 @@ export function setupInput(
         const hp = e.getLocalPosition(ctx.hellLayer);
         ctx.candleCursor = { x: hp.x, y: hp.y };
       }
-      // Orbital Platform placement preview: track the cursor in space coords
-      // so the renderer can draw the platform ghost under it (mirroring the
-      // ground-building placement ghost).
-      if (state.view === 'space' && state.pendingOrbital) {
+      // Orbital Platform / Space Centre placement preview: track the cursor
+      // in space coords so the renderer can draw the footprint ghost under it
+      // (mirroring the ground-building placement ghost).
+      if (state.view === 'space' && (state.pendingOrbital || state.pendingSpaceCentre)) {
         const sp = e.getLocalPosition(ctx.spaceLayer);
         ctx.orbitalCursor = { x: sp.x, y: sp.y };
       }
@@ -410,6 +419,12 @@ export function setupInput(
           // instead of selecting anything (or beeps if Ƶ runs short).
           if (state.pendingOrbital) {
             tryPlaceOrbital(state, lp.x, lp.y);
+            return;
+          }
+          // Space Centre placement armed: the tap sets one down on the
+          // platform under it — bare void refuses with a "no platform" floater.
+          if (state.pendingSpaceCentre) {
+            tryPlaceSpaceCentre(state, lp.x, lp.y);
             return;
           }
           // A small drifting unit wins over the building it may be passing in
@@ -573,12 +588,13 @@ export function setupInput(
       state.pendingStrike = false;
       state.pendingCandle = false;
       state.pendingOrbital = false;
+      state.pendingSpaceCentre = false;
       input.placementGhost.clear();
       return;
     }
     // Space = "give a command" at the cursor, mirroring a desktop right-click.
-    // Works in the ground view (unit orders) and the hell view (steering souls);
-    // the space view has no command, so it's ignored there.
+    // Works in the ground view (unit orders), the hell view (steering souls),
+    // and the space view (steering robots).
     if (e.code === 'Space') {
       const ae = document.activeElement as HTMLElement | null;
       if (ae && (ae.tagName === 'INPUT' || ae.tagName === 'TEXTAREA' || ae.isContentEditable)) return;
@@ -589,6 +605,9 @@ export function setupInput(
       if (state.view === 'hell') {
         const hp = ctx.hellLayer.toLocal({ x: lp.global.x, y: lp.global.y });
         handleHellRightClick(state, hp.x, hp.y);
+      } else if (state.view === 'space') {
+        const sp = ctx.spaceLayer.toLocal({ x: lp.global.x, y: lp.global.y });
+        handleSpaceRightClick(state, sp.x, sp.y);
       } else if (state.view === 'ground') {
         const world = worldLayer.toLocal({ x: lp.global.x, y: lp.global.y });
         handleRightClick(state, world.x, world.y);
@@ -713,21 +732,26 @@ function scheduleLongPress(
     input.isDragging = false;
     input.selectionGfx.clear();
     input.spaceTapStart = null;
-    if (state.pendingBuild || state.pendingCandle || state.pendingOrbital) {
+    if (state.pendingBuild || state.pendingCandle || state.pendingOrbital || state.pendingSpaceCentre) {
       // No keyboard ESC on touch — long-press cancels pending placement.
       state.pendingBuild = null;
       state.pendingCandle = false;
       state.pendingOrbital = false;
+      state.pendingSpaceCentre = false;
       input.placementGhost.clear();
       return;
     }
     flashCursor(tracked.x, tracked.y);
     // Touch has no right-click, so long-press is the "command" gesture. In hell
     // the command target lives in hell-layer space (souls, the demon, soul
-    // chairs); on the ground it's the world layer.
+    // chairs); in orbit it's the space layer (robots); on the ground it's the
+    // world layer.
     if (state.view === 'hell') {
       const hp = ctx.hellLayer.toLocal({ x: tracked.x, y: tracked.y });
       handleHellRightClick(state, hp.x, hp.y);
+    } else if (state.view === 'space') {
+      const sp = ctx.spaceLayer.toLocal({ x: tracked.x, y: tracked.y });
+      handleSpaceRightClick(state, sp.x, sp.y);
     } else {
       const world = worldLayer.toLocal({ x: tracked.x, y: tracked.y });
       handleRightClick(state, world.x, world.y);
@@ -893,9 +917,12 @@ function tryPlaceOrbital(state: GameState, x: number, y: number) {
     refusePlacement(state, x, y, `need Ƶ${def.cost.toLocaleString('en-US')}`, 'Not enough Ƶ.', 'space');
     return;
   }
-  // Clamp inside the void's bounds so the scaffold can't hide off-scene.
-  const px = Math.max(SPACE_UNIT.margin, Math.min(SPACE.width - SPACE_UNIT.margin, x));
-  const py = Math.max(SPACE_UNIT.margin, Math.min(SPACE.height - SPACE_UNIT.margin, y));
+  // Clamp inside the void's bounds so the scaffold can't hide off-scene —
+  // by half the footprint, since the deck is now wide enough that the old
+  // unit-margin clamp would let its edges poke out of the scene.
+  const halfClamp = Math.max(SPACE_UNIT.margin, def.size / 2);
+  const px = Math.max(halfClamp, Math.min(SPACE.width - halfClamp, x));
+  const py = Math.max(halfClamp, Math.min(SPACE.height - halfClamp, y));
   state.money -= def.cost;
   const b: Building = {
     id: state.nextId++,
@@ -919,6 +946,74 @@ function tryPlaceOrbital(state: GameState, x: number, y: number) {
   state.pendingOrbital = false;
   playSound('place', 1.4);
   appendLog(state, `${def.name} #${b.displayNum} scaffold deployed — only a robot can assemble it.`);
+}
+
+// Deploy a Space Centre at a tapped SPACE coord while placement is armed.
+// Unlike the platform it can't sit in bare void: the tap must land on a
+// completed Orbital Platform with no Centre already on it — anywhere else
+// refuses with a red "no platform" floater. The Centre snaps to the
+// platform's center (their footprints match exactly) and arrives as a
+// constructing building only a robot can assemble. Disarms after one drop.
+function tryPlaceSpaceCentre(state: GameState, x: number, y: number) {
+  const def = BUILDING_DEFS.space_centre;
+  const platform = freePlatformAt(state, x, y);
+  if (!platform) {
+    refusePlacement(state, x, y, 'no platform',
+      'A Space Centre can only be built on a free, completed Orbital Platform.', 'space');
+    return;
+  }
+  if (state.money < def.cost) {
+    refusePlacement(state, x, y, `need Ƶ${def.cost.toLocaleString('en-US')}`, 'Not enough Ƶ.', 'space');
+    return;
+  }
+  state.money -= def.cost;
+  const b: Building = {
+    id: state.nextId++,
+    displayNum: nextBuildingDisplayNum(state, 'space_centre'),
+    kind: 'space_centre',
+    cell: { cx: 0, cy: 0 },   // never on the grid — placeholder only
+    state: 'constructing',
+    buildProgress: 0,
+    assignedGoblins: [],
+    selected: false,
+  };
+  state.spaceBuildings.set(b.id, {
+    id: b.id,
+    building: b,
+    pos: { x: platform.pos.x, y: platform.pos.y },  // flush on the deck
+    vel: { x: 0, y: 0 },      // anchored to its platform
+    spin: 0,
+    spinRate: 0,
+    selected: false,
+    platformId: platform.id,
+  });
+  state.pendingSpaceCentre = false;
+  playSound('place', 1.4);
+  appendLog(state, `${def.name} #${b.displayNum} scaffold set down on ${BUILDING_DEFS.orbital_platform.name} #${platform.building.displayNum} — only a robot can assemble it.`);
+}
+
+// Right-click (or long-press / spacebar) in the space view: walk every
+// selected robot to the clicked space-coord, just like commanding goblins on
+// the ground. Multiple robots fan out around the point so they don't pile up.
+// Non-robot castaways can't be steered (they're busy suffocating); a selection
+// with no robots in it just error-beeps.
+function handleSpaceRightClick(state: GameState, x: number, y: number) {
+  const robots = [...state.spaceUnits.values()].filter((su) => su.selected && su.robot);
+  if (robots.length === 0) { playSound('error'); return; }
+  const m = SPACE_UNIT.margin;
+  robots.forEach((su, i) => {
+    // First robot lands exactly on the click; the rest take jittered spots
+    // around it (mirroring the hell ghost fan-out).
+    const dx = i === 0 ? 0 : (Math.random() - 0.5) * 70;
+    const dy = i === 0 ? 0 : (Math.random() - 0.5) * 70;
+    su.goal = {
+      x: Math.max(m, Math.min(SPACE.width - m, x + dx)),
+      y: Math.max(m, Math.min(SPACE.height - m, y + dy)),
+    };
+  });
+  // Robots are goblins under the chrome — same command grunts, one per unit.
+  playGruntBurst(robots.length);
+  appendLog(state, `${robots.length} robot${robots.length === 1 ? '' : 's'} ordered across the void.`);
 }
 
 // Commanded souls answer with their living cry made distant — the same per-kind

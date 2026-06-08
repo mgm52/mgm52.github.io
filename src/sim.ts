@@ -1,5 +1,5 @@
 import { playDecayingGoblinDeath, playDecayingGoblinSpawn, playDecayingGoldKillCash, playSound } from './audio';
-import { BUILDING_DEFS, CELL, COLS, DEMON, DRAGON, DRAGON_KILL_REWARD, GOBLIN, GOLD_GOBLIN_CHANCE, GOLD_KILL_REWARD, HELL, KILL_REWARD, LIGHTNING, MINOTAUR_KILL_REWARD, ROBOT, SOUL_SIGIL, SPACE, SPACE_UNIT, SUMMON_UPGRADES, TICK_S, MINOTAUR, TINYTAUR, WATER_DEPLETION_PP_PER_SEC, WATER_METER_MAX, WORLD, SOUL_STRENGTH_LABEL, formatPower, sigilPortalOutput, soulStrengthOf } from './config';
+import { BUILDING_DEFS, BuildingKind, CELL, COLS, DEMON, DRAGON, DRAGON_KILL_REWARD, GOBLIN, GOLD_GOBLIN_CHANCE, GOLD_KILL_REWARD, HELL, KILL_REWARD, LIGHTNING, MINOTAUR_KILL_REWARD, ROBOT, SOUL_SIGIL, SPACE, SPACE_UNIT, SUMMON_UPGRADES, TICK_S, MINOTAUR, TINYTAUR, WATER_DEPLETION_PP_PER_SEC, WATER_METER_MAX, WORLD, SOUL_STRENGTH_LABEL, formatPower, sigilPortalOutput, soulStrengthOf } from './config';
 import { DEMON_FACING_ANGLE, getOptions } from './options';
 import {
   ALL_DIRS, Building, Cell, DX, DY, Demon, Dir, Dragon, GameState, Ghost, Goblin, HOLE_SIZE, Minotaur, SoulChair, SpaceBuilding, SpaceUnit, WaterSource,
@@ -1876,8 +1876,9 @@ function updateDragon(state: GameState, d: Dragon) {
 // nudge so the motion reads as organic rather than perfectly linear.
 function updateSpaceBuilding(sb: SpaceBuilding) {
   // Orbital Platforms are anchored where they're deployed — no drift, no spin
-  // (they're platforms; a tumbling one would be a fairground ride).
-  if (sb.building.kind === 'orbital_platform') return;
+  // (they're platforms; a tumbling one would be a fairground ride). Space
+  // Centres are bolted to their platform, so they hold station too.
+  if (sb.building.kind === 'orbital_platform' || sb.building.kind === 'space_centre') return;
   const def = BUILDING_DEFS[sb.building.kind];
   const halfPx = def.size / 2;
   sb.pos.x += sb.vel.x * TICK_S;
@@ -1898,43 +1899,95 @@ function updateSpaceBuilding(sb: SpaceBuilding) {
   }
 }
 
-// A unit adrift in space. Robots paddle toward the nearest Orbital Platform
-// still under construction and hold station at its rim (advanceOrbitalPlatforms
-// counts them as builders there); everything else — and robots with no work —
-// tumbles gently within the space bounds, mirroring the building drift. A
-// non-robot's vacuum timer pops it once SPACE_UNIT.lifetime is up.
+// The nearest space structure still under robot assembly, or null.
+function nearestConstructingSite(state: GameState, su: SpaceUnit): SpaceBuilding | null {
+  let target: SpaceBuilding | null = null;
+  let bestD = Infinity;
+  for (const sb of state.spaceBuildings.values()) {
+    if (!isRobotBuilt(sb.building.kind) || sb.building.state !== 'constructing') continue;
+    const dx = sb.pos.x - su.pos.x, dy = sb.pos.y - su.pos.y;
+    const d = dx * dx + dy * dy;
+    if (d < bestD) { bestD = d; target = sb; }
+  }
+  return target;
+}
+
+// Step a robot toward a point, stopping `hold` px short of it. Returns true
+// once within that range. Sets the walk pose (facing, no tumble) and flags
+// `walking` on ticks it actually moved.
+function robotStepToward(su: SpaceUnit, x: number, y: number, hold: number): boolean {
+  const dx = x - su.pos.x;
+  const dy = y - su.pos.y;
+  const dist = Math.hypot(dx, dy);
+  su.spin = 0; // squared up, not tumbling
+  if (dist <= hold) return true;
+  const step = Math.min(getOptions().robotSpaceSpeed * TICK_S, dist - hold);
+  su.pos.x += (dx / dist) * step;
+  su.pos.y += (dy / dist) * step;
+  su.facing = Math.atan2(dy, dx);
+  su.walking = true;
+  return false;
+}
+
+// A robot's parking spot on a platform's deck: a stable per-robot position on
+// a ring just inside the deck edge — the walkable rim a Space Centre leaves
+// uncovered. The golden angle spreads any number of robots around the ring
+// without two ever sharing a spot.
+function robotParkSpot(su: SpaceUnit, platform: SpaceBuilding): { x: number; y: number } {
+  const r = BUILDING_DEFS.orbital_platform.size / 2 - ROBOT.parkInset;
+  const ang = su.id * 2.399963; // golden angle, radians
+  return { x: platform.pos.x + Math.cos(ang) * r, y: platform.pos.y + Math.sin(ang) * r };
+}
+
+// A unit adrift in space. Robots have a little life up here: a player move
+// command (goal) takes priority — walk there and stand fast; otherwise they
+// paddle toward the nearest structure under robot assembly and hold station
+// at its rim (advanceOrbitalPlatforms counts them as builders there); failing
+// that they head for the nearest completed Orbital Platform and park on its
+// deck. Everything else — and robots with nowhere to go — tumbles gently
+// within the space bounds, mirroring the building drift. A non-robot's vacuum
+// timer pops it once SPACE_UNIT.lifetime is up.
 function updateSpaceUnit(state: GameState, su: SpaceUnit) {
   if (su.diesAt !== undefined && state.now >= su.diesAt) {
     spaceUnitPerish(state, su);
     return;
   }
   if (su.robot) {
-    let target: SpaceBuilding | null = null;
-    let bestD = Infinity;
-    for (const sb of state.spaceBuildings.values()) {
-      if (sb.building.kind !== 'orbital_platform' || sb.building.state !== 'constructing') continue;
-      const dx = sb.pos.x - su.pos.x, dy = sb.pos.y - su.pos.y;
-      const d = dx * dx + dy * dy;
-      if (d < bestD) { bestD = d; target = sb; }
+    su.walking = false;
+    // 1) Player command — walk to the goal, then STAY there (a commanded
+    // goblin doesn't wander off its post). Only fresh construction work may
+    // claim a robot off its post once it's standing (mirroring autobuild
+    // grabbing an idle goblin); a robot mid-walk ignores work entirely.
+    if (su.goal) {
+      su.workingOn = undefined;
+      if (!robotStepToward(su, su.goal.x, su.goal.y, ROBOT.arriveDist)) return;
+      if (!nearestConstructingSite(state, su)) return; // standing fast
+      su.goal = undefined; // work calls — release the post and fall through
     }
+    // 2) Assembly work.
+    const target = nearestConstructingSite(state, su);
     if (target) {
       su.workingOn = target.id;
-      const def = BUILDING_DEFS.orbital_platform;
-      const dx = target.pos.x - su.pos.x;
-      const dy = target.pos.y - su.pos.y;
-      const dist = Math.hypot(dx, dy);
+      const def = BUILDING_DEFS[target.building.kind];
       // Park just inside the build range so the robot reads as ON the site.
-      const hold = def.size / 2 + ROBOT.buildRange * 0.5;
-      if (dist > hold) {
-        const step = Math.min(getOptions().robotSpaceSpeed * TICK_S, dist - hold);
-        su.pos.x += (dx / dist) * step;
-        su.pos.y += (dy / dist) * step;
-        su.facing = Math.atan2(dy, dx);
-        su.spin = 0; // squared up for work, not tumbling
-      }
+      robotStepToward(su, target.pos.x, target.pos.y, def.size / 2 + ROBOT.buildRange * 0.5);
       return;
     }
     su.workingOn = undefined;
+    // 3) Idle — park on the nearest completed platform's deck.
+    let platform: SpaceBuilding | null = null;
+    let bestD = Infinity;
+    for (const sb of state.spaceBuildings.values()) {
+      if (sb.building.kind !== 'orbital_platform' || sb.building.state === 'constructing') continue;
+      const dx = sb.pos.x - su.pos.x, dy = sb.pos.y - su.pos.y;
+      const d = dx * dx + dy * dy;
+      if (d < bestD) { bestD = d; platform = sb; }
+    }
+    if (platform) {
+      const spot = robotParkSpot(su, platform);
+      robotStepToward(su, spot.x, spot.y, ROBOT.arriveDist);
+      return;
+    }
   }
   // Gentle bounded tumble — same physics as the floating buildings.
   su.pos.x += su.vel.x * TICK_S;
@@ -1974,14 +2027,20 @@ function spaceUnitPerish(state: GameState, su: SpaceUnit) {
   appendLog(state, `${label} perishes silently in the vacuum.`);
 }
 
-// Robots holding station at an unfinished Orbital Platform advance its build.
-// buildersRequired is 1, so a single robot on site keeps the work moving;
-// extra robots don't speed it up (there's only one wrench).
+// The structures born in space that a robot can assemble (everything else up
+// there was hauled up already built).
+function isRobotBuilt(kind: BuildingKind): boolean {
+  return kind === 'orbital_platform' || kind === 'space_centre';
+}
+
+// Robots holding station at an unfinished Orbital Platform or Space Centre
+// advance its build. buildersRequired is 1, so a single robot on site keeps
+// the work moving; extra robots don't speed it up (there's only one wrench).
 function advanceOrbitalPlatforms(state: GameState) {
-  const def = BUILDING_DEFS.orbital_platform;
   for (const sb of state.spaceBuildings.values()) {
     const b = sb.building;
-    if (b.kind !== 'orbital_platform' || b.state !== 'constructing') continue;
+    if (!isRobotBuilt(b.kind) || b.state !== 'constructing') continue;
+    const def = BUILDING_DEFS[b.kind];
     let workers = 0;
     for (const su of state.spaceUnits.values()) {
       if (!su.robot) continue;
@@ -1991,10 +2050,17 @@ function advanceOrbitalPlatforms(state: GameState) {
     b.buildProgress += TICK_S / def.buildTime;
     if (b.buildProgress >= 1) {
       b.buildProgress = 1;
-      b.state = 'active';
       b.activatedAt = state.now;
       playSound('build_done');
-      appendLog(state, `${def.name} #${b.displayNum} assembled in the void. It does nothing. For now.`);
+      if (b.kind === 'space_centre') {
+        // Finish dormant — resolvePowerAndState flips it active (with the
+        // power-link floater) the first tick the grid can spare its 10 GW.
+        b.state = 'dormant';
+        appendLog(state, `${def.name} #${b.displayNum} assembled in the void — hungry for ${formatPower(-def.powerOutput)} from below.`);
+      } else {
+        b.state = 'active';
+        appendLog(state, `${def.name} #${b.displayNum} assembled in the void. It does nothing. For now.`);
+      }
     }
   }
 }
@@ -2782,6 +2848,7 @@ function resolvePowerAndState(state: GameState) {
   // of any maintainer / water / power upkeep — the same hands-off deal they get
   // on income. Only generators contribute; off-grid consumers draw nothing.
   for (const sb of state.spaceBuildings.values()) {
+    if (sb.building.state === 'constructing') continue;
     const out = BUILDING_DEFS[sb.building.kind].powerOutput;
     if (out > 0) production += out;
   }
@@ -2841,6 +2908,9 @@ function resolvePowerAndState(state: GameState) {
   // earns nothing until the grid catches back up.
   for (const sb of state.spaceBuildings.values()) {
     const b = sb.building;
+    // A Space Centre still under robot assembly isn't on the grid yet — it
+    // neither draws power nor gets flipped active here.
+    if (b.state === 'constructing') continue;
     // Dragon Beacons in orbit are inert ("Useless Beacons") — they neither
     // draw power nor summon anything. Skip them entirely so they don't
     // silently siphon 10 GW from the grid.
