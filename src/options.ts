@@ -212,6 +212,10 @@ export type Options = {
   // Gain on the ghostly reverb send that carries the hell command cries
   // (see setGhostSendGain in audio.ts). Master volume still applies on top.
   hellCommandVolume: number;
+  // The sample dragged to the resampler's floor when a Nuclear Reactor goes
+  // critical (see detonateReactor in sim.ts) — the long electric groan under
+  // the meltdown. Any registry sample can take the role.
+  meltdownSound: SoundName;
   // Hell visuals — live-tunable from the admin cog so the underworld's
   // contrast can be dialled in. drawHellBackground re-runs on any change.
   hellBgTop: number;          // top of the vertical gradient (dim by default)
@@ -422,6 +426,8 @@ export const DEFAULT_OPTIONS: Options = {
   crackleEnabled: true,
   // 3× the original 0.45 send — the distant cries were getting lost.
   hellCommandVolume: 1.35,
+  // The classic meltdown groan: the building power-up chime, pitched down.
+  meltdownSound: 'online',
   // Hell defaults — pulled down from the earlier "way too light" pass so the
   // underworld reads as oppressive: a near-black maroon gradient with a few
   // dim red blooms and a sparse ember dust. Tunable from the admin cog.

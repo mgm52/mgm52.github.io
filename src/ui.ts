@@ -6,11 +6,12 @@ import {
 } from './config';
 import {
   Building, Cell, Demon, DragonState, GameState, Ghost, Goblin, GoblinState, SoulChair, SpaceBuilding, SpaceUnit, WaterSource,
-  appendLog, buildingCenter, buildingLabel, buildingMoneyCost, cellCenter, cellKey, countHypercentres, countIdle, defOf, digDirection,
-  earnDragonBone, getSpawnCapacity, holeBlockedByBuilding, isCellBlocked, isInBounds,
+  appendLog, buildingCenter, buildingLabel, buildingMoneyCost, cellCenter, cellKey, chairSoulSnapshot, countHypercentres, countIdle, defOf, digDirection,
+  earnDragonBone, getSpawnCapacity, goblinSpawningBlocked, holeBlockedByBuilding, isCellBlocked, isInBounds,
   maintainerCount, markBuildingsChanged, nextBuildingDisplayNum, occupyCell, waterCarrierCount,
 } from './state';
 import { spawnDragon, spawnMinotaur, unseatSoulFromChair } from './sim';
+import { isModalDialogueActive } from './demon-dialogue';
 import { unlockOptionsCog } from './options-ui';
 
 // Build buttons appear in this fixed order, mostly cheapest-first. goblin_hole
@@ -105,6 +106,14 @@ let initialButtonsSeeded = false;
 // Joined ids of the currently-active tasks, so a change (a fresh task surfacing
 // at the bottom of the sidebar) can flag the task line as new content.
 let lastActiveTaskKey = '';
+// Lilly's optional-Work handout rides the same staged reveal a completed
+// task's unlocks get. `lastLillyTasksGiven` spots the flag flipping true
+// mid-parlay (null until the first refresh seeds it, so a resumed save that
+// already has the tasks doesn't replay the ceremony); the pending flag then
+// holds the walk until her dialogue overlay is gone, so the reveal doesn't
+// fire underneath the conversation.
+let lastLillyTasksGiven: boolean | null = null;
+let lillyHandoutRevealPending = false;
 // Last-written innerHTML for the power readout / task line — assigning the
 // same markup again still rebuilds the DOM nodes, so both writes are gated.
 let lastPowerHtml = '';
@@ -459,7 +468,18 @@ type Task = {
   prereq?: string[];
   // Optional side-tasks don't gate any other task and render as "Optional: …".
   optional?: boolean;
+  // Extra availability gate beyond the prereq DAG, for tasks granted by a
+  // world event rather than another task (Lilly's optional-Work handout).
+  // The task stays hidden — and can't complete — until this returns true.
+  available?: (s: GameState) => boolean;
 };
+
+// A task is eligible to surface/complete only once its prereq tasks are done
+// AND any extra availability gate passes.
+function taskReady(t: Task, s: GameState): boolean {
+  return (!t.prereq || t.prereq.every(id => completedTaskIds.has(id)))
+    && (!t.available || t.available(s));
+}
 
 // Tasks are sticky: once a task's isDone has ever returned true in this session,
 // we treat it as permanently complete. Stops unlocks/build buttons from
@@ -577,6 +597,54 @@ const TASKS: Task[] = [
     unlocks: [],
     isDone: (s) => s.blood >= 9_999_999,
     prereq: ['build_hypercentre'],
+  },
+  // ── Lilly's optional Work ─────────────────────────────────────────
+  // Handed out by demon L the first time she rules "you need more Work"
+  // (see the golf-alibi beat in demon-dialogue.ts); hidden until then via
+  // the `available` gate on state.lillyTasksGiven. None of them unlock
+  // anything — they're Work for Work's sake.
+  {
+    // Spawning is "prevented" when no hole can produce a goblin: every hole
+    // built over, walled off, or buried under so many bodies that no
+    // reachable free cell remains (the same emergence test spawnGoblin uses
+    // — see goblinSpawningBlocked).
+    id: 'prevent_spawning',
+    text: 'Prevent goblin spawning',
+    unlocks: [],
+    isDone: (s) => goblinSpawningBlocked(s),
+    available: (s) => s.lillyTasksGiven,
+    optional: true,
+  },
+  {
+    // Robots shrug off every other kill path — only a reactor meltdown's
+    // radioactive shockwave can destroy one (strike a completed Nuclear
+    // Reactor with Lightning; see updateMeltdowns).
+    id: 'destroy_robot',
+    text: 'Destroy a robot',
+    unlocks: [],
+    isDone: (s) => s.robotsDestroyed > 0,
+    available: (s) => s.lillyTasksGiven,
+    optional: true,
+  },
+  {
+    // "Fully fed" = one portal's sigil running at full burn: all five chairs
+    // bound with very-strong souls (tinytaurs or dragons, x144 each).
+    id: 'feed_hell_core',
+    text: 'Fully feed a hell core',
+    unlocks: [],
+    isDone: (s) => {
+      const veryStrong = SOUL_SIGIL.soulMultipliers.veryStrong;
+      const fed = new Map<number, number>();
+      for (const c of s.soulChairs) {
+        if (!c.occupied || c.mult !== veryStrong) continue;
+        const n = (fed.get(c.portalId) ?? 0) + 1;
+        if (n >= SOUL_SIGIL.count) return true;
+        fed.set(c.portalId, n);
+      }
+      return false;
+    },
+    available: (s) => s.lillyTasksGiven,
+    optional: true,
   },
 ];
 
@@ -758,9 +826,10 @@ export function setupUI(state: GameState, callbacks: UICallbacks) {
 
   // Robot — late-game money summon, revealed with the Hypercentre era. The
   // "needs 4 hypercentres" banner sits on the button until the industrial
-  // base is big enough. A robot is a small grey goblin that cannot die; its
-  // real purpose is being dragon-snatched to orbit, where (unlike everything
-  // else) it survives — and can assemble an Orbital Platform.
+  // base is big enough. A robot is a small grey goblin allergic only to
+  // radioactive waste (a reactor meltdown is the one thing that kills it);
+  // its real purpose is being dragon-snatched to orbit, where (unlike
+  // everything else) it survives — and can assemble an Orbital Platform.
   const robotBtn = document.createElement('button');
   robotBtn.className = 'build-button build-button-compact';
   robotBtn.id = 'btn-summon-robot';
@@ -1272,12 +1341,11 @@ export function refreshUI(state: GameState) {
     firstRefreshDone = true;
     for (const t of TASKS) {
       // Same DAG guard as the live loop below: don't auto-complete a task from
-      // isDone alone unless its prereqs are too, so an early-satisfiable task
-      // (the optional Summon-2-Minotaurs side-task) can't reveal its unlock out
-      // of order on load. Genuinely
+      // isDone alone unless its prereqs (and availability gate) are too, so an
+      // early-satisfiable task (the optional Summon-2-Minotaurs side-task)
+      // can't reveal its unlock out of order on load. Genuinely
       // persisted progress is restored separately by the hydration step below.
-      const prereqsDone = !t.prereq || t.prereq.every(id => completedTaskIds.has(id));
-      if (prereqsDone && t.isDone(state)) {
+      if (taskReady(t, state) && t.isDone(state)) {
         completedTaskIds.add(t.id);
         previouslyCompletedTaskIds.add(t.id);
         revealedTaskIds.add(t.id);
@@ -1478,14 +1546,14 @@ export function refreshUI(state: GameState) {
   // black-out and then fade in.
   const unlocked = new Set<BuildingKind>();
   for (const t of TASKS) {
-    // A task can only complete once its prereqs have, so an isDone satisfiable
-    // out of DAG order can't fire its unlock early (the Goblin Hole's
-    // Summon-2-Minotaurs task, gated behind build_gas_engine, would otherwise
-    // pop the instant a Minotaur count crossed 2). Safe as a single forward pass: prereqs
+    // A task can only complete once its prereqs (and availability gate) have,
+    // so an isDone satisfiable out of DAG order can't fire its unlock early
+    // (the Goblin Hole's Summon-2-Minotaurs task, gated behind
+    // build_gas_engine, would otherwise pop the instant a Minotaur count
+    // crossed 2). Safe as a single forward pass: prereqs
     // precede their dependents in TASKS, so they're added to completedTaskIds
     // earlier in this same loop.
-    const prereqsDone = !t.prereq || t.prereq.every(id => completedTaskIds.has(id));
-    if (completedTaskIds.has(t.id) || (prereqsDone && t.isDone(state))) {
+    if (completedTaskIds.has(t.id) || (taskReady(t, state) && t.isDone(state))) {
       completedTaskIds.add(t.id);
       if (revealedTaskIds.has(t.id)) {
         for (const k of t.unlocks) unlocked.add(k);
@@ -1503,8 +1571,7 @@ export function refreshUI(state: GameState) {
   const activeTasks: Task[] = [];
   for (const t of TASKS) {
     if (completedTaskIds.has(t.id)) continue;
-    const ready = !t.prereq || t.prereq.every(id => completedTaskIds.has(id));
-    if (ready) activeTasks.push(t);
+    if (taskReady(t, state)) activeTasks.push(t);
   }
   // Mandatory tasks first, optional side-tasks after (stable within each group).
   activeTasks.sort((a, b) => Number(a.optional ?? false) - Number(b.optional ?? false));
@@ -1578,6 +1645,26 @@ export function refreshUI(state: GameState) {
     document.getElementById('task-text')?.classList.add('reveal-hidden');
   }
   lastActiveTaskKey = activeTaskKey;
+
+  // Lilly's optional-Work handout: the instant the flag flips (mid-parlay,
+  // with no celebration overlay to hold things), hide the freshly grown task
+  // line and mark it pending so it can't just pop in plainly. The walk itself
+  // waits below until her dialogue closes.
+  if (lastLillyTasksGiven === false && state.lillyTasksGiven) {
+    lillyHandoutRevealPending = true;
+    taskTextPendingReveal = true;
+    document.getElementById('task-text')?.classList.add('reveal-hidden');
+  }
+  lastLillyTasksGiven = state.lillyTasksGiven;
+  // Dialogue gone — arm the staged reveal exactly like a cleared WORK
+  // COMPLETE overlay does (finishCelebration): freeze game time and let this
+  // pass's kick at the bottom of refreshUI walk the sequence, landing the
+  // task line with the usual dim + glow + chime.
+  if (lillyHandoutRevealPending && !isModalDialogueActive()) {
+    lillyHandoutRevealPending = false;
+    document.body.classList.add('unlock-reveal-hold');
+    revealArmed = true;
+  }
 
   // Scroll cues — muted chevrons at the top/bottom of the build panel whenever
   // any content sits off-screen in that direction (iOS/macOS hide overlay
@@ -2200,19 +2287,30 @@ function showHellPortal(state: GameState, b: Building, panel: HTMLElement, portr
   // The portal puts out a deadpan 1 W on its own — its real output is the
   // soul sigil ringed around its mirror: every seated soul multiplies the
   // wattage by its own strength (x66 weak / x100 strong / x144 very strong).
+  // The card reads as a live status report: what it's giving the grid right
+  // now, how full the candle ring is, and who exactly is bound in it.
   const ring = state.soulChairs.filter((c) => c.portalId === b.id);
-  const seated = ring.filter((c) => c.occupied).length;
-  const power = `Power output: ${formatPower(sigilPortalOutput(def.powerOutput, ring))}`;
+  const seated = ring.filter((c) => c.occupied);
+  const power = `Currently giving: ${formatPower(sigilPortalOutput(def.powerOutput, ring))}`;
   const lines = [
     `<span style="color:#ff8a6a">Its light pierces down into the abyss</span>`,
     `<span style="color:#8acfff">${power}</span>`,
   ];
-  if (b.state !== 'constructing' && ring.length < SOUL_SIGIL.count) {
+  if (b.state !== 'constructing') {
     lines.push(`<span style="color:#ff8a6a">${ring.length}/${SOUL_SIGIL.count} candles on its outer ring</span>`);
-  } else if (seated > 0) {
-    lines.push(`<span style="color:#8acfff">x${SOUL_SIGIL.soulMultipliers.weak}–x${SOUL_SIGIL.soulMultipliers.veryStrong} per bound soul (${seated}/${SOUL_SIGIL.count})</span>`);
+    if (seated.length > 0) {
+      const souls = [...seated].sort((a, c) => a.index - c.index).map(chairSoulLabel).join(', ');
+      lines.push(`<span style="color:#8acfff">Bound souls (${seated.length}/${SOUL_SIGIL.count}): ${souls}</span>`);
+    }
   }
   extra.innerHTML = lines.join('<br>');
+}
+
+// Human label for the soul bound into an occupied chair — the snapshot when
+// recorded, reconstructed from the multiplier on older saves.
+function chairSoulLabel(c: SoulChair): string {
+  const s = chairSoulSnapshot(c);
+  return s.tiny ? 'tinytaur' : s.gold ? 'gold goblin' : s.kind;
 }
 
 // A candle (→ soul chair) in the abyssal sigil — a deliberately minimal info
@@ -2230,15 +2328,17 @@ function showSoulChair(state: GameState, c: SoulChair, panel: HTMLElement, portr
   stateEl.textContent = c.occupied ? 'Bound' : ringDone ? 'Hungry for a soul' : 'Waiting on the ring';
   // An occupied chair reports its own soul's multiplier; an empty one
   // advertises the range so the player knows stronger souls bind bigger.
-  // Chairs from saves predating the soul snapshot have no kind on record.
-  const soulKind = c.soul ? (c.soul.tiny ? 'tinytaur' : c.soul.gold ? 'gold goblin' : c.soul.kind) : null;
   const lines = ringDone
     ? [`<span style="color:#ff8a6a">${filled}/${SOUL_SIGIL.count} bound${c.occupied
-        ? ` · this soul: x${c.mult ?? SOUL_SIGIL.soulMultipliers.strong}${soulKind ? ` (${soulKind})` : ''}`
+        ? ` · this soul: x${c.mult ?? SOUL_SIGIL.soulMultipliers.strong} (${chairSoulLabel(c)})`
         : ` · x${SOUL_SIGIL.soulMultipliers.weak}–x${SOUL_SIGIL.soulMultipliers.veryStrong} by soul strength`}</span>`]
     : [`<span style="color:#ff4a3a">needs ${SOUL_SIGIL.count - ring.length} more candle${SOUL_SIGIL.count - ring.length === 1 ? '' : 's'}</span>`];
   if (ringDone && !c.occupied) {
     lines.push(`<span style="color:#6a7080">${TOUCH_PRIMARY ? 'Long tap' : 'Right click'} to bind a soul</span>`);
+  } else if (c.occupied) {
+    // The freeing command mirrors the binding one: order the bound soul away
+    // from its candle and it steps right back out.
+    lines.push(`<span style="color:#6a7080">${TOUCH_PRIMARY ? 'Long tap' : 'Right click'} away to free the soul</span>`);
   }
   extra.innerHTML = lines.join('<br>');
 }
@@ -2283,7 +2383,7 @@ function showGoblin(state: GameState, g: Goblin, panel: HTMLElement, portrait: H
     ? `<div class="portrait-goblin" style="background:#1c2026;border-color:#9aa3ad;color:#cfd5dc">R</div>`
     : `<div class="portrait-goblin">G</div>`;
   name.textContent = g.robot ? `Robot #${g.id}` : `Goblin #${g.id}`;
-  stateEl.textContent = describeGoblinState(state, g.state) || (g.robot ? 'Cannot die' : '');
+  stateEl.textContent = describeGoblinState(state, g.state) || (g.robot ? 'Allergic to radioactive waste' : '');
   setCommandHint(extra, state);
 }
 
@@ -2454,10 +2554,10 @@ export function executeTaskSkip(state: GameState): void {
   let next: Task | null = null;
   for (const t of order) {
     if (completedTaskIds.has(t.id)) continue;
+    if (!taskReady(t, state)) continue;
     if (t.isDone(state)) { completedTaskIds.add(t.id); continue; }
-    const prereqs = t.prereq ?? [];
-    const prereqsDone = prereqs.every(id => completedTaskIds.has(id));
-    if (prereqsDone) { next = t; break; }
+    next = t;
+    break;
   }
   if (!next) {
     appendLog(state, 'Work skip: nothing to skip.');

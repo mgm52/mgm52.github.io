@@ -107,8 +107,10 @@ export const TINYTAUR = {
 // Robot — a late-game summon unlocked alongside the Hypercentre era. Costs
 // money (not blood) and demands a serious industrial base (4 Hypercentres)
 // before the button even arms. On the ground a robot is just a small white
-// goblin — same jobs, same pathfinding, faster servos — except it cannot die:
-// lightning, minotaurs, kill orders and dragon fire all pass over it. Its
+// goblin — same jobs, same pathfinding, faster servos — except it's all but
+// unkillable: lightning, minotaurs, kill orders and dragon fire all pass over
+// it. Its one allergy is radioactive waste — a reactor meltdown's shockwave
+// destroys robots like anything else (see updateMeltdowns). Its
 // real purpose is orbit: a robot snatched to space by a dragon survives the
 // vacuum and is the only unit able to assemble an Orbital Platform.
 // Look + orbital speed live in options (robotScale / robotTint /
