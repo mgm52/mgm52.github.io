@@ -2390,6 +2390,41 @@ function drawFloaters(ctx: RenderContext, state: GameState) {
   }
 }
 
+// Whole-screen radiation tint after a reactor rupture: a green wash laid over
+// everything — canvas and DOM panels alike, which is why this is a DOM div
+// rather than a stage rect — starting at REACTOR_MELTDOWN.tintAlpha and
+// fading linearly to nothing over tintSeconds. Driven per-frame from
+// state.lastMeltdownAt (game time, so it pauses with the sim); the div is
+// created on first use, never intercepts input, and is display:none'd once
+// the fade completes.
+let meltdownTintEl: HTMLDivElement | null = null;
+function syncMeltdownTint(state: GameState): void {
+  let alpha = 0;
+  if (state.lastMeltdownAt !== undefined) {
+    const age = state.now - state.lastMeltdownAt;
+    if (age >= 0 && age < REACTOR_MELTDOWN.tintSeconds) {
+      alpha = REACTOR_MELTDOWN.tintAlpha * (1 - age / REACTOR_MELTDOWN.tintSeconds);
+    }
+  }
+  if (alpha <= 0) {
+    if (meltdownTintEl) meltdownTintEl.style.display = 'none';
+    return;
+  }
+  if (!meltdownTintEl) {
+    meltdownTintEl = document.createElement('div');
+    meltdownTintEl.id = 'meltdown-tint';
+    const s = meltdownTintEl.style;
+    s.position = 'fixed';
+    s.inset = '0';
+    s.background = '#3aff80';
+    s.pointerEvents = 'none';
+    s.zIndex = '9999';
+    document.body.appendChild(meltdownTintEl);
+  }
+  meltdownTintEl.style.display = '';
+  meltdownTintEl.style.opacity = String(alpha);
+}
+
 function drawLightning(ctx: RenderContext, state: GameState) {
   const g = ctx.lightningGfx;
   g.clear();
@@ -3439,6 +3474,7 @@ export function render(state: GameState, ctx: RenderContext) {
   // Bob's nametag(s) — synced across all scenes after every host has moved.
   syncBobTags(ctx, state);
   syncFastBuildTags(ctx, state);
+  syncMeltdownTint(state);
 
   // ─── Hell red beam ───
   // One vertical red line per Hell Portal, drawn from the portal's

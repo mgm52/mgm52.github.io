@@ -655,6 +655,10 @@ export type GameState = {
   // ruptured Nuclear Reactor, killing every overworld unit the front passes.
   // Advanced in sim's updateMeltdowns, drawn alongside the lightning bolts.
   meltdowns: Meltdown[];
+  // state.now of the most recent reactor rupture. Drives the whole-screen
+  // green radiation tint, which fades out over REACTOR_MELTDOWN.tintSeconds
+  // (see render's syncMeltdownTint). Undefined until a reactor has ever blown.
+  lastMeltdownAt?: number;
   // Active Lightning Strike power surges, summed into production each tick.
   powerBoosts: PowerBoost[];
   // True while the player is aiming a Lightning Strike (next map click fires

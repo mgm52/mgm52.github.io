@@ -704,6 +704,8 @@ function detonateReactor(state: GameState, reactor: Building): void {
   playSound('online', 1, 0.25);
   appendLog(state, `${name} goes critical! A shockwave races out from the core...`);
 
+  // Whole-screen radiation wash — faded back out by the renderer.
+  state.lastMeltdownAt = state.now;
   state.meltdowns.push({
     id: state.nextId++,
     x: c.x, y: c.y,

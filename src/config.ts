@@ -427,6 +427,11 @@ export const REACTOR_MELTDOWN = {
   waveSpeed: 450,                   // shockwave expansion, px/sec
   powerBoostWatts: 10_000_000_000,  // 10 GW peak death-surge
   powerBoostSeconds: 10,            // surge decays to 0 over this many seconds
+  // Whole-screen radiation tint at the rupture instant: a green wash over
+  // everything (canvas + panels) starting at tintAlpha and fading linearly
+  // to nothing over tintSeconds. Driven by state.lastMeltdownAt in render.
+  tintAlpha: 0.32,
+  tintSeconds: 10,
 };
 
 // Killing a goblin yields this much money + this much blood.
