@@ -172,7 +172,7 @@ export type Minotaur = {
   state: MinotaurState;
   nextWanderAt: number;
   selected: boolean;
-  // Stuck detection: minotaurs step greedily (Chebyshev-toward-target) with
+  // Stuck detection: minotaurs step greedily (octile-toward-target) with
   // only a wall-following detour for obstacles — no real pathfinding — so a
   // pathological pinch can still trap one in a tiny area. We periodically
   // sample the cell and bail back to `wander` when the sample stays inside a
@@ -1678,7 +1678,7 @@ export function spaceUnitAt(state: GameState, x: number, y: number): SpaceUnit |
 }
 
 // Hypercentres the player can point at — finished ground ones plus any hauled
-// into orbit. Gates the Robot summon ("needs 5 hypercentres").
+// into orbit. Gates the Robot summon ("needs 4 hypercentres").
 export function countHypercentres(state: GameState): number {
   let n = 0;
   for (const b of state.buildings.values()) {

@@ -86,7 +86,7 @@ export function demonRebuke(demon: Demon, text: string): void {
 }
 
 // How long a Bob bark lingers after the last character has typed out.
-const BOB_BARK_HOLD_MS = 2200;
+const BOB_BARK_HOLD_MS = 4200;
 // Monotonic token so a newer bark supersedes an in-flight one — the older
 // bark's typing/hold loop bails as soon as it's no longer the latest.
 let bobBarkGen = 0;

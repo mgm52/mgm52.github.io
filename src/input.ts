@@ -2,12 +2,12 @@ import { Application, Container, FederatedPointerEvent, Graphics } from 'pixi.js
 import { playSound, playGhostCommand, playMinotaurCommand } from './audio';
 import { flashCursor } from './cursor-fx';
 import { bobOverworldBark, demonRebuke } from './demon-dialogue';
-import { BUILDABLE_KINDS, BUILDING_DEFS, BuildingKind, CELL, DRAGON, GOBLIN, HELL, LIGHTNING, MINOTAUR, SOUL_SIGIL, SPACE, SPACE_UNIT, WORLD, formatPower } from './config';
+import { BUILDABLE_KINDS, BUILDING_DEFS, BuildingKind, CELL, DRAGON, GOBLIN, HELL, LIGHTNING, MAX_SELECTED_UNITS, MINOTAUR, SOUL_SIGIL, SPACE, SPACE_UNIT, WORLD, formatPower } from './config';
 import { runBobCutscene } from './intro';
 import { RenderContext, ambientDragonAt, clampCamera, clampHellCamera, clampSpaceCamera, currentHellScale, ghostAtHell, ghostHellPos } from './render';
 import { autoAssignAllIdle, lightningStrike, spawnBob } from './sim';
 import {
-  Building, Cell, Dragon, GameState, Ghost, Goblin, Minotaur, WaterSource,
+  Building, Cell, Dragon, GameState, Ghost, Goblin, Minotaur, SpaceUnit, WaterSource,
   appendLog, buildingAtCell, buildingMoneyCost, candleSpotAt, cellKey, defOf, demonAtHell, findFreeCellNear,
   hellPortalAt, holeAtCell, isInBounds, markBuildingsChanged, nextBuildingDisplayNum, pixelToCell, placeCandle, pushFloater,
   soulChairAt, spaceBuildingAt, spaceUnitAt, waterCarrierCount, waterSourceAtCell,
@@ -392,7 +392,12 @@ export function setupInput(
             const chair = (gh || portal) ? null : soulChairAt(state, hp.x, hp.y, SOUL_SIGIL.chairRadius * mult);
             const dm = (gh || portal || chair) ? null : dmHit;
             if (!e.shiftKey) clearSelection(state);
-            if (gh) { selectGhost(state, gh); playSound('select', 0.33); }
+            // Souls count against the unit-selection cap (see the ground view).
+            if (gh && selectedUnitCount(state) >= MAX_SELECTED_UNITS) {
+              playSound('error');
+              refuseOverCap(state, hp.x, hp.y, 'hell', ctx.renderScale / currentHellScale(ctx));
+            }
+            else if (gh) { selectGhost(state, gh); playSound('select', 0.33); }
             else if (portal) { portal.selected = true; playSound('select', 0.33); }
             else if (chair) { chair.selected = true; playSound('select', 0.33); }
             else if (dm) { dm.selected = true; playSound('select', 0.33); }
@@ -402,15 +407,22 @@ export function setupInput(
             const x1 = Math.min(a.x, b.x), y1 = Math.min(a.y, b.y);
             const x2 = Math.max(a.x, b.x), y2 = Math.max(a.y, b.y);
             if (!e.shiftKey) clearSelection(state);
-            let count = 0;
+            // Same cap dance as the ground box: gather, then take up to the
+            // MAX_SELECTED_UNITS room left (shift keeps what's already held).
+            const grabbed: Ghost[] = [];
             for (const g of state.ghosts) {
               const p = ghostHellPos(state, g);
-              if (p.x >= x1 && p.x <= x2 && p.y >= y1 && p.y <= y2) {
-                selectGhost(state, g);
-                count++;
-              }
+              if (p.x >= x1 && p.x <= x2 && p.y >= y1 && p.y <= y2) grabbed.push(g);
             }
+            const room = Math.max(0, MAX_SELECTED_UNITS - selectedUnitCount(state));
+            const taken = grabbed.slice(0, room);
+            for (const g of taken) selectGhost(state, g);
+            const count = taken.length;
             if (count > 0) playSound('select', 0.33);
+            if (grabbed.length > room) {
+              if (count === 0) playSound('error');
+              refuseOverCap(state, a.x, a.y, 'hell', ctx.renderScale / currentHellScale(ctx));
+            }
             if (count >= 2) state.multiSelectSeen = true;
           }
         } else if (moved < SPACE_DRAG_TOL) {
@@ -434,7 +446,12 @@ export function setupInput(
           const sb = su ? null : spaceBuildingAt(state, lp.x, lp.y);
           const ad = (su || sb) ? null : ambientDragonAt(ctx, lp.x, lp.y);
           if (!e.shiftKey) clearSelection(state);
-          if (su) { su.selected = true; playSound('select', 0.33); }
+          // Drifting units count against the unit-selection cap; buildings don't.
+          if (su && selectedUnitCount(state) >= MAX_SELECTED_UNITS) {
+            playSound('error');
+            refuseOverCap(state, lp.x, lp.y, 'space');
+          }
+          else if (su) { su.selected = true; playSound('select', 0.33); }
           else if (sb) { sb.selected = true; playSound('select', 0.33); }
           else if (ad) { state.selectedAmbientDragonId = ad.id; playSound('select', 0.33); }
         } else {
@@ -445,6 +462,7 @@ export function setupInput(
           const x1 = Math.min(a.x, b.x), y1 = Math.min(a.y, b.y);
           const x2 = Math.max(a.x, b.x), y2 = Math.max(a.y, b.y);
           if (!e.shiftKey) clearSelection(state);
+          // Buildings select freely; only the drifting units are capped.
           let count = 0;
           for (const sb of state.spaceBuildings.values()) {
             if (sb.pos.x >= x1 && sb.pos.x <= x2 && sb.pos.y >= y1 && sb.pos.y <= y2) {
@@ -452,13 +470,19 @@ export function setupInput(
               count++;
             }
           }
+          const grabbed: SpaceUnit[] = [];
           for (const su of state.spaceUnits.values()) {
-            if (su.pos.x >= x1 && su.pos.x <= x2 && su.pos.y >= y1 && su.pos.y <= y2) {
-              su.selected = true;
-              count++;
-            }
+            if (su.pos.x >= x1 && su.pos.x <= x2 && su.pos.y >= y1 && su.pos.y <= y2) grabbed.push(su);
           }
+          const room = Math.max(0, MAX_SELECTED_UNITS - selectedUnitCount(state));
+          const taken = grabbed.slice(0, room);
+          for (const su of taken) su.selected = true;
+          count += taken.length;
           if (count > 0) playSound('select', 0.33);
+          if (grabbed.length > room) {
+            if (count === 0) playSound('error');
+            refuseOverCap(state, a.x, a.y, 'space');
+          }
           if (count >= 2) state.multiSelectSeen = true;
         }
       }
@@ -490,7 +514,13 @@ export function setupInput(
         if (!b && !onHole) w = waterSourceAtCell(state, c);
       }
       if (!additive) clearSelection(state);
-      if (g) { g.selected = true; playSound('select', 0.33); }
+      // Shift-clicking one more unit onto a full selection refuses outright —
+      // buildings, the hole, and water aren't units, so they still take.
+      if ((g || d || m) && selectedUnitCount(state) >= MAX_SELECTED_UNITS) {
+        playSound('error');
+        refuseOverCap(state, local.x, local.y);
+      }
+      else if (g) { g.selected = true; playSound('select', 0.33); }
       else if (d) { d.selected = true; playSound('select', 0.33); }
       else if (m) { m.selected = true; playSound('select', 0.33); }
       else if (b) { b.selected = true; playSound('select', 0.33); }
@@ -502,30 +532,28 @@ export function setupInput(
       const x2 = Math.max(input.dragStart.x, local.x);
       const y2 = Math.max(input.dragStart.y, local.y);
       if (!additive) clearSelection(state);
-      let any = false;
-      let count = 0;
+      // Gather everything inside the box first so MAX_SELECTED_UNITS can
+      // truncate the grab deterministically (goblins, then minotaurs, then
+      // dragons). With shift held, what's already selected eats into the cap.
+      const grabbed: Array<Goblin | Minotaur | Dragon> = [];
       for (const g of state.goblins.values()) {
-        if (g.pos.x >= x1 && g.pos.x <= x2 && g.pos.y >= y1 && g.pos.y <= y2) {
-          g.selected = true;
-          any = true;
-          count++;
-        }
+        if (g.pos.x >= x1 && g.pos.x <= x2 && g.pos.y >= y1 && g.pos.y <= y2) grabbed.push(g);
       }
       for (const m of state.minotaurs.values()) {
-        if (m.pos.x >= x1 && m.pos.x <= x2 && m.pos.y >= y1 && m.pos.y <= y2) {
-          m.selected = true;
-          any = true;
-          count++;
-        }
+        if (m.pos.x >= x1 && m.pos.x <= x2 && m.pos.y >= y1 && m.pos.y <= y2) grabbed.push(m);
       }
       for (const d of state.dragons.values()) {
-        if (d.pos.x >= x1 && d.pos.x <= x2 && d.pos.y >= y1 && d.pos.y <= y2) {
-          d.selected = true;
-          any = true;
-          count++;
-        }
+        if (d.pos.x >= x1 && d.pos.x <= x2 && d.pos.y >= y1 && d.pos.y <= y2) grabbed.push(d);
       }
-      if (any) playSound('select', 0.33);
+      const room = Math.max(0, MAX_SELECTED_UNITS - selectedUnitCount(state));
+      const taken = grabbed.slice(0, room);
+      for (const u of taken) u.selected = true;
+      const count = taken.length;
+      if (count > 0) playSound('select', 0.33);
+      if (grabbed.length > room) {
+        if (count === 0) playSound('error');
+        refuseOverCap(state, local.x, local.y);
+      }
       // Onboarding gate: any drag that grabbed 2+ creatures counts as the
       // player "discovering" multi-select, hiding the drag-select hint forever.
       if (count >= 2) state.multiSelectSeen = true;
@@ -835,6 +863,27 @@ function clearSelection(state: GameState) {
   for (const c of state.soulChairs) c.selected = false;
   state.hole.selected = false;
   state.selectedAmbientDragonId = null;
+}
+
+// How many units are currently selected, across every scene — ground
+// creatures, hell souls, space drifters. Buildings, chairs, demons, the
+// hole, etc. don't count: MAX_SELECTED_UNITS only guards units.
+function selectedUnitCount(state: GameState): number {
+  let n = 0;
+  for (const g of state.goblins.values()) if (g.selected) n++;
+  for (const m of state.minotaurs.values()) if (m.selected) n++;
+  for (const d of state.dragons.values()) if (d.selected) n++;
+  for (const gh of state.ghosts) if (gh.selected) n++;
+  for (const su of state.spaceUnits.values()) if (su.selected) n++;
+  return n;
+}
+
+// A selection that ran into MAX_SELECTED_UNITS: short red floater at the
+// click/release point so the player knows why the rest didn't take. The
+// caller decides whether an error beep goes with it (only when nothing new
+// was selected at all — a truncated box still plays its select chirp).
+function refuseOverCap(state: GameState, x: number, y: number, scene?: 'space' | 'hell', sizeMult?: number) {
+  pushFloater(state, x, y - 24, `max ${MAX_SELECTED_UNITS} units`, 0xd96b6b, 1.6, undefined, scene === 'space', scene === 'hell', sizeMult);
 }
 
 // Mark a ghost as selected. The sim only tracks an explicit hx/hy once a ghost

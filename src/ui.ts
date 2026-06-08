@@ -757,7 +757,7 @@ export function setupUI(state: GameState, callbacks: UICallbacks) {
   summonList.appendChild(dragonBtn);
 
   // Robot — late-game money summon, revealed with the Hypercentre era. The
-  // "needs 5 hypercentres" banner sits on the button until the industrial
+  // "needs 4 hypercentres" banner sits on the button until the industrial
   // base is big enough. A robot is a small grey goblin that cannot die; its
   // real purpose is being dragon-snatched to orbit, where (unlike everything
   // else) it survives — and can assemble an Orbital Platform.
@@ -1032,7 +1032,6 @@ export function setupUI(state: GameState, callbacks: UICallbacks) {
           <span class="build-cost build-gold-cost" id="cost-orbital">Ƶ${orbitalDef.cost.toLocaleString('en-US')}</span>
         </div>
       </div>
-      <div class="build-yields"><span class="yield-power">robot-built</span></div>
     </div>
   `;
   orbitalBtn.addEventListener('click', () => { playSound('click', 1, 0.75); callbacks.onPlaceOrbital(); });
@@ -1055,7 +1054,7 @@ export function setupUI(state: GameState, callbacks: UICallbacks) {
           <span class="build-cost build-gold-cost" id="cost-space-centre">Ƶ${spaceCentreDef.cost.toLocaleString('en-US')}</span> · <span class="build-power-cost" id="power-cost-space-centre">${formatPower(-spaceCentreDef.powerOutput)}</span>
         </div>
       </div>
-      <div class="build-yields"><span class="yield-money">+Ƶ${spaceCentreDef.income.toLocaleString('en-US')}/s</span><br><span class="yield-power">needs platform</span></div>
+      <div class="build-yields"><span class="yield-money">+Ƶ${spaceCentreDef.income.toLocaleString('en-US')}/s</span></div>
     </div>
   `;
   spaceCentreBtn.addEventListener('click', () => { playSound('click', 1, 0.75); callbacks.onPlaceSpaceCentre(); });
@@ -1445,7 +1444,7 @@ export function refreshUI(state: GameState) {
   }
 
   // Robot button — revealed by the Build-a-Hypercentre task, but stays banner-
-  // gated ("needs 5 hypercentres") until the industrial base reaches
+  // gated ("needs 4 hypercentres") until the industrial base reaches
   // ROBOT.hypercentresRequired (ground + orbit combined). Costs money.
   const robotBtn = document.getElementById('btn-summon-robot') as HTMLButtonElement;
   if (revealedTaskIds.has('build_hypercentre')) {
@@ -1793,8 +1792,8 @@ export function refreshUI(state: GameState) {
   }
 
   // Space Centre — sits under the Orbital Platform in the space view's Build
-  // menu. Shown whenever the player is in orbit (its "needs platform" tag and
-  // the red "no platform" refusal floater teach the placement rule). Flashes
+  // menu. Shown whenever the player is in orbit (the red "no platform"
+  // refusal floater teaches the placement rule). Flashes
   // for attention once it's affordable AND there's a completed platform to
   // stand it on, until the first Centre exists; leaving the view disarms
   // placement like the others.

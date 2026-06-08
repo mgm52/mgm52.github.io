@@ -21,6 +21,13 @@ export const INITIAL_PLAY_Y0 = DIG_GROWTH_CELLS;
 export const CAMERA_SPEED = 700; // px/sec when panning with WASD
 export const RENDER_SCALE = 1.3; // visual zoom factor applied to the world layer
 
+// Hard cap on how many units the player can have selected at once — ground
+// creatures (goblins, minotaurs, dragons), souls in hell, and drifting units
+// in space all count against it; buildings and other scenery don't. A
+// box-select fills up to the cap and drops the overflow; shift-clicking one
+// more unit onto a full selection refuses outright.
+export const MAX_SELECTED_UNITS = 30;
+
 // Seconds after the first dig before the pan-hint (WASD/arrows) appears, if
 // the player hasn't already panned the camera to bring water into view.
 export const WATER_HINT_DELAY_SEC = 4;
@@ -109,8 +116,12 @@ export const TINYTAUR = {
 export const ROBOT = {
   moneyCost: 250_000,
   hypercentresRequired: 4,
-  speed: 150,         // px/sec on the ground — quicker than GOBLIN.speed (110)
+  speed: 200,         // px/sec on the ground — near-double GOBLIN.speed (110)
   buildRange: 30,     // px past a platform's edge that counts as "on site"
+  // Each robot actively building a ground site multiplies the build time by
+  // this factor, compounding — two robots run a build at 1/0.49 ≈ 2× rate.
+  // Announced by the white "fast build" floater when a robot sets to work.
+  buildTimeMult: 0.7,
   // Robots assemble on a timed queue like the other summons (one at a time,
   // mirroring the Minotaur's single-slot ritual track).
   spawnTime: 2,
@@ -367,7 +378,7 @@ export const AUTOSPAWN_TIERS: { multiplier: number; bloodCost: number }[] = [
 // subsequent digs cost a small fortune so the player can't trivially
 // surround everything with water.
 export const DIG = {
-  firstBloodCost: 100,
+  firstBloodCost: 50,
   secondBloodCost: 500,
   laterBloodCost: 2000,
   cells: DIG_GROWTH_CELLS,
@@ -396,10 +407,22 @@ export const GOBLIN_HOLE_CAPACITY_PER_BUILDING = 5;
 // goblins, minotaurs, and dragons — granting their usual kill rewards, and
 // powers a temporary surge that decays linearly to zero.
 export const LIGHTNING = {
-  cellsWide: 8,                    // blast diameter, in cells
+  cellsWide: 7,                    // blast diameter, in cells
   bloodCost: 32,                   // blood spent per strike
   powerBoostWatts: 1_000_000_000,  // 1 GW peak surge
   powerBoostSeconds: 5,            // surge decays to 0 over this many seconds
+};
+
+// Striking a completed Nuclear Reactor with Lightning ruptures the core: the
+// reactor detonates, levelling itself and killing every unit in the overworld
+// — even robots, which nothing else in the game can touch. The blast paints a
+// fallout splatter around the crater, hurls extra bolts skyward, and dumps
+// one final decaying surge into the grid as the core lets go.
+export const REACTOR_MELTDOWN = {
+  splatterCells: 20,                // fallout splatter diameter, in cells
+  boltCount: 6,                     // extra bolts thrown up around the rupture
+  powerBoostWatts: 10_000_000_000,  // 10 GW peak death-surge
+  powerBoostSeconds: 10,            // surge decays to 0 over this many seconds
 };
 
 // Killing a goblin yields this much money + this much blood.
