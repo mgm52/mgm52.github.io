@@ -2,11 +2,11 @@ import { playSound, playMinotaurCommand } from './audio';
 import {
   AUTOSPAWN_TIERS, BUILDABLE_KINDS, BUILDING_DEFS, BuildingKind, DRAG_SELECT_HINT_DELAY_SEC, MULTI_SPAWN_HINT_DELAY_SEC,
   DRAGON, GOBLIN, LIGHTNING, PAN_HINT_DELAY_SEC, ROBOT, SPAWN_HINT_NO_SPAWN_SEC,
-  SPAWN_HINT_NO_TASK_SEC, SUMMON_UPGRADES, WATER_HINT_DELAY_SEC, digBloodCost, MINOTAUR, minotaurBloodCost, TINYTAUR, formatPower, SOUL_SIGIL, sigilPortalOutput,
+  SPAWN_HINT_NO_TASK_SEC, SUMMON_UPGRADES, TERMINATOR, WATER_HINT_DELAY_SEC, digBloodCost, MINOTAUR, minotaurBloodCost, TINYTAUR, formatPower, SOUL_SIGIL, sigilPortalOutput,
 } from './config';
 import {
   Building, Cell, Demon, DragonState, GameState, Ghost, Goblin, GoblinState, SoulChair, SpaceBuilding, SpaceUnit, WaterSource,
-  appendLog, buildingCenter, buildingLabel, buildingMoneyCost, cellCenter, cellKey, chairSoulSnapshot, countHypercentres, countIdle, defOf, digDirection,
+  appendLog, buildingCenter, buildingLabel, buildingMoneyCost, cellCenter, cellKey, chairSoulSnapshot, countHypercentres, countIdle, countSpaceCentres, defOf, digDirection,
   earnDragonBone, getSpawnCapacity, goblinSpawningBlocked, holeBlockedByBuilding, isCellBlocked, isInBounds,
   maintainerCount, markBuildingsChanged, nextBuildingDisplayNum, occupyCell, waterCarrierCount,
 } from './state';
@@ -114,6 +114,14 @@ let lastActiveTaskKey = '';
 // fire underneath the conversation.
 let lastLillyTasksGiven: boolean | null = null;
 let lillyHandoutRevealPending = false;
+// The three tasks Lilly hands out, in the order they should land. Each gets
+// its own step in the staged reveal walk (one line popping in per chime)
+// rather than the whole batch appearing at once: lines whose ids sit in
+// `pendingTaskLineReveals` render hidden (re-applied across innerHTML
+// rebuilds) until runUnlockRevealSequence reveals their div and clears them.
+const LILLY_TASK_IDS = ['destroy_robot', 'feed_hell_core', 'prevent_spawning'];
+const pendingTaskLineReveals = new Set<string>();
+function taskLineElId(taskId: string): string { return `task-line-${taskId}`; }
 // Last-written innerHTML for the power readout / task line — assigning the
 // same markup again still rebuilds the DOM nodes, so both writes are gated.
 let lastPowerHtml = '';
@@ -441,6 +449,15 @@ function runUnlockRevealSequence(step = 0): void {
   revealSequenceActive = true;
   sidebar?.classList.add('unlock-reveal-dim');
   el.classList.remove('reveal-hidden');
+  // A revealed task line is no longer pending — without this, the per-line
+  // re-hide in the task renderer would snap it invisible again next refresh.
+  if (el.id.startsWith('task-line-')) {
+    pendingTaskLineReveals.delete(el.id.slice('task-line-'.length));
+    // The sidebar dim fades the whole .task-text container; lift it so the
+    // line's pop reads at full strength. Retired with the other highlights
+    // when the walk ends.
+    el.parentElement?.classList.add('reveal-highlight');
+  }
   el.classList.add('reveal-highlight');
   // The item's "new" tag (created when the walk kicked off) pops in with it —
   // .reveal-lit punches it through the sidebar dim, and the sync makes it
@@ -602,19 +619,8 @@ const TASKS: Task[] = [
   // Handed out by demon L the first time she rules "you need more Work"
   // (see the golf-alibi beat in demon-dialogue.ts); hidden until then via
   // the `available` gate on state.lillyTasksGiven. None of them unlock
-  // anything — they're Work for Work's sake.
-  {
-    // Spawning is "prevented" when no hole can produce a goblin: every hole
-    // built over, walled off, or buried under so many bodies that no
-    // reachable free cell remains (the same emergence test spawnGoblin uses
-    // — see goblinSpawningBlocked).
-    id: 'prevent_spawning',
-    text: 'Prevent goblin spawning',
-    unlocks: [],
-    isDone: (s) => goblinSpawningBlocked(s),
-    available: (s) => s.lillyTasksGiven,
-    optional: true,
-  },
+  // anything — they're Work for Work's sake. Listed (and revealed — see
+  // LILLY_TASK_IDS) in this order: destroy, feed, prevent.
   {
     // Robots shrug off every other kill path — only a reactor meltdown's
     // radioactive shockwave can destroy one (strike a completed Nuclear
@@ -646,6 +652,18 @@ const TASKS: Task[] = [
     available: (s) => s.lillyTasksGiven,
     optional: true,
   },
+  {
+    // Spawning is "prevented" when no hole can produce a goblin: every hole
+    // built over, walled off, or buried under so many bodies that no
+    // reachable free cell remains (the same emergence test spawnGoblin uses
+    // — see goblinSpawningBlocked).
+    id: 'prevent_spawning',
+    text: 'Prevent goblin spawning',
+    unlocks: [],
+    isDone: (s) => goblinSpawningBlocked(s),
+    available: (s) => s.lillyTasksGiven,
+    optional: true,
+  },
 ];
 
 export type UICallbacks = {
@@ -654,12 +672,19 @@ export type UICallbacks = {
   onSummonTinytaur: () => void;
   onSummonDragon: () => void;
   onSummonRobot: () => void;
+  onSummonTerminator: () => void;
   onPlaceOrbital: () => void;
   onPlaceSpaceCentre: () => void;
   onLightningStrike: () => void;
   onBuyAutoAssign: () => void;
   onBuyAutoWater: () => void;
   onBuyAutoSpawn: () => void;
+  // Lilly's task rewards: the autospawn throttle slider (0 = paused,
+  // otherwise an owned tier multiplier), the Autodragon ritual, and the
+  // quick-travel strip.
+  onSetAutoSpawnLevel: (multiplier: number) => void;
+  onBuyAutoDragon: () => void;
+  onQuickTravel: (view: 'ground' | 'hell' | 'space') => void;
   onBuyGoldgoblins: () => void;
   onBuyGoldgoblinsX10: () => void;
   onDig: (dir: 'n' | 'e' | 's' | 'w') => void;
@@ -847,6 +872,27 @@ export function setupUI(state: GameState, callbacks: UICallbacks) {
   robotBtn.addEventListener('click', (e) => { playSound('click', 1, 0.75); flashSummonClick(robotBtn); emanateAtCursor(e.clientX, e.clientY, 'white'); callbacks.onSummonRobot(); });
   summonList.appendChild(robotBtn);
 
+  // Terminator — the endgame killer, revealed by the Collect-9,999,999-blood
+  // task. A robot with a red targeting lamp that hunts every non-robot unit
+  // automatically; the "needs 2 space centres" banner sits on the button
+  // until the orbital base is big enough.
+  const terminatorBtn = document.createElement('button');
+  terminatorBtn.className = 'build-button build-button-compact';
+  terminatorBtn.id = 'btn-summon-terminator';
+  terminatorBtn.style.display = 'none';
+  terminatorBtn.innerHTML = `
+    ${progressTrack('summon-terminator', TERMINATOR.spawnCapacity)}
+    <div class="build-content">
+      <div class="build-text">
+        <div class="build-name">Terminator</div>
+      </div>
+      <div class="build-cost-side"><span class="build-cost" id="cost-summon-terminator">Ƶ${TERMINATOR.moneyCost.toLocaleString('en-US')}</span></div>
+    </div>
+    <div class="build-warning" id="warn-summon-terminator" style="display:none">needs ${TERMINATOR.spaceCentresRequired} space centres</div>
+  `;
+  terminatorBtn.addEventListener('click', (e) => { playSound('click', 1, 0.75); flashSummonClick(terminatorBtn); emanateAtCursor(e.clientX, e.clientY, 'white'); callbacks.onSummonTerminator(); });
+  summonList.appendChild(terminatorBtn);
+
   // Ritual upgrades — surfaced once a Phone Farm has finished building.
   // Bought ones stay visible but go disabled.
   const autoAssignBtn = document.createElement('button');
@@ -894,6 +940,48 @@ export function setupUI(state: GameState, callbacks: UICallbacks) {
   `;
   autoSpawnBtn.addEventListener('click', () => { playSound('click', 1, 0.75); callbacks.onBuyAutoSpawn(); });
   ritualList.appendChild(autoSpawnBtn);
+
+  // Autospawn throttle — Lilly's prevent-spawning reward. A slider under the
+  // Autospawn button running 0 (off) → every owned tier, so a player who has
+  // bought x4 can wind production back to x2, x1, or a full stop. Hidden
+  // until the task is done and at least one tier is owned (refreshUI).
+  const autoSpawnLevelRow = document.createElement('div');
+  autoSpawnLevelRow.className = 'build-button build-button-compact';
+  autoSpawnLevelRow.id = 'autospawn-level-row';
+  autoSpawnLevelRow.style.display = 'none';
+  autoSpawnLevelRow.innerHTML = `
+    <div class="build-content" style="align-items:center; gap:8px">
+      <div class="build-text" style="flex:0 0 auto">
+        <div class="build-name" id="autospawn-level-label">off</div>
+      </div>
+      <input type="range" id="autospawn-level" min="0" max="1" step="1" value="0"
+             style="flex:1; min-width:0; accent-color:#ffd96b">
+    </div>
+  `;
+  const autoSpawnSlider = autoSpawnLevelRow.querySelector('#autospawn-level') as HTMLInputElement;
+  autoSpawnSlider.addEventListener('input', () => {
+    const idx = Number(autoSpawnSlider.value);
+    callbacks.onSetAutoSpawnLevel(idx === 0 ? 0 : AUTOSPAWN_TIERS[idx - 1].multiplier);
+    playSound('click', 0.5, 1.2);
+  });
+  ritualList.appendChild(autoSpawnLevelRow);
+
+  // Autodragon — Lilly's destroy-a-robot reward: once bought, dragon rituals
+  // queue themselves every few seconds while blood and beacons allow.
+  const autoDragonBtn = document.createElement('button');
+  autoDragonBtn.className = 'build-button build-button-compact';
+  autoDragonBtn.id = 'btn-buy-autodragon';
+  autoDragonBtn.style.display = 'none';
+  autoDragonBtn.innerHTML = `
+    <div class="build-content">
+      <div class="build-text">
+        <div class="build-name">Autodragon</div>
+      </div>
+      <div class="build-cost-side"><span class="build-cost" id="cost-buy-autodragon">${SUMMON_UPGRADES.autoDragon.bloodCost} blood</span></div>
+    </div>
+  `;
+  autoDragonBtn.addEventListener('click', () => { playSound('click', 1, 0.75); callbacks.onBuyAutoDragon(); });
+  ritualList.appendChild(autoDragonBtn);
 
   // Goldgoblins — appears alongside Autobuild (once a Phone Farm is
   // built). Once bought, ~10% of new goblins spawn gold-tinted and drop
@@ -1189,6 +1277,19 @@ export function setupUI(state: GameState, callbacks: UICallbacks) {
       ghost.selected = true;
     }
   });
+
+  // Quick-travel strip (Lilly's fully-feed reward) — the Earth / Hell /
+  // Space buttons pinned left of the sidebar. refreshUI gates visibility;
+  // main.ts owns the 0.3s blink and the actual view snap.
+  const qt: [string, 'ground' | 'hell' | 'space'][] = [
+    ['qt-ground', 'ground'], ['qt-hell', 'hell'], ['qt-space', 'space'],
+  ];
+  for (const [id, view] of qt) {
+    document.getElementById(id)?.addEventListener('click', () => {
+      playSound('click', 1, 0.75);
+      callbacks.onQuickTravel(view);
+    });
+  }
 }
 
 function btnId(kind: BuildingKind): string { return `btn-build-${kind}`; }
@@ -1409,16 +1510,21 @@ export function refreshUI(state: GameState) {
   powerEl.style.color = '#8acfff';
 
   // Spawn Goblin button — sidebar, always visible. Surfaces a "Hole blocked"
-  // warning when a building is on the hole.
+  // warning when a building is on the hole, or "No room" when no hole can
+  // yield a free emergence cell at all (walled in, built over, or buried
+  // under so many bodies the flood finds nowhere to land — the same test
+  // Lilly's "Prevent goblin spawning" task is judged against).
   const spawnInProgress = state.spawnQueue.length;
   const spawnBtn = document.getElementById('btn-spawn-goblin') as HTMLButtonElement;
   const canAffordGoblin = state.money >= GOBLIN.spawnCost;
   const holeBlocked = holeBlockedByBuilding(state);
+  const noRoom = !holeBlocked && goblinSpawningBlocked(state);
   const cap = getSpawnCapacity(state);
-  spawnBtn.disabled = !canAffordGoblin || holeBlocked || spawnInProgress >= cap;
+  spawnBtn.disabled = !canAffordGoblin || holeBlocked || noRoom || spawnInProgress >= cap;
   spawnBtn.classList.toggle('in-progress', spawnInProgress > 0);
   const warnEl = document.getElementById('warn-spawn-goblin')!;
-  warnEl.style.display = holeBlocked ? '' : 'none';
+  warnEl.textContent = holeBlocked ? 'Hole blocked' : 'No room';
+  warnEl.style.display = (holeBlocked || noRoom) ? '' : 'none';
   const spawnBySlot: Record<number, number> = {};
   for (const item of state.spawnQueue) {
     spawnBySlot[item.slot] = 1 - item.remaining / GOBLIN.spawnTime;
@@ -1538,6 +1644,50 @@ export function refreshUI(state: GameState) {
     setBuyFlash('btn-summon-robot', false);
   }
 
+  // Terminator button — revealed by the Collect-9,999,999-blood task, but
+  // stays banner-gated ("needs 2 space centres") until the orbital base
+  // reaches TERMINATOR.spaceCentresRequired completed Space Centres.
+  const terminatorBtn = document.getElementById('btn-summon-terminator') as HTMLButtonElement;
+  if (revealedTaskIds.has('collect_blood')) {
+    terminatorBtn.style.display = '';
+    applyFadeInOnFirstShow('btn-summon-terminator');
+    const scs = countSpaceCentres(state);
+    const enoughSCs = scs >= TERMINATOR.spaceCentresRequired;
+    const canAffordTerminator = state.money >= TERMINATOR.moneyCost;
+    const termQueued = state.terminatorSpawnQueue.length;
+    terminatorBtn.disabled = !enoughSCs || !canAffordTerminator || termQueued >= TERMINATOR.spawnCapacity;
+    terminatorBtn.classList.toggle('in-progress', termQueued > 0);
+    const termRemaining = termQueued > 0 ? state.terminatorSpawnQueue[0].remaining : TERMINATOR.spawnTime;
+    const termFill = termQueued > 0 ? 1 - termRemaining / TERMINATOR.spawnTime : 0;
+    setFillWidth('fill-summon-terminator-0', Math.max(0, Math.min(1, termFill)));
+    document.getElementById('warn-summon-terminator')!.style.display = enoughSCs ? 'none' : '';
+    const termCost = document.getElementById('cost-summon-terminator')!;
+    termCost.classList.toggle('met', canAffordTerminator && enoughSCs && termQueued === 0);
+    // Nudge once the gate opens and no terminator has ever stalked the map.
+    setBuyFlash('btn-summon-terminator', enoughSCs && canAffordTerminator && termQueued === 0 && ![...state.goblins.values()].some((g) => g.terminator));
+  } else {
+    terminatorBtn.style.display = 'none';
+    setBuyFlash('btn-summon-terminator', false);
+  }
+
+  // Quick-travel strip — Lilly's fully-feed reward: Earth / Hell / Space
+  // jumps pinned at the top of the play area. Space stays hidden until orbit
+  // is reachable at all; the current view's button reads as lit + inert.
+  const qtStrip = document.getElementById('quick-travel');
+  if (qtStrip) {
+    qtStrip.classList.toggle('visible', revealedTaskIds.has('feed_hell_core'));
+    (document.getElementById('qt-space') as HTMLButtonElement).style.display =
+      state.spaceUnlocked ? '' : 'none';
+    const qtViews: [string, GameState['view']][] = [
+      ['qt-ground', 'ground'], ['qt-hell', 'hell'], ['qt-space', 'space'],
+    ];
+    for (const [id, view] of qtViews) {
+      const btn = document.getElementById(id) as HTMLButtonElement;
+      btn.classList.toggle('active', state.view === view);
+      btn.disabled = state.view === view;
+    }
+  }
+
   // Tutorial: build the completed set first, then collect any tasks whose
   // prereqs are all done but which are themselves not done yet — those are
   // the *active* tasks (multiple can be active at once). A completed task's
@@ -1647,21 +1797,28 @@ export function refreshUI(state: GameState) {
   lastActiveTaskKey = activeTaskKey;
 
   // Lilly's optional-Work handout: the instant the flag flips (mid-parlay,
-  // with no celebration overlay to hold things), hide the freshly grown task
-  // line and mark it pending so it can't just pop in plainly. The walk itself
-  // waits below until her dialogue closes.
+  // with no celebration overlay to hold things), mark each of her three task
+  // lines pending so none of them just pops in plainly — the render below
+  // keeps pending lines invisible. The walk itself waits until her dialogue
+  // closes.
   if (lastLillyTasksGiven === false && state.lillyTasksGiven) {
     lillyHandoutRevealPending = true;
-    taskTextPendingReveal = true;
-    document.getElementById('task-text')?.classList.add('reveal-hidden');
+    for (const id of LILLY_TASK_IDS) pendingTaskLineReveals.add(id);
   }
   lastLillyTasksGiven = state.lillyTasksGiven;
   // Dialogue gone — arm the staged reveal exactly like a cleared WORK
-  // COMPLETE overlay does (finishCelebration): freeze game time and let this
-  // pass's kick at the bottom of refreshUI walk the sequence, landing the
-  // task line with the usual dim + glow + chime.
+  // COMPLETE overlay does (finishCelebration): freeze game time, queue each
+  // still-pending line as its own walk step, and let this pass's kick at the
+  // bottom of refreshUI run the sequence — the lines land one by one, each
+  // with the usual dim + glow + chime.
   if (lillyHandoutRevealPending && !isModalDialogueActive()) {
     lillyHandoutRevealPending = false;
+    for (const id of LILLY_TASK_IDS) {
+      const elId = taskLineElId(id);
+      if (pendingTaskLineReveals.has(id) && !revealQueue.includes(elId)) {
+        revealQueue.push(elId);
+      }
+    }
     document.body.classList.add('unlock-reveal-hold');
     revealArmed = true;
   }
@@ -1693,6 +1850,32 @@ export function refreshUI(state: GameState) {
   );
   // Autospawn — unlocked by the Run-a-Phone-Farm task (Phase 2).
   refreshAutospawnButton(state, phaseRunPhoneFarm);
+  // Autospawn throttle slider — Lilly's prevent-spawning reward. Runs 0
+  // (off) → every owned tier; the max grows as further tiers are bought.
+  // Skipped (value untouched) while the player is mid-drag.
+  const levelRow = document.getElementById('autospawn-level-row') as HTMLElement;
+  const sliderVisible = revealedTaskIds.has('prevent_spawning') && state.autoSpawnMultiplier > 0;
+  levelRow.style.display = sliderVisible ? '' : 'none';
+  if (sliderVisible) {
+    applyFadeInOnFirstShow('autospawn-level-row');
+    const slider = document.getElementById('autospawn-level') as HTMLInputElement;
+    const ownedTiers = AUTOSPAWN_TIERS.filter(t => t.multiplier <= state.autoSpawnMultiplier);
+    slider.max = String(ownedTiers.length);
+    const idx = state.autoSpawnLevel <= 0 ? 0
+      : ownedTiers.findIndex(t => t.multiplier === state.autoSpawnLevel) + 1;
+    if (document.activeElement !== slider && slider.value !== String(idx)) {
+      slider.value = String(idx);
+    }
+    const label = document.getElementById('autospawn-level-label')!;
+    label.textContent = state.autoSpawnLevel <= 0 ? 'off' : `x${state.autoSpawnLevel}`;
+  }
+  // Autodragon — Lilly's destroy-a-robot reward; a one-shot ritual purchase.
+  refreshRitualButton(
+    'btn-buy-autodragon', 'cost-buy-autodragon',
+    revealedTaskIds.has('destroy_robot'),
+    state.autoDragonEnabled, state.blood >= SUMMON_UPGRADES.autoDragon.bloodCost,
+    `${SUMMON_UPGRADES.autoDragon.bloodCost} blood`,
+  );
   // Goldblins → Goldblins x10 form a replace chain (like Autospawn): base
   // button hides once owned, x10 takes its place; x10 hides once owned.
   // Base Goldblins unlocks via the optional Summon-2-Minotaurs side-task; x10
@@ -1749,12 +1932,19 @@ export function refreshUI(state: GameState) {
       .map(t => {
         const label = t.optional ? 'Optional' : 'Work';
         const text = t.dynamicText ? t.dynamicText(state) : t.text;
-        return `<div><strong>${label}:</strong> ${text}</div>`;
+        return `<div id="${taskLineElId(t.id)}"><strong>${label}:</strong> ${text}</div>`;
       })
       .join('');
     if (taskHtml !== lastTaskHtml) {
       lastTaskHtml = taskHtml;
       taskEl.innerHTML = taskHtml;
+    }
+    // Lines awaiting their step in the staged reveal walk (Lilly's handout)
+    // stay invisible — re-applied here so an innerHTML rebuild can't flash
+    // them in early. runUnlockRevealSequence clears each id as it lands.
+    for (const t of activeTasks) {
+      if (!pendingTaskLineReveals.has(t.id)) continue;
+      document.getElementById(taskLineElId(t.id))?.classList.add('reveal-hidden');
     }
   } else {
     taskEl.style.display = 'none';
@@ -2379,11 +2569,14 @@ function showWaterSource(state: GameState, w: WaterSource, panel: HTMLElement,
 function showGoblin(state: GameState, g: Goblin, panel: HTMLElement, portrait: HTMLElement,
                     name: HTMLElement, stateEl: HTMLElement, extra: HTMLElement) {
   panel.classList.add('visible');
-  portrait.innerHTML = g.robot
+  portrait.innerHTML = g.terminator
+    ? `<div class="portrait-goblin" style="background:#1c2026;border-color:#ff5040;color:#ffb0a8">T</div>`
+    : g.robot
     ? `<div class="portrait-goblin" style="background:#1c2026;border-color:#9aa3ad;color:#cfd5dc">R</div>`
     : `<div class="portrait-goblin">G</div>`;
-  name.textContent = g.robot ? `Robot #${g.id}` : `Goblin #${g.id}`;
-  stateEl.textContent = describeGoblinState(state, g.state) || (g.robot ? 'Allergic to radioactive waste' : '');
+  name.textContent = g.terminator ? `Terminator #${g.id}` : g.robot ? `Robot #${g.id}` : `Goblin #${g.id}`;
+  stateEl.textContent = describeGoblinState(state, g.state)
+    || (g.terminator ? 'Scanning for targets' : g.robot ? 'Allergic to radioactive waste' : '');
   setCommandHint(extra, state);
 }
 

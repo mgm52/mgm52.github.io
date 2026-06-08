@@ -1,7 +1,7 @@
 import { getAudioDebugInfo, playSound, preloadSounds, setCrackleEnabled, setGhostSendGain, setInHellView, setMasterVolume, setMusicDepth, setMusicVolume, startBackgroundCrackle, startBackgroundMusic } from './audio';
 import {
   AUTOSPAWN_TIERS, CAMERA_SPEED, CELL, DRAGON, GOBLIN, GOLD_KILL_REWARD, HELL, KILL_REWARD, ROBOT, SOUL_SIGIL,
-  START_CELL, SUMMON_UPGRADES, TICK_MS, MINOTAUR, WORLD, digBloodCost, minotaurBloodCost,
+  START_CELL, SUMMON_UPGRADES, TERMINATOR, TICK_MS, MINOTAUR, WORLD, digBloodCost, minotaurBloodCost,
 } from './config';
 import { setupInput } from './input';
 import { runDemonDialogue, runGhostChat } from './demon-dialogue';
@@ -9,7 +9,7 @@ import { playIntroSequence, setIntroPaused, skipIntro } from './intro';
 import { getOptions, onOptionsChange } from './options';
 import { getRestartInHell, relockOptionsCog, setupOptionsUI } from './options-ui';
 import { applyDomOptions, centerCameraOn, centerHellCameraOnWorld, centerSpaceCamera, clampCamera, clampHellCamera, clampSpaceCamera, createRender, currentHellScale, preloadRenderAssets, render, spaceCameraMaxY } from './render';
-import { appendLog, buildingCenter, cellCenter, countHypercentres, createInitialState, destroyBuilding, digDirection, earnBlood, earnDragonBone, earnMoney, getSpawnCapacity, pushDeathEffect, pushFloater, recordGhost, removeGoblin, type GameState, type Ghost } from './state';
+import { appendLog, buildingCenter, cellCenter, countHypercentres, countSpaceCentres, createInitialState, destroyBuilding, digDirection, earnBlood, earnDragonBone, earnMoney, getSpawnCapacity, pushDeathEffect, pushFloater, recordGhost, removeGoblin, type GameState, type Ghost } from './state';
 import { autoAssignAllIdle, spawnDragon, spawnMinotaur, spawnRobot, spawnTinytaur, tick } from './sim';
 import { ensureHellPortal, executeTaskSkip, refreshUI, setupUI } from './ui';
 import { clearSave, formatRelativeTime, getLastSaveStats, loadGame, saveGame, saveGameInBackground } from './save';
@@ -492,6 +492,38 @@ async function main() {
       playSound('online', 0.7, 1.8);
       appendLog(state, 'Robot assembly begins...');
     },
+    onSummonTerminator: () => {
+      // Collect-blood reward. Demands an orbital industrial base (2 Space
+      // Centres) and costs serious money; assembles on its own single-slot
+      // track. The chassis comes out hunting — see the terminator pass in sim.
+      if (countSpaceCentres(state) < TERMINATOR.spaceCentresRequired) { playSound('error'); return; }
+      if (state.money < TERMINATOR.moneyCost) { playSound('error'); return; }
+      if (state.terminatorSpawnQueue.length >= TERMINATOR.spawnCapacity) { playSound('error'); return; }
+      state.money -= TERMINATOR.moneyCost;
+      state.terminatorSpawnQueue.push({ remaining: TERMINATOR.spawnTime });
+      // The robot sting, dragged lower — something heavier is being built.
+      playSound('online', 0.8, 1.2);
+      appendLog(state, 'Terminator assembly begins...');
+    },
+    onSetAutoSpawnLevel: (multiplier: number) => {
+      // Lilly's prevent-spawning reward: throttle autospawn to any owned
+      // tier, or 0 (paused). Clamped so a stale slider can't outrun the
+      // purchased maximum.
+      state.autoSpawnLevel = Math.max(0, Math.min(state.autoSpawnMultiplier, multiplier));
+    },
+    onBuyAutoDragon: () => {
+      // Lilly's destroy-a-robot reward, bought like the other one-shot
+      // rituals. The per-spawn DRAGON.bloodCost still applies on each fire.
+      if (state.autoDragonEnabled) return;
+      const cost = SUMMON_UPGRADES.autoDragon.bloodCost;
+      if (state.blood < cost) { playSound('error'); return; }
+      state.blood -= cost;
+      state.autoDragonEnabled = true;
+      state.autoDragonTimer = 0;
+      playSound('ritual');
+      appendLog(state, `Autodragon unlocked — a dragon ritual begins every ${SUMMON_UPGRADES.autoDragon.intervalSeconds}s while blood and beacons allow.`);
+    },
+    onQuickTravel: (view: 'ground' | 'hell' | 'space') => quickTravel(view),
     onPlaceOrbital: () => {
       // Toggle Orbital Platform placement (space view only — the button is
       // hidden elsewhere); arming it cancels any other pending mode.
@@ -549,6 +581,9 @@ async function main() {
       state.blood -= next.bloodCost;
       const wasEnabled = state.autoSpawnEnabled;
       state.autoSpawnMultiplier = next.multiplier;
+      // Each purchase re-pins the throttle (Lilly's prevent-spawning reward
+      // slider) to the new maximum — buying a tier means wanting it running.
+      state.autoSpawnLevel = next.multiplier;
       if (!wasEnabled) {
         state.autoSpawnEnabled = true;
         state.autoSpawnTimer = SUMMON_UPGRADES.autoSpawn.intervalSeconds / next.multiplier;
@@ -795,6 +830,59 @@ async function main() {
     state.viewTransitioning = true;
     state.pendingCandle = false;
     playSound('ritual', 0.7, 0.5);
+  }
+
+  // ─── Quick travel (Lilly's fully-feed reward) ───────────────────────
+  // The strip of Earth / Hell / Space buttons left of the sidebar (see
+  // index.html + refreshUI's gating). Unlike the held-edge transitions above,
+  // travel is instant under a ~0.3s black blink: fade to black, snap every
+  // transition variable to the destination's settled values, fade back.
+  const quickTravelFadeEl = document.getElementById('quick-travel-fade');
+  let quickTravelBusy = false;
+  function quickTravel(view: 'ground' | 'hell' | 'space'): void {
+    if (quickTravelBusy || state.view === view) return;
+    // Respect every world-freeze: cutscenes, parlays, celebrations, Bob's
+    // hole-picker. Mid-flight transitions are fine — they get snapped.
+    if (document.body.classList.contains('intro-cutscene-hold')
+        || document.body.classList.contains('bob-cutscene-hold')
+        || document.body.classList.contains('demon-parlay-hold')
+        || document.body.classList.contains('bob-spawn-hold')
+        || document.body.classList.contains('unlock-reveal-hold')
+        || state.bobPickingHole) return;
+    if (view === 'hell' && !state.hellUnlocked) { playSound('error'); return; }
+    if (view === 'space' && !state.spaceUnlocked) { playSound('error'); return; }
+    quickTravelBusy = true;
+    playSound('ritual', 0.55, view === 'hell' ? 0.6 : 0.9);
+    if (quickTravelFadeEl) quickTravelFadeEl.style.opacity = '1';
+    window.setTimeout(() => {
+      // Cancel any in-flight climb/descent and land fully settled.
+      transitioning = false;
+      hellTransitioning = false;
+      hellZooming = false;
+      ascendHold = descendHold = descendHellHold = ascendHellHold = 0;
+      state.viewTransitioning = false;
+      if (view === 'space') {
+        ctx.depth = 0;
+        ctx.altitude = 1;
+        centerSpaceCamera(ctx);
+        ctx.spaceCamera.y = 0; clampSpaceCamera(ctx);  // arrive looking down from the top
+      } else if (view === 'hell') {
+        ctx.altitude = 0;
+        ctx.depth = 1;
+        // Arrive already zoomed out, centred on the region mirroring the surface.
+        ctx.hellZoom = 1;
+        centerHellCameraOnWorld(ctx, WORLD.width / 2, WORLD.height / 2);
+      } else {
+        ctx.altitude = 0;
+        ctx.depth = 0;
+      }
+      state.view = view;
+      // Placement/aim modes don't survive a change of world.
+      state.pendingBuild = null; state.pendingStrike = false; state.pendingCandle = false;
+      state.pendingOrbital = false; state.pendingSpaceCentre = false;
+      if (quickTravelFadeEl) quickTravelFadeEl.style.opacity = '0';
+      quickTravelBusy = false;
+    }, 160);
   }
 
   // On a touch device there are no arrow keys to hold, so let a tap on the

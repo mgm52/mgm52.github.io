@@ -1715,9 +1715,9 @@ seatedSoulFilter.brightness(2.6, true);
 
 // A spectre of the soul bound into a candle: the first frame of the unit's
 // own sheet (facing the viewer; the dragon's fly sheet only has profiles, so
-// it shows its east one), whitened by the shared filter and sized to stand
-// inside the wax pool whatever the kind. Returns null while the sheet is
-// still loading — the caller just retries next frame.
+// it shows its east one), whitened by the shared filter and standing in the
+// wax pool at its usual ghost size. Returns null while the sheet is still
+// loading — the caller just retries next frame.
 function makeSeatedSoulSprite(chair: SoulChair): Sprite | null {
   const soul = chairSoulSnapshot(chair);
   const sheet = soul.kind === 'goblin' ? (goblinIdleSheet ?? goblinWalkSheet)
@@ -1727,9 +1727,12 @@ function makeSeatedSoulSprite(chair: SoulChair): Sprite | null {
   const heading = soul.kind === 'dragon' ? 0 : Math.PI / 2;
   const sprite = new Sprite(sheet.frames[dirIndex(sheet.meta, heading)][0]);
   sprite.anchor.set(0.5);
-  // One size for every kind (a dragon shrinks a lot to fit); a tinytaur
-  // keeps its small stature.
-  const px = SOUL_SIGIL.chairRadius * 2.3 * (soul.tiny ? TINYTAUR.scale : 1);
+  // Same per-kind display size the drifting ghosts use (makeGhostView), so a
+  // soul keeps its full stature when it takes the chair — a bound dragon
+  // looms over its candle just like it loomed in life.
+  const px = soul.kind === 'goblin' ? getOptions().goblinDisplayPx
+    : soul.kind === 'minotaur' ? getOptions().minotaurDisplayPx * (soul.tiny ? TINYTAUR.scale : 1)
+    : DRAGON.displayPx;
   sprite.scale.set(px / sheet.meta.spriteSize);
   sprite.alpha = 0.92;
   sprite.filters = [seatedSoulFilter];
@@ -3128,14 +3131,26 @@ export function render(state: GameState, ctx: RenderContext) {
     setSpriteFilter(v.sprite, g.robot && opts.robotGreyscale ? getRobotWhiteFilter() : null);
     // Robots carry a soft white halo behind the chassis, pulsing gently — and
     // flaring hot (with a red shift) through a laser windup so the shot
-    // telegraphs before the beam lands.
+    // telegraphs before the beam lands. A terminator's halo is its targeting
+    // lamp instead: a tight red glow pinned to the head, always burning,
+    // strobing through the windup.
     if (v.glow) {
-      v.glow.scale.set(px * 2.0 / 128);
       const charging = g.state.kind === 'firing_laser' && g.state.fireAt !== undefined;
-      v.glow.tint = charging ? 0xff6050 : 0xffffff;
-      v.glow.alpha = charging
-        ? 0.7 + 0.2 * Math.sin(state.now * 24)
-        : 0.28 + 0.1 * Math.sin(state.now * 3 + g.id);
+      if (g.terminator) {
+        v.glow.scale.set(px * 1.1 / 128);
+        v.glow.position.set(0, -px * 0.42);
+        v.glow.tint = 0xff2018;
+        v.glow.alpha = charging
+          ? 0.85 + 0.15 * Math.sin(state.now * 24)
+          : 0.55 + 0.18 * Math.sin(state.now * 5 + g.id);
+      } else {
+        v.glow.scale.set(px * 2.0 / 128);
+        v.glow.position.set(0, 0);
+        v.glow.tint = charging ? 0xff6050 : 0xffffff;
+        v.glow.alpha = charging
+          ? 0.7 + 0.2 * Math.sin(state.now * 24)
+          : 0.28 + 0.1 * Math.sin(state.now * 3 + g.id);
+      }
     }
   }
   for (const [id, v] of ctx.goblinViews) {
