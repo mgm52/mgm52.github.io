@@ -1,6 +1,6 @@
 import { getAudioDebugInfo, playSound, preloadSounds, setCrackleEnabled, setGhostSendGain, setInHellView, setMasterVolume, setMusicDepth, setMusicVolume, startBackgroundCrackle, startBackgroundMusic } from './audio';
 import {
-  AUTOSPAWN_TIERS, CAMERA_SPEED, CELL, DRAGON, GOBLIN, GOLD_KILL_REWARD, HELL, KILL_REWARD, PAIN_GABBONSAW, ROBOT, SOUL_SIGIL,
+  AUTODRAGON_TIERS, AUTOSPAWN_TIERS, CAMERA_SPEED, CELL, DRAGON, GOBLIN, GOLD_KILL_REWARD, HELL, KILL_REWARD, PAIN_GABBONSAW, ROBOT, SOUL_SIGIL,
   START_CELL, SUMMON_UPGRADES, TERMINATOR, TICK_MS, MINOTAUR, WORLD, digBloodCost, minotaurBloodCost,
 } from './config';
 import { setupInput } from './input';
@@ -10,7 +10,7 @@ import { getOptions, onOptionsChange } from './options';
 import { getRestartInHell, relockOptionsCog, setupOptionsUI } from './options-ui';
 import { applyDomOptions, centerCameraOn, centerHellCameraOnWorld, centerSpaceCamera, clampCamera, clampHellCamera, clampSpaceCamera, createRender, currentHellScale, preloadRenderAssets, render, spaceCameraMaxY } from './render';
 import { appendLog, buildingCenter, cellCenter, countHypercentres, countSpaceCentres, createInitialState, destroyBuilding, digDirection, earnBlood, earnDragonBone, earnMoney, getSpawnCapacity, pushDeathEffect, pushFloater, recordGhost, removeGoblin, type GameState, type Ghost } from './state';
-import { autoAssignAllIdle, spawnDragon, spawnLollyRampage, spawnMinotaur, spawnRobot, spawnTinytaur, tick } from './sim';
+import { autoAssignAllIdle, maybeDepartBobAndLolly, spawnDragon, spawnLollyRampage, spawnMinotaur, spawnRobot, spawnTinytaur, tick } from './sim';
 import { ensureHellPortal, executeTaskSkip, refreshUI, setupUI } from './ui';
 import { clearSave, formatRelativeTime, getLastSaveStats, loadGame, saveGame, saveGameInBackground } from './save';
 
@@ -346,7 +346,8 @@ async function main() {
     // Bob waits below — the demons' best material is written for him. A
     // living Bob is claimed by the descent (his soul records where he
     // stood); a never-summoned Bob gets his ghost conjured by the mirror.
-    if (!state.ghosts.some((g) => g.bob)) {
+    // Unless he's already slipped out of hell with Lolly — then he stays gone.
+    if (!state.bobLollyDeparted && !state.ghosts.some((g) => g.bob)) {
       const liveBob = [...state.goblins.values()].find((g) => g.bob);
       if (liveBob) {
         recordGhost(state, 'goblin', liveBob.pos.x, liveBob.pos.y, liveBob.facing, { bob: true });
@@ -512,16 +513,29 @@ async function main() {
       state.autoSpawnLevel = Math.max(0, Math.min(state.autoSpawnMultiplier, multiplier));
     },
     onBuyAutoDragon: () => {
-      // Lilly's destroy-a-robot reward, bought like the other one-shot
-      // rituals. The per-spawn DRAGON.bloodCost still applies on each fire.
-      if (state.autoDragonEnabled) return;
-      const cost = SUMMON_UPGRADES.autoDragon.bloodCost;
-      if (state.blood < cost) { playSound('error'); return; }
-      state.blood -= cost;
-      state.autoDragonEnabled = true;
-      state.autoDragonTimer = 0;
+      // Lilly's destroy-a-robot reward, levelling through AUTODRAGON_TIERS
+      // like Autospawn. Each tier demands as many active Dragon Beacons as
+      // its multiplier — a beacon supports exactly one simultaneous ritual.
+      // The per-spawn DRAGON.bloodCost still applies on each fire.
+      const next = AUTODRAGON_TIERS.find((t) => t.multiplier > state.autoDragonMultiplier);
+      if (!next) return;
+      if (state.blood < next.bloodCost) { playSound('error'); return; }
+      let activeBeacons = 0;
+      for (const b of state.buildings.values()) {
+        if (b.kind === 'dragon_beacon' && b.state === 'active') activeBeacons++;
+      }
+      if (next.multiplier > activeBeacons) { playSound('error'); return; }
+      state.blood -= next.bloodCost;
+      state.autoDragonMultiplier = next.multiplier;
+      if (!state.autoDragonEnabled) {
+        state.autoDragonEnabled = true;
+        state.autoDragonTimer = 0;
+      }
       playSound('ritual');
-      appendLog(state, `Autodragon unlocked — a dragon ritual begins every ${SUMMON_UPGRADES.autoDragon.intervalSeconds}s while blood and beacons allow.`);
+      const cadence = SUMMON_UPGRADES.autoDragon.intervalSeconds / next.multiplier;
+      appendLog(state, next.multiplier === 1
+        ? `Autodragon unlocked — a dragon ritual begins every ${cadence}s while blood and beacons allow.`
+        : `Autodragon x${next.multiplier} — a ritual every ${cadence}s while blood and beacons allow.`);
     },
     onQuickTravel: (view: 'ground' | 'hell' | 'space') => quickTravel(view),
     onPlaceOrbital: () => {
@@ -869,6 +883,8 @@ async function main() {
         || state.bobPickingHole) return;
     if (view === 'hell' && !state.hellUnlocked) { playSound('error'); return; }
     if (view === 'space' && !state.spaceUnlocked) { playSound('error'); return; }
+    // First hop ever — retires the strip's fresh-unlock attention pulse.
+    state.quickTravelUsed = true;
     quickTravelBusy = true;
     playSound('ritual', 0.55, view === 'hell' ? 0.6 : 0.9);
     if (quickTravelFadeEl) quickTravelFadeEl.style.opacity = '1';
@@ -1056,6 +1072,24 @@ async function main() {
         tick(state);
         acc -= TICK_MS;
       }
+      // Bob & Lolly's quiet exit — once their three hell beats are done they
+      // slip away the moment both are off screen. Runs here (not in tick)
+      // because "off screen" needs the renderer's hell camera, and only while
+      // the world is live so a frozen parlay can never vanish its speakers.
+      maybeDepartBobAndLolly(
+        state,
+        state.view === 'hell'
+          ? (() => {
+              const scale = currentHellScale(ctx);
+              return {
+                x0: ctx.hellCamera.x,
+                y0: ctx.hellCamera.y,
+                x1: ctx.hellCamera.x + ctx.viewport.width / scale,
+                y1: ctx.hellCamera.y + ctx.viewport.height / scale,
+              };
+            })()
+          : null,
+      );
       if (fpsHud) frameTimings.tickMs = performance.now() - tickStart;
       saveAcc += dt;
       if (saveAcc >= SAVE_INTERVAL_MS) backgroundSave();

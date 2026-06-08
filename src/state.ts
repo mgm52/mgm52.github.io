@@ -189,6 +189,11 @@ export type Demon = {
   // state.lillyTasksGiven); every visit afterwards gets only the curt
   // "get back to kroW". Optional for saves predating the alibi.
   heardOfGolf?: boolean;
+  // Demon R only: set once Bob has completed the colossus's 5-dragon-bone
+  // trade (the 9,999,999-blood "gift") at least once. One of the three beats
+  // behind Bob & Lolly's quiet exit from hell (see maybeDepartBobAndLolly in
+  // sim.ts). Optional for saves predating the exit.
+  boneGiftGiven?: boolean;
   // Id of the ghost currently mid-parlay, or null. Only one soul may speak at a
   // time; while set the demon stands still and faces the speaker.
   busyWith: number | null;
@@ -566,6 +571,18 @@ export type Hole = {
 // Total in-flight spawn slots: base + GOBLIN_HOLE_CAPACITY_PER_BUILDING per
 // completed Goblin Hole building. Computed fresh each tick so the spawn queue
 // always reflects the latest infrastructure.
+// Whether any hole remains for units to crawl out of: the original Goblin
+// Hole (until Lolly tears it out) or any completed Goblin Hole building.
+// Once Lolly has destroyed every last one, nothing can spawn — goblins,
+// minotaurs, robots and terminators all hatch from holes.
+export function anySpawnHole(state: GameState): boolean {
+  if (!state.holeDestroyed) return true;
+  for (const b of state.buildings.values()) {
+    if (b.kind === 'goblin_hole' && b.state !== 'constructing') return true;
+  }
+  return false;
+}
+
 export function getSpawnCapacity(state: GameState): number {
   // The base capacity belongs to the original hole — once Lolly has torn it
   // out of the earth, only built Goblin Holes (those still standing) count.
@@ -689,10 +706,14 @@ export type GameState = {
   // "Prevent goblin spawning" task is done a slider under the Autospawn
   // button lets the player throttle it down to any owned tier, or 0 (off).
   autoSpawnLevel: number;
-  // Autodragon — Lilly's "Destroy a robot" reward, bought as a one-shot
-  // ritual: queues a dragon summon every SUMMON_UPGRADES.autoDragon
-  // .intervalSeconds while the blood + active-beacon gates allow it.
+  // Autodragon — Lilly's "Destroy a robot" reward, levelling through
+  // AUTODRAGON_TIERS like Autospawn: each tier quickens the cadence
+  // (intervalSeconds / multiplier) and demands as many active Dragon
+  // Beacons as its multiplier (one beacon = one simultaneous ritual).
+  // `autoDragonEnabled` stays the on/off flag (and the pre-tier save
+  // field); `autoDragonMultiplier` is the owned tier (0 = none).
   autoDragonEnabled: boolean;
+  autoDragonMultiplier: number;
   autoDragonTimer: number;
   // Set of dig directions already purchased ('n'|'e'|'s'|'w'); each expands
   // the play area by DIG.cells in that direction and reveals a water source.
@@ -799,6 +820,17 @@ export type GameState = {
   // One-shot — the button retires, Bob comes back for one last word, and
   // Lolly is loosed on the overworld.
   gabbonsawBought: boolean;
+  // Sticky: the player has used the quick-travel strip (Lilly's fully-feed
+  // reward) at least once. Until then the freshly-unlocked strip pulses gold
+  // for attention (see refreshUI). Optional for saves predating the strip.
+  quickTravelUsed?: boolean;
+  // Sticky: Bob's soul and Lolly have slipped out of hell together — set once
+  // all three of their hell beats are done (Lolly's corner conversation heard
+  // through, Lilly's optional Work handed down, and demon R's bone trade
+  // completed at least once) and both were off screen to vanish unseen. They
+  // stay gone until the Pain Gabbonsaw ritual reunites them on the overworld.
+  // See maybeDepartBobAndLolly in sim.ts.
+  bobLollyDeparted: boolean;
   // Lolly's overworld rampage (with Bob riding on top), spawned by the Pain
   // Gabbonsaw ritual. Null/absent until then. Persisted — she does not stop.
   lolly?: Lolly | null;
@@ -1213,6 +1245,7 @@ export function createInitialState(): GameState {
     autoSpawnMultiplier: 0,
     autoSpawnLevel: 0,
     autoDragonEnabled: false,
+    autoDragonMultiplier: 0,
     autoDragonTimer: 0,
     spawnHoleRotation: 0,
     dugDirections: new Set(),
@@ -1258,6 +1291,7 @@ export function createInitialState(): GameState {
     bobPickingHole: false,
     bobCheatPending: false,
     gabbonsawBought: false,
+    bobLollyDeparted: false,
     lolly: null,
     holeDestroyed: false,
     ghosts: [],
@@ -1346,6 +1380,14 @@ export function ensureDemonRoster(state: GameState): void {
   const have = new Set([...state.demons.values()].map((d) => d.variant));
   for (const d of createDemons(state).values()) {
     if (!have.has(d.variant)) state.demons.set(d.id, d);
+  }
+  // Once Bob and Lolly have slipped out of hell, the roster stays a duo —
+  // without this, the top-up above (and the corrupt-save reseed in load) would
+  // quietly resurrect her in the corner.
+  if (state.bobLollyDeparted) {
+    for (const d of [...state.demons.values()]) {
+      if (d.variant === 'friend') state.demons.delete(d.id);
+    }
   }
 }
 

@@ -192,6 +192,8 @@ export function loadGame(): { state: GameState; savedAt: number } | null {
     env.state.terminatorSpawnQueue ??= [];
     env.state.autoSpawnLevel ??= env.state.autoSpawnMultiplier;
     env.state.autoDragonEnabled ??= false;
+    // Autodragon tiers — a pre-tier save that owned Autodragon maps to x1.
+    env.state.autoDragonMultiplier ??= env.state.autoDragonEnabled ? 1 : 0;
     env.state.autoDragonTimer ??= 0;
     env.state.minotaursBought ??= 0;
     // minotaursSummoned (rituals that actually finished) was added when the
@@ -226,6 +228,10 @@ export function loadGame(): { state: GameState; savedAt: number } | null {
     // Pain Gabbonsaw ritual + Lolly's rampage — added together. The rampage
     // itself persists (she does not stop), so only seed the defaults.
     env.state.gabbonsawBought ??= false;
+    // Bob & Lolly's quiet exit from hell — must default before
+    // ensureDemonRoster below, which uses it to keep a departed Lolly from
+    // being re-seeded into the corner.
+    env.state.bobLollyDeparted ??= false;
     env.state.lolly ??= null;
     env.state.holeDestroyed ??= false;
     env.state.ghosts ??= [];

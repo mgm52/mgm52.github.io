@@ -1,12 +1,12 @@
 import { playSound, playMinotaurCommand } from './audio';
 import {
-  AUTOSPAWN_TIERS, BUILDABLE_KINDS, BUILDING_DEFS, BuildingKind, DRAG_SELECT_HINT_DELAY_SEC, MULTI_SPAWN_HINT_DELAY_SEC,
+  AUTODRAGON_TIERS, AUTOSPAWN_TIERS, BUILDABLE_KINDS, BUILDING_DEFS, BuildingKind, DRAG_SELECT_HINT_DELAY_SEC, MULTI_SPAWN_HINT_DELAY_SEC,
   DRAGON, GOBLIN, LIGHTNING, PAIN_GABBONSAW, PAN_HINT_DELAY_SEC, ROBOT, SPAWN_HINT_NO_SPAWN_SEC,
   SPAWN_HINT_NO_TASK_SEC, SUMMON_UPGRADES, TERMINATOR, WATER_HINT_DELAY_SEC, digBloodCost, MINOTAUR, minotaurBloodCost, TINYTAUR, formatPower, SOUL_SIGIL, sigilPortalOutput,
 } from './config';
 import {
   Building, Cell, Demon, DragonState, GameState, Ghost, Goblin, GoblinState, SoulChair, SpaceBuilding, SpaceUnit, WaterSource,
-  appendLog, buildingCenter, buildingLabel, buildingMoneyCost, cellCenter, cellKey, chairSoulSnapshot, countHypercentres, countIdle, countSpaceCentres, defOf, digDirection,
+  anySpawnHole, appendLog, buildingCenter, buildingLabel, buildingMoneyCost, cellCenter, cellKey, chairSoulSnapshot, countHypercentres, countIdle, countSpaceCentres, defOf, digDirection,
   earnDragonBone, getSpawnCapacity, goblinSpawningBlocked, holeBlockedByBuilding, isCellBlocked, isInBounds,
   maintainerCount, markBuildingsChanged, nextBuildingDisplayNum, occupyCell, spaceCentreMaintained, waterCarrierCount,
 } from './state';
@@ -970,7 +970,9 @@ export function setupUI(state: GameState, callbacks: UICallbacks) {
   ritualList.appendChild(autoSpawnLevelRow);
 
   // Autodragon — Lilly's destroy-a-robot reward: once bought, dragon rituals
-  // queue themselves every few seconds while blood and beacons allow.
+  // queue themselves every few seconds while blood and beacons allow. Levels
+  // through AUTODRAGON_TIERS (x2, x4, …) like Autospawn; each tier demands
+  // as many active Dragon Beacons as its multiplier.
   const autoDragonBtn = document.createElement('button');
   autoDragonBtn.className = 'build-button build-button-compact';
   autoDragonBtn.id = 'btn-buy-autodragon';
@@ -978,10 +980,11 @@ export function setupUI(state: GameState, callbacks: UICallbacks) {
   autoDragonBtn.innerHTML = `
     <div class="build-content">
       <div class="build-text">
-        <div class="build-name">Autodragon</div>
+        <div class="build-name" id="label-buy-autodragon">Autodragon</div>
       </div>
-      <div class="build-cost-side"><span class="build-cost" id="cost-buy-autodragon">${SUMMON_UPGRADES.autoDragon.bloodCost} blood</span></div>
+      <div class="build-cost-side"><span class="build-cost" id="cost-buy-autodragon">${AUTODRAGON_TIERS[0].bloodCost} blood</span></div>
     </div>
+    <div class="build-warning" id="warn-buy-autodragon" style="display:none">not enough beacons</div>
   `;
   autoDragonBtn.addEventListener('click', () => { playSound('click', 1, 0.75); callbacks.onBuyAutoDragon(); });
   ritualList.appendChild(autoDragonBtn);
@@ -1448,6 +1451,49 @@ function refreshAutospawnButton(state: GameState, unlocked: boolean): void {
   setBuyFlash('btn-buy-autospawn', current === 0 && canAfford && !willOverflow);
 }
 
+// Single Autodragon button that levels up through AUTODRAGON_TIERS, exactly
+// like the Autospawn replace-chain: "Autodragon" → "Autodragon x2" → … and
+// hidden once the top tier is owned. Each tier demands as many ACTIVE Dragon
+// Beacons as its multiplier (one beacon = one simultaneous ritual), so the
+// button greys out with a "not enough beacons" warning until the fleet of
+// beacons catches up.
+function refreshAutodragonButton(state: GameState, unlocked: boolean): void {
+  const btn = document.getElementById('btn-buy-autodragon') as HTMLButtonElement;
+  const cost = document.getElementById('cost-buy-autodragon')!;
+  const label = document.getElementById('label-buy-autodragon')!;
+  const warn = document.getElementById('warn-buy-autodragon')!;
+  if (!unlocked) {
+    btn.style.display = 'none';
+    setBuyFlash('btn-buy-autodragon', false);
+    return;
+  }
+  const current = state.autoDragonMultiplier;
+  const next = AUTODRAGON_TIERS.find(t => t.multiplier > current);
+  if (!next) {
+    // Already at max — hide the button.
+    btn.style.display = 'none';
+    setBuyFlash('btn-buy-autodragon', false);
+    return;
+  }
+  btn.style.display = '';
+  label.textContent = next.multiplier === 1 ? 'Autodragon' : `Autodragon x${next.multiplier}`;
+  cost.textContent = `${next.bloodCost} blood`;
+  const canAfford = state.blood >= next.bloodCost;
+  cost.classList.toggle('met', canAfford);
+  cost.classList.remove('owned');
+  let activeBeacons = 0;
+  for (const b of state.buildings.values()) {
+    if (b.kind === 'dragon_beacon' && b.state === 'active') activeBeacons++;
+  }
+  const needsBeacons = next.multiplier > activeBeacons;
+  warn.style.display = needsBeacons ? '' : 'none';
+  btn.disabled = !canAfford || needsBeacons;
+  // Set disabled BEFORE applying the fade-in so the right keyframes pick.
+  applyFadeInOnFirstShow('btn-buy-autodragon');
+  // Flash only the very first purchase, like Autospawn.
+  setBuyFlash('btn-buy-autodragon', current === 0 && canAfford && !needsBeacons);
+}
+
 function progressTrack(id: string, slots: number): string {
   const segs = Array.from({ length: slots }, (_, i) =>
     `<div class="seg" id="seg-${id}-${i}"><div class="fill" id="fill-${id}-${i}"></div></div>`,
@@ -1543,11 +1589,14 @@ export function refreshUI(state: GameState) {
   const holeBlocked = holeBlockedByBuilding(state);
   const noRoom = !holeBlocked && goblinSpawningBlocked(state);
   const cap = getSpawnCapacity(state);
-  spawnBtn.disabled = !canAffordGoblin || holeBlocked || noRoom || spawnInProgress >= cap;
+  // Once Lolly has destroyed every hole, nothing hole-born can be summoned
+  // again — goblins, minotaurs, robots and terminators all grey out for good.
+  const noHoles = !anySpawnHole(state);
+  spawnBtn.disabled = !canAffordGoblin || holeBlocked || noRoom || noHoles || spawnInProgress >= cap;
   spawnBtn.classList.toggle('in-progress', spawnInProgress > 0);
   const warnEl = document.getElementById('warn-spawn-goblin')!;
-  warnEl.textContent = holeBlocked ? 'Hole blocked' : 'No room';
-  warnEl.style.display = (holeBlocked || noRoom) ? '' : 'none';
+  warnEl.textContent = noHoles ? 'No holes remain' : holeBlocked ? 'Hole blocked' : 'No room';
+  warnEl.style.display = (noHoles || holeBlocked || noRoom) ? '' : 'none';
   const spawnBySlot: Record<number, number> = {};
   for (const item of state.spawnQueue) {
     spawnBySlot[item.slot] = 1 - item.remaining / GOBLIN.spawnTime;
@@ -1575,9 +1624,9 @@ export function refreshUI(state: GameState) {
     const queued = state.minotaurSpawnQueue.length;
     const minoCost = minotaurBloodCost(state.minotaursBought, state.minotaurFirstDiscount);
     const canAffordMinotaur = state.blood >= minoCost;
-    minotaurBtn.disabled = queued > 0 || !canAffordMinotaur;
+    minotaurBtn.disabled = queued > 0 || !canAffordMinotaur || noHoles;
     minotaurCostEl.textContent = `${minoCost} blood`;
-    minotaurCostEl.classList.toggle('met', canAffordMinotaur && queued === 0);
+    minotaurCostEl.classList.toggle('met', canAffordMinotaur && queued === 0 && !noHoles);
     minotaurBtn.classList.toggle('in-progress', queued > 0);
     const remaining = queued > 0 ? state.minotaurSpawnQueue[0].remaining : MINOTAUR.spawnTime;
     const fill = queued > 0 ? 1 - remaining / MINOTAUR.spawnTime : 0;
@@ -1652,7 +1701,7 @@ export function refreshUI(state: GameState) {
     const canAffordRobot = state.money >= ROBOT.moneyCost;
     // Assembly runs on a timed track like the other summons — one at a time.
     const robotQueued = state.robotSpawnQueue.length;
-    robotBtn.disabled = !enoughHCs || !canAffordRobot || robotQueued >= ROBOT.spawnCapacity;
+    robotBtn.disabled = !enoughHCs || !canAffordRobot || noHoles || robotQueued >= ROBOT.spawnCapacity;
     robotBtn.classList.toggle('in-progress', robotQueued > 0);
     const robotRemaining = robotQueued > 0 ? state.robotSpawnQueue[0].remaining : ROBOT.spawnTime;
     const robotFill = robotQueued > 0 ? 1 - robotRemaining / ROBOT.spawnTime : 0;
@@ -1678,7 +1727,7 @@ export function refreshUI(state: GameState) {
     const enoughSCs = scs >= TERMINATOR.spaceCentresRequired;
     const canAffordTerminator = state.money >= TERMINATOR.moneyCost;
     const termQueued = state.terminatorSpawnQueue.length;
-    terminatorBtn.disabled = !enoughSCs || !canAffordTerminator || termQueued >= TERMINATOR.spawnCapacity;
+    terminatorBtn.disabled = !enoughSCs || !canAffordTerminator || noHoles || termQueued >= TERMINATOR.spawnCapacity;
     terminatorBtn.classList.toggle('in-progress', termQueued > 0);
     const termRemaining = termQueued > 0 ? state.terminatorSpawnQueue[0].remaining : TERMINATOR.spawnTime;
     const termFill = termQueued > 0 ? 1 - termRemaining / TERMINATOR.spawnTime : 0;
@@ -1693,12 +1742,17 @@ export function refreshUI(state: GameState) {
     setBuyFlash('btn-summon-terminator', false);
   }
 
-  // Quick-travel strip — Lilly's fully-feed reward: Earth / Hell / Space
-  // jumps pinned at the top of the play area. Space stays hidden until orbit
-  // is reachable at all; the current view's button reads as lit + inert.
+  // Quick-travel strip — Lilly's fully-feed reward: Space / Earth / Hell
+  // jumps stacked at the top of the play area (Earth in the middle,
+  // mirroring the world). Space stays hidden until orbit is reachable at
+  // all; the current view's button reads as lit + inert. Until the player's
+  // first hop the whole strip pulses gold so the fresh unlock can't be
+  // missed up in the corner.
   const qtStrip = document.getElementById('quick-travel');
   if (qtStrip) {
-    qtStrip.classList.toggle('visible', revealedTaskIds.has('feed_hell_core'));
+    const qtVisible = revealedTaskIds.has('feed_hell_core');
+    qtStrip.classList.toggle('visible', qtVisible);
+    qtStrip.classList.toggle('attention', qtVisible && !state.quickTravelUsed);
     (document.getElementById('qt-space') as HTMLButtonElement).style.display =
       state.spaceUnlocked ? '' : 'none';
     const qtViews: [string, GameState['view']][] = [
@@ -1892,13 +1946,9 @@ export function refreshUI(state: GameState) {
     const label = document.getElementById('autospawn-level-label')!;
     label.textContent = state.autoSpawnLevel <= 0 ? 'off' : `x${state.autoSpawnLevel}`;
   }
-  // Autodragon — Lilly's destroy-a-robot reward; a one-shot ritual purchase.
-  refreshRitualButton(
-    'btn-buy-autodragon', 'cost-buy-autodragon',
-    revealedTaskIds.has('destroy_robot'),
-    state.autoDragonEnabled, state.blood >= SUMMON_UPGRADES.autoDragon.bloodCost,
-    `${SUMMON_UPGRADES.autoDragon.bloodCost} blood`,
-  );
+  // Autodragon — Lilly's destroy-a-robot reward, levelling through
+  // AUTODRAGON_TIERS (the same replace-chain treatment as Autospawn).
+  refreshAutodragonButton(state, revealedTaskIds.has('destroy_robot'));
   // Pain Gabbonsaw — surfaces once the final task's celebration clears, and
   // retires forever the moment it's bought (the ritual is very much one-shot).
   refreshRitualButton(
@@ -2121,6 +2171,10 @@ export function refreshUI(state: GameState) {
     spaceCentreBtn.disabled = !canAffordCentre;
     spaceCentreBtn.classList.toggle('active', state.pendingSpaceCentre);
     document.getElementById('cost-space-centre')!.classList.toggle('met', canAffordCentre);
+    // Same headroom check the ground build buttons run — without it the
+    // 10 GW figure stayed permanently unmet-red no matter the grid.
+    const centreDraw = -BUILDING_DEFS.space_centre.powerOutput;
+    document.getElementById('power-cost-space-centre')!.classList.toggle('met', centreDraw <= availablePower);
     // Mid-placement bankruptcy (mirrors the platform): can't pay any more →
     // leave placement mode.
     if (state.pendingSpaceCentre && !canAffordCentre) state.pendingSpaceCentre = false;
