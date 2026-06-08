@@ -1682,7 +1682,7 @@ function makeHellPortalMirror(b: Building): Container {
   }
   const body = new Graphics();
   body.rect(-half, -half, def.size, def.size).fill({ color: 0x2a0610, alpha: 0.95 });
-  body.rect(-half, -half, def.size, def.size).stroke({ width: 3, color: 0xff2030 });
+  body.rect(-half, -half, def.size, def.size).stroke({ width: 3, color: HELL.lineColor });
   // Glowing core square pulses with state.now via container.alpha tweak in
   // the render loop; we keep the geometry static.
   const core = new Graphics();
@@ -1694,29 +1694,39 @@ function makeHellPortalMirror(b: Building): Container {
   return c;
 }
 
-// Position the darkness veil's light pools: one fuzzy radial sprite per
-// active portal mirror and per demon, recycled from hellLightMask's children
-// (extras are hidden, not destroyed). The veil rect itself is drawn by
-// applyOptions; this only runs the per-frame tracking.
-function syncHellDarkness(ctx: RenderContext, state: GameState): void {
-  const o = getOptions();
-  if (!o.hellDarknessEnabled) return;
-  const mask = ctx.hellLightMask;
+// Recycle fuzzy radial light-pool sprites from a veil container's children
+// (extras are hidden, not destroyed). Returns `place` to position the next
+// pool and `hideRest` to hide whatever wasn't reused this frame. Shared by
+// the hell darkness veil and the parlay dim layer.
+function lightPoolPlacer(container: Container, alpha = 1) {
   let used = 0;
   const place = (x: number, y: number, radius: number) => {
-    let s = mask.children[used] as Sprite | undefined;
+    let s = container.children[used] as Sprite | undefined;
     if (!s) {
       s = new Sprite(getLightTexture());
       s.anchor.set(0.5);
       s.blendMode = 'erase';
-      mask.addChild(s);
+      container.addChild(s);
     }
     s.visible = true;
     s.position.set(x, y);
     s.scale.set((radius * 2) / LIGHT_TEX_SIZE);
-    s.alpha = o.hellDarknessLightAlpha;
+    s.alpha = alpha;
     used++;
   };
+  const hideRest = () => {
+    for (let i = used; i < container.children.length; i++) container.children[i].visible = false;
+  };
+  return { place, hideRest };
+}
+
+// Position the darkness veil's light pools: one fuzzy radial sprite per
+// active portal mirror and per demon. The veil rect itself is drawn by
+// applyOptions; this only runs the per-frame tracking.
+function syncHellDarkness(ctx: RenderContext, state: GameState): void {
+  const o = getOptions();
+  if (!o.hellDarknessEnabled) return;
+  const { place, hideRest } = lightPoolPlacer(ctx.hellLightMask, o.hellDarknessLightAlpha);
   for (const b of state.buildings.values()) {
     if (b.kind !== 'hell_portal' || b.state === 'constructing') continue;
     const ctr = buildingCenter(b);
@@ -1739,7 +1749,7 @@ function syncHellDarkness(ctx: RenderContext, state: GameState): void {
   }
   const speaker = getParlaySpeaker();
   if (speaker?.kind === 'ghost') litGhost(speaker.ghost.id);
-  for (let i = used; i < mask.children.length; i++) mask.children[i].visible = false;
+  hideRest();
 }
 
 // Drive the parlay dim: fade toward visible while a modal hell dialogue is
@@ -1756,21 +1766,7 @@ function syncParlayDim(ctx: RenderContext, state: GameState): void {
   layer.alpha += (target - layer.alpha) * 0.16;
   if (!active && layer.alpha < 0.01) { layer.visible = false; return; }
   layer.visible = true;
-  const lights = ctx.hellParlayLights;
-  let used = 0;
-  const place = (x: number, y: number, radius: number) => {
-    let s = lights.children[used] as Sprite | undefined;
-    if (!s) {
-      s = new Sprite(getLightTexture());
-      s.anchor.set(0.5);
-      s.blendMode = 'erase';
-      lights.addChild(s);
-    }
-    s.visible = true;
-    s.position.set(x, y);
-    s.scale.set((radius * 2) / LIGHT_TEX_SIZE);
-    used++;
-  };
+  const { place, hideRest } = lightPoolPlacer(ctx.hellParlayLights);
   const litGhost = (id: number) => {
     const v = ctx.ghostViews.get(id);
     if (v) place(v.container.position.x, v.container.position.y, o.hellDarknessParlayRadius);
@@ -1789,7 +1785,7 @@ function syncParlayDim(ctx: RenderContext, state: GameState): void {
       if (g.chatTargetId === speaker.ghost.id) litGhost(g.id);
     }
   }
-  for (let i = used; i < lights.children.length; i++) lights.children[i].visible = false;
+  hideRest();
 }
 
 // Redraw the soul sigil every frame: the central inner ring, the outer candle
@@ -1847,7 +1843,7 @@ function syncSoulSigil(ctx: RenderContext, state: GameState): void {
     // while the player is placing candles and the ring still has room.
     const placing = state.pendingCandle && !ringDone;
     const outerAlpha = placing ? 0.38 + 0.14 * Math.sin(now * 3) : 0.14;
-    ring.circle(center.x, center.y, ringRadius).stroke({ width: placing ? 3 : 2, color: 0xff2030, alpha: outerAlpha });
+    ring.circle(center.x, center.y, ringRadius).stroke({ width: placing ? 3 : 2, color: HELL.lineColor, alpha: outerAlpha });
 
     // A line links every pair of placed candles (the complete graph), so the
     // pentagram sketches itself in line by line as candles go down. Skip-one
@@ -1860,7 +1856,7 @@ function syncSoulSigil(ctx: RenderContext, state: GameState): void {
         const isStar = ordered.length < count || gap === 2; // skip-one pairs are the pentagram
         const alpha = isStar ? (completed ? 0.85 : 0.6) : (completed ? 0.4 : 0.26);
         ring.moveTo(ca.hx, ca.hy).lineTo(cb.hx, cb.hy)
-          .stroke({ width: isStar ? 5 : 3, color: 0xff2030, alpha });
+          .stroke({ width: isStar ? 5 : 3, color: HELL.lineColor, alpha });
         if (completed && isStar) {
           const a2 = 0.4 + 0.35 * Math.sin(now * 4);
           ring.moveTo(ca.hx, ca.hy).lineTo(cb.hx, cb.hy).stroke({ width: 2, color: 0xffe0a0, alpha: a2 });
