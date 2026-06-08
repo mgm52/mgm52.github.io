@@ -528,7 +528,7 @@ export async function runDemonDialogue(state: GameState, demon: Demon, ghost: Gh
         if (pick === new Date().getHours()) {
           demon.taskCount = tasks - 1;
           await say('demon', `${tasks - 1}.`, { literal: true });
-          await say('demon', 'do your tasks.', { literal: true });
+          await say('demon', 'do your Work.', { literal: true });
           await say('demon', "do⏸ *not*⏸ .nomed renroc tisiv", { literal: true });
         } else {
           await say('demon', 'no.', { literal: true });
@@ -540,18 +540,21 @@ export async function runDemonDialogue(state: GameState, demon: Demon, ghost: Gh
       await soulOpener();
       if (ghost.bob) {
         await say('demon', 'a clumsy wield of language');
-        await say('demon', 'have you *collected a dragon bone*?', { hold: true });
+        await say('demon', 'have you *collected 5 dragon bones*?', { hold: true });
         const yes = await ask();
         if (!yes) {
           await say('demon', 'begone and be useful');
-        } else if (state.dragonBone >= 1) {
+        } else if (state.dragonBone >= 5) {
+          // He takes the bones — the gift is a trade, not a blessing.
+          state.dragonBone -= 5;
           await ellipsisBeat();
           playSound('ritual', 0.85, 0.55);
           await say('demon', 'mmm');
           await say('demon', 'delicious. thank you my child');
           await say('demon', 'be witness to my gift');
-          state.blood += 9999;
-          appendLog(state, 'The demon grants Bob 9,999 blood.');
+          // Exactly the closing task's target (collect_blood in ui.ts).
+          state.blood += 9_999_999;
+          appendLog(state, 'The demon devours 5 dragon bones and grants Bob 9,999,999 blood.');
         } else {
           await ellipsisBeat();
           await say('demon', 'untruth');

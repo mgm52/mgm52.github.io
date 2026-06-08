@@ -240,7 +240,7 @@ export const HELL = {
 };
 
 // Demons — uncommandable denizens of hell. Three of them now: the original
-// colossus (demon "R", the Third Prince of Dark Enjoyment, right of the
+// colossus (demon "R", Hungry, right of the
 // landing zone, bellowing in ALL CAPS), his half-size counterpart across the
 // abyss (demon "L", Lilly, who speaks every word backwards), and Lilly's
 // smaller friend Lolly tucked away in a corner of the map.

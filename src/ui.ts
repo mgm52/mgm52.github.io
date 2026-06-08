@@ -564,15 +564,16 @@ const TASKS: Task[] = [
     optional: true,
   },
   {
-    // Main closing task: collecting five dragon bones (cumulative) fires the
-    // demo's "game's incomplete" alerts and unlocks the secret settings menu
-    // (see the revealSecretSettings gate in refreshUI). Dragon bones drop when
-    // one dragon incinerates another, so this needs the Dragon Beacon
-    // (build_hypercentre) first. Grants no building.
-    id: 'collect_dragon_bones',
-    text: 'Collect 5 dragon bones (somehow…)',
+    // Main closing task: amassing 9,999,999 blood fires the demo's "game's
+    // incomplete" alerts and unlocks the secret settings menu (see the
+    // revealSecretSettings gate in refreshUI). That figure is exactly what
+    // the pit colossus grants for feeding him 5 dragon bones (see
+    // demon-dialogue.ts), so the intended route runs through the Dragon
+    // Beacon (build_hypercentre) and a trip to hell. Grants no building.
+    id: 'collect_blood',
+    text: 'Collect 9,999,999 blood (somehow…)',
     unlocks: [],
-    isDone: (s) => s.dragonBoneEarned >= 5,
+    isDone: (s) => s.blood >= 9_999_999,
     prereq: ['build_hypercentre'],
   },
 ];
@@ -1252,6 +1253,10 @@ export function refreshUI(state: GameState) {
       // old id onto the new one so an in-progress save keeps Goldblins unlocked.
       if (u.completed.has('earn_30_blood')) u.completed.add('summon_minotaurs');
       if (u.revealed.has('earn_30_blood')) u.revealed.add('summon_minotaurs');
+      // Same for 'collect_dragon_bones' → 'collect_blood' (the closing task's
+      // goal changed; a save that finished the demo stays finished).
+      if (u.completed.has('collect_dragon_bones')) u.completed.add('collect_blood');
+      if (u.revealed.has('collect_dragon_bones')) u.revealed.add('collect_blood');
       for (const id of u.completed) { completedTaskIds.add(id); previouslyCompletedTaskIds.add(id); }
       for (const id of u.revealed) revealedTaskIds.add(id);
       for (const k of u.obsoleted) obsoletedKinds.add(k);
@@ -1480,10 +1485,11 @@ export function refreshUI(state: GameState) {
   const phaseGasTurbine = revealedTaskIds.has('build_gas_engine');
   const minotaurTaskDone = revealedTaskIds.has('summon_minotaurs');
 
-  // Collecting 5 dragon bones is the demo's closing easter egg: once that task
+  // Amassing 9,999,999 blood is the demo's closing easter egg: once that task
   // reveals, fire the "game's incomplete" alerts and unlock the secret settings
-  // menu. revealSecretSettings is guarded so it only runs once.
-  if (revealedTaskIds.has('collect_dragon_bones') && !state.optionsUnlocked) {
+  // menu. revealSecretSettings is guarded so it only runs once. (Old saves may
+  // carry the legacy 'collect_dragon_bones' id — migrated on load above.)
+  if (revealedTaskIds.has('collect_blood') && !state.optionsUnlocked) {
     revealSecretSettings(state);
   }
 
@@ -2040,16 +2046,16 @@ function showDemon(_state: GameState, d: Demon, panel: HTMLElement, portrait: HT
                    name: HTMLElement, stateEl: HTMLElement, extra: HTMLElement) {
   panel.classList.add('visible');
   portrait.innerHTML = `<div class="portrait-goblin" style="background:#2a0606;border-color:#ff5a4a;color:#ff8a6a">☠</div>`;
-  // Each demon carries its own name now: the colossus is the Third Prince of
-  // Dark Enjoyment; demon L is Lilly; her smaller corner-dwelling friend is
-  // Lolly.
+  // Each demon carries its own name now: the colossus is Hungry; demon L is
+  // Lilly; her smaller corner-dwelling friend is Lolly.
   const variant = d.variant ?? 'pit';
-  name.textContent = variant === 'pit' ? 'Third Prince of Dark Enjoyment'
+  name.textContent = variant === 'pit' ? 'Hungry'
     : variant === 'l' ? 'Lilly'
     : 'Lolly';
   stateEl.textContent = d.busyWith !== null ? 'Locked in parlay'
-    : variant === 'friend' ? 'Standing alone in a corner of the abyss'
-    : 'Standing watch over the abyss';
+    : variant === 'pit' ? 'Watching the abyss'
+    : variant === 'l' ? 'Circumallocating work'
+    : 'Longing';
   extra.innerHTML = `<span style="color:#ff4a4a">You cannot command this creature, only parlay</span>`;
 }
 
@@ -2426,18 +2432,19 @@ export function executeTaskSkip(state: GameState): void {
       state.bloodUnlocked = true;
       break;
     }
-    case 'collect_dragon_bones': {
-      // Bones only drop from dragon-on-dragon fratricide, so a real player has
-      // a powered Beacon and at least two live dragons circling by now. A single
-      // Beacon draws 5 GW, so the Hypercentre's lone reactor is nowhere near
-      // enough — the rig adds the nuclear plants needed to actually keep the
-      // Beacon lit. By this point a real player would also have flown a building
-      // to space, so unlock the ascent affordance too. Then grant the five bones
-      // so the resource row + count match the completed task; revealing it fires
-      // the secret-menu alerts in refreshUI.
+    case 'collect_blood': {
+      // The intended route to 9,999,999 blood runs through dragon bones (the
+      // pit colossus trades 5 of them for exactly that figure), so a real
+      // player has a powered Beacon and at least two live dragons circling by
+      // now. A single Beacon draws 5 GW, so the Hypercentre's lone reactor is
+      // nowhere near enough — the rig adds the nuclear plants needed to
+      // actually keep the Beacon lit. By this point a real player would also
+      // have flown a building to space, so unlock the ascent affordance too.
+      // Then grant the blood itself so the count matches the completed task;
+      // revealing it fires the secret-menu alerts in refreshUI.
       ensureDragonRig(state, 1, 2);
       state.money = Math.max(state.money, 50_000_000);
-      state.blood = Math.max(state.blood, 3000);
+      state.blood = Math.max(state.blood, 9_999_999);
       state.bloodUnlocked = true;
       state.spaceUnlocked = true;
       if (state.dragonBoneEarned < 5) earnDragonBone(state, 5 - state.dragonBoneEarned);

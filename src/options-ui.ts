@@ -353,7 +353,7 @@ function rebuildPanel(panel: HTMLElement, callbacks: OptionsUICallbacks, refresh
     slider('Anim speed', o.demonAnimSpeed, 0, 4, 0.1, (v) => setOption('demonAnimSpeed', v)),
     toggle('Foot shadow', o.demonShadow, (v) => setOption('demonShadow', v)),
     slider('Shadow Y', o.demonShadowY, 0, 500, 5, (v) => setOption('demonShadowY', v)),
-    // R — the pit colossus (Third Prince of Dark Enjoyment). Stand X/Y is the
+    // R — the pit colossus (Hungry). Stand X/Y is the
     // absolute hell position he holds while standing; the sprite offset
     // nudges only the art (and its shadow) relative to his selection circle /
     // collision centre.
