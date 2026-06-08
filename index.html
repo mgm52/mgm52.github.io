@@ -686,7 +686,10 @@
          button is lit + inert. */
       #quick-travel {
         position: absolute; top: 10px; right: 12px;
-        display: flex; gap: 6px; z-index: 6;
+        /* Stacked vertically to mirror the world: Space above, Earth in the
+           middle, Hell below. */
+        display: flex; flex-direction: column; gap: 6px; z-index: 6;
+        align-items: stretch;
         opacity: 0; pointer-events: none; transition: opacity 600ms ease;
       }
       #quick-travel.visible { opacity: 1; pointer-events: auto; }
@@ -695,9 +698,19 @@
         border: 1px solid rgba(150, 180, 255, 0.35); border-radius: 4px;
         font-family: var(--font-body); font-size: calc(14px * var(--font-body-scale));
         letter-spacing: 1px; padding: 7px 12px; cursor: pointer;
+        text-align: center;
         text-shadow: 0 0 8px rgba(120, 160, 255, 0.6);
       }
       #quick-travel button:hover:not(:disabled) { border-color: rgba(210, 225, 255, 0.85); }
+      /* Fresh-unlock attention: the strip pulses gold from the moment it
+         unlocks until the player's first quick hop, so the new buttons can't
+         be missed tucked up in the corner (ui.ts toggles .attention off the
+         sticky state.quickTravelUsed flag). */
+      #quick-travel.attention button { animation: qt-attention 1.5s ease-in-out infinite; }
+      @keyframes qt-attention {
+        0%, 100% { box-shadow: 0 0 0 0 rgba(255, 217, 107, 0); }
+        50% { box-shadow: 0 0 14px 2px rgba(255, 217, 107, 0.6); border-color: #ffd96b; }
+      }
       #quick-travel #qt-hell {
         background: rgba(28, 4, 6, 0.78); color: #ffd0c8;
         border-color: rgba(255, 80, 80, 0.45);
@@ -1644,9 +1657,9 @@
              in main.ts). Pinned top-right of the play area, just left of the
              sidebar. -->
         <div id="quick-travel">
+          <button id="qt-space" type="button">Space</button>
           <button id="qt-ground" type="button">Earth</button>
           <button id="qt-hell" type="button">Hell</button>
-          <button id="qt-space" type="button">Space</button>
         </div>
         <!-- Quick-travel blink: main.ts drives opacity 0→1→0 over ~0.3s while
              the view snaps underneath. -->

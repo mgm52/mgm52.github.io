@@ -1,6 +1,6 @@
 import { getAudioDebugInfo, playSound, preloadSounds, setCrackleEnabled, setGhostSendGain, setInHellView, setMasterVolume, setMusicDepth, setMusicVolume, startBackgroundCrackle, startBackgroundMusic } from './audio';
 import {
-  AUTOSPAWN_TIERS, CAMERA_SPEED, CELL, DRAGON, GOBLIN, GOLD_KILL_REWARD, HELL, KILL_REWARD, PAIN_GABBONSAW, ROBOT, SOUL_SIGIL,
+  AUTODRAGON_TIERS, AUTOSPAWN_TIERS, CAMERA_SPEED, CELL, DRAGON, GOBLIN, GOLD_KILL_REWARD, HELL, KILL_REWARD, PAIN_GABBONSAW, ROBOT, SOUL_SIGIL,
   START_CELL, SUMMON_UPGRADES, TERMINATOR, TICK_MS, MINOTAUR, WORLD, digBloodCost, minotaurBloodCost,
 } from './config';
 import { setupInput } from './input';
@@ -513,16 +513,29 @@ async function main() {
       state.autoSpawnLevel = Math.max(0, Math.min(state.autoSpawnMultiplier, multiplier));
     },
     onBuyAutoDragon: () => {
-      // Lilly's destroy-a-robot reward, bought like the other one-shot
-      // rituals. The per-spawn DRAGON.bloodCost still applies on each fire.
-      if (state.autoDragonEnabled) return;
-      const cost = SUMMON_UPGRADES.autoDragon.bloodCost;
-      if (state.blood < cost) { playSound('error'); return; }
-      state.blood -= cost;
-      state.autoDragonEnabled = true;
-      state.autoDragonTimer = 0;
+      // Lilly's destroy-a-robot reward, levelling through AUTODRAGON_TIERS
+      // like Autospawn. Each tier demands as many active Dragon Beacons as
+      // its multiplier — a beacon supports exactly one simultaneous ritual.
+      // The per-spawn DRAGON.bloodCost still applies on each fire.
+      const next = AUTODRAGON_TIERS.find((t) => t.multiplier > state.autoDragonMultiplier);
+      if (!next) return;
+      if (state.blood < next.bloodCost) { playSound('error'); return; }
+      let activeBeacons = 0;
+      for (const b of state.buildings.values()) {
+        if (b.kind === 'dragon_beacon' && b.state === 'active') activeBeacons++;
+      }
+      if (next.multiplier > activeBeacons) { playSound('error'); return; }
+      state.blood -= next.bloodCost;
+      state.autoDragonMultiplier = next.multiplier;
+      if (!state.autoDragonEnabled) {
+        state.autoDragonEnabled = true;
+        state.autoDragonTimer = 0;
+      }
       playSound('ritual');
-      appendLog(state, `Autodragon unlocked — a dragon ritual begins every ${SUMMON_UPGRADES.autoDragon.intervalSeconds}s while blood and beacons allow.`);
+      const cadence = SUMMON_UPGRADES.autoDragon.intervalSeconds / next.multiplier;
+      appendLog(state, next.multiplier === 1
+        ? `Autodragon unlocked — a dragon ritual begins every ${cadence}s while blood and beacons allow.`
+        : `Autodragon x${next.multiplier} — a ritual every ${cadence}s while blood and beacons allow.`);
     },
     onQuickTravel: (view: 'ground' | 'hell' | 'space') => quickTravel(view),
     onPlaceOrbital: () => {
@@ -870,6 +883,8 @@ async function main() {
         || state.bobPickingHole) return;
     if (view === 'hell' && !state.hellUnlocked) { playSound('error'); return; }
     if (view === 'space' && !state.spaceUnlocked) { playSound('error'); return; }
+    // First hop ever — retires the strip's fresh-unlock attention pulse.
+    state.quickTravelUsed = true;
     quickTravelBusy = true;
     playSound('ritual', 0.55, view === 'hell' ? 0.6 : 0.9);
     if (quickTravelFadeEl) quickTravelFadeEl.style.opacity = '1';

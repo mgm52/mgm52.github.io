@@ -118,13 +118,15 @@ export function tick(state: GameState) {
   }
 
   // ── 1c. Dragon spawn queue ───────────────────────────────────────
-  // Autodragon (Lilly's destroy-a-robot reward): every intervalSeconds, queue
-  // a dragon summon through the same gates the manual button enforces —
+  // Autodragon (Lilly's destroy-a-robot reward): every intervalSeconds —
+  // divided by the owned tier multiplier, so x2 fires twice as often — queue
+  // a dragon summon through the same gates the manual button enforces:
   // blood for the ritual, and an active Dragon Beacon with a free slot.
   if (state.autoDragonEnabled) {
     state.autoDragonTimer -= TICK_S;
     if (state.autoDragonTimer <= 0) {
-      state.autoDragonTimer += SUMMON_UPGRADES.autoDragon.intervalSeconds;
+      state.autoDragonTimer += SUMMON_UPGRADES.autoDragon.intervalSeconds
+        / Math.max(1, state.autoDragonMultiplier);
       let activeBeacons = 0;
       for (const b of state.buildings.values()) {
         if (b.kind === 'dragon_beacon' && b.state === 'active') activeBeacons++;

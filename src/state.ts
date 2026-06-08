@@ -706,10 +706,14 @@ export type GameState = {
   // "Prevent goblin spawning" task is done a slider under the Autospawn
   // button lets the player throttle it down to any owned tier, or 0 (off).
   autoSpawnLevel: number;
-  // Autodragon — Lilly's "Destroy a robot" reward, bought as a one-shot
-  // ritual: queues a dragon summon every SUMMON_UPGRADES.autoDragon
-  // .intervalSeconds while the blood + active-beacon gates allow it.
+  // Autodragon — Lilly's "Destroy a robot" reward, levelling through
+  // AUTODRAGON_TIERS like Autospawn: each tier quickens the cadence
+  // (intervalSeconds / multiplier) and demands as many active Dragon
+  // Beacons as its multiplier (one beacon = one simultaneous ritual).
+  // `autoDragonEnabled` stays the on/off flag (and the pre-tier save
+  // field); `autoDragonMultiplier` is the owned tier (0 = none).
   autoDragonEnabled: boolean;
+  autoDragonMultiplier: number;
   autoDragonTimer: number;
   // Set of dig directions already purchased ('n'|'e'|'s'|'w'); each expands
   // the play area by DIG.cells in that direction and reveals a water source.
@@ -816,6 +820,10 @@ export type GameState = {
   // One-shot — the button retires, Bob comes back for one last word, and
   // Lolly is loosed on the overworld.
   gabbonsawBought: boolean;
+  // Sticky: the player has used the quick-travel strip (Lilly's fully-feed
+  // reward) at least once. Until then the freshly-unlocked strip pulses gold
+  // for attention (see refreshUI). Optional for saves predating the strip.
+  quickTravelUsed?: boolean;
   // Sticky: Bob's soul and Lolly have slipped out of hell together — set once
   // all three of their hell beats are done (Lolly's corner conversation heard
   // through, Lilly's optional Work handed down, and demon R's bone trade
@@ -1237,6 +1245,7 @@ export function createInitialState(): GameState {
     autoSpawnMultiplier: 0,
     autoSpawnLevel: 0,
     autoDragonEnabled: false,
+    autoDragonMultiplier: 0,
     autoDragonTimer: 0,
     spawnHoleRotation: 0,
     dugDirections: new Set(),

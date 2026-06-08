@@ -588,6 +588,9 @@ export type RenderContext = {
   // the candle labels ("needs 4 candles" / "needs soul") are Text objects made
   // once and retargeted by ring state.
   soulSigilLayer: Container;
+  // The per-portal wattage readouts' own layer — above the hell units so a
+  // crowd of souls can't cover the number (see sigilPowerLabels below).
+  hellSigilLabelLayer: Container;
   soulSigilGfx: Graphics;
   soulChairGfx: Graphics;
   soulChairLabels: Map<number, Text>;
@@ -855,6 +858,10 @@ export async function createRender(parent: HTMLElement, state: GameState): Promi
   hellLayer.addChild(soulSigilLayer);
   hellLayer.addChild(hellGhostLayer);
   hellLayer.addChild(demonLayer);
+  // The sigils' wattage readouts ride above the ghosts and demons so a crowd
+  // milling around a mirror can't bury the number.
+  const hellSigilLabelLayer = new Container();
+  hellLayer.addChild(hellSigilLabelLayer);
   hellLayer.addChild(hellEffectsLayer);
   hellLayer.addChild(hellSideBeamGfx);
   hellLayer.addChild(hellFloatersLayer);
@@ -1003,7 +1010,7 @@ export async function createRender(parent: HTMLElement, state: GameState): Promi
     hellDarknessLayer, hellDarknessGfx, hellLightMask,
     hellParlayDimLayer, hellParlayDimGfx, hellParlayLights,
     hellPortalMirrors: new Map(),
-    soulSigilLayer, soulSigilGfx, soulChairGfx, soulChairLabels: new Map(),
+    soulSigilLayer, hellSigilLabelLayer, soulSigilGfx, soulChairGfx, soulChairLabels: new Map(),
     seatedSoulSprites: new Map(),
     sigilPowerLabels: new Map(),
     candleCursor: null,
@@ -2168,7 +2175,7 @@ function syncSoulSigil(ctx: RenderContext, state: GameState): void {
         },
       });
       power.anchor.set(0.5, 0);
-      ctx.soulSigilLayer.addChild(power);
+      ctx.hellSigilLabelLayer.addChild(power);
       ctx.sigilPowerLabels.set(portal.id, power);
     }
     const watts = sigilPortalOutput(defOf(portal).powerOutput, ordered);

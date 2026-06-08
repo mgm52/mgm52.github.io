@@ -380,11 +380,25 @@ export const SUMMON_UPGRADES = {
   goldgoblins: { bloodCost: 26 },
   goldgoblinsX10: { bloodCost: 128, multiplier: 10 },
   // Autodragon — unlocked by Lilly's "Destroy a robot" optional task. Once
-  // bought, a dragon summon is queued automatically every intervalSeconds,
-  // provided the player can cover the usual DRAGON.bloodCost and an active
-  // Dragon Beacon has a free ritual slot (same gates as the manual button).
-  autoDragon: { bloodCost: 256, intervalSeconds: 5 },
+  // bought, a dragon summon is queued automatically every intervalSeconds
+  // (divided by the owned AUTODRAGON_TIERS multiplier), provided the player
+  // can cover the usual DRAGON.bloodCost and an active Dragon Beacon has a
+  // free ritual slot (same gates as the manual button).
+  autoDragon: { intervalSeconds: 5 },
 };
+
+// Tier ladder for the Autodragon ritual, mirroring AUTOSPAWN_TIERS — each
+// purchase replaces the previous in the menu and quickens the cadence
+// (interval / multiplier). Where Autospawn tiers are capped by spawn
+// capacity (Goblin Holes grant several slots each), Autodragon tiers are
+// capped by Dragon Beacons, and a beacon supports exactly ONE simultaneous
+// dragon ritual — so Autodragon xN demands N active beacons.
+export const AUTODRAGON_TIERS: { multiplier: number; bloodCost: number }[] = [
+  { multiplier: 1, bloodCost: 256 },
+  { multiplier: 2, bloodCost: 512 },
+  { multiplier: 4, bloodCost: 1024 },
+  { multiplier: 8, bloodCost: 2048 },
+];
 
 // Pain Gabbonsaw — the demo's true closing ritual, surfaced once the final
 // (Collect 9,999,999 blood) task's celebration clears. Costs a fortune in
