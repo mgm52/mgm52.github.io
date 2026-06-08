@@ -1813,12 +1813,15 @@ export function refreshUI(state: GameState) {
   // First task is `earn_100`; check sticky completion as well as live state
   // so a save resumed mid-game doesn't pop the hint back up. Earning any
   // blood (sticky bloodUnlocked) means the player has already commanded
-  // violence, so the hint would be stale noise — never show it again.
+  // violence, so the hint would be stale noise — never show it again. A run
+  // that dev-skipped to hell jumped past the early game entirely, so the
+  // nudge stays suppressed there too.
   const spawnHint = document.getElementById('spawn-hint')!;
   const earn100Done = completedTaskIds.has('earn_100') || TASKS[0].isDone(state);
   const noSpawnTrip = state.spawnsCompleted === 0 && state.now >= SPAWN_HINT_NO_SPAWN_SEC;
   const noTaskTrip = !earn100Done && state.now >= SPAWN_HINT_NO_TASK_SEC;
-  spawnHint.classList.toggle('visible', !state.bloodUnlocked && (noSpawnTrip || noTaskTrip));
+  spawnHint.classList.toggle('visible',
+    !state.bloodUnlocked && !state.devSkippedToHell && (noSpawnTrip || noTaskTrip));
 
   // Drag-select hint — once past the first task, surface after DRAG_SELECT_HINT_DELAY_SEC
   // of play if the player still hasn't done a 2+ multi-select. Sticky-hidden

@@ -1,15 +1,15 @@
 import { getAudioDebugInfo, playSound, preloadSounds, setCrackleEnabled, setInHellView, setMasterVolume, setMusicDepth, setMusicVolume, startBackgroundCrackle, startBackgroundMusic } from './audio';
 import {
-  AUTOSPAWN_TIERS, CAMERA_SPEED, CELL, DRAGON, GOBLIN, GOLD_KILL_REWARD, HELL, KILL_REWARD, ROBOT, START_CELL,
-  SUMMON_UPGRADES, TICK_MS, MINOTAUR, WORLD, digBloodCost, minotaurBloodCost,
+  AUTOSPAWN_TIERS, CAMERA_SPEED, CELL, DRAGON, GOBLIN, GOLD_KILL_REWARD, HELL, KILL_REWARD, ROBOT, SOUL_SIGIL,
+  START_CELL, SUMMON_UPGRADES, TICK_MS, MINOTAUR, WORLD, digBloodCost, minotaurBloodCost,
 } from './config';
 import { setupInput } from './input';
 import { runDemonDialogue, runGhostChat } from './demon-dialogue';
 import { playIntroSequence, setIntroPaused, skipIntro } from './intro';
 import { getOptions, onOptionsChange } from './options';
-import { relockOptionsCog, setupOptionsUI } from './options-ui';
+import { getRestartInHell, relockOptionsCog, setupOptionsUI } from './options-ui';
 import { applyDomOptions, centerCameraOn, centerHellCameraOnWorld, centerSpaceCamera, clampCamera, clampHellCamera, clampSpaceCamera, createRender, currentHellScale, preloadRenderAssets, render, spaceCameraMaxY } from './render';
-import { appendLog, cellCenter, countHypercentres, createInitialState, destroyBuilding, digDirection, earnBlood, earnDragonBone, earnMoney, getSpawnCapacity, pushDeathEffect, pushFloater, recordGhost, removeGoblin, type GameState } from './state';
+import { appendLog, buildingCenter, cellCenter, countHypercentres, createInitialState, destroyBuilding, digDirection, earnBlood, earnDragonBone, earnMoney, getSpawnCapacity, pushDeathEffect, pushFloater, recordGhost, removeGoblin, type GameState, type Ghost } from './state';
 import { autoAssignAllIdle, spawnDragon, spawnMinotaur, spawnRobot, spawnTinytaur, tick } from './sim';
 import { ensureHellPortal, executeTaskSkip, refreshUI, setupUI } from './ui';
 import { clearSave, formatRelativeTime, getLastSaveStats, loadGame, saveGame, saveGameInBackground } from './save';
@@ -251,12 +251,19 @@ async function main() {
 
   // Now that sounds are queued, see what the player picked. Resume swaps
   // in the saved state; new game wipes any prior save and starts fresh.
-  const choice = await choicePromise;
+  // The dev "Restart in hell" checkbox overrides the pick: every reload is
+  // a fresh run that rides straight down (devSkipToHell fires post-setup).
+  // We still await the title screen first — in prod its click is what
+  // satisfies the browser's audio user-gesture requirement.
+  const restartInHell = getRestartInHell();
+  const picked = await choicePromise;
+  const choice = restartInHell ? 'new' : picked;
   // For brand-new games we play the goblin intro before revealing the spawn
   // panel and the first task. The intro: ~10s of free clicking, then the
   // goblin slides up, monologues, slides back out. Resumed games skip it
-  // entirely (the player has presumably already met the goblin).
-  const introWillPlay = choice === 'new';
+  // entirely (the player has presumably already met the goblin) — as do
+  // restart-in-hell runs, which would cut it off mid-descent anyway.
+  const introWillPlay = choice === 'new' && !restartInHell;
   if (introWillPlay) {
     // intro-hold suppresses the spawn panel + (via the existing .revealed
     // gate) the task text. Removed once the intro promise resolves. Purely
@@ -306,6 +313,69 @@ async function main() {
   // Dev cheat flag: set by the options menu's "skip to hell" button,
   // consumed at the top of the frame loop (where the transition state lives).
   let requestSkipToHell = false;
+  // The "skip to hell" cheat — also fired at startup by the "Restart in
+  // hell" checkbox. Conjures an active Hell Portal if none exists, stocks
+  // the underworld, then rides the beam straight down. Only meaningful from
+  // the ground view (transitions are ground↔space / ground↔hell).
+  const devSkipToHell = () => {
+    // Cut the goblin intro short first so a fresh session isn't left
+    // descending behind the cutscene's input hold.
+    skipIntro();
+    if (state.view !== 'ground') return;
+    // Skip enough of the work chain that candles are usable on arrival —
+    // placement needs blood unlocked and at least one candle's worth. On a
+    // fresh run that's two skips (earn_100, then run_phone_farm); a run
+    // that's already mid-game may need none.
+    for (let i = 0; i < 8 && !(state.bloodUnlocked && state.blood >= SOUL_SIGIL.candleBloodCost); i++) {
+      executeTaskSkip(state);
+    }
+    if (!ensureHellPortal(state)) {
+      appendLog(state, 'Cheat: nowhere to fit a Hell Portal.');
+      return;
+    }
+    // Stock the underworld so the drop-in lands somewhere lived-in. Ghost
+    // hell coords are world coords shifted by the hell offset, so spawning
+    // around the portal's world centre scatters them around its abyssal
+    // mirror — right where the descent deposits the camera.
+    const portal = [...state.buildings.values()].find((b) => b.kind === 'hell_portal' && b.state !== 'constructing');
+    const pc = portal ? buildingCenter(portal) : { x: WORLD.width / 2, y: WORLD.height / 2 };
+    // Bob waits below — the demons' best material is written for him. A
+    // living Bob is claimed by the descent (his soul records where he
+    // stood); a never-summoned Bob gets his ghost conjured by the mirror.
+    if (!state.ghosts.some((g) => g.bob)) {
+      const liveBob = [...state.goblins.values()].find((g) => g.bob);
+      if (liveBob) {
+        recordGhost(state, 'goblin', liveBob.pos.x, liveBob.pos.y, liveBob.facing, { bob: true });
+        removeGoblin(state, liveBob.id);
+      } else {
+        recordGhost(state, 'goblin', pc.x + 120, pc.y + 420, Math.PI / 2, { bob: true, quiet: true });
+      }
+      // Bob's already below — the building-placement cutscene never re-offers.
+      state.bobSpawned = true;
+    }
+    // A drifting crowd to parlay/seat/chat with: mostly goblins, a few
+    // minotaurs, a couple of dragons. Only when hell is near-empty so
+    // repeated skips don't pile up an army.
+    if (state.ghosts.filter((g) => !g.bob).length < 5) {
+      const crowd: Ghost['kind'][] = [
+        ...Array<Ghost['kind']>(12).fill('goblin'),
+        'minotaur', 'minotaur', 'minotaur',
+        'dragon', 'dragon',
+      ];
+      for (const kind of crowd) {
+        recordGhost(
+          state, kind,
+          pc.x + (Math.random() - 0.5) * 1400,
+          pc.y - 200 - Math.random() * 900,
+          Math.random() * Math.PI * 2,
+          { quiet: true },
+        );
+      }
+    }
+    appendLog(state, 'Cheat: descending into hell.');
+    state.devSkippedToHell = true;
+    requestSkipToHell = true;
+  };
   // Wire up the DOM-only UI (sidebar buttons, options cog, task text) and
   // run one refresh now so the sidebar is fully populated while the title
   // screen is still fading out. Pixi setup (createRender/setupInput) can
@@ -337,21 +407,14 @@ async function main() {
       state.bobCheatPending = true;
       appendLog(state, 'Cheat: Bob will appear on your next building placement.');
     },
-    onSkipToHell: () => {
-      // Conjure an active Hell Portal if none exists, then ride its beam
-      // straight down. Only meaningful from the ground view (transitions are
-      // ground↔space / ground↔hell), and not while another one is running.
-      if (state.view !== 'ground') return;
-      if (!ensureHellPortal(state)) {
-        appendLog(state, 'Cheat: nowhere to fit a Hell Portal.');
-        return;
-      }
-      appendLog(state, 'Cheat: descending into hell.');
-      requestSkipToHell = true;
-    },
+    onSkipToHell: devSkipToHell,
     onTaskSkip: () => { skipIntro(); executeTaskSkip(state); },
     onShowTitleScreen: () => { void showTitleScreen(); },
   });
+  // "Restart in hell": this run started fresh (choice forced to 'new'), so
+  // ride straight down. The flag just queues requestSkipToHell — the frame
+  // loop consumes it once everything below has finished setting up.
+  if (restartInHell) devSkipToHell();
   setupUI(state, {
     onSpawnGoblin: () => {
       if (state.money < GOBLIN.spawnCost) { playSound('error'); return; }

@@ -905,6 +905,15 @@
         font-size: 11px; text-transform: uppercase; letter-spacing: 2px;
         color: #8a9099; margin-bottom: 6px;
       }
+      /* In-section divider — groups related rows inside a long section
+         (e.g. one block per demon in the Demons section). */
+      .options-subheader {
+        font-family: var(--font-display);
+        font-size: 10px; text-transform: uppercase; letter-spacing: 1.5px;
+        color: #6a7080;
+        margin: 10px 0 2px; padding-bottom: 3px;
+        border-bottom: 1px solid #2e3238;
+      }
       /* Collapsible (admin-panel) sections: a <details> whose <summary> is the
          section title with a rotating chevron. Collapsed sections pack tight
          so the long panel scans as a table of contents. */
@@ -1420,6 +1429,39 @@
         text-align: center;
         white-space: nowrap;
       }
+      /* Hour picker for demon L's clock quiz — a 6×4 grid of 0–23. Buttons
+         are filled in by demon-dialogue.ts on first use. */
+      #demon-hours {
+        position: absolute;
+        left: 50%; top: 62%;
+        transform: translate(-50%, -50%);
+        display: grid;
+        grid-template-columns: repeat(6, minmax(48px, 1fr));
+        gap: 10px;
+        max-width: 92vw;
+        opacity: 0;
+        pointer-events: none;
+        transition: opacity 400ms ease;
+        z-index: 11;
+      }
+      #demon-overlay.show-hours #demon-hours {
+        opacity: 1;
+        pointer-events: auto;
+      }
+      #demon-hours .build-button {
+        width: auto;
+        min-width: 0;
+        box-shadow:
+          0 6px 18px rgba(0, 0, 0, 0.55),
+          0 2px 6px rgba(0, 0, 0, 0.45);
+      }
+      #demon-hours .build-name {
+        font-family: var(--font-display);
+        font-size: 18px;
+        letter-spacing: 0.1em;
+        text-align: center;
+        white-space: nowrap;
+      }
 
       /* ───────── Portrait phones — stacked layout ─────────
          Held upright, the side-by-side layout has nowhere to put a 280px
@@ -1606,6 +1648,9 @@
               </div>
             </button>
           </div>
+          <!-- 0–23 hour grid for demon L's clock quiz; demon-dialogue.ts
+               populates the buttons lazily on first use. -->
+          <div id="demon-hours"></div>
           <div id="demon-clickwall"></div>
         </div>
         <div id="info-panel">

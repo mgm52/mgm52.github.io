@@ -213,8 +213,8 @@ let musicEl: HTMLAudioElement | null = null;
 // Flat boost on the music quartet only (not the crackle). The music had been
 // riding at master×music = 0.49 since the music slider was split out from
 // master, which read noticeably softer than the older master-only default.
-// This pulls it back up by 50%; the result is still clamped to 1.
-const MUSIC_GAIN = 1.5;
+// This pulls it back up by 80%; the result is still clamped to 1.
+const MUSIC_GAIN = 1.8;
 function effectiveMusicVolume(): number {
   return Math.max(0, Math.min(1, masterVolume * musicVolume * MUSIC_GAIN));
 }

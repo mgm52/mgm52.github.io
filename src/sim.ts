@@ -1017,7 +1017,7 @@ function updateDemon(state: GameState, d: Demon) {
   // speaker (handled above).
   const o = getOptions();
   if (o.demonWalks) {
-    d.hy += d.dir * DEMON.speed * TICK_S;
+    d.hy += d.dir * DEMON.speed * o.demonWalkSpeed * TICK_S;
     if (d.hy >= d.y1) { d.hy = d.y1; d.dir = -1; }
     else if (d.hy <= d.y0) { d.hy = d.y0; d.dir = 1; }
     d.facing = d.dir > 0 ? Math.PI / 2 : -Math.PI / 2;
@@ -1027,6 +1027,9 @@ function updateDemon(state: GameState, d: Demon) {
       : variant === 'friend' ? o.demonFriendFacing
       : o.demonFacing;
     d.facing = DEMON_FACING_ANGLE[facing];
+    d.hx = variant === 'l' ? o.demonLX
+      : variant === 'friend' ? o.demonFriendX
+      : o.demonRX;
     d.hy = variant === 'l' ? o.demonLY
       : variant === 'friend' ? o.demonFriendY
       : o.demonRY;

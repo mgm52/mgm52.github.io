@@ -1,4 +1,4 @@
-import { DEMON, HELL } from './config';
+import { DEMON, HELL, SOUL_SIGIL } from './config';
 
 export type BgPattern = 'solid' | 'checker';
 
@@ -214,40 +214,77 @@ export type Options = {
   hellBgBottom: number;       // bottom of the vertical gradient
   hellGlowColor: number;      // tint of the soft fog blooms
   hellGlowIntensity: number;  // multiplier on every glow ring's alpha
+  hellGlowSteps: number;      // concentric rings per fog bloom (more = smoother gradient)
   hellEmberCount: number;     // number of ember specks scattered across the bg
   hellEmberBrightness: number; // multiplier on every ember's alpha
   hellEmberSize: number;      // multiplier on every ember's radius (1 = native size)
   hellGhostAlpha: number;     // overall alpha applied to ghost containers
   hellGhostBrightness: number; // multiplier on ghost-layer brightness (1 = no change)
+  hellGhostTint: number;      // silhouette tint (gold goblins keep their gold)
   hellGhostFallSpeed: number; // px/sec the ghosts drift downward in hell
   hellBloodColor: number;     // tint applied to the hell-side death splatters
-  // Demon (the giant hell Minotaur) dev controls: render scale, whether it
-  // patrols its band or stands frozen, plus its own saturation/brightness
-  // colour filter. Facing is per-demon: the colossus (R), demon L, and L's
-  // friend each get their own standing direction.
+  // The halo ring(s) around each hell-side portal mirror — the stroked
+  // circles that make the portal read as an emanation in the underworld.
+  hellPortalRingCount: number;   // 0 hides them entirely
+  hellPortalRingRadius: number;  // innermost ring radius, as a multiple of the portal's size
+  hellPortalRingSpacing: number; // px between successive rings
+  hellPortalRingWidth: number;   // stroke width, px
+  hellPortalRingColor: number;
+  hellPortalRingAlpha: number;
+  // The soul sigil's red inner ring — the occult circle drawn at the mirror,
+  // inside the candle ring. Alpha is the idle level; sigil completion still
+  // layers its brightening pulse on top.
+  hellSigilRingRadius: number;   // hell-px (config SOUL_SIGIL.innerRadius was 110)
+  hellSigilRingWidth: number;    // stroke width, px
+  hellSigilRingColor: number;
+  hellSigilRingAlpha: number;
+  // Darkness veil — optional "lights out" pass over the hell scene: the whole
+  // underworld dims toward the veil colour except fuzzy pools of visibility
+  // around each portal mirror and each demon. Off by default (no veil at all).
+  hellDarknessEnabled: boolean;
+  hellDarknessAlpha: number;        // veil opacity (1 = pitch black outside the pools)
+  hellDarknessColor: number;
+  hellDarknessMirrorRadius: number; // light-pool radius around portal mirrors, hell-px
+  hellDarknessDemonRadius: number;  // light-pool radius around demons (rides demon size)
+  hellDarknessLightAlpha: number;   // how fully a pool cuts the veil (1 = fully clear)
+  // Demon (the giant hell denizens) dev controls: render scale, whether they
+  // patrol their band or stand frozen, plus their own saturation/brightness
+  // colour filter. Sprite sheet and facing are per-demon: the colossus (R),
+  // demon L, and L's friend each get their own art and standing direction.
   demonScale: number;         // multiplier on DEMON.displayPx (1 = native size)
   demonWalks: boolean;        // false = stands still at its current spot
+  demonWalkSpeed: number;     // multiplier on DEMON.speed while patrolling
+  demonAnimSpeed: number;     // multiplier on the sheet's natural fps (minotaur only — the statue is static)
+  demonShadow: boolean;       // demons' own foot-shadow toggle
+  demonShadowY: number;       // shadow centre below the demon centre (px, pre-demonScale)
   demonFacing: DemonFacing;   // demon R's standing facing (walking overrides it)
   demonSaturation: number;
   demonBrightness: number;
-  // Per-demon standing position (absolute hell-y, applied each tick while the
-  // demon stands; the walk toggle overrides it) and per-demon sprite Y nudge
-  // relative to the selection circle / collision centre (the ring and body
-  // radius stay put; only the art moves).
+  demonHue: number;           // hue rotation in degrees (-180..180, 0 = natural)
+  // Per-demon standing position (absolute hell coords, applied each tick
+  // while the demon stands; the walk toggle overrides Y) and per-demon sprite
+  // Y nudge relative to the selection circle / collision centre (the ring and
+  // body radius stay put; only the art moves).
+  demonRX: number;
   demonRY: number;
+  demonRSprite: DemonSprite;  // which sheet the colossus draws from
   demonRSpriteYOffset: number;
-  demonRTint: number;         // sprite tint over the (shared) minotaur art
+  demonRTint: number;         // sprite tint over the demon art
   // Demon L (Lilly) — live size (fraction of the colossus; also scales her
-  // parlay/hit/body radii), standing facing, stand-y, and sprite nudge.
+  // parlay/hit/body radii), standing facing, stand position, and sprite nudge.
   demonLScale: number;
   demonLFacing: DemonFacing;
+  demonLX: number;
   demonLY: number;
+  demonLSprite: DemonSprite;
   demonLSpriteYOffset: number;
   demonLTint: number;
   // Lolly (L's friend) — her own live size plus the same per-demon dials.
   demonFriendScale: number;
   demonFriendFacing: DemonFacing;
+  demonFriendX: number;
   demonFriendY: number;
+  demonFriendSprite: DemonSprite;
   demonFriendSpriteYOffset: number;
   demonFriendTint: number;
   // Robots — the late-game grey summons. Live-tunable look + orbital speed.
@@ -256,6 +293,10 @@ export type Options = {
   robotGreyscale: boolean;  // desaturate the goblin art (off = tint over green)
   robotSpaceSpeed: number;  // space-px/sec a robot paddles toward a platform
 };
+
+// A sheet base-name from assets/demons/ (auto-discovered via the manifest —
+// see demon-sheets.ts), or 'minotaur' for the classic walk-cycle art.
+export type DemonSprite = string;
 
 export type DemonFacing =
   | 'down' | 'up' | 'left' | 'right'
@@ -339,40 +380,73 @@ export const DEFAULT_OPTIONS: Options = {
   // Hell defaults — pulled down from the earlier "way too light" pass so the
   // underworld reads as oppressive: a near-black maroon gradient with a few
   // dim red blooms and a sparse ember dust. Tunable from the admin cog.
-  hellBgTop: 0xcb0606,
-  hellBgBottom: 0x2a0608,
+  hellBgTop: 0x8b0404,
+  hellBgBottom: 0x1f0506,
   hellGlowColor: 0xff3010,
-  hellGlowIntensity: 0.65,
+  hellGlowIntensity: 0.8,
+  hellGlowSteps: 20,
   hellEmberCount: 525,
-  hellEmberBrightness: 0.55,
-  hellEmberSize: 1.0,
-  hellGhostAlpha: 0.84,
-  hellGhostBrightness: 1.05,
+  hellEmberBrightness: 1.5,
+  hellEmberSize: 1.1,
+  hellGhostAlpha: 0.76,
+  hellGhostBrightness: 0.7,
+  hellGhostTint: 0x775037,
   hellGhostFallSpeed: 7,
   hellBloodColor: 0x4a8acf,
+  // Mirror halo defaults mirror the old hardcoded look: one pale ring at
+  // 2.2× the portal's footprint.
+  hellPortalRingCount: 6,
+  hellPortalRingRadius: 2.2,
+  hellPortalRingSpacing: 40,
+  hellPortalRingWidth: 3,
+  hellPortalRingColor: 0xfff4c0,
+  hellPortalRingAlpha: 0.06,
+  // Sigil inner-ring defaults mirror the old hardcoded look.
+  hellSigilRingRadius: 280,
+  hellSigilRingWidth: 4,
+  hellSigilRingColor: 0x000000,
+  hellSigilRingAlpha: 0.56,
+  hellDarknessEnabled: true,
+  hellDarknessAlpha: 0.34,
+  hellDarknessColor: 0x000000,
+  hellDarknessMirrorRadius: 140,
+  hellDarknessDemonRadius: 1070,
+  hellDarknessLightAlpha: 1,
   demonScale: 1,
-  // Demons stand still by default now, each facing its own direction: R faces
-  // left, L faces right (eyeing each other across the abyss), Lolly faces
-  // up-left into her corner. The walk toggle resumes the old patrol for all
-  // of them. Stand-Y defaults mirror where createDemons seeds them; sprite Y
-  // offsets start neutral; all three share the deep infernal red tint.
+  // Demons stand still by default now, each facing its own direction: R
+  // faces down toward the viewer, L down-right, Lolly up-left into her
+  // corner. The walk toggle resumes the old patrol for all of them. Stand
+  // X/Y defaults mirror where createDemons seeds them. R and L wear the
+  // young-mask art under muted grey tints; Lolly wears its dark variant
+  // untinted.
   demonWalks: false,
-  demonFacing: 'left',
-  demonSaturation: 1,
-  demonBrightness: 1,
+  demonWalkSpeed: 1,
+  demonAnimSpeed: 1,
+  demonShadow: true,
+  demonShadowY: 320,
+  demonFacing: 'down',
+  demonSaturation: 3,
+  demonBrightness: 1.4,
+  demonHue: -17,
+  demonRX: HELL.width / 2 + DEMON.spawnOffsetX,
   demonRY: HELL.height / 2,
-  demonRSpriteYOffset: 0,
-  demonRTint: 0x7a2014,
+  demonRSprite: 'young_mask_imitate_idle_b',
+  demonRSpriteYOffset: -105,
+  demonRTint: 0x8c8c8c,
   demonLScale: 0.5,           // mirrors DEMON.smallScale
-  demonLFacing: 'right',
+  demonLFacing: 'downright',
+  demonLX: HELL.width / 2 - DEMON.spawnOffsetX,
   demonLY: HELL.height / 2,
-  demonLSpriteYOffset: 0,
-  demonLTint: 0x7a2014,
+  demonLSprite: 'young_mask_imitate_idle_b',
+  demonLSpriteYOffset: -130,
+  demonLTint: 0x4f4f4f,
   demonFriendScale: 0.35,     // mirrors DEMON.friendScale
   demonFriendFacing: 'upleft',
+  demonFriendX: DEMON.friendCorner.x,
   demonFriendY: DEMON.friendCorner.y,
-  demonFriendSpriteYOffset: 0,
-  demonFriendTint: 0x7a2014,
+  demonFriendSprite: 'young_mask_imitate_idle_b_dark',
+  demonFriendSpriteYOffset: -115,
+  demonFriendTint: 0xffffff,
   // Robot defaults — a small white chassis. The greyscale filter is what makes
   // the green goblin art read as metal; the tint then shades the grey.
   robotScale: 0.72,

@@ -1,4 +1,5 @@
 import { HELL } from './config';
+import { getDemonSheetList, loadDemonSheetList } from './demon-sheets';
 import {
   DEFAULT_OPTIONS, FONT_FAMILIES, FONT_KEYS, ensureFontLoaded,
   getOptions, resetOptions, setAllFontFamilies, setFontConfig, setOption,
@@ -72,6 +73,12 @@ export function setupOptionsUI(root: HTMLElement, callbacks: OptionsUICallbacks)
 
   rebuildPublicPanel(publicPanel);
   rebuildPanel(adminPanel, callbacks, () => rebuildPublicPanel(publicPanel));
+  // The demon-sprite dropdowns list whatever sheets the assets/demons/
+  // manifest delivers; that fetch is async, so re-render the panel once it
+  // lands (the panel is hidden this early — nobody sees the flash).
+  void loadDemonSheetList().then(() => {
+    rebuildPanel(adminPanel, callbacks, () => rebuildPublicPanel(publicPanel));
+  });
 
   root.appendChild(publicCog);
   root.appendChild(publicPanel);
@@ -144,6 +151,17 @@ function rebuildPublicPanel(panel: HTMLElement): void {
 
 const SECRET_UNLOCK_KEY = 'gs.optionsCog.secretUnlocked';
 
+// Dev convenience flag (plain localStorage, not part of Options or the save):
+// when on, every page reload wipes the run and rides straight down to hell.
+// Read by main.ts at startup; toggled from the Cheats section. Off by default.
+const RESTART_IN_HELL_KEY = 'gs.restartInHell';
+export function getRestartInHell(): boolean {
+  try { return localStorage.getItem(RESTART_IN_HELL_KEY) === '1'; } catch { return false; }
+}
+function setRestartInHell(v: boolean): void {
+  try { localStorage.setItem(RESTART_IN_HELL_KEY, v ? '1' : '0'); } catch { /* no-op */ }
+}
+
 // Reveals the options cog. In prod it's revealed by the demon's gift to a
 // truthful Bob (revealSecretSettings in ui.ts) or the secret shift-click /
 // long-press R gesture below. Persists in localStorage so it survives reloads.
@@ -186,6 +204,17 @@ const FACING_OPTS = [
   { value: 'downleft',  label: 'Down-left' },
   { value: 'downright', label: 'Down-right' },
 ];
+
+// Per-demon art: every turntable sheet auto-discovered in assets/demons/
+// (drop a .json+.png pair in the folder and it shows up here), plus the old
+// minotaur walk cycle. Built per-rebuild — the panel re-renders once the
+// manifest fetch lands, so the list is complete by the time anyone opens it.
+function demonSpriteOpts(): { value: string; label: string }[] {
+  return [
+    ...getDemonSheetList().map(({ id, label }) => ({ value: id, label })),
+    { value: 'minotaur', label: 'Minotaur (classic)' },
+  ];
+}
 
 function rebuildPanel(panel: HTMLElement, callbacks: OptionsUICallbacks, refreshPublic?: () => void): void {
   panel.innerHTML = '';
@@ -270,40 +299,83 @@ function rebuildPanel(panel: HTMLElement, callbacks: OptionsUICallbacks, refresh
     color('BG bottom',       o.hellBgBottom,        (v) => setOption('hellBgBottom', v)),
     color('Glow color',      o.hellGlowColor,       (v) => setOption('hellGlowColor', v)),
     slider('Glow intensity', o.hellGlowIntensity, 0, 3, 0.05, (v) => setOption('hellGlowIntensity', v)),
+    slider('Glow granularity', o.hellGlowSteps, 1, 40, 1, (v) => setOption('hellGlowSteps', v)),
     slider('Ember count',    o.hellEmberCount, 0, 2500, 25, (v) => setOption('hellEmberCount', v)),
     slider('Ember brightness', o.hellEmberBrightness, 0, 1.5, 0.05, (v) => setOption('hellEmberBrightness', v)),
     slider('Ember size',     o.hellEmberSize, 0.1, 5, 0.1, (v) => setOption('hellEmberSize', v)),
     slider('Ghost alpha',    o.hellGhostAlpha, 0, 1, 0.02, (v) => setOption('hellGhostAlpha', v)),
-    slider('Ghost brightness', o.hellGhostBrightness, 0, 3, 0.05, (v) => setOption('hellGhostBrightness', v)),
+    slider('Ghost brightness', o.hellGhostBrightness, 0, 8, 0.05, (v) => setOption('hellGhostBrightness', v)),
+    color('Ghost tint',      o.hellGhostTint,       (v) => setOption('hellGhostTint', v)),
     slider('Ghost fall (px/s)', o.hellGhostFallSpeed, 0, 60, 1, (v) => setOption('hellGhostFallSpeed', v)),
     color('Blood splatter',  o.hellBloodColor,      (v) => setOption('hellBloodColor', v)),
+    // The halo rings around each portal's hell-side mirror.
+    subheader('Portal mirror rings'),
+    slider('Ring count',   o.hellPortalRingCount, 0, 8, 1, (v) => setOption('hellPortalRingCount', v)),
+    slider('Ring radius',  o.hellPortalRingRadius, 0.5, 6, 0.1, (v) => setOption('hellPortalRingRadius', v)),
+    slider('Ring spacing', o.hellPortalRingSpacing, 5, 200, 5, (v) => setOption('hellPortalRingSpacing', v)),
+    slider('Ring width',   o.hellPortalRingWidth, 1, 16, 0.5, (v) => setOption('hellPortalRingWidth', v)),
+    color('Ring color',    o.hellPortalRingColor, (v) => setOption('hellPortalRingColor', v)),
+    slider('Ring alpha',   o.hellPortalRingAlpha, 0, 1, 0.02, (v) => setOption('hellPortalRingAlpha', v)),
+    // The soul sigil's red inner ring at the mirror's centre.
+    subheader('Sigil inner ring'),
+    slider('Radius',     o.hellSigilRingRadius, 20, 400, 5, (v) => setOption('hellSigilRingRadius', v)),
+    slider('Width',      o.hellSigilRingWidth, 1, 16, 0.5, (v) => setOption('hellSigilRingWidth', v)),
+    color('Color',       o.hellSigilRingColor, (v) => setOption('hellSigilRingColor', v)),
+    slider('Idle alpha', o.hellSigilRingAlpha, 0, 1, 0.02, (v) => setOption('hellSigilRingAlpha', v)),
+    // "Lights out" hell: dark veil with fuzzy visibility pools around the
+    // mirrors and demons.
+    subheader('Darkness veil'),
+    toggle('Enabled',          o.hellDarknessEnabled, (v) => setOption('hellDarknessEnabled', v)),
+    slider('Veil alpha',       o.hellDarknessAlpha, 0, 1, 0.02, (v) => setOption('hellDarknessAlpha', v)),
+    color('Veil color',        o.hellDarknessColor, (v) => setOption('hellDarknessColor', v)),
+    slider('Mirror light radius', o.hellDarknessMirrorRadius, 50, 1500, 10, (v) => setOption('hellDarknessMirrorRadius', v)),
+    slider('Demon light radius',  o.hellDarknessDemonRadius, 50, 1500, 10, (v) => setOption('hellDarknessDemonRadius', v)),
+    slider('Light strength',   o.hellDarknessLightAlpha, 0, 1, 0.02, (v) => setOption('hellDarknessLightAlpha', v)),
   ]));
 
+  // The Demons section grew enough dials that it reads as four mini-panels:
+  // shared look/behaviour first, then one block per demon.
   panel.appendChild(collapsibleSection('Demons', [
-    slider('Size (all)', o.demonScale, 0.2, 3, 0.05, (v) => setOption('demonScale', v)),
-    toggle('Walk (patrol)', o.demonWalks, (v) => setOption('demonWalks', v)),
+    subheader('All demons'),
+    slider('Size', o.demonScale, 0.2, 3, 0.05, (v) => setOption('demonScale', v)),
+    slider('Hue', o.demonHue, -180, 180, 1, (v) => setOption('demonHue', v)),
     slider('Saturation', o.demonSaturation, 0, 3, 0.05, (v) => setOption('demonSaturation', v)),
     slider('Brightness', o.demonBrightness, 0, 3, 0.05, (v) => setOption('demonBrightness', v)),
-    // R — the pit colossus (Third Prince of Dark Enjoyment). Stand Y is the
-    // absolute hell-y he holds while standing; the sprite offset nudges only
-    // the art relative to his selection circle / collision centre.
-    select('R facing (standing)', o.demonFacing, FACING_OPTS, (v) => setOption('demonFacing', v as Options['demonFacing'])),
-    slider('R stand Y', o.demonRY, 0, HELL.height, 10, (v) => setOption('demonRY', v)),
-    slider('R sprite Y offset', o.demonRSpriteYOffset, -400, 400, 5, (v) => setOption('demonRSpriteYOffset', v)),
-    color('R tint', o.demonRTint, (v) => setOption('demonRTint', v)),
+    toggle('Walk (patrol)', o.demonWalks, (v) => setOption('demonWalks', v)),
+    slider('Walk speed', o.demonWalkSpeed, 0.1, 5, 0.1, (v) => setOption('demonWalkSpeed', v)),
+    slider('Anim speed', o.demonAnimSpeed, 0, 4, 0.1, (v) => setOption('demonAnimSpeed', v)),
+    toggle('Foot shadow', o.demonShadow, (v) => setOption('demonShadow', v)),
+    slider('Shadow Y', o.demonShadowY, 0, 500, 5, (v) => setOption('demonShadowY', v)),
+    // R — the pit colossus (Third Prince of Dark Enjoyment). Stand X/Y is the
+    // absolute hell position he holds while standing; the sprite offset
+    // nudges only the art (and its shadow) relative to his selection circle /
+    // collision centre.
+    subheader('R — the colossus'),
+    select('Sprite', o.demonRSprite, demonSpriteOpts(), (v) => setOption('demonRSprite', v)),
+    select('Facing (standing)', o.demonFacing, FACING_OPTS, (v) => setOption('demonFacing', v as Options['demonFacing'])),
+    slider('Stand X', o.demonRX, 0, HELL.width, 10, (v) => setOption('demonRX', v)),
+    slider('Stand Y', o.demonRY, 0, HELL.height, 10, (v) => setOption('demonRY', v)),
+    slider('Sprite Y offset', o.demonRSpriteYOffset, -400, 400, 5, (v) => setOption('demonRSpriteYOffset', v)),
+    color('Tint', o.demonRTint, (v) => setOption('demonRTint', v)),
     // Lilly (demon L) — size also rescales her parlay / click / body radii
     // (demonScaleOf reads this live).
-    slider('Lilly size', o.demonLScale, 0.1, 2, 0.05, (v) => setOption('demonLScale', v)),
-    select('Lilly facing (standing)', o.demonLFacing, FACING_OPTS, (v) => setOption('demonLFacing', v as Options['demonLFacing'])),
-    slider('Lilly stand Y', o.demonLY, 0, HELL.height, 10, (v) => setOption('demonLY', v)),
-    slider('Lilly sprite Y offset', o.demonLSpriteYOffset, -400, 400, 5, (v) => setOption('demonLSpriteYOffset', v)),
-    color('Lilly tint', o.demonLTint, (v) => setOption('demonLTint', v)),
+    subheader('Lilly (demon L)'),
+    select('Sprite', o.demonLSprite, demonSpriteOpts(), (v) => setOption('demonLSprite', v)),
+    slider('Size', o.demonLScale, 0.1, 2, 0.05, (v) => setOption('demonLScale', v)),
+    select('Facing (standing)', o.demonLFacing, FACING_OPTS, (v) => setOption('demonLFacing', v as Options['demonLFacing'])),
+    slider('Stand X', o.demonLX, 0, HELL.width, 10, (v) => setOption('demonLX', v)),
+    slider('Stand Y', o.demonLY, 0, HELL.height, 10, (v) => setOption('demonLY', v)),
+    slider('Sprite Y offset', o.demonLSpriteYOffset, -400, 400, 5, (v) => setOption('demonLSpriteYOffset', v)),
+    color('Tint', o.demonLTint, (v) => setOption('demonLTint', v)),
     // Lolly (Lilly's corner-dwelling friend) — her own independent dials.
-    slider('Lolly size', o.demonFriendScale, 0.1, 2, 0.05, (v) => setOption('demonFriendScale', v)),
-    select('Lolly facing (standing)', o.demonFriendFacing, FACING_OPTS, (v) => setOption('demonFriendFacing', v as Options['demonFriendFacing'])),
-    slider('Lolly stand Y', o.demonFriendY, 0, HELL.height, 10, (v) => setOption('demonFriendY', v)),
-    slider('Lolly sprite Y offset', o.demonFriendSpriteYOffset, -400, 400, 5, (v) => setOption('demonFriendSpriteYOffset', v)),
-    color('Lolly tint', o.demonFriendTint, (v) => setOption('demonFriendTint', v)),
+    subheader("Lolly (Lilly's friend)"),
+    select('Sprite', o.demonFriendSprite, demonSpriteOpts(), (v) => setOption('demonFriendSprite', v)),
+    slider('Size', o.demonFriendScale, 0.1, 2, 0.05, (v) => setOption('demonFriendScale', v)),
+    select('Facing (standing)', o.demonFriendFacing, FACING_OPTS, (v) => setOption('demonFriendFacing', v as Options['demonFriendFacing'])),
+    slider('Stand X', o.demonFriendX, 0, HELL.width, 10, (v) => setOption('demonFriendX', v)),
+    slider('Stand Y', o.demonFriendY, 0, HELL.height, 10, (v) => setOption('demonFriendY', v)),
+    slider('Sprite Y offset', o.demonFriendSpriteYOffset, -400, 400, 5, (v) => setOption('demonFriendSpriteYOffset', v)),
+    color('Tint', o.demonFriendTint, (v) => setOption('demonFriendTint', v)),
   ]));
 
   panel.appendChild(collapsibleSection('Robots', [
@@ -332,9 +404,28 @@ function rebuildPanel(panel: HTMLElement, callbacks: OptionsUICallbacks, refresh
     cheatButton('Cheat +100 dragon bones', callbacks.onCheatBones),
     cheatButton('Cheat: trigger Bob on next building', callbacks.onTriggerBob),
     cheatButton('Cheat: skip to hell', callbacks.onSkipToHell),
+    toggle('Restart in hell (every reload)', getRestartInHell(), setRestartInHell),
     cheatButton('Work skip', callbacks.onTaskSkip),
     cheatButton('Show title screen', callbacks.onShowTitleScreen),
   ]));
+
+  // Copy the current settings (only the keys that differ from defaults) as
+  // JSON-ish text — handy for pasting a tuned look into a bug report or chat
+  // so the values can be baked back into DEFAULT_OPTIONS.
+  const copyBtn = document.createElement('button');
+  copyBtn.type = 'button';
+  copyBtn.className = 'options-reset';
+  copyBtn.textContent = 'Copy settings to clipboard';
+  copyBtn.addEventListener('click', async () => {
+    try {
+      await navigator.clipboard.writeText(formatOptionsDiff(getOptions()));
+      copyBtn.textContent = 'Copied!';
+    } catch {
+      copyBtn.textContent = 'Copy failed (clipboard blocked)';
+    }
+    setTimeout(() => { copyBtn.textContent = 'Copy settings to clipboard'; }, 1500);
+  });
+  panel.appendChild(copyBtn);
 
   const reset = document.createElement('button');
   reset.type = 'button';
@@ -348,6 +439,32 @@ function rebuildPanel(panel: HTMLElement, callbacks: OptionsUICallbacks, refresh
   panel.appendChild(reset);
 
   panel.appendChild(unlockHint());
+}
+
+// Serialize only the options that differ from DEFAULT_OPTIONS, one `key: value`
+// line each. Colour-ish numeric keys print as 0xRRGGBB so they read like the
+// literals in options.ts rather than opaque decimals.
+const COLOR_KEY_RE = /color|tint|bg|border|accent/i;
+function formatOptionsDiff(o: Options): string {
+  const lines: string[] = [];
+  const fmt = (key: string, v: unknown): string =>
+    typeof v === 'number' && COLOR_KEY_RE.test(key)
+      ? `0x${v.toString(16).padStart(6, '0')}`
+      : JSON.stringify(v);
+  for (const key of Object.keys(DEFAULT_OPTIONS) as (keyof Options)[]) {
+    if (key === 'fonts') {
+      for (const { key: fk } of FONT_KEYS) {
+        const cur = o.fonts[fk];
+        const def = DEFAULT_OPTIONS.fonts[fk];
+        if (cur.family !== def.family || cur.scale !== def.scale) {
+          lines.push(`fonts.${fk}: ${JSON.stringify(cur)}`);
+        }
+      }
+      continue;
+    }
+    if (o[key] !== DEFAULT_OPTIONS[key]) lines.push(`${key}: ${fmt(key, o[key])}`);
+  }
+  return lines.length ? lines.join('\n') : '(all options at defaults)';
 }
 
 function fontsSection(o: Options): HTMLElement {
@@ -462,6 +579,15 @@ function collapsibleSection(title: string, rows: HTMLElement[]): HTMLElement {
     try { localStorage.setItem(OPEN_SECTIONS_KEY, JSON.stringify([...open])); } catch { /* no-op */ }
   });
   return wrap;
+}
+
+// Thin in-section divider — groups related rows inside a long section (the
+// Demons section uses one per demon).
+function subheader(text: string): HTMLElement {
+  const h = document.createElement('div');
+  h.className = 'options-subheader';
+  h.textContent = text;
+  return h;
 }
 
 function row(label: string, control: HTMLElement): HTMLElement {

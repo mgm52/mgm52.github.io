@@ -1,4 +1,4 @@
-import { Application, Assets, ColorMatrixFilter, Container, extensions, Graphics, Rectangle, Sprite, Text, Texture } from 'pixi.js';
+import { AlphaFilter, Application, Assets, ColorMatrixFilter, Container, extensions, Graphics, Rectangle, Sprite, Text, Texture } from 'pixi.js';
 import { GifAsset, GifSource } from 'pixi.js/gif';
 
 // Side-effect registration: `pixi.js/gif` does NOT auto-register the .gif
@@ -10,8 +10,9 @@ extensions.add(GifAsset);
 // each tick based on (state.now - spawnAt) so playback always starts at frame 0.
 type DeathFrames = { textures: Texture[]; ends: number[]; duration: number };
 import { AMBIENT_DRAGON, BUILDING_DEFS, BuildingKind, CELL, COLS, DEMON, DRAGON, GOBLIN, HELL, RENDER_SCALE, ROBOT, ROWS, MINOTAUR, SOUL_SIGIL, SPACE, SPACE_UNIT, TINYTAUR, WORLD, formatPower, sigilPortalOutput } from './config';
-import { ensureFontLoaded, fontFamilyById, getOptions, onOptionsChange, type FontConfig, type Options } from './options';
-import { Building, Demon, Dragon, GameState, Ghost, Goblin, HOLE_SIZE, Minotaur, SoulChair, SpaceBuilding, SpaceUnit, WaterSource, buildingCenter, candleSpotAt, cellCenter, defOf, demonScaleOf, holeCenter, isInPlayCell, maintainerCount } from './state';
+import { DEFAULT_OPTIONS, ensureFontLoaded, fontFamilyById, getOptions, onOptionsChange, type FontConfig, type Options } from './options';
+import { loadDemonSheetList } from './demon-sheets';
+import { Building, Demon, DemonVariant, Dragon, GameState, Ghost, Goblin, HOLE_SIZE, Minotaur, SoulChair, SpaceBuilding, SpaceUnit, WaterSource, buildingCenter, candleSpotAt, cellCenter, defOf, demonScaleOf, holeCenter, isInPlayCell, maintainerCount } from './state';
 import { getParlaySpeaker } from './demon-dialogue';
 
 export type Camera = { x: number; y: number };
@@ -28,6 +29,11 @@ const GOBLIN_SWIPE_BASE = 'assets/rigged_goblin_dancing_aligol3dart_mutant_swipi
 const MINOTAUR_WALK_BASE = 'assets/rigged_minotaur_sasswalk_aligol3dart_rigged_minotaur_sasswalk_aligol3dart';
 const MINOTAUR_SWIPE_BASE = 'assets/rigged_minotaur_sasswalk_aligol3dart_mutant_swiping';
 const DRAGON_FLY_BASE = 'assets/dragon_fly_new';
+// The hell demons' own art: turntable sheets (8 viewing directions, ambient
+// light-spin loops rather than locomotion), auto-discovered from
+// assets/demons/ via the manifest. The dev menu picks one per demon, or
+// swaps back to the old minotaur walk cycle.
+const DEMON_SHEET_DIR = 'assets/demons';
 
 type SheetHeading = { index: number; headingDeg: number };
 type SheetMeta = {
@@ -48,6 +54,7 @@ let goblinSwipeSheet: Sheet | null = null;
 let minotaurWalkSheet: Sheet | null = null;
 let minotaurSwipeSheet: Sheet | null = null;
 let dragonFlySheet: Sheet | null = null;
+const demonSheets = new Map<string, Sheet>();
 
 async function loadSheet(base: string): Promise<Sheet> {
   const meta = await fetch(`${base}.json`).then(r => r.json()) as SheetMeta;
@@ -69,9 +76,12 @@ async function loadSheet(base: string): Promise<Sheet> {
     }
     frames.push(row);
   }
-  // fps preserves the clip's natural tempo, given the trim window the sheet was sampled from.
+  // fps preserves the clip's natural tempo, given the trim window the sheet
+  // was sampled from. Sheets with no clip (clipDuration 0 — e.g. the patung
+  // statue, whose frames are a light-spin loop rather than locomotion) get a
+  // gentle default so the loop still plays instead of dividing by zero.
   const span = Math.max(0.001, (meta.trimEndPct - meta.trimStartPct) / 100);
-  const fps = meta.framesPerDirection / (meta.clipDuration * span);
+  const fps = meta.clipDuration > 0 ? meta.framesPerDirection / (meta.clipDuration * span) : 5;
   return { meta, frames, fps };
 }
 
@@ -104,6 +114,19 @@ async function loadGoblinSheets(): Promise<void> {
     loadSheet(MINOTAUR_SWIPE_BASE),
     loadSheet(DRAGON_FLY_BASE),
   ]);
+}
+
+// Load every sheet the demons manifest lists. A pair that fails to load is
+// skipped with a warning rather than sinking the whole preload.
+async function loadDemonSheets(): Promise<void> {
+  const list = await loadDemonSheetList();
+  await Promise.all(list.map(async ({ id }) => {
+    try {
+      demonSheets.set(id, await loadSheet(`${DEMON_SHEET_DIR}/${id}`));
+    } catch (err) {
+      console.warn(`demon sheet ${id} failed to load`, err);
+    }
+  }));
 }
 
 // Map facing radians to a row index using the sheet's per-row heading table.
@@ -174,6 +197,29 @@ function getGlowTexture(): Texture {
   return glowTexture;
 }
 
+// Radial "light pool" for the hell darkness veil: fully opaque core with a
+// fuzzy falloff. Separate from getGlowTexture (whose centre peaks at 0.9) —
+// used as an inverse alpha mask, an opaque core is what cuts a fully clear
+// hole in the veil.
+const LIGHT_TEX_SIZE = 256;
+let lightTexture: Texture | null = null;
+function getLightTexture(): Texture {
+  if (lightTexture) return lightTexture;
+  const s = LIGHT_TEX_SIZE;
+  const canvas = document.createElement('canvas');
+  canvas.width = s; canvas.height = s;
+  const c = canvas.getContext('2d')!;
+  const grad = c.createRadialGradient(s / 2, s / 2, 0, s / 2, s / 2, s / 2);
+  grad.addColorStop(0, 'rgba(255,255,255,1)');
+  grad.addColorStop(0.4, 'rgba(255,255,255,0.95)');
+  grad.addColorStop(0.7, 'rgba(255,255,255,0.4)');
+  grad.addColorStop(1, 'rgba(255,255,255,0)');
+  c.fillStyle = grad;
+  c.fillRect(0, 0, s, s);
+  lightTexture = Texture.from(canvas);
+  return lightTexture;
+}
+
 // Infernal wash + drifting fog rings for the hell scene. Re-rendered whenever
 // any hell visual option changes; tunables come straight from the admin cog.
 // The fixed sprinkle positions are seeded so re-draws stay stable rather than
@@ -206,10 +252,14 @@ function drawHellBackground(g: Graphics, o: Options): void {
     [HELL.width * 0.28, HELL.height * 0.78, 540],
     [HELL.width * 0.82, HELL.height * 0.86, 560],
   ];
-  const baseGlow = 0.05 * o.hellGlowIntensity;
+  // Ring count is the "granularity" dial: more rings = a smoother gradient.
+  // Per-ring alpha is normalised by the count so the bloom's total brightness
+  // stays put while the player tunes smoothness independently of intensity.
+  const steps = Math.max(1, Math.round(o.hellGlowSteps));
+  const baseGlow = (0.25 * o.hellGlowIntensity) / steps;
   for (const [nx, ny, nr] of mist) {
-    for (let i = 5; i >= 1; i--) {
-      g.circle(nx, ny, nr * (i / 5)).fill({ color: o.hellGlowColor, alpha: baseGlow });
+    for (let i = steps; i >= 1; i--) {
+      g.circle(nx, ny, nr * (i / steps)).fill({ color: o.hellGlowColor, alpha: baseGlow });
     }
   }
   // Ember specks — count + brightness driven by the sliders. RNG is per-call
@@ -451,6 +501,12 @@ export type RenderContext = {
   // overworld hell_portal. Built/destroyed in lockstep with their counterpart.
   hellPortalMirrorLayer: Container;
   hellPortalMirrors: Map<number, Container>;
+  // Darkness veil: the tinted full-scene rect, and the container whose
+  // erase-blend light-pool sprites (recycled by syncHellDarkness) punch
+  // fuzzy holes around mirrors and demons.
+  hellDarknessLayer: Container;
+  hellDarknessGfx: Graphics;
+  hellLightMask: Container;
   // The soul sigil: a central inner ring + outer candle ring + the pentagram
   // edges that spring between placed candles. Two Graphics (lines/rings +
   // candle discs) are redrawn each frame for the flicker/seat/completion VFX;
@@ -540,6 +596,7 @@ let renderAssetsPromise: Promise<void> | null = null;
 export function preloadRenderAssets(): Promise<void> {
   renderAssetsPromise ??= Promise.all([
     loadGoblinSheets(),
+    loadDemonSheets(),
     loadBuildingTextures(),
     Assets.load<GifSource>('assets/blood-explosion.gif').catch(() => undefined),
   ]).then(() => undefined);
@@ -706,6 +763,22 @@ export async function createRender(parent: HTMLElement, state: GameState): Promi
   hellLayer.addChild(hellEffectsLayer);
   hellLayer.addChild(hellSideBeamGfx);
   hellLayer.addChild(hellFloatersLayer);
+  // Darkness veil — a tinted rect over the whole hell scene, with fuzzy
+  // light-pool sprites (blendMode 'erase') punching soft holes around each
+  // portal mirror and demon (syncHellDarkness). The pass-through AlphaFilter
+  // forces the layer into its own offscreen texture so the erase only eats
+  // the veil, not the scene beneath — and unlike an inverse mask (which goes
+  // through the binary stencil path) erase respects the pools' alpha
+  // gradient, keeping the edges fuzzy. Hidden entirely unless the
+  // hellDarknessEnabled dial is on, so the extra pass costs nothing then.
+  const hellDarknessLayer = new Container();
+  const hellDarknessGfx = new Graphics();
+  const hellLightMask = new Container();
+  hellDarknessLayer.addChild(hellDarknessGfx);
+  hellDarknessLayer.addChild(hellLightMask);
+  hellDarknessLayer.filters = [new AlphaFilter()];
+  hellDarknessLayer.visible = false;
+  hellLayer.addChild(hellDarknessLayer);
   // Bob's hell nametag rides above everything in the underworld — demons
   // included — so his soul stays findable behind the colossi.
   const hellTagLayer = new Container();
@@ -803,6 +876,7 @@ export async function createRender(parent: HTMLElement, state: GameState): Promi
     hellBeamGfx,
     hellSideBeamGfx,
     hellPortalMirrorLayer,
+    hellDarknessLayer, hellDarknessGfx, hellLightMask,
     hellPortalMirrors: new Map(),
     soulSigilLayer, soulSigilGfx, soulChairGfx, soulChairLabels: new Map(),
     sigilPowerLabels: new Map(),
@@ -900,7 +974,19 @@ function applyOptions(ctx: RenderContext, o: Options) {
   applyFilter(ctx.dragonLayer, ctx.dragonFilter, o.dragonSaturation, o.dragonBrightness);
   applyFilter(ctx.buildingLayer, ctx.buildingFilter, o.buildingSaturation, o.buildingBrightness);
   applyFilter(ctx.hellGhostLayer, ctx.hellGhostFilter, 1, o.hellGhostBrightness);
-  applyFilter(ctx.demonLayer, ctx.demonFilter, o.demonSaturation, o.demonBrightness);
+  applyFilter(ctx.demonLayer, ctx.demonFilter, o.demonSaturation, o.demonBrightness, o.demonHue);
+  // Portal-mirror geometry (halo rings) is baked at creation — drop every
+  // mirror so the next render frame rebuilds them with the new dials.
+  for (const m of ctx.hellPortalMirrors.values()) m.destroy({ children: true });
+  ctx.hellPortalMirrors.clear();
+  // Darkness veil: visibility + the veil rect itself live here; the light
+  // pools are re-positioned every frame by syncHellDarkness.
+  ctx.hellDarknessLayer.visible = o.hellDarknessEnabled;
+  ctx.hellDarknessGfx.clear();
+  if (o.hellDarknessEnabled) {
+    ctx.hellDarknessGfx.rect(0, 0, HELL.width, HELL.height)
+      .fill({ color: o.hellDarknessColor, alpha: o.hellDarknessAlpha });
+  }
   applyDomOptions(o);
   applyFonts(ctx, o);
 }
@@ -980,8 +1066,9 @@ function redrawGrid(ctx: RenderContext, o: Options) {
   g.stroke({ width: 1, color: o.gridColor, alpha: o.gridAlpha });
 }
 
-function applyFilter(layer: Container, f: ColorMatrixFilter, saturation: number, brightness: number) {
-  const isIdentity = Math.abs(saturation - 1) < 0.005 && Math.abs(brightness - 1) < 0.005;
+function applyFilter(layer: Container, f: ColorMatrixFilter, saturation: number, brightness: number, hue = 0) {
+  const isIdentity = Math.abs(saturation - 1) < 0.005 && Math.abs(brightness - 1) < 0.005
+    && Math.abs(hue) < 0.5;
   if (isIdentity) {
     layer.filters = [];
     return;
@@ -989,6 +1076,7 @@ function applyFilter(layer: Container, f: ColorMatrixFilter, saturation: number,
   f.reset();
   f.brightness(brightness, false);
   f.saturate(saturation - 1, true); // saturate(0) is no-op; positive boosts, negative desats
+  if (Math.abs(hue) >= 0.5) f.hue(hue, true); // degrees; 0 is a no-op
   layer.filters = [f];
 }
 
@@ -1180,7 +1268,24 @@ function makeMinotaurView(): MinotaurView {
   return { container: c, shadow, sprite, selectionRing: ring };
 }
 
-function makeDemonView(): DemonView {
+// The sheet a demon draws from — picked per demon in the dev menu from the
+// auto-discovered assets/demons/ sheets, or the old tinted minotaur. An
+// unknown id (e.g. a sheet that was deleted from the folder, or a stale
+// persisted option) falls back to the default sheet, then to anything the
+// manifest delivered, then to the minotaur.
+function demonSheetFor(variant: DemonVariant): Sheet | null {
+  const o = getOptions();
+  const pick = variant === 'l' ? o.demonLSprite
+    : variant === 'friend' ? o.demonFriendSprite
+    : o.demonRSprite;
+  if (pick === 'minotaur') return minotaurWalkSheet;
+  return demonSheets.get(pick)
+    ?? demonSheets.get(DEFAULT_OPTIONS.demonRSprite)
+    ?? demonSheets.values().next().value
+    ?? minotaurWalkSheet;
+}
+
+function makeDemonView(variant: DemonVariant): DemonView {
   const container = new Container();
   // Soft foot shadow grounds the giant in the abyss — same radial-gradient
   // ellipse the goblins/minotaurs use, sat behind everything else.
@@ -1189,10 +1294,9 @@ function makeDemonView(): DemonView {
   const ring = new Graphics();
   ring.circle(0, 0, DEMON.displayPx * 0.4).stroke({ width: 3, color: 0xff5a4a });
   ring.visible = false;
-  const startTex = minotaurWalkSheet?.frames[0][0] ?? Texture.EMPTY;
+  const startTex = demonSheetFor(variant)?.frames[0][0] ?? Texture.EMPTY;
   const sprite = new Sprite(startTex);
   sprite.anchor.set(0.5);
-  sprite.tint = 0x7a2014; // deep infernal red — bigger and darker than a Minotaur
   container.addChild(shadow);
   container.addChild(ring);
   container.addChild(sprite);
@@ -1360,7 +1464,7 @@ export function ambientDragonAt(ctx: RenderContext, x: number, y: number): { id:
 // Build a static silhouette of a killed unit at its death position. Uses the
 // first frame of the matching idle/walk sheet for the row that matches the
 // recorded facing — no per-frame animation, no shadow, no outline. Tinted
-// dim red so the whole hell scene reads as the underworld.
+// hellGhostTint (dim red by default) so the hell scene reads as the underworld.
 function makeGhostView(g: Ghost): GhostView | null {
   const container = new Container();
   // Position is updated each render frame; here we just seed it.
@@ -1381,7 +1485,7 @@ function makeGhostView(g: Ghost): GhostView | null {
     sprite.anchor.set(0.5);
     const px = getOptions().goblinDisplayPx;
     sprite.scale.set(px / sheet.meta.spriteSize);
-    sprite.tint = g.gold ? 0xc9a85a : 0xa06868;
+    sprite.tint = g.gold ? 0xc9a85a : getOptions().hellGhostTint;
     selectionRing.circle(0, 0, GOBLIN.radius + 4).stroke({ width: 2, color: 0xffd96b });
     container.addChild(selectionRing);
     container.addChild(sprite);
@@ -1398,7 +1502,7 @@ function makeGhostView(g: Ghost): GhostView | null {
     sprite.anchor.set(0.5);
     const px = getOptions().minotaurDisplayPx * (g.tiny ? TINYTAUR.scale : 1);
     sprite.scale.set(px / sheet.meta.spriteSize);
-    sprite.tint = 0x9a5050;
+    sprite.tint = getOptions().hellGhostTint;
     selectionRing.circle(0, 0, MINOTAUR.radius + 6).stroke({ width: 2, color: 0xffd96b });
     container.addChild(selectionRing);
     container.addChild(sprite);
@@ -1413,7 +1517,7 @@ function makeGhostView(g: Ghost): GhostView | null {
   const sprite = new Sprite(sheet.frames[dir][0]);
   sprite.anchor.set(0.5);
   sprite.scale.set(DRAGON.displayPx / sheet.meta.spriteSize);
-  sprite.tint = 0x9a5050;
+  sprite.tint = getOptions().hellGhostTint;
   selectionRing.circle(0, 0, DRAGON.displayPx * 0.5).stroke({ width: 2, color: 0xffd96b });
   container.addChild(selectionRing);
   container.addChild(sprite);
@@ -1430,14 +1534,21 @@ function makeHellPortalMirror(b: Building): Container {
   const ctr = buildingCenter(b);
   c.position.set(worldToHellX(ctr.x), worldToHellY(ctr.y));
   const half = def.size / 2;
-  // Single halo ring drawn first so it sits BEHIND the body/core. A stroked
-  // outline (not a filled disc) so the portal reads as an emanation in the
-  // underworld. Kept to one circle, sized to sit clearly inside the sigil's
-  // red inner ring (radius SOUL_SIGIL.innerRadius) now that the portal's
-  // footprint is 1×1, so the scene stays uncluttered.
+  // Halo ring(s) drawn first so they sit BEHIND the body/core. Stroked
+  // outlines (not filled discs) so the portal reads as an emanation in the
+  // underworld. Count/size/spacing/width/colour/alpha all ride the dev
+  // dials; applyOptions rebuilds every mirror when any of them change. The
+  // default (one ring at 2.2× the footprint) sits clearly inside the sigil's
+  // red inner ring (radius SOUL_SIGIL.innerRadius), keeping the scene
+  // uncluttered.
+  const o = getOptions();
   const halo = new Graphics();
-  const outerR = def.size * 2.2;
-  halo.circle(0, 0, outerR).stroke({ width: 3, color: 0xfff4c0, alpha: 0.3 });
+  const ringCount = Math.max(0, Math.round(o.hellPortalRingCount));
+  const innerR = def.size * o.hellPortalRingRadius;
+  for (let i = 0; i < ringCount; i++) {
+    halo.circle(0, 0, innerR + i * o.hellPortalRingSpacing)
+      .stroke({ width: o.hellPortalRingWidth, color: o.hellPortalRingColor, alpha: o.hellPortalRingAlpha });
+  }
   const body = new Graphics();
   body.rect(-half, -half, def.size, def.size).fill({ color: 0x2a0610, alpha: 0.95 });
   body.rect(-half, -half, def.size, def.size).stroke({ width: 3, color: 0xff2030 });
@@ -1452,6 +1563,41 @@ function makeHellPortalMirror(b: Building): Container {
   return c;
 }
 
+// Position the darkness veil's light pools: one fuzzy radial sprite per
+// active portal mirror and per demon, recycled from hellLightMask's children
+// (extras are hidden, not destroyed). The veil rect itself is drawn by
+// applyOptions; this only runs the per-frame tracking.
+function syncHellDarkness(ctx: RenderContext, state: GameState): void {
+  const o = getOptions();
+  if (!o.hellDarknessEnabled) return;
+  const mask = ctx.hellLightMask;
+  let used = 0;
+  const place = (x: number, y: number, radius: number) => {
+    let s = mask.children[used] as Sprite | undefined;
+    if (!s) {
+      s = new Sprite(getLightTexture());
+      s.anchor.set(0.5);
+      s.blendMode = 'erase';
+      mask.addChild(s);
+    }
+    s.visible = true;
+    s.position.set(x, y);
+    s.scale.set((radius * 2) / LIGHT_TEX_SIZE);
+    s.alpha = o.hellDarknessLightAlpha;
+    used++;
+  };
+  for (const b of state.buildings.values()) {
+    if (b.kind !== 'hell_portal' || b.state === 'constructing') continue;
+    const ctr = buildingCenter(b);
+    place(worldToHellX(ctr.x), worldToHellY(ctr.y), o.hellDarknessMirrorRadius);
+  }
+  for (const d of state.demons.values()) {
+    // Pool size rides the same per-demon × all-demons scaling as the sprite.
+    place(d.hx, d.hy, o.hellDarknessDemonRadius * demonScaleOf(d) * o.demonScale);
+  }
+  for (let i = used; i < mask.children.length; i++) mask.children[i].visible = false;
+}
+
 // Redraw the soul sigil every frame: the central inner ring, the outer candle
 // ring (the placement target), the pentagram edges between placed candles, the
 // candles themselves (flickering flames; ember-bound once a soul is seated),
@@ -1461,7 +1607,11 @@ function makeHellPortalMirror(b: Building): Container {
 // readout on each mirror ("1 W" ×87 per seated soul) are driven here too.
 function syncSoulSigil(ctx: RenderContext, state: GameState): void {
   const now = state.now;
-  const { count, innerRadius, ringRadius, chairRadius } = SOUL_SIGIL;
+  const { count, ringRadius, chairRadius } = SOUL_SIGIL;
+  // The inner ring's geometry/colour ride the dev dials; redrawn every frame
+  // anyway, so changes apply live.
+  const o = getOptions();
+  const innerRadius = o.hellSigilRingRadius;
   const ring = ctx.soulSigilGfx;
   const cg = ctx.soulChairGfx;
   ring.clear();
@@ -1491,9 +1641,13 @@ function syncSoulSigil(ctx: RenderContext, state: GameState): void {
     const ringDone = ordered.length >= count;
 
     // Central inner ring at the mirror — a single occult outline that
-    // brightens once the sigil is complete.
-    const ringGlow = completed ? 0.55 + 0.25 * Math.sin(now * 3) : 0.4;
-    ring.circle(center.x, center.y, innerRadius).stroke({ width: 4, color: 0xff2030, alpha: ringGlow });
+    // brightens once the sigil is complete (the completion pulse rides on
+    // top of the dialled-in idle alpha).
+    const ringGlow = completed
+      ? o.hellSigilRingAlpha + 0.15 + 0.25 * Math.sin(now * 3)
+      : o.hellSigilRingAlpha;
+    ring.circle(center.x, center.y, innerRadius)
+      .stroke({ width: o.hellSigilRingWidth, color: o.hellSigilRingColor, alpha: ringGlow });
 
     // Outer ring — where candles take. Faint normally; breathes brighter
     // while the player is placing candles and the ring still has room.
@@ -3041,6 +3195,9 @@ export function render(state: GameState, ctx: RenderContext) {
     }
     v.container.position.set(hx, hy);
     v.container.alpha = ghostAlpha;
+    // Re-applied each frame (like alpha) so a tint-picker change retints the
+    // silhouettes already drifting down the scene. Gold goblins stay gold.
+    v.sprite.tint = gh.kind === 'goblin' && gh.gold ? 0xc9a85a : opts.hellGhostTint;
     applyRingFlash(v.selectionRing, !!gh.selected, gh.commandFlashAt, state.now);
     // Keep the silhouette's facing frame live — pacing Bob and commanded
     // walkers turn to face their direction of travel. (The frame used to be
@@ -3057,14 +3214,16 @@ export function render(state: GameState, ctx: RenderContext) {
     }
   }
 
-  // Sync demon views — the giant patrolling Minotaur. Sass-walks while pacing;
-  // freezes on frame 0 while locked in a parlay.
+  // Sync demon views — the giant patrolling demons (patung-statue art by
+  // default; the dev menu can swap back to the minotaur, which sass-walks
+  // while pacing). Frozen on frame 0 while locked in a parlay.
   const seenDe = new Set<number>();
   for (const d of state.demons.values()) {
     seenDe.add(d.id);
+    const demonVariant = d.variant ?? 'pit';
     let v = ctx.demonViews.get(d.id);
     if (!v) {
-      v = makeDemonView();
+      v = makeDemonView(demonVariant);
       v.container.cullable = true;
       ctx.demonLayer.addChild(v.container);
       ctx.demonViews.set(d.id, v);
@@ -3077,31 +3236,34 @@ export function render(state: GameState, ctx: RenderContext) {
     applyRingFlash(v.selectionRing, d.selected, d.commandFlashAt, state.now);
     // Per-demon dev dials: sprite Y nudge relative to the selection circle /
     // collision centre (the ring and body stay put; only the art moves), and
-    // a per-demon tint over the shared minotaur art.
-    const demonVariant = d.variant ?? 'pit';
-    v.sprite.y = demonVariant === 'l' ? opts.demonLSpriteYOffset
+    // a per-demon tint over its art.
+    const spriteYOff = demonVariant === 'l' ? opts.demonLSpriteYOffset
       : demonVariant === 'friend' ? opts.demonFriendSpriteYOffset
       : opts.demonRSpriteYOffset;
+    v.sprite.y = spriteYOff;
     v.sprite.tint = demonVariant === 'l' ? opts.demonLTint
       : demonVariant === 'friend' ? opts.demonFriendTint
       : opts.demonRTint;
-    v.shadow.visible = opts.goblinShadow;
-    if (opts.goblinShadow) {
-      // The demon sprite isn't raised the way Minotaurs are, so its feet sit
-      // around ≈0.3 of its half-height below centre — park the shadow there
-      // rather than the old 0.55, which floated it well below the hooves.
-      v.shadow.position.set(0, DEMON.displayPx * 0.3);
+    v.shadow.visible = opts.demonShadow;
+    if (opts.demonShadow) {
+      // Shadow offset is its own dev dial — the patung statue's plinth sits
+      // lower in the cell than the minotaur's hooves did. It rides the
+      // per-demon sprite Y nudge so the art and its shadow move together.
+      v.shadow.position.set(0, spriteYOff + opts.demonShadowY);
       const sy = DEMON.displayPx / 64;
       v.shadow.scale.set(sy * 0.75, sy);
     }
-    const sheet = minotaurWalkSheet;
+    const sheet = demonSheetFor(demonVariant);
     if (sheet) {
       const dir = dirIndex(sheet.meta, d.facing);
       const fpd = sheet.meta.framesPerDirection;
-      // Freeze on the standing frame while locked in a parlay or when the
-      // dev "walks" toggle has parked it.
-      const standing = d.busyWith !== null || !opts.demonWalks;
-      const frame = standing ? 0 : Math.floor(state.now * sheet.fps) % fpd;
+      // The minotaur's frames are a walk cycle, so it freezes on the standing
+      // frame while locked in a parlay or when the dev "walks" toggle has
+      // parked it. The statue turntables' frames are ambient light-spin loops
+      // — not locomotion — so they shimmer whether standing or pacing.
+      const isWalkCycle = sheet === minotaurWalkSheet;
+      const standing = isWalkCycle && (d.busyWith !== null || !opts.demonWalks);
+      const frame = standing ? 0 : Math.floor(state.now * sheet.fps * opts.demonAnimSpeed) % fpd;
       v.sprite.texture = sheet.frames[dir][frame];
       v.sprite.scale.set(DEMON.displayPx / sheet.meta.spriteSize);
     }
@@ -3139,6 +3301,10 @@ export function render(state: GameState, ctx: RenderContext) {
       ctx.hellPortalMirrors.delete(id);
     }
   }
+
+  // Darkness veil light pools — re-positioned every frame so they track
+  // walking demons (and any new portals).
+  syncHellDarkness(ctx, state);
 
   // Scene cross-fades driven by altitude (0 ground … 1 space) and depth
   // (0 ground … 1 hell). The climb runs in three overlapping phases so

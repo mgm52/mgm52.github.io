@@ -674,6 +674,10 @@ export type GameState = {
   // Ephemeral (reset on load). The sidebar uses it to hold back the
   // destination view's buttons (Candle / Orbital Platform) until arrival.
   viewTransitioning?: boolean;
+  // Set by the dev "skip to hell" cheat (and the restart-in-hell toggle).
+  // This run jumped past the early game, so onboarding nudges that assume a
+  // fresh ground start (the spawn hint) stay suppressed.
+  devSkippedToHell?: boolean;
   // Persisted UI unlock progress (the sticky sets that live in ui.ts). Saved so
   // tutorial unlocks, the dig gate, and "outgrown" hides survive a reload even
   // after the buildings that triggered them are gone. ui.ts hydrates its module
@@ -1378,7 +1382,9 @@ export function recordGhost(
   kind: Ghost['kind'],
   x: number, y: number,
   facing: number,
-  opts: { gold?: boolean; tiny?: boolean; bob?: boolean } = {},
+  // `quiet` skips the hell-side death splatter — for ghosts conjured in bulk
+  // (the skip-to-hell cheat) rather than recorded from an actual death.
+  opts: { gold?: boolean; tiny?: boolean; bob?: boolean; quiet?: boolean } = {},
 ): void {
   state.ghosts.push({
     id: state.nextId++,
@@ -1393,7 +1399,7 @@ export function recordGhost(
     // walk command in handleHellRightClick (we skip ghosts with bob set).
     speedMult: opts.bob ? 0 : 0.75 + Math.random() * 0.5,
   });
-  pushDeathEffect(state, x, y, false, true);
+  if (!opts.quiet) pushDeathEffect(state, x, y, false, true);
 }
 
 export function pushDeathEffect(state: GameState, x: number, y: number, white = false, hell = false) {

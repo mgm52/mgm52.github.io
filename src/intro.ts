@@ -248,7 +248,7 @@ async function runSpeak(
   await sleep(POST_LINE_BUFFER_MS);
   overlay.classList.add('click-armed');
   await waitForClick(clickWall);
-  playSound('click', 0.6, 0.9);
+  playSound('click', 0.29, 0.9);
   overlay.classList.remove('click-armed');
   overlay.classList.remove('speaking');
   // Leave the .done class on — the next typeLine() will clear it when it
