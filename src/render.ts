@@ -2853,13 +2853,21 @@ function makeSpaceBuildingView(sb: SpaceBuilding): SpaceBuildingView {
   // the haul-up severs whatever made them useful. Relabel to match the info
   // panel and the joke ("Useless Beacon").
   const short = sb.building.kind === 'dragon_beacon' ? 'UB' : def.short;
+  // The Space Centre ships no PNG, so unlike the Dragon Beacon (whose "DB"
+  // is baked into its sprite art) its "SC" is this Text — drawn big to match
+  // the beacon's proportions, and kept visible regardless of the short-label
+  // dev toggle (it's the building's art, not an annotation). See the sync loop.
+  const isCentre = sb.building.kind === 'space_centre';
   const label = new Text({
     text: short,
     style: {
       fontFamily: fontFamilyById(o.fonts.buildingLabel.family).css,
-      fontSize: buildingLabelSize(def.cellSize, o.fonts.buildingLabel.scale * gs),
+      fontSize: isCentre
+        ? Math.round(def.size * 0.3)
+        : buildingLabelSize(def.cellSize, o.fonts.buildingLabel.scale * gs),
       fill: 0xffffff,
       fontWeight: 'bold',
+      ...(isCentre ? { dropShadow: { color: 0x000000, alpha: 0.45, blur: 0, distance: 4, angle: Math.PI / 3 } } : {}),
     },
   });
   label.anchor.set(0.5);
@@ -3605,7 +3613,9 @@ export function render(state: GameState, ctx: RenderContext) {
     v.selectionRing.rotation = sb.spin;
     v.selectionRing.visible = sb.selected;
     v.sprite.visible = opts.buildingSpriteEnabled;
-    v.label.visible = opts.buildingLabelEnabled;
+    // The Space Centre's "SC" is its art (it has no sprite, and the Dragon
+    // Beacon's "DB" is baked into its PNG) — always shown, like the beacon's.
+    v.label.visible = opts.buildingLabelEnabled || sb.building.kind === 'space_centre';
     // Space Centre body fill tracks active/dormant — redraw on transitions.
     if (sb.building.kind === 'space_centre' && v.body && v.bodyState !== sb.building.state) {
       drawSpaceCentreBody(v.body, sb.building.state);
