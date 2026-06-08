@@ -223,6 +223,11 @@ export function loadGame(): { state: GameState; savedAt: number } | null {
     env.state.bobSpawned ??= false;
     env.state.bobPickingHole ??= false;
     env.state.bobCheatPending ??= false;
+    // Pain Gabbonsaw ritual + Lolly's rampage — added together. The rampage
+    // itself persists (she does not stop), so only seed the defaults.
+    env.state.gabbonsawBought ??= false;
+    env.state.lolly ??= null;
+    env.state.holeDestroyed ??= false;
     env.state.ghosts ??= [];
     // Pre-existing ghosts from saves predating the downward drift get a
     // spawnAt anchored to load time, so they start their fall fresh rather

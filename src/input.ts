@@ -185,7 +185,7 @@ export function setupInput(
       input.isDragging = false;
       input.selectionGfx.clear();
       const c = pixelToCell(local.x, local.y);
-      const onMain = holeAtCell(state, c.cx, c.cy);
+      const onMain = !state.holeDestroyed && holeAtCell(state, c.cx, c.cy);
       const b = onMain ? null : buildingAtCell(state, c.cx, c.cy);
       const onBuildingHole = b !== null && b.kind === 'goblin_hole' && b.state !== 'constructing';
       const target: Cell | null = onMain
@@ -510,7 +510,9 @@ export function setupInput(
       if (!g && !d && !m) {
         const c = pixelToCell(local.x, local.y);
         b = buildingAtCell(state, c.cx, c.cy);
-        if (!b) onHole = holeAtCell(state, c.cx, c.cy);
+        // A hole Lolly has destroyed no longer renders, so it shouldn't take
+        // a click either.
+        if (!b) onHole = !state.holeDestroyed && holeAtCell(state, c.cx, c.cy);
         if (!b && !onHole) w = waterSourceAtCell(state, c);
       }
       if (!additive) clearSelection(state);

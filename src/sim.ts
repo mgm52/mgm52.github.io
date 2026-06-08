@@ -1,8 +1,8 @@
 import { playDecayingGoblinDeath, playDecayingGoblinSpawn, playDecayingGoldKillCash, playSound } from './audio';
-import { BUILDING_DEFS, BuildingKind, CELL, COLS, DEMON, DRAGON, DRAGON_KILL_REWARD, GOBLIN, GOLD_GOBLIN_CHANCE, GOLD_KILL_REWARD, HELL, KILL_REWARD, LIGHTNING, MINOTAUR_KILL_REWARD, REACTOR_MELTDOWN, ROBOT, SOUL_SIGIL, SPACE, SPACE_UNIT, SUMMON_UPGRADES, TICK_S, MINOTAUR, TINYTAUR, WATER_DEPLETION_PP_PER_SEC, WATER_METER_MAX, WORLD, SOUL_STRENGTH_LABEL, formatPower, sigilPortalOutput, soulStrengthOf } from './config';
+import { BUILDING_DEFS, BuildingKind, CELL, COLS, DEMON, DRAGON, DRAGON_KILL_REWARD, GOBLIN, GOLD_GOBLIN_CHANCE, GOLD_KILL_REWARD, HELL, KILL_REWARD, LIGHTNING, LOLLY, MINOTAUR_KILL_REWARD, REACTOR_MELTDOWN, ROBOT, SOUL_SIGIL, SPACE, SPACE_UNIT, SUMMON_UPGRADES, TICK_S, MINOTAUR, TINYTAUR, WATER_DEPLETION_PP_PER_SEC, WATER_METER_MAX, WORLD, SOUL_STRENGTH_LABEL, formatPower, sigilPortalOutput, soulStrengthOf } from './config';
 import { DEMON_FACING_ANGLE, getOptions } from './options';
 import {
-  ALL_DIRS, Building, Cell, DX, DY, Demon, Dir, Dragon, GameState, Ghost, Goblin, HOLE_SIZE, Minotaur, SoulChair, SpaceBuilding, SpaceUnit, WaterSource,
+  ALL_DIRS, Building, Cell, DX, DY, Demon, Dir, Dragon, GameState, Ghost, Goblin, HOLE_SIZE, LollyTarget, Minotaur, SoulChair, SpaceBuilding, SpaceUnit, Vec2, WaterSource,
   appendLog, buildingAtCell, buildingCenter, buildingFootprint, buildingPerimeter,
   cellCenter, cellKey, chairSoulSnapshot, constructedDragonBeacon, currentPowerBoost, defOf, demonScaleOf, destroyBuilding, dragonTargetBuilding,
   earnBlood, earnDragonBone, earnMoney, findHoleEmergenceCell,
@@ -192,6 +192,9 @@ export function tick(state: GameState) {
 
   // ── 2d. Demon updates (hell pacing + parlay arrivals) ─────────────────
   for (const d of state.demons.values()) updateDemon(state, d);
+
+  // ── 2e. Lolly's rampage (Pain Gabbonsaw payoff) ───────────────────────
+  if (state.lolly) updateLolly(state);
 
   // Sticky: the Tinytaur summon reveals itself once the player has fielded
   // enough Minotaurs at once to pay its sacrifice cost.
@@ -841,9 +844,14 @@ function updateMeltdowns(state: GameState) {
 
 function spawnGoblin(state: GameState) {
   // Round-robin between the main hole and every completed Goblin Hole. A
-  // freshly-built hole is added to the rotation automatically.
-  const holeCells: Cell[] = [{ cx: state.hole.cell.cx, cy: state.hole.cell.cy }];
-  const isMain: boolean[] = [true];
+  // freshly-built hole is added to the rotation automatically. A main hole
+  // Lolly has destroyed drops out of the rotation entirely.
+  const holeCells: Cell[] = [];
+  const isMain: boolean[] = [];
+  if (!state.holeDestroyed) {
+    holeCells.push({ cx: state.hole.cell.cx, cy: state.hole.cell.cy });
+    isMain.push(true);
+  }
   for (const b of state.buildings.values()) {
     if (b.kind !== 'goblin_hole') continue;
     if (b.state === 'constructing') continue;
@@ -928,8 +936,20 @@ export function spawnBob(state: GameState, holeCell: Cell): boolean {
 // chassis comes out hunting instead: red head-lamp, no jobs, lasers for
 // everything fleshy (see the terminator pass in tick).
 export function spawnRobot(state: GameState, terminator = false): boolean {
-  const h = state.hole.cell;
-  const cell = findHoleEmergenceCell(state, h.cx, h.cy);
+  // Assembly normally happens at the main hole; if Lolly has destroyed it,
+  // fall back to any completed Goblin Hole still standing.
+  let cell: Cell | null = null;
+  if (!state.holeDestroyed) {
+    const h = state.hole.cell;
+    cell = findHoleEmergenceCell(state, h.cx, h.cy);
+  }
+  if (!cell) {
+    for (const b of state.buildings.values()) {
+      if (b.kind !== 'goblin_hole' || b.state === 'constructing') continue;
+      cell = findHoleEmergenceCell(state, b.cell.cx, b.cell.cy);
+      if (cell) break;
+    }
+  }
   if (!cell) return false;
   const id = state.nextId++;
   const g: Goblin = {
@@ -1498,6 +1518,198 @@ function updateDemon(state: GameState, d: Demon) {
       break;
     }
   }
+}
+
+// ─── Lolly's rampage ────────────────────────────────────────────────
+// The Pain Gabbonsaw ritual's payoff: Lolly arrives on the overworld with
+// Bob riding on top. She works like a Minotaur — walk to the nearest prey,
+// wind up, smash — except she's colossal, grid-free (straight lines over
+// walls, water, anything), and her prey list is everything: every building
+// (Goblin Holes included — even the original spawning hole, which nothing
+// else in the game can touch), every goblin, robot, and minotaur. Kills pay
+// nothing — this is a calamity, not a harvest. Once nothing is left she
+// wanders the ruins.
+
+// Spawn Lolly at the original Goblin Hole (poetically, her first target).
+// Bob leaves wherever he currently is — alive on the ground, a soul in hell,
+// even adrift in space — to take his seat on her shoulders. Returns the
+// spawn point so the caller can swing the camera onto it.
+export function spawnLollyRampage(state: GameState): Vec2 {
+  for (const g of [...state.goblins.values()]) {
+    if (g.bob) removeGoblin(state, g.id);
+  }
+  state.ghosts = state.ghosts.filter((g) => !g.bob);
+  for (const [id, su] of [...state.spaceUnits]) {
+    if (su.bob) state.spaceUnits.delete(id);
+  }
+  const c = holeCenter(state);
+  state.lolly = {
+    pos: { x: c.x, y: c.y },
+    facing: Math.PI / 2,
+    target: null,
+    nextWanderAt: 0,
+    spawnAt: state.now,
+  };
+  // An arrival worthy of a demon: bolts from a clear sky and a blood-flash.
+  pushLightningBolt(state, c.x, c.y);
+  pushLightningBolt(state, c.x - CELL * 2, c.y + CELL);
+  pushLightningBolt(state, c.x + CELL * 2, c.y - CELL);
+  pushDeathEffect(state, c.x, c.y);
+  playSound('ritual', 1, 0.35);
+  playSound('destroy', 0.8, 0.45);
+  appendLog(state, 'Lolly has come to the overworld. Bob rides upon her shoulders.');
+  return c;
+}
+
+// Nearest thing Lolly can still destroy: any building (walls included), the
+// original hole (until she gets it), any goblin (robots aren't spared —
+// nothing is), any minotaur. Null once the overworld is picked clean.
+function acquireLollyTarget(state: GameState, pos: Vec2): LollyTarget | null {
+  let best: LollyTarget | null = null;
+  let bestD = Infinity;
+  const consider = (t: LollyTarget, x: number, y: number) => {
+    const dx = x - pos.x, dy = y - pos.y;
+    const d = dx * dx + dy * dy;
+    if (d < bestD) { bestD = d; best = t; }
+  };
+  for (const b of state.buildings.values()) {
+    const c = buildingCenter(b);
+    consider({ kind: 'building', id: b.id }, c.x, c.y);
+  }
+  if (!state.holeDestroyed) {
+    const c = holeCenter(state);
+    consider({ kind: 'hole' }, c.x, c.y);
+  }
+  for (const g of state.goblins.values()) consider({ kind: 'goblin', id: g.id }, g.pos.x, g.pos.y);
+  for (const m of state.minotaurs.values()) consider({ kind: 'minotaur', id: m.id }, m.pos.x, m.pos.y);
+  return best;
+}
+
+// Resolve a target's live position + smashing reach (bigger footprints are
+// in range from further out). Null when the target no longer exists.
+function lollyTargetSpot(state: GameState, t: LollyTarget): { x: number; y: number; reach: number } | null {
+  if (t.kind === 'building') {
+    const b = state.buildings.get(t.id);
+    if (!b) return null;
+    const c = buildingCenter(b);
+    return { x: c.x, y: c.y, reach: LOLLY.reach + defOf(b).size / 2 };
+  }
+  if (t.kind === 'hole') {
+    if (state.holeDestroyed) return null;
+    const c = holeCenter(state);
+    return { x: c.x, y: c.y, reach: LOLLY.reach + CELL / 2 };
+  }
+  if (t.kind === 'goblin') {
+    const g = state.goblins.get(t.id);
+    return g ? { x: g.pos.x, y: g.pos.y, reach: LOLLY.reach } : null;
+  }
+  const m = state.minotaurs.get(t.id);
+  return m ? { x: m.pos.x, y: m.pos.y, reach: LOLLY.reach } : null;
+}
+
+// Land the smash. No rewards anywhere — the world simply gets smaller.
+function lollySmash(state: GameState, t: LollyTarget): void {
+  if (t.kind === 'building') {
+    const b = state.buildings.get(t.id);
+    if (!b) return;
+    const c = buildingCenter(b);
+    appendLog(state, `Lolly crushes ${defOf(b).name} #${b.displayNum}.`);
+    pushDeathEffect(state, c.x, c.y);
+    destroyBuilding(state, b.id);
+    playSound('destroy', 0.55);
+    return;
+  }
+  if (t.kind === 'hole') {
+    const c = holeCenter(state);
+    state.holeDestroyed = true;
+    state.hole.selected = false;
+    pushDeathEffect(state, c.x, c.y);
+    playSound('destroy', 0.7, 0.6);
+    appendLog(state, 'Lolly tears the Goblin Hole out of the earth.');
+    return;
+  }
+  if (t.kind === 'goblin') {
+    const g = state.goblins.get(t.id);
+    if (!g) return;
+    const x = g.pos.x, y = g.pos.y;
+    if (g.robot) {
+      // Even the indestructible chassis comes apart in her hands. No soul —
+      // but it still counts toward Lilly's "Destroy a robot" Work.
+      state.robotsDestroyed++;
+      appendLog(state, `${g.terminator ? 'Terminator' : 'Robot'} #${g.id} torn apart by Lolly.`);
+    } else {
+      recordGhost(state, 'goblin', x, y, g.facing, { gold: g.gold });
+      appendLog(state, `Goblin #${g.id} devoured by Lolly.`);
+    }
+    removeGoblin(state, g.id);
+    pushDeathEffect(state, x, y);
+    playDecayingGoblinDeath();
+    return;
+  }
+  const m = state.minotaurs.get(t.id);
+  if (!m) return;
+  recordGhost(state, 'minotaur', m.pos.x, m.pos.y, m.facing, { tiny: m.tiny });
+  state.minotaurs.delete(m.id);
+  pushDeathEffect(state, m.pos.x, m.pos.y);
+  playSound('goblin_death', 0.56, 0.3);
+  appendLog(state, `Minotaur #${m.id} devoured by Lolly.`);
+}
+
+function updateLolly(state: GameState): void {
+  const L = state.lolly;
+  if (!L) return;
+  // Re-validate the current target (it may have died, been destroyed, or —
+  // for a unit — moved); re-acquire when it's gone.
+  let spot = L.target ? lollyTargetSpot(state, L.target) : null;
+  if (!spot) {
+    L.target = acquireLollyTarget(state, L.pos);
+    L.attackAt = undefined;
+    spot = L.target ? lollyTargetSpot(state, L.target) : null;
+  }
+  if (spot && L.target) {
+    const dx = spot.x - L.pos.x;
+    const dy = spot.y - L.pos.y;
+    const d = Math.hypot(dx, dy);
+    if (d <= spot.reach) {
+      // Windup → smash, same beat as a Minotaur's.
+      if (L.attackAt === undefined) {
+        L.attackAt = state.now + LOLLY.attackWindup;
+        if (d > 1e-3) L.facing = Math.atan2(dy, dx);
+        return;
+      }
+      if (state.now < L.attackAt) return;
+      L.attackAt = undefined;
+      lollySmash(state, L.target);
+      L.target = null;
+      return;
+    }
+    L.attackAt = undefined;
+    const step = LOLLY.speed * TICK_S;
+    L.pos.x += (dx / d) * step;
+    L.pos.y += (dy / d) * step;
+    L.facing = Math.atan2(dy, dx);
+    return;
+  }
+  // Nothing left to destroy — Lolly wanders the ruins, Bob still aboard.
+  if (!L.wanderGoal || state.now >= L.nextWanderAt) {
+    const pa = state.playArea;
+    L.wanderGoal = {
+      x: (pa.x0 + Math.random() * (pa.x1 - pa.x0)) * CELL,
+      y: (pa.y0 + Math.random() * (pa.y1 - pa.y0)) * CELL,
+    };
+    L.nextWanderAt = state.now + LOLLY.wanderInterval + Math.random() * LOLLY.wanderInterval;
+  }
+  const dx = L.wanderGoal.x - L.pos.x;
+  const dy = L.wanderGoal.y - L.pos.y;
+  const d = Math.hypot(dx, dy);
+  if (d < LOLLY.reach) {
+    L.wanderGoal = undefined;
+    return;
+  }
+  const step = LOLLY.speed * 0.5 * TICK_S; // an unhurried victory lap
+  L.pos.x += (dx / d) * step;
+  L.pos.y += (dy / d) * step;
+  L.facing = Math.atan2(dy, dx);
 }
 
 function updateMinotaur(state: GameState, t: Minotaur, autoTargets: Map<number, number>) {

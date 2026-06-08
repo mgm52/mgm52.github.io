@@ -386,6 +386,30 @@ export const SUMMON_UPGRADES = {
   autoDragon: { bloodCost: 256, intervalSeconds: 5 },
 };
 
+// Pain Gabbonsaw — the demo's true closing ritual, surfaced once the final
+// (Collect 9,999,999 blood) task's celebration clears. Costs a fortune in
+// dragon bones; what it actually does is an anagram the player is meant to
+// discover the hard way ("pain gabbonsaw" → "spawn bob again"). Buying it
+// brings Bob back for one last word, then spawns Lolly — with Bob riding on
+// top — to rampage across the overworld (see LOLLY below).
+export const PAIN_GABBONSAW = { dragonBoneCost: 99 };
+
+// Lolly's overworld rampage. She works like a Minotaur — walks the map,
+// hunts the nearest prey — except she's colossal, grid-free (she crushes
+// straight over walls and water), and her prey list is EVERYTHING: every
+// building (Goblin Holes included, even the original spawning hole), every
+// goblin, robot, and minotaur, until nothing is left standing.
+export const LOLLY = {
+  speed: 95,           // px/sec — ponderous but unstoppable
+  displayPx: 280,      // on-screen sprite size (a demon loose on the surface)
+  reach: 36,           // px past a target's half-size that counts as in smashing range
+  attackWindup: 0.45,  // beat of menace before each smash lands
+  wanderInterval: 2.5, // once nothing is left: seconds between wander goals
+  // Where Bob sits — fraction of displayPx above her centre. Tuned so his
+  // feet plant ON the crown of her hat rather than hovering over it.
+  bobRideHeight: 0.46,
+};
+
 // Tier ladder for the Autospawn ritual. Each subsequent purchase replaces the
 // previous in the menu (level → next entry). Doubling cost per tier.
 export const AUTOSPAWN_TIERS: { multiplier: number; bloodCost: number }[] = [
