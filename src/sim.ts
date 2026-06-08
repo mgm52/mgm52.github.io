@@ -960,14 +960,21 @@ export function autoAssignAllIdle(state: GameState) {
     }
     if (!best) return;
 
+    // Construction sites poach idle robots ahead of any goblin, however far
+    // away — their compounding 0.7× build-time bonus beats a goblin's head
+    // start. Within a class (and for non-build needs), nearest wins.
+    const wantRobot = best.b.state === 'constructing';
     let pickI = 0;
     let pickD = Infinity;
+    let pickRobot = false;
     for (let i = 0; i < idle.length; i++) {
       const g = idle[i];
+      const isRobot = !!g.robot;
+      if (wantRobot && pickRobot && !isRobot) continue;
       const dx = g.pos.x - best.center.x;
       const dy = g.pos.y - best.center.y;
       const d = dx * dx + dy * dy;
-      if (d < pickD) { pickD = d; pickI = i; }
+      if ((wantRobot && isRobot && !pickRobot) || d < pickD) { pickD = d; pickI = i; pickRobot = isRobot; }
     }
     const g = idle.splice(pickI, 1)[0];
     best.b.assignedGoblins.push(g.id);
@@ -2404,6 +2411,9 @@ function updateGoblin(state: GameState, g: Goblin) {
         g.goal = null;
         g.path = [];
         g.state = { kind: 'building', buildingId: b.id };
+        // A robot setting to work announces its compounding 0.7× build-time
+        // bonus (see updateConstruction) with a white tag above its head.
+        if (g.robot) pushFloater(state, g.pos.x, g.pos.y - 14, 'fast build', 0xffffff, 3);
         return true;
       };
 
@@ -2945,12 +2955,19 @@ function updateConstruction(state: GameState, b: Building) {
   if (b.state !== 'constructing') return;
   const def = defOf(b);
   let workers = 0;
+  let robotWorkers = 0;
   for (const id of b.assignedGoblins) {
     const g = state.goblins.get(id);
-    if (g && g.state.kind === 'building' && g.state.buildingId === b.id) workers++;
+    if (g && g.state.kind === 'building' && g.state.buildingId === b.id) {
+      workers++;
+      if (g.robot) robotWorkers++;
+    }
   }
   if (workers < def.buildersRequired) return;
-  b.buildProgress += TICK_S / def.buildTime;
+  // Each robot on the site compounds a ROBOT.buildTimeMult (0.7×) cut to the
+  // build time — announced by the "fast build" floater when it set to work.
+  const buildTime = def.buildTime * Math.pow(ROBOT.buildTimeMult, robotWorkers);
+  b.buildProgress += TICK_S / buildTime;
   if (b.buildProgress >= 1) {
     b.buildProgress = 1;
     const keep = def.maintainersRequired;
