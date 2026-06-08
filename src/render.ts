@@ -1471,6 +1471,29 @@ function makeDemonView(variant: DemonVariant): DemonView {
   return { container, shadow, spriteShadow, sprite, hueFilter: new ColorMatrixFilter(), selectionRing: ring };
 }
 
+// Daylight does Lolly's hell shroud no favours: on the overworld she draws
+// from the bright variant of her sheet (same art minus the `_dark` grade)
+// when the manifest carries one, plus a brightness lift so she reads as a
+// creature in the sun rather than a silhouette.
+function lollyOverworldSheet(): Sheet | null {
+  const pick = getOptions().demonFriendSprite;
+  if (typeof pick === 'string' && pick.endsWith('_dark')) {
+    const bright = demonSheets.get(pick.slice(0, -'_dark'.length));
+    if (bright) return bright;
+  }
+  return demonSheetFor('friend');
+}
+
+const LOLLY_BRIGHTNESS = 1.9;
+let lollyBrightFilter: ColorMatrixFilter | null = null;
+function getLollyBrightFilter(): ColorMatrixFilter {
+  if (!lollyBrightFilter) {
+    lollyBrightFilter = new ColorMatrixFilter();
+    lollyBrightFilter.brightness(LOLLY_BRIGHTNESS, false);
+  }
+  return lollyBrightFilter;
+}
+
 // Lolly on the overworld — her hell sprite at a colossal size, with Bob
 // (a regular goblin sprite) perched on top. Her nametag-free: the yellow
 // "bob" tag above the rider comes from syncBobTags like everywhere else.
@@ -1478,8 +1501,9 @@ function makeLollyView(): LollyView {
   const container = new Container();
   const shadow = new Sprite(getShadowTexture());
   shadow.anchor.set(0.5);
-  const sprite = new Sprite(demonSheetFor('friend')?.frames[0][0] ?? Texture.EMPTY);
+  const sprite = new Sprite(lollyOverworldSheet()?.frames[0][0] ?? Texture.EMPTY);
   sprite.anchor.set(0.5);
+  sprite.filters = [getLollyBrightFilter()];
   const bob = new Sprite((goblinIdleSheet ?? goblinWalkSheet)?.frames[0][0] ?? Texture.EMPTY);
   bob.anchor.set(0.5);
   container.addChild(shadow);
@@ -3346,7 +3370,7 @@ export function render(state: GameState, ctx: RenderContext) {
       const sy = LOLLY.displayPx / 64;
       v.shadow.scale.set(sy * 0.75, sy);
     }
-    const sheet = demonSheetFor('friend');
+    const sheet = lollyOverworldSheet();
     if (sheet) {
       const dir = dirIndex(sheet.meta, L.facing);
       const fpd = sheet.meta.framesPerDirection;
@@ -3354,7 +3378,6 @@ export function render(state: GameState, ctx: RenderContext) {
       v.sprite.texture = sheet.frames[dir][frame];
       v.sprite.scale.set(LOLLY.displayPx / sheet.meta.spriteSize);
     }
-    v.sprite.tint = opts.demonFriendTint;
     const bobSheet = (L.target ? goblinWalkSheet : goblinIdleSheet) ?? goblinWalkSheet ?? goblinIdleSheet;
     if (bobSheet) {
       const dir = dirIndex(bobSheet.meta, L.facing);

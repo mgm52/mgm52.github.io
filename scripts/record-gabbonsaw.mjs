@@ -101,7 +101,9 @@ await advanceSpeak('oh no…');
 await advanceSpeak('lolly was right.');
 
 console.log('  anagram reveal…');
-check('anagram overlay appears', await page.waitForSelector('#anagram-overlay', { timeout: 15000 })
+// state:'attached' — the wrapper is a zero-width anchor (its letter spans
+// overflow it), so Playwright's bounding-box visibility test never passes.
+check('anagram overlay appears', await page.waitForSelector('#anagram-overlay', { state: 'attached', timeout: 15000 })
   .then(() => true).catch(() => false));
 await advanceSpeak('you really would click it.');
 await advanceSpeak('now i know what must be done');
@@ -168,10 +170,12 @@ if (newest) {
   const webm = path.join(OUT_DIR, newest.f);
   const mp4 = path.join(OUT_DIR, 'pain-gabbonsaw.mp4');
   console.log('Converting to mp4…');
-  // System PATH may not carry ffmpeg — fall back to Playwright's bundled one.
+  // System PATH may not carry ffmpeg, and Playwright's bundled build has no
+  // libx264 — prefer a real one, then ffmpeg-static (npm i --no-save
+  // ffmpeg-static) as the fallback.
   let ffmpeg = 'ffmpeg';
   try { execFileSync('ffmpeg', ['-version'], { stdio: 'ignore' }); }
-  catch { ffmpeg = '/opt/pw-browsers/ffmpeg-1011/ffmpeg-linux'; }
+  catch { ffmpeg = path.resolve('node_modules/ffmpeg-static/ffmpeg'); }
   execFileSync(ffmpeg, [
     '-y', '-i', webm,
     '-c:v', 'libx264', '-preset', 'slow', '-crf', '23',

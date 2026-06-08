@@ -405,8 +405,9 @@ export const LOLLY = {
   reach: 36,           // px past a target's half-size that counts as in smashing range
   attackWindup: 0.45,  // beat of menace before each smash lands
   wanderInterval: 2.5, // once nothing is left: seconds between wander goals
-  // Where Bob sits — fraction of displayPx above her centre.
-  bobRideHeight: 0.52,
+  // Where Bob sits — fraction of displayPx above her centre. Tuned so his
+  // feet plant ON the crown of her hat rather than hovering over it.
+  bobRideHeight: 0.46,
 };
 
 // Tier ladder for the Autospawn ritual. Each subsequent purchase replaces the

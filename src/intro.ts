@@ -492,14 +492,20 @@ function buildAnagramMapping(): { ch: string; from: number; to: number }[] {
 
 // The reveal itself: the ritual's name fades in, holds, then every letter
 // glides to its position in "spawn bob again" (monospace, so the slots line
-// up cleanly), holds again, and fades out. Self-contained DOM — built inside
-// the intro overlay and removed afterwards. Uses the pausable sleep, so P
-// freezes the beats (the in-flight CSS glide itself keeps easing — fine).
+// up cleanly), holds again, and fades out. Deliberately slow — it runs
+// CONCURRENTLY with Bob's remaining lines (the caller doesn't await it until
+// the dialogue is done), so the rearrangement unfolds above his head while
+// he talks. Self-contained DOM — built inside the intro overlay and removed
+// afterwards. Uses the pausable sleep, so P freezes the beats (the in-flight
+// CSS glide itself keeps easing — fine).
+const ANAGRAM_GLIDE_MS = 4500;
 async function playAnagramReveal(overlay: HTMLElement): Promise<void> {
   const wrap = document.createElement('div');
   wrap.id = 'anagram-overlay';
+  // Pinned ABOVE the speech line (#intro-speech bottoms out at 71vh, i.e.
+  // ~29% from the top) — the two are on screen together now.
   wrap.style.cssText =
-    'position:absolute; left:50%; top:32%; width:0; height:1.4em; overflow:visible; '
+    'position:absolute; left:50%; top:15%; width:0; height:1.4em; overflow:visible; '
     + "font-family:'VT323', monospace; font-size:clamp(28px, 7vmin, 72px); color:#ffd96b; "
     + 'text-shadow:0 0 14px rgba(255,90,40,0.85), 0 2px 2px #000; '
     + 'opacity:0; transition:opacity 600ms ease; pointer-events:none;';
@@ -518,7 +524,7 @@ async function playAnagramReveal(overlay: HTMLElement): Promise<void> {
     el.textContent = m.ch;
     el.style.cssText =
       'position:absolute; top:0; left:0; '
-      + 'transition:transform 1700ms cubic-bezier(0.65, 0, 0.35, 1), color 1700ms ease; '
+      + `transition:transform ${ANAGRAM_GLIDE_MS}ms cubic-bezier(0.65, 0, 0.35, 1), color ${ANAGRAM_GLIDE_MS}ms ease; `
       + `transform:translateX(${((m.from - srcCenter) * chW - chW / 2).toFixed(1)}px);`;
     wrap.appendChild(el);
     return { el, m };
@@ -526,15 +532,15 @@ async function playAnagramReveal(overlay: HTMLElement): Promise<void> {
   await sleep(80);                 // let the initial transforms commit
   wrap.style.opacity = '1';
   playSound('online', 0.5, 0.8);
-  await sleep(1700);               // "pain gabbonsaw" registers
+  await sleep(3200);               // "pain gabbonsaw" registers
   playSound('ritual', 0.7, 0.8);   // the letters begin to crawl
   for (const { el, m } of letters) {
     el.style.transform = `translateX(${((m.to - dstCenter) * chW - chW / 2).toFixed(1)}px)`;
     el.style.color = '#ff5a4a';
   }
-  await sleep(1900);               // glide completes
+  await sleep(ANAGRAM_GLIDE_MS + 300);  // glide completes
   playSound('online', 0.6, 1.3);
-  await sleep(1800);               // "spawn bob again" lands
+  await sleep(3600);               // "spawn bob again" lands
   wrap.style.opacity = '0';
   await sleep(650);
   wrap.remove();
@@ -584,13 +590,17 @@ export async function runGabbonsawCutscene(): Promise<void> {
   await runSpeak(overlay, speechEl, clickWall, 'oh no…');
   await runSpeak(overlay, speechEl, clickWall, 'lolly was right.');
   await speakBeat(overlay, speechEl, '. . .');
-  await playAnagramReveal(overlay);
+  // The anagram rearranges itself above his head WHILE he keeps talking —
+  // started here, awaited only after his last line so a quick clicker can't
+  // cut the reveal short.
+  const anagramDone = playAnagramReveal(overlay);
   await runSpeak(overlay, speechEl, clickWall, 'you really would click it.');
   // A glance off to the side, a beat of silence, then back to the player.
   await faceRow(goblinEl, 3);
   await speakBeat(overlay, speechEl, '. . .');
   await faceRow(goblinEl, 4);
   await runSpeak(overlay, speechEl, clickWall, 'now i know what must be done');
+  await anagramDone;
 
   // Walk-off — the world resumes behind him, and unlike runBobCutscene we
   // AWAIT the exit: Lolly only spawns once Bob is fully off screen.
