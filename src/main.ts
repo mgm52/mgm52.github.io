@@ -783,6 +783,17 @@ async function main() {
   tapHint(descendHellHint, triggerDescendToHell);
   tapHint(ascendHellHint, triggerAscendFromHell);
 
+  // Each frame-loop branch shows at most the travel hints it names here and
+  // hides the rest.
+  const showHints = (visible: {
+    ascend?: boolean; descend?: boolean; descendHell?: boolean; ascendHell?: boolean;
+  } = {}) => {
+    ascendHint?.classList.toggle('visible', !!visible.ascend);
+    descendHint?.classList.toggle('visible', !!visible.descend);
+    descendHellHint?.classList.toggle('visible', !!visible.descendHell);
+    ascendHellHint?.classList.toggle('visible', !!visible.ascendHell);
+  };
+
   // Autosave to localStorage every SAVE_INTERVAL_MS, plus on visibilitychange
   // and pagehide so a closed tab loses at most this much progress. The
   // periodic save runs through a worker (serialize+compress off the main
@@ -992,10 +1003,7 @@ async function main() {
         // Arrived — the destination view's buttons may now show (see refreshUI).
         state.viewTransitioning = false;
       }
-      ascendHint?.classList.remove('visible');
-      descendHint?.classList.remove('visible');
-      descendHellHint?.classList.remove('visible');
-      ascendHellHint?.classList.remove('visible');
+      showHints();
     } else if (hellTransitioning) {
       // Mid-descent: drive depth with the same ease-in-out and ignore pan.
       const t = Math.min(1, (now - hellTransStart) / HELL_TRANS_MS);
@@ -1016,10 +1024,7 @@ async function main() {
           state.view = 'ground';
         }
       }
-      ascendHint?.classList.remove('visible');
-      descendHint?.classList.remove('visible');
-      descendHellHint?.classList.remove('visible');
-      ascendHellHint?.classList.remove('visible');
+      showHints();
     } else if (ctx.altitude >= 0.9999) {
       // ── Space view ── pan the space camera; hold ↓ at the bottom to descend.
       state.view = 'space';
@@ -1034,10 +1039,7 @@ async function main() {
         descendHold += dt;
         if (descendHold >= SPACE_HOLD_MS) triggerDescendToSurface(now);
       } else { descendHold = 0; }
-      ascendHint?.classList.remove('visible');
-      descendHint?.classList.toggle('visible', atBottom && !transitioning);
-      descendHellHint?.classList.remove('visible');
-      ascendHellHint?.classList.remove('visible');
+      showHints({ descend: atBottom && !transitioning });
     } else if (ctx.depth >= 0.9999) {
       // ── Hell view ── pan the hell camera; hold ↑ at the top to rise back.
       state.view = 'hell';
@@ -1056,10 +1058,7 @@ async function main() {
         ascendHellHold += dt;
         if (ascendHellHold >= SPACE_HOLD_MS) triggerAscendFromHell(now);
       } else { ascendHellHold = 0; }
-      ascendHint?.classList.remove('visible');
-      descendHint?.classList.remove('visible');
-      descendHellHint?.classList.remove('visible');
-      ascendHellHint?.classList.toggle('visible', atTop && !hellTransitioning);
+      showHints({ ascendHell: atTop && !hellTransitioning });
     } else {
       // ── Ground view ── pan the world; hold ↑ at the top to rise into space,
       // or hold ↓ at the bottom (Hell Portal placed) to descend into hell.
@@ -1082,10 +1081,10 @@ async function main() {
         descendHellHold += dt;
         if (descendHellHold >= SPACE_HOLD_MS) triggerDescendToHell(now);
       } else { descendHellHold = 0; }
-      descendHint?.classList.remove('visible');
-      ascendHint?.classList.toggle('visible', state.spaceUnlocked && atTop && !transitioning);
-      descendHellHint?.classList.toggle('visible', state.hellUnlocked && atBottom && !hellTransitioning);
-      ascendHellHint?.classList.remove('visible');
+      showHints({
+        ascend: state.spaceUnlocked && atTop && !transitioning,
+        descendHell: state.hellUnlocked && atBottom && !hellTransitioning,
+      });
       // Pan-hint trigger: once any water source intersects the camera's visible
       // rect, mark `waterSeen` sticky-true. The hint flips off in refreshUI.
       if (!state.waterSeen && state.waterSources.size > 0) {

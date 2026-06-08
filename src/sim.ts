@@ -160,7 +160,7 @@ export function tick(state: GameState) {
     const def = defOf(b);
     if (!def.waterDeliveryAmount || b.state === 'constructing') continue;
     if (b.waterMeter === undefined) b.waterMeter = 0;
-    const depletion = defOf(b).waterDepletionPerSec ?? WATER_DEPLETION_PP_PER_SEC;
+    const depletion = def.waterDepletionPerSec ?? WATER_DEPLETION_PP_PER_SEC;
     b.waterMeter = Math.max(0, b.waterMeter - depletion * TICK_S);
   }
 
@@ -2226,9 +2226,9 @@ function updateGoblin(state: GameState, g: Goblin) {
         // building is fully staffed. A half-built crew can't keep the
         // tanks online, so the carrier's water "spills" until maintainers
         // are in place.
-        const delivery = defOf(b).waterDeliveryAmount ?? 0;
-        const def2 = defOf(b);
-        const fullyStaffed = maintainerCount(state, b) >= def2.maintainersRequired;
+        const bDef = defOf(b);
+        const delivery = bDef.waterDeliveryAmount ?? 0;
+        const fullyStaffed = maintainerCount(state, b) >= bDef.maintainersRequired;
         if (delivery > 0 && fullyStaffed) {
           b.waterMeter = Math.min(WATER_METER_MAX, (b.waterMeter ?? 0) + delivery);
           playSound('water_splash', 0.5);
