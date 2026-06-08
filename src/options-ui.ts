@@ -334,6 +334,15 @@ function rebuildPanel(panel: HTMLElement, callbacks: OptionsUICallbacks, refresh
     slider('Light strength',   o.hellDarknessLightAlpha, 0, 1, 0.02, (v) => setOption('hellDarknessLightAlpha', v)),
     // The canvas-side darkening during a parlay / soul chat (speakers exempt).
     slider('Parlay dim alpha', o.hellParlayDimAlpha, 0, 1, 0.02, (v) => setOption('hellParlayDimAlpha', v)),
+    // Sprite shadows: each soul's/demon's own art flipped vertically under
+    // its feet, like a reflection in the abyss.
+    subheader('Sprite shadows'),
+    toggle('Ghost shadows', o.hellSpriteShadowGhosts, (v) => setOption('hellSpriteShadowGhosts', v)),
+    toggle('Demon shadows', o.hellSpriteShadowDemons, (v) => setOption('hellSpriteShadowDemons', v)),
+    slider('Alpha',  o.hellSpriteShadowAlpha, 0, 1, 0.02, (v) => setOption('hellSpriteShadowAlpha', v)),
+    color('Tint',    o.hellSpriteShadowTint, (v) => setOption('hellSpriteShadowTint', v)),
+    slider('Squash', o.hellSpriteShadowSquash, 0.1, 1.5, 0.05, (v) => setOption('hellSpriteShadowSquash', v)),
+    slider('Gap (px)', o.hellSpriteShadowGap, -100, 200, 2, (v) => setOption('hellSpriteShadowGap', v)),
   ]));
 
   // The Demons section grew enough dials that it reads as four mini-panels:

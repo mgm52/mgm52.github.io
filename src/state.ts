@@ -409,6 +409,11 @@ export type Ghost = {
   paceAnchorX?: number;
   paceDir?: 1 | -1;
   pacePauseUntil?: number;
+  // Set by the demon's untruth strike: the ghost is hidden and inert (not
+  // rendered, not hit-testable, sim-skipped) until state.now reaches this,
+  // then re-materialises at his already-set hx/hy with a landing flash
+  // (see the respawn pass at the top of tickGhosts in sim.ts).
+  respawnAt?: number;
 };
 
 // A candle in an abyssal sigil — placed by the player (9 blood each) on the

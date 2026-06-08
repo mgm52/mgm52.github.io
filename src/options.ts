@@ -252,6 +252,14 @@ export type Options = {
   // soul chat is on screen (canvas-side, so the two speakers stay lit via
   // the same fuzzy pools as the veil). Replaces the old DOM overlay dim.
   hellParlayDimAlpha: number;       // 0 disables the dim entirely
+  // Sprite shadows — each ghost's / demon's own art flipped vertically,
+  // tinted dark, and mirrored about its feet like a reflection in the abyss.
+  hellSpriteShadowGhosts: boolean;  // flipped-copy shadows under the souls
+  hellSpriteShadowDemons: boolean;  // flipped-copy shadows under the demons
+  hellSpriteShadowAlpha: number;    // opacity of the mirrored copy
+  hellSpriteShadowTint: number;     // tint over the flipped art (black = pure silhouette)
+  hellSpriteShadowSquash: number;   // vertical scale of the mirror (1 = full-height reflection)
+  hellSpriteShadowGap: number;      // px between the feet and the shadow (negative overlaps)
   // Demon (the giant hell denizens) dev controls: render scale, whether they
   // patrol their band or stand frozen, plus their own saturation/brightness
   // colour filter. Sprite sheet and facing are per-demon: the colossus (R),
@@ -424,6 +432,12 @@ export const DEFAULT_OPTIONS: Options = {
   hellDarknessParlayRadius: 320,
   hellDarknessLightAlpha: 1,
   hellParlayDimAlpha: 0.75,
+  hellSpriteShadowGhosts: true,
+  hellSpriteShadowDemons: false,
+  hellSpriteShadowAlpha: 0.28,
+  hellSpriteShadowTint: 0x000000,
+  hellSpriteShadowSquash: 0.75,
+  hellSpriteShadowGap: -36,
   demonScale: 1,
   // Demons stand still by default now, each facing its own direction: R
   // faces down toward the viewer, L down-right, Lolly up-left into her

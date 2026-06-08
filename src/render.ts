@@ -324,6 +324,9 @@ type MinotaurView = {
 type DemonView = {
   container: Container;
   shadow: Sprite;
+  // Sprite shadow: the demon's own art flipped vertically below its feet
+  // (see syncSpriteShadow). Independent of the radial foot shadow above.
+  spriteShadow: Sprite;
   sprite: Sprite;
   selectionRing: Graphics;
 };
@@ -368,6 +371,9 @@ type SpaceUnitView = {
 // died. Lives in hellLayer. Made once on first sight; tinted dim red.
 type GhostView = {
   container: Container;
+  // Sprite shadow: the ghost's art flipped vertically below its feet
+  // (see syncSpriteShadow).
+  shadow: Sprite;
   sprite: Sprite;
   selectionRing: Graphics;
 };
@@ -1250,8 +1256,10 @@ function syncBobTags(ctx: RenderContext, state: GameState): void {
     specs.push({ key: `su${su.id}`, layer: ctx.spaceTagLayer, x: su.pos.x, y: su.pos.y - px * 0.55, alpha: 1, sizeMult: 1 });
   }
   // His soul in hell — double size (the scene zooms out) at half opacity.
+  // No tag while he's vanished between an untruth strike and its respawn.
   for (const gh of state.ghosts) {
     if (!gh.bob) continue;
+    if (gh.respawnAt !== undefined && state.now < gh.respawnAt) continue;
     const p = ghostHellPos(state, gh);
     specs.push({ key: `gh${gh.id}`, layer: ctx.hellTagLayer, x: p.x, y: p.y - px * 0.55, alpha: 0.5, sizeMult: 2 });
   }
@@ -1325,10 +1333,14 @@ function makeDemonView(variant: DemonVariant): DemonView {
   const startTex = demonSheetFor(variant)?.frames[0][0] ?? Texture.EMPTY;
   const sprite = new Sprite(startTex);
   sprite.anchor.set(0.5);
+  // Flipped-copy sprite shadow over the radial one — synced to the demon's
+  // live frame each render pass (syncSpriteShadow).
+  const spriteShadow = makeSpriteShadow();
   container.addChild(shadow);
+  container.addChild(spriteShadow);
   container.addChild(ring);
   container.addChild(sprite);
-  return { container, shadow, sprite, selectionRing: ring };
+  return { container, shadow, spriteShadow, sprite, selectionRing: ring };
 }
 
 // The dragon draws from an 8-direction fly sheet (dragonFlySheet). A soft glow
@@ -1489,6 +1501,37 @@ export function ambientDragonAt(ctx: RenderContext, x: number, y: number): { id:
   return best ? { id: best.id } : null;
 }
 
+// ─── Hell sprite shadows ───
+// A unit's own art flipped vertically, tinted dark, and mirrored about its
+// feet — reads as a shadow/reflection cast onto the abyss floor. Made empty
+// here; syncSpriteShadow keeps texture/scale/position in step with the real
+// sprite each frame and applies the dev dials.
+function makeSpriteShadow(): Sprite {
+  const s = new Sprite(Texture.EMPTY);
+  s.anchor.set(0.5);
+  s.visible = false;
+  return s;
+}
+
+function syncSpriteShadow(shadow: Sprite, sprite: Sprite, enabled: boolean, footY?: number): void {
+  shadow.visible = enabled;
+  if (!enabled) return;
+  const o = getOptions();
+  const squash = o.hellSpriteShadowSquash;
+  shadow.texture = sprite.texture;
+  // Negative y-scale flips the copy; squash shortens the reflection.
+  shadow.scale.set(sprite.scale.x, -sprite.scale.y * squash);
+  // Mirror about the foot line — where the art visually meets the ground.
+  // Defaults to the sprite's bottom edge; demons pass their dialed foot line
+  // (sprite Y nudge + the radial shadow's Y) instead, because the turntable
+  // art carries transparent padding that puts the texture's bottom edge well
+  // below the statue's actual feet. The gap dial then offsets from there.
+  const g = footY ?? sprite.y + sprite.height / 2;
+  shadow.position.set(sprite.x, g + (g - sprite.y) * squash + o.hellSpriteShadowGap);
+  shadow.alpha = o.hellSpriteShadowAlpha;
+  shadow.tint = o.hellSpriteShadowTint;
+}
+
 // Build a static silhouette of a killed unit at its death position. Uses the
 // first frame of the matching idle/walk sheet for the row that matches the
 // recorded facing — no per-frame animation, no shadow, no outline. Tinted
@@ -1504,6 +1547,10 @@ function makeGhostView(g: Ghost): GhostView | null {
   const selectionRing = new Graphics();
   selectionRing.visible = false;
 
+  // Flipped-copy sprite shadow, behind everything else in the container.
+  // Texture/position are synced to the live sprite each frame.
+  const shadow = makeSpriteShadow();
+
   if (g.kind === 'goblin') {
     const sheet = goblinIdleSheet ?? goblinWalkSheet;
     if (!sheet) return null;
@@ -1515,11 +1562,12 @@ function makeGhostView(g: Ghost): GhostView | null {
     sprite.scale.set(px / sheet.meta.spriteSize);
     sprite.tint = g.gold ? 0xc9a85a : getOptions().hellGhostTint;
     selectionRing.circle(0, 0, GOBLIN.radius + 4).stroke({ width: 2, color: 0xffd96b });
+    container.addChild(shadow);
     container.addChild(selectionRing);
     container.addChild(sprite);
     // Bob's hell nametag lives in hellTagLayer (see syncBobTags), not here,
     // so the demons can never cover it.
-    return { container, sprite, selectionRing };
+    return { container, shadow, sprite, selectionRing };
   }
   if (g.kind === 'minotaur') {
     const sheet = minotaurWalkSheet;
@@ -1532,9 +1580,10 @@ function makeGhostView(g: Ghost): GhostView | null {
     sprite.scale.set(px / sheet.meta.spriteSize);
     sprite.tint = getOptions().hellGhostTint;
     selectionRing.circle(0, 0, MINOTAUR.radius + 6).stroke({ width: 2, color: 0xffd96b });
+    container.addChild(shadow);
     container.addChild(selectionRing);
     container.addChild(sprite);
-    return { container, sprite, selectionRing };
+    return { container, shadow, sprite, selectionRing };
   }
   // Dragon ghost: first fly-sheet frame for the east/west row, dim red.
   // Dragon facing is -1 (left) / +1 (right) — map it onto the sheet's
@@ -1547,9 +1596,10 @@ function makeGhostView(g: Ghost): GhostView | null {
   sprite.scale.set(DRAGON.displayPx / sheet.meta.spriteSize);
   sprite.tint = getOptions().hellGhostTint;
   selectionRing.circle(0, 0, DRAGON.displayPx * 0.5).stroke({ width: 2, color: 0xffd96b });
+  container.addChild(shadow);
   container.addChild(selectionRing);
   container.addChild(sprite);
-  return { container, sprite, selectionRing };
+  return { container, shadow, sprite, selectionRing };
 }
 
 // Build the hell-side mirror of an overworld hell_portal — a darker copy of
@@ -2617,6 +2667,8 @@ export function ghostAtHell(state: GameState, hx: number, hy: number): Ghost | n
   let best: Ghost | null = null;
   let bestD = HELL.ghostHitRadius * HELL.ghostHitRadius;
   for (const g of state.ghosts) {
+    // Vanished between an untruth strike and its respawn — not clickable.
+    if (g.respawnAt !== undefined && state.now < g.respawnAt) continue;
     const p = ghostHellPos(state, g);
     const dx = p.x - hx;
     const dy = p.y - hy;
@@ -3269,6 +3321,11 @@ export function render(state: GameState, ctx: RenderContext) {
       ctx.ghostViews.set(gh.id, made);
       v = made;
     }
+    // A respawn-pending soul (demon untruth strike) stays invisible until
+    // its timer runs out — keep the view alive but hidden.
+    const hidden = gh.respawnAt !== undefined && state.now < gh.respawnAt;
+    v.container.visible = !hidden;
+    if (hidden) continue;
     // Once a ghost has been touched by the sim (commanded to walk, or just
     // selected), its position is tracked explicitly via hx/hy. Otherwise the
     // hell-y is derived from spawnAt+drift with the per-ghost speed multiplier.
@@ -3297,6 +3354,8 @@ export function render(state: GameState, ctx: RenderContext) {
       const sheet = gh.kind === 'goblin' ? (goblinIdleSheet ?? goblinWalkSheet) : minotaurWalkSheet;
       if (sheet) v.sprite.texture = sheet.frames[dirIndex(sheet.meta, gh.facing)][0];
     }
+    // Mirror the (possibly just-updated) frame into the flipped sprite shadow.
+    syncSpriteShadow(v.shadow, v.sprite, opts.hellSpriteShadowGhosts);
   }
   for (const [id, v] of ctx.ghostViews) {
     if (!seenGh.has(id)) {
@@ -3358,6 +3417,11 @@ export function render(state: GameState, ctx: RenderContext) {
       v.sprite.texture = sheet.frames[dir][frame];
       v.sprite.scale.set(DEMON.displayPx / sheet.meta.spriteSize);
     }
+    // Flipped sprite shadow rides the live frame and the per-demon Y nudge
+    // (it derives everything from v.sprite, set just above). Mirrors about
+    // the same foot line the radial shadow sits on, not the texture's
+    // (padding-laden) bottom edge.
+    syncSpriteShadow(v.spriteShadow, v.sprite, opts.hellSpriteShadowDemons, v.sprite.y + opts.demonShadowY);
   }
   for (const [id, v] of ctx.demonViews) {
     if (!seenDe.has(id)) {

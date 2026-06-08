@@ -8,10 +8,11 @@
 // click to advance; the dramatic "…" beats auto-advance after a short pause.
 
 import { playSound } from './audio';
+import { HELL } from './config';
 import { getOptions } from './options';
 import {
   Demon, GameState, Ghost, Goblin,
-  appendLog, hellToWorld, pushDeathEffect, resurrectBob,
+  appendLog, hellToWorld, pushDeathEffect,
 } from './state';
 
 type Speaker = 'demon' | 'goblin' | 'bob';
@@ -309,16 +310,32 @@ function waitForOption(buttons: HTMLButtonElement[]): Promise<number> {
   });
 }
 
-// White hell flash where Bob stood + a thunderclap, then yank his ghost out of
-// the underworld (he's cast back to the overworld by resurrectBob).
-function strikeGhostBack(state: GameState, ghost: Ghost): void {
+// White hell flash where Bob stood + a thunderclap, then hurl his soul back
+// to the centre of hell — the demon's "untruth" punishment. (He used to be
+// cast all the way back to the overworld; now it's basically a teleport.)
+// The ghost vanishes here and stays gone for HELL.bobRespawnDelaySec; the
+// respawn pass at the top of tickGhosts (sim.ts) re-materialises him at the
+// centre with his own landing flash once the timer runs out.
+function strikeGhostToCentre(state: GameState, ghost: Ghost): void {
   const w = (ghost.hx !== undefined && ghost.hy !== undefined)
     ? hellToWorld(ghost.hx, ghost.hy)
     : { x: ghost.x, y: ghost.y };
   pushDeathEffect(state, w.x, w.y, true, true);
   playSound('destroy', 0.7, 0.5);
-  const i = state.ghosts.findIndex((g) => g.id === ghost.id);
-  if (i >= 0) state.ghosts.splice(i, 1);
+  // Pre-place him at the centre so the respawn only has to unhide him. (If
+  // the centre is inside a demon, the per-tick shove ejects him to its rim —
+  // see shoveGhostOffDemons.)
+  ghost.hx = HELL.width / 2;
+  ghost.hy = HELL.height / 2;
+  ghost.respawnAt = state.now + HELL.bobRespawnDelaySec;
+  // Drop any in-flight command and re-anchor his idle pacing at the new spot.
+  ghost.goal = undefined;
+  ghost.parlayDemonId = undefined;
+  ghost.targetChairId = undefined;
+  ghost.chatTargetId = undefined;
+  ghost.paceAnchorX = ghost.hx;
+  ghost.pacePauseUntil = undefined;
+  appendLog(state, 'The demon hurls Bob back into the depths of hell.');
 }
 
 export async function runDemonDialogue(state: GameState, demon: Demon, ghost: Ghost): Promise<void> {
@@ -558,8 +575,7 @@ export async function runDemonDialogue(state: GameState, demon: Demon, ghost: Gh
         } else {
           await ellipsisBeat();
           await say('demon', 'untruth');
-          strikeGhostBack(state, ghost);
-          resurrectBob(state);
+          strikeGhostToCentre(state, ghost);
         }
       } else {
         await noLanguage();

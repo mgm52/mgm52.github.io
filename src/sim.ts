@@ -8,7 +8,7 @@ import {
   earnBlood, earnDragonBone, earnMoney, findHoleEmergenceCell,
   getSpawnCapacity, holeBlockedByBuilding, holeCenter, isCellBlocked, isCellInBuilding, isCellInWaterSource,
   isInBounds, maintainerCount, markBuildingsChanged, nearestCellInWaterSource, occupyCell, pushDeathEffect, pushFloater,
-  hellMirrorCenter, pruneSoulChairs, pushLaserBeam, pushLightningBolt, recordGhost, releaseCell, removeDragon, removeGoblin,
+  hellMirrorCenter, hellToWorld, pruneSoulChairs, pushLaserBeam, pushLightningBolt, recordGhost, releaseCell, removeDragon, removeGoblin,
   waterCarrierCount,
 } from './state';
 
@@ -241,6 +241,18 @@ export function tick(state: GameState) {
   const hellYOffset = (HELL.height - WORLD.height) / 2;
   for (let i = state.ghosts.length - 1; i >= 0; i--) {
     const g = state.ghosts[i];
+    // Respawn pass: a soul struck by the demon's untruth punishment stays
+    // vanished and inert until its timer runs out, then flashes back in at
+    // the spot the strike pre-placed it (the centre of hell).
+    if (g.respawnAt !== undefined) {
+      if (state.now < g.respawnAt) continue;
+      g.respawnAt = undefined;
+      if (g.hx !== undefined && g.hy !== undefined) {
+        const w = hellToWorld(g.hx, g.hy);
+        pushDeathEffect(state, w.x, w.y, true, true);
+        playSound('destroy', 0.5, 0.7);
+      }
+    }
     // speedMult is a per-ghost jitter on the *passive drift* only, so a
     // cluster spreads out rather than falling in lockstep. Walk commands run
     // at HELL.ghostWalkSpeed for everyone — including Bob (drift mult 0) —

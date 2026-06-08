@@ -237,6 +237,9 @@ export const HELL = {
   bobPaceRange: 90,
   bobPaceSpeed: 20,
   bobPacePauseSec: 3,
+  // How long Bob's soul stays vanished after the demon's untruth strike
+  // before re-materialising at the centre of hell.
+  bobRespawnDelaySec: 2,
 };
 
 // Demons — uncommandable denizens of hell. Three of them now: the original
