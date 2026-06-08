@@ -1,7 +1,7 @@
 import {
   BASE_SPAWN_CAPACITY, BUILDING_DEFS, BuildingDef, BuildingKind, CELL, COLS,
   DEMON, DIG_GROWTH_CELLS, GOBLIN_HOLE_CAPACITY_PER_BUILDING, HELL, ROWS, SOUL_SIGIL,
-  INITIAL_PLAY_COLS, INITIAL_PLAY_ROWS, INITIAL_PLAY_X0, INITIAL_PLAY_Y0,
+  INITIAL_PLAY_COLS, INITIAL_PLAY_ROWS, INITIAL_PLAY_X0, INITIAL_PLAY_Y0, ROBOT,
   START_CELL, START_GOBLINS, START_MONEY, WALL_BORDER, WORLD, formatPower,
 } from './config';
 import { getOptions } from './options';
@@ -1793,6 +1793,37 @@ export function freePlatformAt(state: GameState, x: number, y: number): SpaceBui
   return null;
 }
 
+// True if a `kind` footprint centered at the given SPACE coord would overlap
+// an existing structure of the same kind. Platforms (and the Centres bolted
+// to them) are anchored where they're deployed, so a simple AABB test against
+// their unrotated squares is exact. Used by placement (input.ts) and the
+// placement ghost (render.ts) so the preview goes red exactly where the drop
+// would refuse.
+export function spaceStructureOverlapAt(
+  state: GameState, kind: 'orbital_platform' | 'space_centre', x: number, y: number, ignoreId?: number,
+): boolean {
+  const half = BUILDING_DEFS[kind].size / 2;
+  for (const sb of state.spaceBuildings.values()) {
+    if (sb.building.kind !== kind || sb.id === ignoreId) continue;
+    const otherHalf = BUILDING_DEFS[sb.building.kind].size / 2;
+    if (Math.abs(x - sb.pos.x) < half + otherHalf && Math.abs(y - sb.pos.y) < half + otherHalf) return true;
+  }
+  return false;
+}
+
+// True if a robot is standing on (or hovering just off) the given Space
+// Centre's deck — the one-robot crew an assembled Centre needs to run. Uses
+// the platform's footprint plus the robot build range, so a robot parked on
+// the walkable rim (robotParkSpot's ring) comfortably counts.
+export function spaceCentreMaintained(state: GameState, sb: SpaceBuilding): boolean {
+  const range = BUILDING_DEFS.orbital_platform.size / 2 + ROBOT.buildRange;
+  for (const su of state.spaceUnits.values()) {
+    if (!su.robot) continue;
+    if (Math.hypot(su.pos.x - sb.pos.x, su.pos.y - sb.pos.y) <= range) return true;
+  }
+  return false;
+}
+
 // Drifting space unit within a generous tap radius of a SPACE-coord point, or
 // null. Checked before buildings so a small unit drifting over a platform can
 // still be picked.
@@ -1809,7 +1840,7 @@ export function spaceUnitAt(state: GameState, x: number, y: number): SpaceUnit |
 }
 
 // Hypercentres the player can point at — finished ground ones plus any hauled
-// into orbit. Gates the Robot summon ("needs 4 hypercentres").
+// into orbit. Gates the Robot summon (ROBOT.hypercentresRequired).
 export function countHypercentres(state: GameState): number {
   let n = 0;
   for (const b of state.buildings.values()) {

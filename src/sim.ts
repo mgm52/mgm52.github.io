@@ -9,7 +9,7 @@ import {
   getSpawnCapacity, holeBlockedByBuilding, holeCenter, isCellBlocked, isCellInBuilding, isCellInWaterSource,
   isInBounds, maintainerCount, markBuildingsChanged, nearestCellInWaterSource, occupyCell, pushDeathEffect, pushFloater,
   hellMirrorCenter, hellToWorld, pruneSoulChairs, pushLaserBeam, pushLightningBolt, recordGhost, releaseCell, removeDragon, removeGoblin,
-  waterCarrierCount,
+  spaceCentreMaintained, waterCarrierCount,
 } from './state';
 
 // Auto-assign normally only runs on discrete events (a spawn, a manual command,
@@ -183,10 +183,12 @@ export function tick(state: GameState) {
   for (const d of [...state.dragons.values()]) updateDragon(state, d);
   // Floating space buildings drift within their bounds.
   for (const sb of state.spaceBuildings.values()) updateSpaceBuilding(sb);
-  // Units adrift in space: robots paddle toward unfinished platforms, the
-  // rest tumble until their vacuum timer pops them. Copy first — a perishing
-  // unit removes itself mid-loop.
-  for (const su of [...state.spaceUnits.values()]) updateSpaceUnit(state, su);
+  // Units adrift in space: robots work their assigned duty (one builder per
+  // construction site, one maintainer per Space Centre), the rest tumble
+  // until their vacuum timer pops them. Copy first — a perishing unit
+  // removes itself mid-loop.
+  const robotDuties = assignRobotDuties(state);
+  for (const su of [...state.spaceUnits.values()]) updateSpaceUnit(state, su, robotDuties);
   // Robots on site advance any Orbital Platform under construction.
   advanceOrbitalPlatforms(state);
 
@@ -2215,6 +2217,29 @@ function robotLaserKill(state: GameState, r: Goblin, kind: 'goblin' | 'minotaur'
   }
 }
 
+// The robot a default (seeking) dragon hauls up when there's no income
+// building left to take: the nearest ground robot not already being chased
+// by another dragon. Terminators stay put — they're hunters, and their red
+// lamp would be wasted on orbital chores.
+function dragonTargetRobot(state: GameState, d: Dragon): Goblin | null {
+  const claimed = new Set<number>();
+  for (const other of state.dragons.values()) {
+    if (other.id === d.id) continue;
+    if (other.state.kind === 'going_to_unit' && other.state.targetKind === 'goblin') {
+      claimed.add(other.state.targetId);
+    }
+  }
+  let best: Goblin | null = null;
+  let bestD = Infinity;
+  for (const g of state.goblins.values()) {
+    if (!g.robot || g.terminator || claimed.has(g.id)) continue;
+    const dx = g.pos.x - d.pos.x, dy = g.pos.y - d.pos.y;
+    const dist = dx * dx + dy * dy;
+    if (dist < bestD) { bestD = dist; best = g; }
+  }
+  return best;
+}
+
 function updateDragon(state: GameState, d: Dragon) {
   // Player-issued orders fly at the snappier manualSpeed so commands feel
   // responsive; the default auto-collecting path stays at the calmer speed.
@@ -2363,7 +2388,14 @@ function updateDragon(state: GameState, d: Dragon) {
       if (d.carrying) { d.state = { kind: 'carrying' }; return; }
       if (d.carryingUnit) { d.state = { kind: 'carrying_unit' }; return; }
       const b = dragonTargetBuilding(state);
-      if (!b) return; // nothing worth hauling — hover (renderer adds the bob)
+      if (!b) {
+        // No income-earner left to haul — bring up a robot instead (the only
+        // unit that survives the vacuum, and the only hands that can build up
+        // there). Falls back to hovering when there's no robot either.
+        const r = dragonTargetRobot(state, d);
+        if (r) d.state = { kind: 'going_to_unit', targetKind: 'goblin', targetId: r.id };
+        return;
+      }
       const c = buildingCenter(b);
       const reached = dragonFlyToward(d, c.x, c.y, speed);
       if (reached || Math.hypot(c.x - d.pos.x, c.y - d.pos.y) <= DRAGON.pickupDist) {
@@ -2402,17 +2434,45 @@ function updateSpaceBuilding(sb: SpaceBuilding) {
   }
 }
 
-// The nearest space structure still under robot assembly, or null.
-function nearestConstructingSite(state: GameState, su: SpaceUnit): SpaceBuilding | null {
-  let target: SpaceBuilding | null = null;
-  let bestD = Infinity;
-  for (const sb of state.spaceBuildings.values()) {
-    if (!isRobotBuilt(sb.building.kind) || sb.building.state !== 'constructing') continue;
-    const dx = sb.pos.x - su.pos.x, dy = sb.pos.y - su.pos.y;
-    const d = dx * dx + dy * dy;
-    if (d < bestD) { bestD = d; target = sb; }
+// One robot per job. Each structure under robot assembly needs exactly one
+// builder (extra hands don't speed it up — see advanceOrbitalPlatforms), and
+// each completed Space Centre needs exactly one robot stationed on its deck
+// as crew. Greedily claim the nearest free robot for every job so the rest
+// stay parked instead of the whole fleet piling onto the same site.
+// Recomputed every tick; robots mid-march to a player goal are off the books
+// (they ignore work entirely until they arrive), and a robot standing fast at
+// its goal may only be claimed for fresh construction work — maintainer duty
+// never pulls a commanded robot off its post.
+type RobotDuty = { kind: 'build' | 'maintain'; siteId: number };
+function assignRobotDuties(state: GameState): Map<number, RobotDuty> {
+  const duties = new Map<number, RobotDuty>();
+  const free: SpaceUnit[] = [];
+  for (const su of state.spaceUnits.values()) {
+    if (!su.robot) continue;
+    if (su.goal && Math.hypot(su.goal.x - su.pos.x, su.goal.y - su.pos.y) > ROBOT.arriveDist + 0.5) continue;
+    free.push(su);
   }
-  return target;
+  const claim = (sb: SpaceBuilding, kind: RobotDuty['kind']): void => {
+    let best: SpaceUnit | null = null;
+    let bestD = Infinity;
+    for (const su of free) {
+      if (duties.has(su.id)) continue;
+      if (kind === 'maintain' && su.goal) continue; // commanded posts yield to builds only
+      const dx = su.pos.x - sb.pos.x, dy = su.pos.y - sb.pos.y;
+      const d = dx * dx + dy * dy;
+      if (d < bestD) { bestD = d; best = su; }
+    }
+    if (best) duties.set(best.id, { kind, siteId: sb.id });
+  };
+  // Construction first — an unfinished structure earns nothing, so it
+  // outranks keeping an already-built Centre crewed.
+  for (const sb of state.spaceBuildings.values()) {
+    if (isRobotBuilt(sb.building.kind) && sb.building.state === 'constructing') claim(sb, 'build');
+  }
+  for (const sb of state.spaceBuildings.values()) {
+    if (sb.building.kind === 'space_centre' && sb.building.state !== 'constructing') claim(sb, 'maintain');
+  }
+  return duties;
 }
 
 // Step a robot toward a point, stopping `hold` px short of it. Returns true
@@ -2444,19 +2504,21 @@ function robotParkSpot(su: SpaceUnit, platform: SpaceBuilding): { x: number; y: 
 
 // A unit adrift in space. Robots have a little life up here: a player move
 // command (goal) takes priority — walk there and stand fast; otherwise they
-// paddle toward the nearest structure under robot assembly and hold station
-// at its rim (advanceOrbitalPlatforms counts them as builders there); failing
-// that they head for the nearest completed Orbital Platform and park on its
-// deck. Everything else — and robots with nowhere to go — tumbles gently
-// within the space bounds, mirroring the building drift. A non-robot's vacuum
-// timer pops it once SPACE_UNIT.lifetime is up.
-function updateSpaceUnit(state: GameState, su: SpaceUnit) {
+// work whatever duty assignRobotDuties handed them this tick — sole builder
+// at a structure under robot assembly (advanceOrbitalPlatforms counts them
+// there), or sole maintainer parked on a completed Space Centre's deck —
+// failing that they head for the nearest completed Orbital Platform and park
+// on its deck. Everything else — and robots with nowhere to go — tumbles
+// gently within the space bounds, mirroring the building drift. A non-robot's
+// vacuum timer pops it once SPACE_UNIT.lifetime is up.
+function updateSpaceUnit(state: GameState, su: SpaceUnit, duties: Map<number, RobotDuty>) {
   if (su.diesAt !== undefined && state.now >= su.diesAt) {
     spaceUnitPerish(state, su);
     return;
   }
   if (su.robot) {
     su.walking = false;
+    const duty = duties.get(su.id);
     // 1) Player command — walk to the goal, then STAY there (a commanded
     // goblin doesn't wander off its post). Only fresh construction work may
     // claim a robot off its post once it's standing (mirroring autobuild
@@ -2464,20 +2526,34 @@ function updateSpaceUnit(state: GameState, su: SpaceUnit) {
     if (su.goal) {
       su.workingOn = undefined;
       if (!robotStepToward(su, su.goal.x, su.goal.y, ROBOT.arriveDist)) return;
-      if (!nearestConstructingSite(state, su)) return; // standing fast
+      if (duty?.kind !== 'build') return; // standing fast
       su.goal = undefined; // work calls — release the post and fall through
     }
-    // 2) Assembly work.
-    const target = nearestConstructingSite(state, su);
-    if (target) {
-      su.workingOn = target.id;
-      const def = BUILDING_DEFS[target.building.kind];
-      // Park just inside the build range so the robot reads as ON the site.
-      robotStepToward(su, target.pos.x, target.pos.y, def.size / 2 + ROBOT.buildRange * 0.5);
-      return;
+    // 2) Assembly work — the one site this robot is the claimed builder for.
+    if (duty?.kind === 'build') {
+      const target = state.spaceBuildings.get(duty.siteId);
+      if (target) {
+        su.workingOn = target.id;
+        const def = BUILDING_DEFS[target.building.kind];
+        // Park just inside the build range so the robot reads as ON the site.
+        robotStepToward(su, target.pos.x, target.pos.y, def.size / 2 + ROBOT.buildRange * 0.5);
+        return;
+      }
     }
     su.workingOn = undefined;
-    // 3) Idle — park on the nearest completed platform's deck.
+    // 3) Maintainer duty — park on the assigned Centre's deck rim, where
+    // spaceCentreMaintained counts this robot as the crew.
+    if (duty?.kind === 'maintain') {
+      const centre = state.spaceBuildings.get(duty.siteId);
+      if (centre) {
+        const platform = centre.platformId !== undefined
+          ? state.spaceBuildings.get(centre.platformId) : undefined;
+        const spot = robotParkSpot(su, platform ?? centre);
+        robotStepToward(su, spot.x, spot.y, ROBOT.arriveDist);
+        return;
+      }
+    }
+    // 4) Idle — park on the nearest completed platform's deck.
     let platform: SpaceBuilding | null = null;
     let bestD = Infinity;
     for (const sb of state.spaceBuildings.values()) {
@@ -3440,6 +3516,17 @@ function resolvePowerAndState(state: GameState) {
     const def = BUILDING_DEFS[b.kind];
     if (def.powerOutput >= 0) continue;
     const draw = -def.powerOutput;
+    // A Space Centre needs its one-robot crew on deck (maintainersRequired);
+    // unstaffed it goes dark and stops drawing from the grid until a robot
+    // parks back on the rim.
+    if (b.kind === 'space_centre' && !spaceCentreMaintained(state, sb)) {
+      if (b.state === 'active') {
+        b.state = 'dormant';
+        appendLog(state, `${def.name} #${b.displayNum} goes dark — needs a robot maintainer on deck.`);
+        pushFloater(state, sb.pos.x, sb.pos.y - POWER_FLOATER_Y_OFFSET, `+${formatPower(draw)}`, 0x8acfff, 1.6, undefined, true);
+      }
+      continue;
+    }
     const wasActive = b.state === 'active';
     const fits = consumed + draw <= production;
     if (fits) {

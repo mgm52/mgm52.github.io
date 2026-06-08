@@ -8,7 +8,7 @@ import {
   Building, Cell, Demon, DragonState, GameState, Ghost, Goblin, GoblinState, SoulChair, SpaceBuilding, SpaceUnit, WaterSource,
   appendLog, buildingCenter, buildingLabel, buildingMoneyCost, cellCenter, cellKey, chairSoulSnapshot, countHypercentres, countIdle, countSpaceCentres, defOf, digDirection,
   earnDragonBone, getSpawnCapacity, goblinSpawningBlocked, holeBlockedByBuilding, isCellBlocked, isInBounds,
-  maintainerCount, markBuildingsChanged, nextBuildingDisplayNum, occupyCell, waterCarrierCount,
+  maintainerCount, markBuildingsChanged, nextBuildingDisplayNum, occupyCell, spaceCentreMaintained, waterCarrierCount,
 } from './state';
 import { spawnDragon, spawnMinotaur, unseatSoulFromChair } from './sim';
 import { isModalDialogueActive } from './demon-dialogue';
@@ -853,7 +853,7 @@ export function setupUI(state: GameState, callbacks: UICallbacks) {
   summonList.appendChild(dragonBtn);
 
   // Robot — late-game money summon, revealed with the Hypercentre era. The
-  // "needs 4 hypercentres" banner sits on the button until the industrial
+  // "needs 2 hypercentres" banner sits on the button until the industrial
   // base is big enough. A robot is a small grey goblin allergic only to
   // radioactive waste (a reactor meltdown is the one thing that kills it);
   // its real purpose is being dragon-snatched to orbit, where (unlike
@@ -1641,7 +1641,7 @@ export function refreshUI(state: GameState) {
   }
 
   // Robot button — revealed by the Build-a-Hypercentre task, but stays banner-
-  // gated ("needs 4 hypercentres") until the industrial base reaches
+  // gated ("needs 2 hypercentres") until the industrial base reaches
   // ROBOT.hypercentresRequired (ground + orbit combined). Costs money.
   const robotBtn = document.getElementById('btn-summon-robot') as HTMLButtonElement;
   if (revealedTaskIds.has('build_hypercentre')) {
@@ -2690,7 +2690,7 @@ function showBuilding(state: GameState, b: Building, panel: HTMLElement, portrai
 // Info panel for a building that's been hauled into space. Unlike its
 // ground self it has no maintainers, water, or power upkeep — it just floats
 // and keeps earning (and feeding any power generation back to the grid).
-function showSpaceBuilding(_state: GameState, sb: SpaceBuilding, panel: HTMLElement, portrait: HTMLElement,
+function showSpaceBuilding(state: GameState, sb: SpaceBuilding, panel: HTMLElement, portrait: HTMLElement,
                            name: HTMLElement, stateEl: HTMLElement, extra: HTMLElement) {
   panel.classList.add('visible');
   const b = sb.building;
@@ -2719,8 +2719,12 @@ function showSpaceBuilding(_state: GameState, sb: SpaceBuilding, panel: HTMLElem
   }
   // Consumers in orbit still need the ground grid — `state` reflects whether
   // resolvePowerAndState could spare the draw this tick. Generators stay
-  // active in orbit (no upkeep).
-  if (def.powerOutput < 0) {
+  // active in orbit (no upkeep). A Space Centre additionally needs its
+  // one-robot crew on deck; report that ahead of the power link since an
+  // unstaffed Centre doesn't draw at all.
+  if (b.kind === 'space_centre' && !isActive && !spaceCentreMaintained(state, sb)) {
+    stateEl.textContent = 'Dormant — needs a robot maintainer';
+  } else if (def.powerOutput < 0) {
     stateEl.textContent = isActive ? 'Active — powered from below' : 'Dormant — power link severed';
   } else if (def.powerOutput > 0) {
     stateEl.textContent = 'Active — beaming power down';
