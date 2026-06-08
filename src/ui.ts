@@ -7,7 +7,7 @@ import {
 import {
   Building, Cell, Demon, DragonState, GameState, Ghost, Goblin, GoblinState, SoulChair, SpaceBuilding, SpaceUnit, WaterSource,
   appendLog, buildingCenter, buildingLabel, buildingMoneyCost, cellCenter, cellKey, chairSoulSnapshot, countHypercentres, countIdle, defOf, digDirection,
-  earnDragonBone, getSpawnCapacity, holeBlockedByBuilding, isCellBlocked, isInBounds,
+  earnDragonBone, getSpawnCapacity, goblinSpawningBlocked, holeBlockedByBuilding, isCellBlocked, isInBounds,
   maintainerCount, markBuildingsChanged, nextBuildingDisplayNum, occupyCell, waterCarrierCount,
 } from './state';
 import { spawnDragon, spawnMinotaur, unseatSoulFromChair } from './sim';
@@ -459,7 +459,18 @@ type Task = {
   prereq?: string[];
   // Optional side-tasks don't gate any other task and render as "Optional: …".
   optional?: boolean;
+  // Extra availability gate beyond the prereq DAG, for tasks granted by a
+  // world event rather than another task (Lilly's optional-Work handout).
+  // The task stays hidden — and can't complete — until this returns true.
+  available?: (s: GameState) => boolean;
 };
+
+// A task is eligible to surface/complete only once its prereq tasks are done
+// AND any extra availability gate passes.
+function taskReady(t: Task, s: GameState): boolean {
+  return (!t.prereq || t.prereq.every(id => completedTaskIds.has(id)))
+    && (!t.available || t.available(s));
+}
 
 // Tasks are sticky: once a task's isDone has ever returned true in this session,
 // we treat it as permanently complete. Stops unlocks/build buttons from
@@ -577,6 +588,54 @@ const TASKS: Task[] = [
     unlocks: [],
     isDone: (s) => s.blood >= 9_999_999,
     prereq: ['build_hypercentre'],
+  },
+  // ── Lilly's optional Work ─────────────────────────────────────────
+  // Handed out by demon L the first time she rules "you need more Work"
+  // (see the golf-alibi beat in demon-dialogue.ts); hidden until then via
+  // the `available` gate on state.lillyTasksGiven. None of them unlock
+  // anything — they're Work for Work's sake.
+  {
+    // Spawning is "prevented" when no hole can produce a goblin: every hole
+    // built over, walled off, or buried under so many bodies that no
+    // reachable free cell remains (the same emergence test spawnGoblin uses
+    // — see goblinSpawningBlocked).
+    id: 'prevent_spawning',
+    text: 'Prevent goblin spawning',
+    unlocks: [],
+    isDone: (s) => goblinSpawningBlocked(s),
+    available: (s) => s.lillyTasksGiven,
+    optional: true,
+  },
+  {
+    // Robots shrug off every other kill path — only a reactor meltdown's
+    // radioactive shockwave can destroy one (strike a completed Nuclear
+    // Reactor with Lightning; see updateMeltdowns).
+    id: 'destroy_robot',
+    text: 'Destroy a robot',
+    unlocks: [],
+    isDone: (s) => s.robotsDestroyed > 0,
+    available: (s) => s.lillyTasksGiven,
+    optional: true,
+  },
+  {
+    // "Fully fed" = one portal's sigil running at full burn: all five chairs
+    // bound with very-strong souls (tinytaurs or dragons, x144 each).
+    id: 'feed_hell_core',
+    text: 'Fully feed a hell core',
+    unlocks: [],
+    isDone: (s) => {
+      const veryStrong = SOUL_SIGIL.soulMultipliers.veryStrong;
+      const fed = new Map<number, number>();
+      for (const c of s.soulChairs) {
+        if (!c.occupied || c.mult !== veryStrong) continue;
+        const n = (fed.get(c.portalId) ?? 0) + 1;
+        if (n >= SOUL_SIGIL.count) return true;
+        fed.set(c.portalId, n);
+      }
+      return false;
+    },
+    available: (s) => s.lillyTasksGiven,
+    optional: true,
   },
 ];
 
@@ -758,9 +817,10 @@ export function setupUI(state: GameState, callbacks: UICallbacks) {
 
   // Robot — late-game money summon, revealed with the Hypercentre era. The
   // "needs 4 hypercentres" banner sits on the button until the industrial
-  // base is big enough. A robot is a small grey goblin that cannot die; its
-  // real purpose is being dragon-snatched to orbit, where (unlike everything
-  // else) it survives — and can assemble an Orbital Platform.
+  // base is big enough. A robot is a small grey goblin allergic only to
+  // radioactive waste (a reactor meltdown is the one thing that kills it);
+  // its real purpose is being dragon-snatched to orbit, where (unlike
+  // everything else) it survives — and can assemble an Orbital Platform.
   const robotBtn = document.createElement('button');
   robotBtn.className = 'build-button build-button-compact';
   robotBtn.id = 'btn-summon-robot';
@@ -1272,12 +1332,11 @@ export function refreshUI(state: GameState) {
     firstRefreshDone = true;
     for (const t of TASKS) {
       // Same DAG guard as the live loop below: don't auto-complete a task from
-      // isDone alone unless its prereqs are too, so an early-satisfiable task
-      // (the optional Summon-2-Minotaurs side-task) can't reveal its unlock out
-      // of order on load. Genuinely
+      // isDone alone unless its prereqs (and availability gate) are too, so an
+      // early-satisfiable task (the optional Summon-2-Minotaurs side-task)
+      // can't reveal its unlock out of order on load. Genuinely
       // persisted progress is restored separately by the hydration step below.
-      const prereqsDone = !t.prereq || t.prereq.every(id => completedTaskIds.has(id));
-      if (prereqsDone && t.isDone(state)) {
+      if (taskReady(t, state) && t.isDone(state)) {
         completedTaskIds.add(t.id);
         previouslyCompletedTaskIds.add(t.id);
         revealedTaskIds.add(t.id);
@@ -1478,14 +1537,14 @@ export function refreshUI(state: GameState) {
   // black-out and then fade in.
   const unlocked = new Set<BuildingKind>();
   for (const t of TASKS) {
-    // A task can only complete once its prereqs have, so an isDone satisfiable
-    // out of DAG order can't fire its unlock early (the Goblin Hole's
-    // Summon-2-Minotaurs task, gated behind build_gas_engine, would otherwise
-    // pop the instant a Minotaur count crossed 2). Safe as a single forward pass: prereqs
+    // A task can only complete once its prereqs (and availability gate) have,
+    // so an isDone satisfiable out of DAG order can't fire its unlock early
+    // (the Goblin Hole's Summon-2-Minotaurs task, gated behind
+    // build_gas_engine, would otherwise pop the instant a Minotaur count
+    // crossed 2). Safe as a single forward pass: prereqs
     // precede their dependents in TASKS, so they're added to completedTaskIds
     // earlier in this same loop.
-    const prereqsDone = !t.prereq || t.prereq.every(id => completedTaskIds.has(id));
-    if (completedTaskIds.has(t.id) || (prereqsDone && t.isDone(state))) {
+    if (completedTaskIds.has(t.id) || (taskReady(t, state) && t.isDone(state))) {
       completedTaskIds.add(t.id);
       if (revealedTaskIds.has(t.id)) {
         for (const k of t.unlocks) unlocked.add(k);
@@ -1503,8 +1562,7 @@ export function refreshUI(state: GameState) {
   const activeTasks: Task[] = [];
   for (const t of TASKS) {
     if (completedTaskIds.has(t.id)) continue;
-    const ready = !t.prereq || t.prereq.every(id => completedTaskIds.has(id));
-    if (ready) activeTasks.push(t);
+    if (taskReady(t, state)) activeTasks.push(t);
   }
   // Mandatory tasks first, optional side-tasks after (stable within each group).
   activeTasks.sort((a, b) => Number(a.optional ?? false) - Number(b.optional ?? false));
@@ -2296,7 +2354,7 @@ function showGoblin(state: GameState, g: Goblin, panel: HTMLElement, portrait: H
     ? `<div class="portrait-goblin" style="background:#1c2026;border-color:#9aa3ad;color:#cfd5dc">R</div>`
     : `<div class="portrait-goblin">G</div>`;
   name.textContent = g.robot ? `Robot #${g.id}` : `Goblin #${g.id}`;
-  stateEl.textContent = describeGoblinState(state, g.state) || (g.robot ? 'Cannot die' : '');
+  stateEl.textContent = describeGoblinState(state, g.state) || (g.robot ? 'Allergic to radioactive waste' : '');
   setCommandHint(extra, state);
 }
 
@@ -2467,10 +2525,10 @@ export function executeTaskSkip(state: GameState): void {
   let next: Task | null = null;
   for (const t of order) {
     if (completedTaskIds.has(t.id)) continue;
+    if (!taskReady(t, state)) continue;
     if (t.isDone(state)) { completedTaskIds.add(t.id); continue; }
-    const prereqs = t.prereq ?? [];
-    const prereqsDone = prereqs.every(id => completedTaskIds.has(id));
-    if (prereqsDone) { next = t; break; }
+    next = t;
+    break;
   }
   if (!next) {
     appendLog(state, 'Work skip: nothing to skip.');

@@ -547,17 +547,24 @@ export async function runDemonDialogue(state: GameState, demon: Demon, ghost: Gh
         // Once Bob has heard the corner demon's whole piece (and her "tell
         // the others we talked of golf" coaching), the alibi supersedes the
         // hour quiz: Lilly demands to know where he's been, Bob over-explains
-        // his birdie, and after a pause she sends him back to work. Every
-        // visit after the first gets only the curt dismissal.
+        // his birdie, and after a pause she rules that he needs more Work —
+        // and hands down three optional tasks (gated in ui.ts's TASKS via
+        // state.lillyTasksGiven). Every visit after the handout gets only the
+        // curt "get back to Work". A save that heard the old alibi beat
+        // before the handout existed skips straight to the ruling.
         state.bobParlayed = true;
-        if (demon.heardOfGolf) {
+        if (demon.heardOfGolf && state.lillyTasksGiven) {
           await say('demon', 'get back to Work', { literal: true });
         } else {
-          await say('demon', 'where have you been, darling?', { literal: true });
-          await say('bob', 'i achieved score of 1 stroke under par on a hole, colloquially known as a birdie, on a beautiful green lawn of plentiful sporting delight');
-          await sleep(900);   // her pause, taking that in
-          await say('demon', 'get back to work', { literal: true });
-          demon.heardOfGolf = true;
+          if (!demon.heardOfGolf) {
+            await say('demon', 'where have you been, darling?', { literal: true });
+            await say('bob', 'i achieved score of 1 stroke under par on a hole, colloquially known as a birdie, on a beautiful green lawn of plentiful sporting delight');
+            await sleep(900);   // her pause, taking that in
+            demon.heardOfGolf = true;
+          }
+          await say('demon', 'you need more Work', { literal: true });
+          state.lillyTasksGiven = true;
+          appendLog(state, 'Lilly hands down new optional Work: prevent goblin spawning · destroy a robot · fully feed a hell core.');
         }
       } else {
         // Bob's standing appointment, repeated on every visit: she reads off

@@ -742,8 +742,14 @@ function updateMeltdowns(state: GameState) {
     for (const g of [...state.goblins.values()]) {
       if (!within(g.pos.x, g.pos.y)) continue;
       pushDeathEffect(state, g.pos.x, g.pos.y, true);
-      if (g.robot) removeGoblin(state, g.id);
-      else vaporiseGoblin(state, g);
+      if (g.robot) {
+        // The one thing a robot is allergic to: radioactive waste. No bounty,
+        // no soul — but the kill counts toward Lilly's "Destroy a robot" Work.
+        state.robotsDestroyed++;
+        removeGoblin(state, g.id);
+      } else {
+        vaporiseGoblin(state, g);
+      }
       m.killed++;
     }
     for (const mt of [...state.minotaurs.values()]) {

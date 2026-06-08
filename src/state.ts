@@ -64,7 +64,8 @@ export type Goblin = {
   bob?: boolean;
   // A robot — a late-game money summon. Functions exactly like a goblin on
   // the ground (builds, maintains, waters) but renders as a small grey unit
-  // and cannot die: every kill path skips it. Survives in space, where it's
+  // and is allergic to exactly one thing: a reactor meltdown's radioactive
+  // shockwave (every other kill path skips it). Survives in space, where it's
   // the only unit able to assemble an Orbital Platform.
   robot?: boolean;
   // state.now when another unit was last commanded onto this one. The renderer
@@ -152,9 +153,10 @@ export type Demon = {
   // Optional for saves predating the quiz rework.
   taskCount?: number;
   // Demon L only: set once Bob has answered her "where have you been" with
-  // the corner demon's golf alibi (his long-winded birdie). Every visit
-  // afterwards gets only the curt "get back to Work". Optional for saves
-  // predating the alibi.
+  // the corner demon's golf alibi (his long-winded birdie). She then rules
+  // "you need more Work" and hands out her optional tasks (see
+  // state.lillyTasksGiven); every visit afterwards gets only the curt
+  // "get back to Work". Optional for saves predating the alibi.
   heardOfGolf?: boolean;
   // Id of the ghost currently mid-parlay, or null. Only one soul may speak at a
   // time; while set the demon stands still and faces the speaker.
@@ -620,6 +622,14 @@ export type GameState = {
   // reveal (see refreshUI). The demon parlay used to grant this too; it pays
   // out blood now.
   lightningUnlocked: boolean;
+  // Sticky: flips true once Lilly (demon L) has told Bob "you need more
+  // Work" and handed out her three optional tasks (see the golf-alibi beat
+  // in demon-dialogue.ts). Gates those tasks' visibility in ui.ts's TASKS.
+  lillyTasksGiven: boolean;
+  // Robots destroyed this run — only a reactor meltdown's shockwave can do
+  // it (see updateMeltdowns). Cumulative; drives Lilly's "Destroy a robot"
+  // optional task.
+  robotsDestroyed: number;
   // Number of Minotaurs summoned this run — the first summon can be
   // discounted (see minotaurFirstDiscount), the rest cost the flat price.
   // Counted at purchase (queue time); drives the cost ladder.
@@ -1001,6 +1011,22 @@ export function findHoleEmergenceCell(
   return null;
 }
 
+// True when no hole can produce a goblin right now: the main hole is built
+// over (or sealed off from any free cell) and every completed Goblin Hole
+// building likewise yields no reachable emergence cell — whether walled in,
+// built over, or buried under so many bodies the flood finds nowhere to land.
+// Mirrors the per-hole walk in spawnGoblin; Lilly's "Prevent goblin spawning"
+// optional task is judged against this.
+export function goblinSpawningBlocked(state: GameState): boolean {
+  if (!holeBlockedByBuilding(state)
+      && findHoleEmergenceCell(state, state.hole.cell.cx, state.hole.cell.cy)) return false;
+  for (const b of state.buildings.values()) {
+    if (b.kind !== 'goblin_hole' || b.state === 'constructing') continue;
+    if (findHoleEmergenceCell(state, b.cell.cx, b.cell.cy)) return false;
+  }
+  return true;
+}
+
 // Initial center play area, before any digs.
 export function initialPlayArea(): { x0: number; y0: number; x1: number; y1: number } {
   return {
@@ -1123,6 +1149,8 @@ export function createInitialState(): GameState {
     maxStruckAtOnce: 0,
     slewTwoDragonsInOneStrike: false,
     lightningUnlocked: false,
+    lillyTasksGiven: false,
+    robotsDestroyed: 0,
     goldgoblinMultiplier: 1,
     autoSpawnTimer: 0,
     autoSpawnMultiplier: 0,
