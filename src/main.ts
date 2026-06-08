@@ -4,7 +4,7 @@ import {
   START_CELL, SUMMON_UPGRADES, TERMINATOR, TICK_MS, MINOTAUR, WORLD, digBloodCost, minotaurBloodCost,
 } from './config';
 import { setupInput } from './input';
-import { runDemonDialogue, runGhostChat } from './demon-dialogue';
+import { finaleBark, runDemonDialogue, runFinaleConfrontation, runGhostChat } from './demon-dialogue';
 import { playIntroSequence, runGabbonsawCutscene, setIntroPaused, skipIntro } from './intro';
 import { getOptions, onOptionsChange } from './options';
 import { getRestartInHell, relockOptionsCog, setupOptionsUI } from './options-ui';
@@ -13,6 +13,8 @@ import { appendLog, buildingCenter, cellCenter, countHypercentres, countSpaceCen
 import { autoAssignAllIdle, maybeDepartBobAndLolly, spawnDragon, spawnLollyRampage, spawnMinotaur, spawnRobot, spawnTinytaur, tick } from './sim';
 import { ensureHellPortal, executeTaskSkip, refreshUI, setupUI } from './ui';
 import { clearSave, formatRelativeTime, getLastSaveStats, loadGame, saveGame, saveGameInBackground } from './save';
+
+const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
 
 // Returns the player's choice — 'resume' if they clicked the resume button,
 // 'new' if they clicked the spawn button. The fade-out animation runs in
@@ -934,6 +936,101 @@ async function main() {
   tapHint(descendHellHint, triggerDescendToHell);
   tapHint(ascendHellHint, triggerAscendFromHell);
 
+  // ─── Finale driver ──────────────────────────────────────────────────
+  // The cinematic's world-simulation lives in sim.ts (updateFinale); this
+  // handles the parts that need the DOM: the scripted barks fired on phase
+  // transitions, and the closing confrontation + screen-shatter, which freeze
+  // the world and pull the player back to the surface to watch.
+  let finaleLastPhase: string | null = null;
+  let finaleBarkedStay = false;
+  let finaleBarkedCheck = false;
+  let finaleConfrontStarted = false;
+  // The white-out, on <body> so the big #game zoom never shrinks it.
+  let finaleWhiteEl: HTMLElement | null = null;
+
+  // The smash: Bob takes the moon, breaks it, and the world tears itself white.
+  async function runFinaleShatter() {
+    const F = state.finale;
+    if (!F) return;
+    const gameEl = document.getElementById('game');
+    if (!finaleWhiteEl) {
+      finaleWhiteEl = document.createElement('div');
+      finaleWhiteEl.id = 'finale-white';
+      document.body.appendChild(finaleWhiteEl);
+    }
+    // Bob turns to the moon, grabs it out of Lolly's hands, and it goes.
+    F.bobFacing = Math.PI;                        // face Lolly, on his right
+    if (F.moon) {
+      F.moon.scene = 'ground';
+      F.moon.pos = { x: F.bobPos.x + 40, y: F.bobPos.y - 30 };
+      F.moon.state = 'shattering';
+      F.moon.shatterAt = state.now;
+    }
+    playSound('destroy', 1, 0.3);
+    playSound('lightning', 0.8, 0.5);
+    void finaleBark(state, 'lolly', '*NO—*');
+    // The brief, violent tear.
+    gameEl?.classList.add('finale-glitch');
+    await sleep(680);
+    gameEl?.classList.remove('finale-glitch');
+    // The BIG pull-back, the universe whiting out under it.
+    playSound('ritual', 1, 0.25);
+    gameEl?.classList.add('finale-zoom');
+    if (finaleWhiteEl) {
+      finaleWhiteEl.style.transition = 'opacity 1700ms ease-in';
+      requestAnimationFrame(() => { if (finaleWhiteEl) finaleWhiteEl.style.opacity = '1'; });
+    }
+    await sleep(2000);
+    // Held on white — the next part of the game picks up from here.
+    F.phase = 'shattered';
+    backgroundSave();
+  }
+
+  // Run each frame. Fires barks on transitions and kicks off the confrontation.
+  function driveFinale(now: number) {
+    const F = state.finale;
+    if (!F) { finaleLastPhase = null; return; }
+
+    // First sight of the cinematic: swing the camera onto Lolly so the player
+    // sees the dragon answer her call.
+    if (finaleLastPhase === null && F.scene === 'ground') {
+      centerCameraOn(ctx, F.lollyPos.x, F.lollyPos.y);
+    }
+
+    // Lolly tells Bob to stay as she lifts off.
+    if (F.phase === 'lolly_ascends' && !finaleBarkedStay) {
+      finaleBarkedStay = true;
+      void finaleBark(state, 'lolly', 'stay here, little one.');
+    }
+    // Bob reaches the centre, turns to the player, and nudges them spaceward.
+    if (F.bobAtCentre && !finaleBarkedCheck && (F.phase === 'space_rampage' || F.phase === 'grab_moon' || F.phase === 'lolly_ascends')) {
+      finaleBarkedCheck = true;
+      void finaleBark(state, 'bob', 'best you go and see to your things up in space, boss.');
+    }
+    finaleLastPhase = F.phase;
+
+    // The closing confrontation — once Lolly has landed back on the surface.
+    // `confrontReady` is the live trigger; the phase check re-arms it after a
+    // reload (where confrontReady is cleared but the phase persists).
+    if ((F.confrontReady || F.phase === 'confront') && !finaleConfrontStarted) {
+      finaleConfrontStarted = true;
+      void (async () => {
+        // Bring the player down to the surface to watch it happen.
+        if (state.view !== 'ground') {
+          quickTravel('ground');
+          await sleep(420);
+        }
+        const pa = state.playArea;
+        centerCameraOn(ctx, ((pa.x0 + pa.x1) / 2) * CELL, ((pa.y0 + pa.y1) / 2) * CELL);
+        // Freeze the world for the modal + shatter.
+        document.body.classList.add('finale-hold');
+        await runFinaleConfrontation(state);
+        await runFinaleShatter();
+        document.body.classList.remove('finale-hold');
+      })();
+    }
+  }
+
   // Each frame-loop branch shows at most the travel hints it names here and
   // hides the rest.
   const showHints = (visible: {
@@ -1063,6 +1160,9 @@ async function main() {
       || document.body.classList.contains('demon-parlay-hold')
       || document.body.classList.contains('bob-spawn-hold')
       || document.body.classList.contains('unlock-reveal-hold')
+      // The finale's closing confrontation + shatter freezes the world like a
+      // cutscene; the autonomous beats before it (Lolly's flight) run live.
+      || document.body.classList.contains('finale-hold')
       || state.bobPickingHole;
     if (!paused && !introActive) {
       acc += dt;
@@ -1131,6 +1231,8 @@ async function main() {
         });
       }
     }
+    // The finale cinematic's DOM-side beats (barks, the confrontation modal).
+    driveFinale(now);
     // Held pan vector.
     let dx = 0, dy = 0;
     if (held.has('a') || held.has('arrowleft')) dx -= 1;

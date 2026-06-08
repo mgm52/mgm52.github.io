@@ -1,8 +1,8 @@
 import { playDecayingGoblinDeath, playDecayingGoblinSpawn, playDecayingGoldKillCash, playSound } from './audio';
-import { BUILDING_DEFS, BuildingKind, CELL, COLS, DEMON, DRAGON, DRAGON_KILL_REWARD, GOBLIN, GOLD_GOBLIN_CHANCE, GOLD_KILL_REWARD, HELL, KILL_REWARD, LIGHTNING, LOLLY, MINOTAUR_KILL_REWARD, REACTOR_MELTDOWN, ROBOT, SOUL_SIGIL, SPACE, SPACE_UNIT, SUMMON_UPGRADES, TICK_S, MINOTAUR, TINYTAUR, WATER_DEPLETION_PP_PER_SEC, WATER_METER_MAX, WORLD, SOUL_STRENGTH_LABEL, formatPower, sigilPortalOutput, soulStrengthOf } from './config';
+import { BUILDING_DEFS, BuildingKind, CELL, COLS, DEMON, DRAGON, DRAGON_KILL_REWARD, FINALE, GOBLIN, GOLD_GOBLIN_CHANCE, GOLD_KILL_REWARD, HELL, KILL_REWARD, LIGHTNING, LOLLY, MINOTAUR_KILL_REWARD, REACTOR_MELTDOWN, ROBOT, SOUL_SIGIL, SPACE, SPACE_UNIT, SUMMON_UPGRADES, TICK_S, MINOTAUR, TINYTAUR, WATER_DEPLETION_PP_PER_SEC, WATER_METER_MAX, WORLD, SOUL_STRENGTH_LABEL, formatPower, sigilPortalOutput, soulStrengthOf } from './config';
 import { DEMON_FACING_ANGLE, getOptions } from './options';
 import {
-  ALL_DIRS, Building, Cell, DX, DY, Demon, Dir, Dragon, GameState, Ghost, Goblin, HOLE_SIZE, LollyTarget, Minotaur, SoulChair, SpaceBuilding, SpaceUnit, Vec2, WaterSource,
+  ALL_DIRS, Building, Cell, DX, DY, Demon, Dir, Dragon, Finale, FinalePhase, GameState, Ghost, Goblin, HOLE_SIZE, LollyTarget, Minotaur, SoulChair, SpaceBuilding, SpaceUnit, Vec2, WaterSource,
   anySpawnHole, appendLog, buildingAtCell, buildingCenter, buildingFootprint, buildingPerimeter,
   cellCenter, cellKey, chairSoulSnapshot, constructedDragonBeacon, currentPowerBoost, defOf, demonScaleOf, destroyBuilding, dragonTargetBuilding,
   earnBlood, earnDragonBone, earnMoney, findHoleEmergenceCell,
@@ -210,7 +210,11 @@ export function tick(state: GameState) {
   for (const d of state.demons.values()) updateDemon(state, d);
 
   // ── 2e. Lolly's rampage (Pain Gabbonsaw payoff) ───────────────────────
-  if (state.lolly) updateLolly(state);
+  // Once she's scoured the overworld bare, control passes to the finale
+  // cinematic; until then she keeps hunting. updateLolly itself triggers the
+  // hand-off, so call it first and let updateFinale take any active cinematic.
+  if (state.lolly && !state.finale) updateLolly(state);
+  if (state.finale) updateFinale(state);
 
   // Sticky: the Tinytaur summon reveals itself once the player has fielded
   // enough Minotaurs at once to pay its sacrifice cost.
@@ -1768,7 +1772,11 @@ function updateLolly(state: GameState): void {
     L.facing = Math.atan2(dy, dx);
     return;
   }
-  // Nothing left to destroy — Lolly wanders the ruins, Bob still aboard.
+  // Nothing left to destroy — the overworld is scoured bare. This is the cue
+  // for the finale: Lolly calls down a dragon and the cinematic takes over
+  // (after which this function is no longer called — see tick).
+  if (startFinale(state)) return;
+  // Defensive: if the finale somehow couldn't start, she wanders the ruins.
   if (!L.wanderGoal || state.now >= L.nextWanderAt) {
     const pa = state.playArea;
     L.wanderGoal = {
@@ -1788,6 +1796,240 @@ function updateLolly(state: GameState): void {
   L.pos.x += (dx / d) * step;
   L.pos.y += (dy / d) * step;
   L.facing = Math.atan2(dy, dx);
+}
+
+// ─── The finale ─────────────────────────────────────────────────────
+// Kicked off the instant Lolly has nothing left on the overworld to smash. She
+// calls down a dragon, mounts it, climbs to space to wreck what the player
+// stashed up there (sparing the dragons — there's nothing else of theirs left),
+// hoists the moon, and rides back down, leaving Bob behind on the ground. The
+// confrontation that follows — the moon-eating demand, Bob's refusal, the
+// shattering — is driven by main.ts, which owns the modal and the screen
+// effects; this runs only the scripted world up to that hand-off (confrontReady).
+
+// Centre of the play area, in world px.
+function playAreaCentre(state: GameState): Vec2 {
+  const pa = state.playArea;
+  return { x: ((pa.x0 + pa.x1) / 2) * CELL, y: ((pa.y0 + pa.y1) / 2) * CELL };
+}
+
+// Step `p` toward `goal` at `speed` px/sec, snapping on once within reach.
+// Returns whether it arrived and the heading travelled (radians).
+function stepToward(p: Vec2, goal: Vec2, speed: number, arrive: number): { arrived: boolean; facing: number } {
+  const dx = goal.x - p.x, dy = goal.y - p.y;
+  const d = Math.hypot(dx, dy);
+  const facing = d > 1e-3 ? Math.atan2(dy, dx) : 0;
+  const step = speed * TICK_S;
+  if (d <= Math.max(arrive, step)) {
+    p.x = goal.x; p.y = goal.y;
+    return { arrived: true, facing };
+  }
+  p.x += (dx / d) * step;
+  p.y += (dy / d) * step;
+  return { arrived: false, facing };
+}
+
+// Begin the finale, lifting Lolly's live rampage position into the cinematic.
+// Returns true once it's running (idempotent). The moon is seeded floating in
+// space so it's already there when the player rises to watch.
+function startFinale(state: GameState): boolean {
+  if (state.finale) return true;
+  const L = state.lolly;
+  if (!L) return false;
+  state.finale = {
+    phase: 'summon',
+    phaseStartedAt: state.now,
+    lollyPos: { x: L.pos.x, y: L.pos.y },
+    lollyFacing: L.facing,
+    scene: 'ground',
+    dragonShown: false,
+    // Bob slides off her shoulders to just beside her feet.
+    bobPos: { x: L.pos.x - 64, y: L.pos.y + 40 },
+    bobFacing: Math.PI / 2,
+    bobAtCentre: false,
+    target: null,
+    moon: {
+      pos: { x: SPACE.width * 0.5, y: SPACE.height * 0.24 },
+      scene: 'space',
+      state: 'floating',
+      seed: Math.floor(Math.random() * 1e6),
+    },
+    confrontReady: false,
+  };
+  pushLightningBolt(state, L.pos.x, L.pos.y - LOLLY.displayPx * 0.5);
+  playSound('ritual', 1, 0.3);
+  appendLog(state, 'The overworld is bare. Lolly calls down a dragon and lifts her eyes to the sky.');
+  return true;
+}
+
+function updateFinale(state: GameState): void {
+  const F = state.finale;
+  if (!F) return;
+  // Bob's own thread: once she's airborne he trudges to the middle of the play
+  // area and turns to face the player, then holds there.
+  updateFinaleBob(state, F);
+
+  const elapsed = state.now - F.phaseStartedAt;
+  const enter = (phase: FinalePhase) => { F.phase = phase; F.phaseStartedAt = state.now; };
+
+  switch (F.phase) {
+    case 'summon': {
+      F.dragonShown = true;       // the dragon is in the sky (render swoops it in)
+      if (elapsed >= FINALE.summonHold) enter('lolly_ascends');
+      return;
+    }
+    case 'lolly_ascends': {
+      F.lollyFacing = -Math.PI / 2;
+      F.lollyPos.y -= FINALE.flySpeed * TICK_S;
+      if (F.lollyPos.y <= state.playArea.y0 * CELL - FINALE.edgeOffset) {
+        // Cross into the orbit scene, entering from above the top edge.
+        F.scene = 'space';
+        F.lollyPos = { x: SPACE.width * 0.5, y: -FINALE.edgeOffset };
+        enter('space_rampage');
+      }
+      return;
+    }
+    case 'space_rampage': {
+      finaleSpaceRampage(state, F);
+      return;
+    }
+    case 'grab_moon': {
+      finaleGrabMoon(state, F);
+      return;
+    }
+    case 'lolly_descends': {
+      F.lollyFacing = Math.PI / 2;
+      if (F.scene === 'space') {
+        F.lollyPos.y += FINALE.flySpeed * TICK_S;
+        if (F.lollyPos.y >= SPACE.height + FINALE.edgeOffset) {
+          // Re-enter the overworld from above the centre, the moon still hers.
+          F.scene = 'ground';
+          F.lollyPos = { x: playAreaCentre(state).x, y: state.playArea.y0 * CELL - FINALE.edgeOffset };
+          if (F.moon) F.moon.scene = 'ground';
+        }
+      } else {
+        // Settle just to the side of Bob, facing him across the centre.
+        const c = playAreaCentre(state);
+        const r = stepToward(F.lollyPos, { x: c.x + FINALE.landGap, y: c.y }, FINALE.flySpeed * 0.7, 6);
+        F.lollyFacing = Math.PI;
+        if (r.arrived) {
+          F.dragonShown = false;     // she dismounts; the dragon wheels away (render)
+          F.confrontReady = true;    // hand the modal to main.ts
+          enter('confront');
+        }
+      }
+      return;
+    }
+    case 'confront':
+    case 'shattered':
+      // main.ts (the modal) and the renderer (the shatter) drive these. Hold.
+      return;
+  }
+}
+
+// Bob, dismounted: holds at Lolly's side through the summon beat, then walks to
+// the centre and turns to the player, holding there for the rest of the show.
+function updateFinaleBob(state: GameState, F: Finale): void {
+  if (F.phase === 'summon' || F.phase === 'confront' || F.phase === 'shattered') return;
+  if (F.bobAtCentre) { F.bobFacing = Math.PI / 2; return; }
+  const r = stepToward(F.bobPos, playAreaCentre(state), FINALE.bobWalkSpeed, 4);
+  if (r.arrived) { F.bobAtCentre = true; F.bobFacing = Math.PI / 2; }
+  else F.bobFacing = r.facing;
+}
+
+// Nearest thing Lolly can still wreck in orbit: a floating building or a unit
+// adrift. Dragons are decorative here and never targeted.
+function acquireFinaleSpaceTarget(state: GameState, pos: Vec2): Finale['target'] {
+  let best: Finale['target'] = null;
+  let bestD = Infinity;
+  const consider = (kind: 'building' | 'unit', id: number, x: number, y: number) => {
+    const dx = x - pos.x, dy = y - pos.y, d = dx * dx + dy * dy;
+    if (d < bestD) { bestD = d; best = { kind, id }; }
+  };
+  for (const sb of state.spaceBuildings.values()) consider('building', sb.id, sb.pos.x, sb.pos.y);
+  for (const su of state.spaceUnits.values()) consider('unit', su.id, su.pos.x, su.pos.y);
+  return best;
+}
+
+function finaleTargetSpot(state: GameState, t: NonNullable<Finale['target']>): Vec2 | null {
+  if (t.kind === 'building') { const sb = state.spaceBuildings.get(t.id); return sb ? { x: sb.pos.x, y: sb.pos.y } : null; }
+  const su = state.spaceUnits.get(t.id);
+  return su ? { x: su.pos.x, y: su.pos.y } : null;
+}
+
+function finaleSpaceSmash(state: GameState, t: NonNullable<Finale['target']>): void {
+  if (t.kind === 'building') {
+    const sb = state.spaceBuildings.get(t.id);
+    if (!sb) return;
+    pushDeathEffect(state, sb.pos.x, sb.pos.y, false, false, true);
+    state.spaceBuildings.delete(t.id);
+    appendLog(state, `Lolly crushes ${defOf(sb.building).name} #${sb.building.displayNum} out of the sky.`);
+    playSound('destroy', 0.55);
+    return;
+  }
+  const su = state.spaceUnits.get(t.id);
+  if (!su) return;
+  pushDeathEffect(state, su.pos.x, su.pos.y, false, false, true);
+  state.spaceUnits.delete(t.id);
+  playSound('goblin_death', 0.5, 0.3);
+}
+
+function finaleSpaceRampage(state: GameState, F: Finale): void {
+  let spot = F.target ? finaleTargetSpot(state, F.target) : null;
+  if (!spot) {
+    F.target = acquireFinaleSpaceTarget(state, F.lollyPos);
+    F.attackAt = undefined;
+    spot = F.target ? finaleTargetSpot(state, F.target) : null;
+  }
+  if (spot && F.target) {
+    const dx = spot.x - F.lollyPos.x, dy = spot.y - F.lollyPos.y;
+    const d = Math.hypot(dx, dy);
+    if (d <= FINALE.smashReach) {
+      if (F.attackAt === undefined) {
+        F.attackAt = state.now + FINALE.smashWindup;
+        if (d > 1e-3) F.lollyFacing = Math.atan2(dy, dx);
+        return;
+      }
+      if (state.now < F.attackAt) return;
+      F.attackAt = undefined;
+      finaleSpaceSmash(state, F.target);
+      F.target = null;
+      return;
+    }
+    F.attackAt = undefined;
+    const step = FINALE.flySpeed * TICK_S;
+    F.lollyPos.x += (dx / d) * step;
+    F.lollyPos.y += (dy / d) * step;
+    F.lollyFacing = Math.atan2(dy, dx);
+    return;
+  }
+  // Orbit is swept clean — go take the moon.
+  F.target = null;
+  F.phase = 'grab_moon';
+  F.phaseStartedAt = state.now;
+}
+
+function finaleGrabMoon(state: GameState, F: Finale): void {
+  const m = F.moon;
+  if (!m) { F.phase = 'lolly_descends'; F.phaseStartedAt = state.now; return; }
+  const dx = m.pos.x - F.lollyPos.x, dy = m.pos.y - F.lollyPos.y;
+  const d = Math.hypot(dx, dy);
+  if (d > FINALE.moonGrabDist) {
+    const step = FINALE.flySpeed * TICK_S;
+    F.lollyPos.x += (dx / d) * step;
+    F.lollyPos.y += (dy / d) * step;
+    F.lollyFacing = Math.atan2(dy, dx);
+    F.grabHoverUntil = undefined;
+    return;
+  }
+  // In reach — hover a beat of menace, then hoist it onto her shoulder.
+  if (F.grabHoverUntil === undefined) { F.grabHoverUntil = state.now + FINALE.moonGrabHover; playSound('ritual', 0.7, 0.5); return; }
+  if (state.now < F.grabHoverUntil) return;
+  m.state = 'grabbed';
+  appendLog(state, 'Lolly tears the moon down from the sky.');
+  playSound('destroy', 0.7, 0.4);
+  F.phase = 'lolly_descends';
+  F.phaseStartedAt = state.now;
 }
 
 function updateMinotaur(state: GameState, t: Minotaur, autoTargets: Map<number, number>) {

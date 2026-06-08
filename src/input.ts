@@ -1,7 +1,7 @@
 import { Application, Container, FederatedPointerEvent, Graphics } from 'pixi.js';
 import { playSound, playGhostCommand, playMinotaurCommand } from './audio';
 import { flashCursor } from './cursor-fx';
-import { bobOverworldBark, demonRebuke } from './demon-dialogue';
+import { bobOverworldBark, demonRebuke, finaleBark } from './demon-dialogue';
 import { BUILDABLE_KINDS, BUILDING_DEFS, BuildingKind, CELL, DRAGON, GOBLIN, HELL, LIGHTNING, MAX_SELECTED_UNITS, MINOTAUR, SOUL_SIGIL, SPACE, SPACE_UNIT, WORLD, formatPower } from './config';
 import { runBobCutscene } from './intro';
 import { RenderContext, ambientDragonAt, clampCamera, clampHellCamera, clampSpaceCamera, currentHellScale, ghostAtHell, ghostHellPos } from './render';
@@ -13,6 +13,18 @@ import {
   soulChairAt, spaceBuildingAt, spaceStructureOverlapAt, spaceUnitAt, waterCarrierCount, waterSourceAtCell,
   freePlatformAt,
 } from './state';
+
+// Bob's brush-off when the player tries to strike during the finale — he's
+// already dead, and nothing of theirs is left to hit. Varied so a mashing
+// player doesn't hear the same line twice running.
+const FINALE_REFUSAL_LINES = [
+  "you can't kill that which is already dead.",
+  "i'm already dead, boss. ⏸ save your lightning.",
+  'nothing left down here to kill.',
+];
+function finaleRefusalLine(): string {
+  return FINALE_REFUSAL_LINES[Math.floor(Math.random() * FINALE_REFUSAL_LINES.length)];
+}
 
 type ActivePointer = {
   startX: number; startY: number;
@@ -216,6 +228,14 @@ export function setupInput(
       return;
     }
     if (state.pendingStrike) {
+      // During the finale the bolt finds nothing it can kill — Bob is already
+      // dead and everything else is gone — so he just waves it off.
+      if (state.finale && state.finale.phase !== 'shattered') {
+        state.pendingStrike = false;
+        input.placementGhost.clear();
+        void finaleBark(state, 'bob', finaleRefusalLine());
+        return;
+      }
       // Stays armed if the player can't afford it (lightningStrike beeps).
       if (lightningStrike(state, local.x, local.y)) {
         state.pendingStrike = false;

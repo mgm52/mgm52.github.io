@@ -233,6 +233,11 @@ export function loadGame(): { state: GameState; savedAt: number } | null {
     // being re-seeded into the corner.
     env.state.bobLollyDeparted ??= false;
     env.state.lolly ??= null;
+    // The endgame cinematic — added with the finale. The scripted state
+    // persists so a reload mid-cinematic resumes; only `confrontReady` is
+    // ephemeral (main.ts re-arms it from the live phase on the next tick).
+    env.state.finale ??= null;
+    if (env.state.finale) env.state.finale.confrontReady = false;
     env.state.holeDestroyed ??= false;
     env.state.ghosts ??= [];
     // Pre-existing ghosts from saves predating the downward drift get a
