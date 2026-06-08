@@ -6,8 +6,8 @@ import {
 } from './config';
 import {
   Building, Cell, Demon, DragonState, GameState, Ghost, Goblin, GoblinState, SoulChair, SpaceBuilding, SpaceUnit, WaterSource,
-  anySpawnHole, appendLog, buildingCenter, buildingLabel, buildingMoneyCost, cellCenter, cellKey, chairSoulSnapshot, countHypercentres, countIdle, countSpaceCentres, defOf, digDirection,
-  earnDragonBone, getSpawnCapacity, goblinSpawningBlocked, holeBlockedByBuilding, isCellBlocked, isInBounds,
+  anySpawnHole, appendLog, buildingAtCell, buildingCenter, buildingLabel, buildingMoneyCost, cellCenter, cellKey, chairSoulSnapshot, countHypercentres, countIdle, countSpaceCentres, defOf, digDirection,
+  earnDragonBone, getSpawnCapacity, goblinSpawningBlocked, hellMirrorCenter, holeBlockedByBuilding, isCellBlocked, isInBounds,
   maintainerCount, markBuildingsChanged, nextBuildingDisplayNum, occupyCell, spaceCentreMaintained, waterCarrierCount,
 } from './state';
 import { spawnDragon, spawnMinotaur, unseatSoulFromChair } from './sim';
@@ -2895,23 +2895,83 @@ export function executeTaskSkip(state: GameState): void {
       state.bloodUnlocked = true;
       break;
     }
-    case 'build_hypercentre': {
-      // Hypercentre needs 1 GW + 30 maintainers + 4 carriers. The Reactor
-      // (1 GW) does the heavy lifting; the gas turbines stay around for
-      // redundancy and to power the DC + PF independently. Reactor placed
-      // before the bigger footprints so findFreeFootprint doesn't run out
-      // of space for its 2×2.
-      ensureGoblins(state, 90);
+    case 'build_nuclear_reactor': {
+      // The Reactor (1 GW, 4 maintainers, no water) joins the gas-turbine
+      // power line a real player would already have running the DC + PF. Keep
+      // that infra around so the map reads "lived in", then stand up the
+      // reactor itself. Grants the Hell Portal + Hypercentre unlocks.
+      ensureGoblins(state, 70);
       if (!state.dugDirections.has('n')) digDirection(state, 'n');
       ensureBuildingCount(state, 'goblin_wheel', 2);
       ensureBuildingCount(state, 'phone_farm', 1);
+      ensureBuildingCount(state, 'gas_engine', 3);
+      ensureBuildingCount(state, 'datacentre', 1);
       ensureBuildingCount(state, 'nuclear_reactor', 1);
+      state.money = Math.max(state.money, 1_000_000);
+      state.blood = Math.max(state.blood, 1000);
+      state.bloodUnlocked = true;
+      break;
+    }
+    case 'build_hypercentre': {
+      // Hypercentre needs 1 GW + 30 maintainers + 4 carriers. Two Reactors
+      // (2 GW) carry the Hypercentre with headroom; the gas turbines stay
+      // around for redundancy and to power the DC + PF independently.
+      // Reactors placed before the bigger footprints so findFreeFootprint
+      // doesn't run out of space for the Hypercentre's 6×6.
+      ensureGoblins(state, 100);
+      if (!state.dugDirections.has('n')) digDirection(state, 'n');
+      ensureBuildingCount(state, 'goblin_wheel', 2);
+      ensureBuildingCount(state, 'phone_farm', 1);
+      ensureBuildingCount(state, 'nuclear_reactor', 2);
       ensureBuildingCount(state, 'gas_engine', 3);
       ensureBuildingCount(state, 'datacentre', 1);
       ensureBuildingCount(state, 'hypercentre', 1);
       state.money = Math.max(state.money, 2_000_000);
       state.blood = Math.max(state.blood, 1500);
       state.bloodUnlocked = true;
+      break;
+    }
+    case 'summon_minotaurs': {
+      // Optional side-task (prereq: gas turbine). The Goblin Hole ritual it
+      // grants needs a horde to feed it, so top goblins up, then conjure the
+      // two Minotaurs the task counts. minotaursSummoned is the cumulative
+      // run total isDone reads, so bank it directly alongside the live pair.
+      ensureGoblins(state, 30);
+      while (state.minotaurs.size < 2) {
+        if (!spawnMinotaur(state)) break;
+      }
+      state.minotaursSummoned = Math.max(state.minotaursSummoned, 2);
+      state.blood = Math.max(state.blood, 100);
+      state.bloodUnlocked = true;
+      break;
+    }
+    case 'destroy_robot': {
+      // Lilly's Work. A robot only dies to a Nuclear Reactor meltdown's
+      // shockwave, so a real player reaching this has the reactor + Hypercentre
+      // line standing and has summoned (then melted) a robot. Make sure that
+      // rig exists, then bank the kill the task counts.
+      ensureDragonRig(state, 1, 0);
+      ensureBuildingCount(state, 'hypercentre', 1);
+      state.robotsDestroyed = Math.max(state.robotsDestroyed, 1);
+      state.lightningUnlocked = true;
+      break;
+    }
+    case 'feed_hell_core': {
+      // Lilly's Work. A "fully fed" core is one Hell Portal's whole ring of
+      // five candles bound with very-strong (dragon/tinytaur) souls. Stand up
+      // the portal, then light + seat its full sigil so the pentagram burns.
+      if (!ensureHellPortal(state)) break;
+      fullyFeedAHellCore(state);
+      state.blood = Math.max(state.blood, 9_999_999);
+      state.bloodUnlocked = true;
+      break;
+    }
+    case 'prevent_spawning': {
+      // Lilly's Work. Spawning stops once no hole can emerge a goblin. Wall
+      // off the main hole and every Goblin Hole so the emergence search finds
+      // no free cell — the "walled off" route the task text calls out.
+      ensureGoblins(state, 10);
+      blockAllGoblinSpawning(state);
       break;
     }
     case 'collect_blood': {
@@ -3115,6 +3175,88 @@ function ensureDragonRig(state: GameState, beacons: number, dragons: number): vo
   while (state.dragons.size < dragons) {
     if (!spawnDragon(state)) break;
   }
+}
+
+// Task-skip helper (feed_hell_core): light a Hell Portal's whole five-candle
+// ring and bind a very-strong soul into each chair, so the pentagram reads
+// fully fed. Reuses any candles already on the ring, tops the rest up at even
+// angles (matching placeCandle's by-angle indexing), then stamps the
+// completed-sigil VFX time.
+function fullyFeedAHellCore(state: GameState): void {
+  let portal: Building | null = null;
+  for (const b of state.buildings.values()) {
+    if (b.kind === 'hell_portal' && b.state !== 'constructing') { portal = b; break; }
+  }
+  if (!portal) return;
+  const { ringRadius, count, soulMultipliers } = SOUL_SIGIL;
+  const c = hellMirrorCenter(portal);
+  const existing = state.soulChairs.filter((ch) => ch.portalId === portal!.id).length;
+  for (let i = existing; i < count; i++) {
+    const a = -Math.PI / 2 + (i * 2 * Math.PI) / count;
+    state.soulChairs.push({
+      id: state.nextId++,
+      portalId: portal.id,
+      index: i,
+      hx: c.x + Math.cos(a) * ringRadius,
+      hy: c.y + Math.sin(a) * ringRadius,
+      occupied: false,
+      placedAt: state.now,
+    });
+  }
+  const ring = state.soulChairs.filter((ch) => ch.portalId === portal!.id);
+  ring.sort((p, q) => Math.atan2(p.hy - c.y, p.hx - c.x) - Math.atan2(q.hy - c.y, q.hx - c.x));
+  ring.forEach((ch, i) => {
+    ch.index = i;
+    ch.occupied = true;
+    ch.mult = soulMultipliers.veryStrong;
+    ch.soul = { kind: 'dragon' }; // dragon souls bind very strong
+    ch.filledAt = state.now;
+  });
+  state.soulSigilCompletedAt.set(portal.id, state.now);
+}
+
+// Task-skip helper (prevent_spawning): wall off the main hole and every Goblin
+// Hole so the emergence search finds no free cell. Each 1×1 hole only emerges
+// goblins through its four cardinal neighbours (EMERGENCE_DIR_ORDER), so walling
+// those four cells around each origin blocks it outright.
+function blockAllGoblinSpawning(state: GameState): void {
+  const origins: Cell[] = [];
+  if (!state.holeDestroyed) origins.push(state.hole.cell);
+  for (const b of state.buildings.values()) {
+    if (b.kind === 'goblin_hole' && b.state !== 'constructing') origins.push(b.cell);
+  }
+  const cardinals = [[0, -1], [1, 0], [0, 1], [-1, 0]];
+  for (const o of origins) {
+    for (const [dx, dy] of cardinals) placeWallAt(state, o.cx + dx, o.cy + dy);
+  }
+}
+
+// Drop a 1×1 wall Building straight onto a specific cell (the task-skip's own
+// placement, paralleling input.ts's tryPlaceWallAt). No-ops on cells already
+// impassable; evicts any goblin standing on the target so the wall lands clean.
+function placeWallAt(state: GameState, cx: number, cy: number): void {
+  if (!isInBounds(cx, cy)) return;
+  const k = cellKey(cx, cy);
+  if (state.walls.has(k) || buildingAtCell(state, cx, cy)) return;
+  const occ = state.occupancy.get(k);
+  if (occ !== undefined) {
+    const g = state.goblins.get(occ);
+    const spot = g ? findFreeFootprint(state, 1) : null;
+    if (g && spot) teleportGoblinTo(state, g, spot);
+    else state.occupancy.delete(k);
+  }
+  const b: Building = {
+    id: state.nextId++,
+    displayNum: nextBuildingDisplayNum(state, 'wall'),
+    kind: 'wall',
+    cell: { cx, cy },
+    state: 'active',
+    buildProgress: 1,
+    assignedGoblins: [],
+    selected: false,
+  };
+  state.buildings.set(b.id, b);
+  markBuildingsChanged(state);
 }
 
 function findFreeFootprint(state: GameState, cellSize: number): Cell | null {
