@@ -550,11 +550,12 @@ export async function runDemonDialogue(state: GameState, demon: Demon, ghost: Gh
         // his birdie, and after a pause she rules that he needs more Work —
         // and hands down three optional tasks (gated in ui.ts's TASKS via
         // state.lillyTasksGiven). Every visit after the handout gets only the
-        // curt "get back to Work". A save that heard the old alibi beat
-        // before the handout existed skips straight to the ruling.
+        // curt "get back to kroW" — her one word that slips back into her
+        // reversed tongue. A save that heard the old alibi beat before the
+        // handout existed skips straight to the ruling.
         state.bobParlayed = true;
         if (demon.heardOfGolf && state.lillyTasksGiven) {
-          await say('demon', 'get back to Work', { literal: true });
+          await say('demon', 'get back to kroW', { literal: true });
         } else {
           if (!demon.heardOfGolf) {
             await say('demon', 'where have you been, darling?', { literal: true });

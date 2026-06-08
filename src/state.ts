@@ -156,7 +156,7 @@ export type Demon = {
   // the corner demon's golf alibi (his long-winded birdie). She then rules
   // "you need more Work" and hands out her optional tasks (see
   // state.lillyTasksGiven); every visit afterwards gets only the curt
-  // "get back to Work". Optional for saves predating the alibi.
+  // "get back to kroW". Optional for saves predating the alibi.
   heardOfGolf?: boolean;
   // Id of the ghost currently mid-parlay, or null. Only one soul may speak at a
   // time; while set the demon stands still and faces the speaker.
