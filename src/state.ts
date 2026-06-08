@@ -436,6 +436,11 @@ export type SoulChair = {
   // soulStrengthOf), recorded at binding. Absent on chairs from saves
   // predating soul strengths; sigilPortalOutput counts those as strong.
   mult?: number;
+  // Snapshot of the soul consumed at binding (seatSoulInChair removes the
+  // Ghost from state.ghosts), kept so unseatSoulFromChair can conjure it
+  // back out intact — kind, gold sheen and tinytaur stature included. Absent
+  // on chairs from saves predating unseating; those reconstruct from `mult`.
+  soul?: { kind: Ghost['kind']; gold?: boolean; tiny?: boolean };
   placedAt?: number;    // state.now when the candle was placed — drives the place-in VFX
   filledAt?: number;    // state.now when seated — drives the seat-in VFX
   // Ephemeral: id of the soul currently walking to claim this chair, so a crowd
@@ -1290,10 +1295,13 @@ export function sigilSeatedCount(state: GameState, portalId: number): number {
   return n;
 }
 
-// Nearest soul chair within SOUL_SIGIL.chairRadius of a hell-coord point, or null.
-export function soulChairAt(state: GameState, hx: number, hy: number): SoulChair | null {
+// Nearest soul chair within `radius` (default SOUL_SIGIL.chairRadius) of a
+// hell-coord point, or null. Callers pass a widened radius when the point is
+// inside a demon's hit halo, so chairs under him stay clickable.
+export function soulChairAt(state: GameState, hx: number, hy: number,
+                            radius = SOUL_SIGIL.chairRadius): SoulChair | null {
   let best: SoulChair | null = null;
-  let bestD = SOUL_SIGIL.chairRadius * SOUL_SIGIL.chairRadius;
+  let bestD = radius * radius;
   for (const c of state.soulChairs) {
     const dx = c.hx - hx, dy = c.hy - hy;
     const dd = dx * dx + dy * dy;

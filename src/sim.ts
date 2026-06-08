@@ -415,6 +415,8 @@ function seatSoulInChair(state: GameState, chair: SoulChair, soul: Ghost) {
   chair.filledAt = state.now;
   const strength = soulStrengthOf(soul.kind, soul.tiny);
   chair.mult = SOUL_SIGIL.soulMultipliers[strength];
+  // Snapshot the soul so unseatSoulFromChair can conjure it back out later.
+  chair.soul = { kind: soul.kind, gold: soul.gold, tiny: soul.tiny };
   playSound('ritual', 0.6, 0.85);
   const sigil = state.soulChairs.filter((c) => c.portalId === chair.portalId);
   const filled = sigil.filter((c) => c.occupied).length;
@@ -440,6 +442,59 @@ function seatSoulInChair(state: GameState, chair: SoulChair, soul: Ghost) {
     playSound('ritual', 0.95, 0.5);
     appendLog(state, `The pentagram blazes to life — the mirror floods the grid with ${formatPower(out)}!`);
   }
+}
+
+// The inverse of seatSoulInChair: pull a bound soul back out of its chair.
+// The chair empties (the mirror's output divides back down on the next power
+// tick), the sigil's completion record is dropped so re-filling the fifth
+// chair fires the blaze again, and the soul re-materialises beside the chair
+// as a selectable, commandable ghost. Chairs from saves predating the soul
+// snapshot reconstruct the kind from the recorded multiplier (a very-strong
+// dragon is indistinguishable from a tinytaur there — the dragon wins).
+// Returns the freed ghost, or null if the chair was empty.
+export function unseatSoulFromChair(state: GameState, chair: SoulChair): Ghost | null {
+  if (!chair.occupied) return null;
+  const snap = chair.soul ?? (
+    chair.mult === SOUL_SIGIL.soulMultipliers.weak ? { kind: 'goblin' as const }
+    : chair.mult === SOUL_SIGIL.soulMultipliers.veryStrong ? { kind: 'dragon' as const }
+    : { kind: 'minotaur' as const });
+  chair.occupied = false;
+  chair.mult = undefined;
+  chair.soul = undefined;
+  chair.filledAt = undefined;
+  chair.claimedBy = undefined;
+  state.soulSigilCompletedAt.delete(chair.portalId);
+  // Step the soul off the chair, radially outward from the mirror so it
+  // doesn't re-trigger anything sitting on the ring.
+  const portal = state.buildings.get(chair.portalId);
+  const c = portal ? hellMirrorCenter(portal) : { x: chair.hx, y: chair.hy - 1 };
+  const a = Math.atan2(chair.hy - c.y, chair.hx - c.x);
+  const hx = chair.hx + Math.cos(a) * SOUL_SIGIL.chairRadius * 2;
+  const hy = chair.hy + Math.sin(a) * SOUL_SIGIL.chairRadius * 2;
+  const w = hellToWorld(hx, hy);
+  const ghost: Ghost = {
+    id: state.nextId++,
+    kind: snap.kind,
+    x: w.x, y: w.y,
+    // Dragon ghosts use ±1 sprite mirroring where the others use radians.
+    facing: snap.kind === 'dragon' ? 1 : Math.PI / 2,
+    spawnAt: state.now,
+    gold: snap.gold,
+    tiny: snap.tiny,
+    offX: 0, offY: 0,
+    speedMult: 0.75 + Math.random() * 0.5,
+    hx, hy,
+    commanded: true,
+  };
+  state.ghosts.push(ghost);
+  const sigil = state.soulChairs.filter((sc) => sc.portalId === chair.portalId);
+  const filled = sigil.filter((sc) => sc.occupied).length;
+  const out = portal ? sigilPortalOutput(defOf(portal).powerOutput, sigil) : 0;
+  // The seating chime run upward — release rather than binding.
+  playSound('ritual', 0.5, 1.2);
+  pushFloater(state, chair.hx, chair.hy - SOUL_SIGIL.chairRadius * 1.5, 'soul freed', 0x8acfff, 4, undefined, false, true, 2);
+  appendLog(state, `A soul is freed from its chair (${filled}/${SOUL_SIGIL.count}) — the mirror dims to ${formatPower(out)}.`);
+  return ghost;
 }
 
 
