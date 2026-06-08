@@ -359,6 +359,10 @@
       .resource-rate { font-family: var(--font-mono); font-size: calc(11px * var(--font-mono-scale)); font-variant-numeric: tabular-nums; opacity: 0.4; }
       .build-button {
         display: block; width: 100%;
+        /* Real <button>s are border-box by UA default, but some rows reuse
+           this class on a <div> (e.g. the autospawn throttle slider) — pin
+           it so those don't overflow the sidebar into the scrollbar. */
+        box-sizing: border-box;
         position: relative; overflow: hidden;
         background: var(--sidebar-button-bg); border: 1px solid var(--sidebar-button-border);
         color: #eee; padding: 10px 12px; margin-bottom: 6px;

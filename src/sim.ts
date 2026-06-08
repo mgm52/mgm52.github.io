@@ -984,24 +984,28 @@ export function spawnRobot(state: GameState, terminator = false): boolean {
   return true;
 }
 
-// Nearest non-robot unit to a terminator — goblins (flesh ones), minotaurs,
-// and dragons are all prey; robots and fellow terminators are kin. Null once
-// the world is picked clean.
+// A terminator's next prey: the most VALUABLE killable unit first, nearest
+// within a value tier. A dragon's bone drop outranks a goldblin's payout,
+// which outranks a minotaur's blood, which outranks a common goblin's
+// pocket change. Robots and fellow terminators are kin. Null once the world
+// is picked clean.
 function nearestTerminatorTarget(
   state: GameState, t: Goblin,
 ): { kind: 'goblin' | 'minotaur' | 'dragon'; id: number } | null {
   let best: { kind: 'goblin' | 'minotaur' | 'dragon'; id: number } | null = null;
+  let bestTier = -1;
   let bestD = Infinity;
-  const consider = (kind: 'goblin' | 'minotaur' | 'dragon', id: number, x: number, y: number) => {
+  const consider = (kind: 'goblin' | 'minotaur' | 'dragon', id: number, x: number, y: number, tier: number) => {
+    if (tier < bestTier) return;
     const d = (x - t.pos.x) * (x - t.pos.x) + (y - t.pos.y) * (y - t.pos.y);
-    if (d < bestD) { bestD = d; best = { kind, id }; }
+    if (tier > bestTier || d < bestD) { bestTier = tier; bestD = d; best = { kind, id }; }
   };
   for (const g of state.goblins.values()) {
     if (g.robot) continue;
-    consider('goblin', g.id, g.pos.x, g.pos.y);
+    consider('goblin', g.id, g.pos.x, g.pos.y, g.gold ? 2 : 0);
   }
-  for (const m of state.minotaurs.values()) consider('minotaur', m.id, m.pos.x, m.pos.y);
-  for (const d of state.dragons.values()) consider('dragon', d.id, d.pos.x, d.pos.y);
+  for (const m of state.minotaurs.values()) consider('minotaur', m.id, m.pos.x, m.pos.y, 1);
+  for (const d of state.dragons.values()) consider('dragon', d.id, d.pos.x, d.pos.y, 3);
   return best;
 }
 
@@ -3203,7 +3207,9 @@ function updateGoblin(state: GameState, g: Goblin) {
       }
       if (state.now < s.fireAt) return;
       pushLaserBeam(state, g.pos.x, g.pos.y - 6, target.pos.x, target.pos.y);
-      playSound('lightning', 0.45, 2.1);
+      // A terminator fires non-stop while prey remains — keep its report far
+      // quieter than a one-off commanded robot shot or it dominates the mix.
+      playSound('lightning', g.terminator ? 0.14 : 0.45, 2.1);
       robotLaserKill(state, g, s.targetKind, s.targetId);
       g.state = { kind: 'idle' };
       return;
