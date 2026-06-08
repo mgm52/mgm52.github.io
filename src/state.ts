@@ -571,6 +571,18 @@ export type Hole = {
 // Total in-flight spawn slots: base + GOBLIN_HOLE_CAPACITY_PER_BUILDING per
 // completed Goblin Hole building. Computed fresh each tick so the spawn queue
 // always reflects the latest infrastructure.
+// Whether any hole remains for units to crawl out of: the original Goblin
+// Hole (until Lolly tears it out) or any completed Goblin Hole building.
+// Once Lolly has destroyed every last one, nothing can spawn — goblins,
+// minotaurs, robots and terminators all hatch from holes.
+export function anySpawnHole(state: GameState): boolean {
+  if (!state.holeDestroyed) return true;
+  for (const b of state.buildings.values()) {
+    if (b.kind === 'goblin_hole' && b.state !== 'constructing') return true;
+  }
+  return false;
+}
+
 export function getSpawnCapacity(state: GameState): number {
   // The base capacity belongs to the original hole — once Lolly has torn it
   // out of the earth, only built Goblin Holes (those still standing) count.

@@ -6,7 +6,7 @@ import {
 } from './config';
 import {
   Building, Cell, Demon, DragonState, GameState, Ghost, Goblin, GoblinState, SoulChair, SpaceBuilding, SpaceUnit, WaterSource,
-  appendLog, buildingCenter, buildingLabel, buildingMoneyCost, cellCenter, cellKey, chairSoulSnapshot, countHypercentres, countIdle, countSpaceCentres, defOf, digDirection,
+  anySpawnHole, appendLog, buildingCenter, buildingLabel, buildingMoneyCost, cellCenter, cellKey, chairSoulSnapshot, countHypercentres, countIdle, countSpaceCentres, defOf, digDirection,
   earnDragonBone, getSpawnCapacity, goblinSpawningBlocked, holeBlockedByBuilding, isCellBlocked, isInBounds,
   maintainerCount, markBuildingsChanged, nextBuildingDisplayNum, occupyCell, spaceCentreMaintained, waterCarrierCount,
 } from './state';
@@ -1543,11 +1543,14 @@ export function refreshUI(state: GameState) {
   const holeBlocked = holeBlockedByBuilding(state);
   const noRoom = !holeBlocked && goblinSpawningBlocked(state);
   const cap = getSpawnCapacity(state);
-  spawnBtn.disabled = !canAffordGoblin || holeBlocked || noRoom || spawnInProgress >= cap;
+  // Once Lolly has destroyed every hole, nothing hole-born can be summoned
+  // again — goblins, minotaurs, robots and terminators all grey out for good.
+  const noHoles = !anySpawnHole(state);
+  spawnBtn.disabled = !canAffordGoblin || holeBlocked || noRoom || noHoles || spawnInProgress >= cap;
   spawnBtn.classList.toggle('in-progress', spawnInProgress > 0);
   const warnEl = document.getElementById('warn-spawn-goblin')!;
-  warnEl.textContent = holeBlocked ? 'Hole blocked' : 'No room';
-  warnEl.style.display = (holeBlocked || noRoom) ? '' : 'none';
+  warnEl.textContent = noHoles ? 'No holes remain' : holeBlocked ? 'Hole blocked' : 'No room';
+  warnEl.style.display = (noHoles || holeBlocked || noRoom) ? '' : 'none';
   const spawnBySlot: Record<number, number> = {};
   for (const item of state.spawnQueue) {
     spawnBySlot[item.slot] = 1 - item.remaining / GOBLIN.spawnTime;
@@ -1575,9 +1578,9 @@ export function refreshUI(state: GameState) {
     const queued = state.minotaurSpawnQueue.length;
     const minoCost = minotaurBloodCost(state.minotaursBought, state.minotaurFirstDiscount);
     const canAffordMinotaur = state.blood >= minoCost;
-    minotaurBtn.disabled = queued > 0 || !canAffordMinotaur;
+    minotaurBtn.disabled = queued > 0 || !canAffordMinotaur || noHoles;
     minotaurCostEl.textContent = `${minoCost} blood`;
-    minotaurCostEl.classList.toggle('met', canAffordMinotaur && queued === 0);
+    minotaurCostEl.classList.toggle('met', canAffordMinotaur && queued === 0 && !noHoles);
     minotaurBtn.classList.toggle('in-progress', queued > 0);
     const remaining = queued > 0 ? state.minotaurSpawnQueue[0].remaining : MINOTAUR.spawnTime;
     const fill = queued > 0 ? 1 - remaining / MINOTAUR.spawnTime : 0;
@@ -1652,7 +1655,7 @@ export function refreshUI(state: GameState) {
     const canAffordRobot = state.money >= ROBOT.moneyCost;
     // Assembly runs on a timed track like the other summons — one at a time.
     const robotQueued = state.robotSpawnQueue.length;
-    robotBtn.disabled = !enoughHCs || !canAffordRobot || robotQueued >= ROBOT.spawnCapacity;
+    robotBtn.disabled = !enoughHCs || !canAffordRobot || noHoles || robotQueued >= ROBOT.spawnCapacity;
     robotBtn.classList.toggle('in-progress', robotQueued > 0);
     const robotRemaining = robotQueued > 0 ? state.robotSpawnQueue[0].remaining : ROBOT.spawnTime;
     const robotFill = robotQueued > 0 ? 1 - robotRemaining / ROBOT.spawnTime : 0;
@@ -1678,7 +1681,7 @@ export function refreshUI(state: GameState) {
     const enoughSCs = scs >= TERMINATOR.spaceCentresRequired;
     const canAffordTerminator = state.money >= TERMINATOR.moneyCost;
     const termQueued = state.terminatorSpawnQueue.length;
-    terminatorBtn.disabled = !enoughSCs || !canAffordTerminator || termQueued >= TERMINATOR.spawnCapacity;
+    terminatorBtn.disabled = !enoughSCs || !canAffordTerminator || noHoles || termQueued >= TERMINATOR.spawnCapacity;
     terminatorBtn.classList.toggle('in-progress', termQueued > 0);
     const termRemaining = termQueued > 0 ? state.terminatorSpawnQueue[0].remaining : TERMINATOR.spawnTime;
     const termFill = termQueued > 0 ? 1 - termRemaining / TERMINATOR.spawnTime : 0;
@@ -2121,6 +2124,10 @@ export function refreshUI(state: GameState) {
     spaceCentreBtn.disabled = !canAffordCentre;
     spaceCentreBtn.classList.toggle('active', state.pendingSpaceCentre);
     document.getElementById('cost-space-centre')!.classList.toggle('met', canAffordCentre);
+    // Same headroom check the ground build buttons run — without it the
+    // 10 GW figure stayed permanently unmet-red no matter the grid.
+    const centreDraw = -BUILDING_DEFS.space_centre.powerOutput;
+    document.getElementById('power-cost-space-centre')!.classList.toggle('met', centreDraw <= availablePower);
     // Mid-placement bankruptcy (mirrors the platform): can't pay any more →
     // leave placement mode.
     if (state.pendingSpaceCentre && !canAffordCentre) state.pendingSpaceCentre = false;

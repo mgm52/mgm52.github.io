@@ -506,6 +506,13 @@ export type RenderContext = {
   // Floating-building diorama. Scaled + camera-panned like worldLayer.
   spaceLayer: Container;
   spaceBg: Graphics;                 // starfield + nebula, drawn once
+  // Fixed z-order sub-layers (bottom → top): hauled-up ground buildings,
+  // then Orbital Platforms, then the Space Centres standing on them, then
+  // units — so a robot walking a deck always renders on top of it.
+  spaceMiscLayer: Container;
+  spacePlatformLayer: Container;
+  spaceCentreLayer: Container;
+  spaceUnitLayer: Container;
   spaceBuildingViews: Map<number, SpaceBuildingView>;
   spaceUnitViews: Map<number, SpaceUnitView>;
   spaceCamera: Camera;
@@ -784,13 +791,24 @@ export async function createRender(parent: HTMLElement, state: GameState): Promi
   const spaceBg = new Graphics();
   drawSpaceBackground(spaceBg);
   spaceLayer.addChild(spaceBg);
-  // Ambient dragons sit above the starfield but below the floating buildings,
-  // which are added to spaceLayer later (during render) and so stack on top.
+  // Ambient dragons sit above the starfield but below the floating buildings.
   const spaceAmbientLayer = new Container();
   spaceLayer.addChild(spaceAmbientLayer);
-  // Space-side Bob nametag layer + the Orbital Platform placement ghost.
-  // Building/unit views are appended to spaceLayer as they're created, so the
-  // render loop re-appends these whenever they're in use to keep them on top.
+  // Fixed z-order for the diorama (bottom → top): hauled-up ground buildings,
+  // then Orbital Platforms, then the Space Centres standing on them, then
+  // units, with Bob's nametag layer and the placement ghost above everything.
+  const spaceMiscLayer = new Container();
+  spaceMiscLayer.cullableChildren = true;
+  spaceLayer.addChild(spaceMiscLayer);
+  const spacePlatformLayer = new Container();
+  spacePlatformLayer.cullableChildren = true;
+  spaceLayer.addChild(spacePlatformLayer);
+  const spaceCentreLayer = new Container();
+  spaceCentreLayer.cullableChildren = true;
+  spaceLayer.addChild(spaceCentreLayer);
+  const spaceUnitLayer = new Container();
+  spaceUnitLayer.cullableChildren = true;
+  spaceLayer.addChild(spaceUnitLayer);
   const spaceTagLayer = new Container();
   spaceLayer.addChild(spaceTagLayer);
   const orbitalGhostGfx = new Graphics();
@@ -967,7 +985,8 @@ export async function createRender(parent: HTMLElement, state: GameState): Promi
     camera: { x: 0, y: 0 },
     viewport: { width: initW, height: initH },
     renderScale: initScale,
-    spaceLayer, spaceBg, spaceBuildingViews: new Map(), spaceUnitViews: new Map(),
+    spaceLayer, spaceBg, spaceMiscLayer, spacePlatformLayer, spaceCentreLayer, spaceUnitLayer,
+    spaceBuildingViews: new Map(), spaceUnitViews: new Map(),
     spaceCamera: { x: 0, y: 0 },
     spaceAmbientLayer, ambientDragons: [], nextAmbientSpawnAt: 0, ambientIdSeq: 1,
     blackOverlay, skyLayer, skyGfx, cloudGfx, starGfx,
@@ -1373,26 +1392,23 @@ function syncBobTags(ctx: RenderContext, state: GameState): void {
       ctx.bobTags.delete(key);
     }
   }
-  // Space building/unit views are appended to spaceLayer as they're created,
-  // which would stack them over the tag layer — re-appending while a tag is
-  // live keeps Bob's name on top of everything in orbit.
-  if (ctx.spaceTagLayer.children.length > 0) ctx.spaceLayer.addChild(ctx.spaceTagLayer);
 }
 
 // White "fast build" tag above each robot actively building — the on-screen
-// face of the compounding ROBOT.buildTimeMult bonus (see updateConstruction).
-// Unlike a one-shot floater, the tag is synced per-frame and so persists for
-// exactly as long as the robot stays on the job: it vanishes the moment the
-// build completes or the robot is pulled away. Tags ride worldTagLayer, same
-// as Bob's nameplate, so nothing on the ground covers them.
+// face of the compounding ROBOT.buildTimeMult bonus (see updateConstruction
+// on the ground, advanceOrbitalPlatforms in orbit). Unlike a one-shot
+// floater, the tag is synced per-frame and so persists for exactly as long
+// as the robot stays on the job: it vanishes the moment the build completes
+// or the robot is pulled away. Ground tags ride worldTagLayer and space tags
+// spaceTagLayer, same as Bob's nameplate, so nothing covers them. Goblin and
+// space-unit ids share state.nextId, so one map holds both without colliding.
 function syncFastBuildTags(ctx: RenderContext, state: GameState): void {
   const opts = getOptions();
   const px = opts.goblinDisplayPx * opts.robotScale;
   const seen = new Set<number>();
-  for (const g of state.goblins.values()) {
-    if (!g.robot || g.state.kind !== 'building') continue;
-    seen.add(g.id);
-    let t = ctx.fastBuildTags.get(g.id);
+  const placeTag = (id: number, layer: Container, x: number, y: number): void => {
+    seen.add(id);
+    let t = ctx.fastBuildTags.get(id);
     if (!t) {
       t = new Text({
         text: 'fast build',
@@ -1404,10 +1420,19 @@ function syncFastBuildTags(ctx: RenderContext, state: GameState): void {
         },
       });
       t.anchor.set(0.5, 1);
-      ctx.worldTagLayer.addChild(t);
-      ctx.fastBuildTags.set(g.id, t);
+      layer.addChild(t);
+      ctx.fastBuildTags.set(id, t);
     }
-    t.position.set(g.pos.x, g.pos.y - px * 0.55);
+    t.position.set(x, y - px * 0.55);
+  };
+  for (const g of state.goblins.values()) {
+    if (!g.robot || g.state.kind !== 'building') continue;
+    placeTag(g.id, ctx.worldTagLayer, g.pos.x, g.pos.y);
+  }
+  // Robots assembling a structure in orbit get the same announcement.
+  for (const su of state.spaceUnits.values()) {
+    if (!su.robot || su.workingOn === undefined) continue;
+    placeTag(su.id, ctx.spaceTagLayer, su.pos.x, su.pos.y);
   }
   for (const [id, t] of ctx.fastBuildTags) {
     if (!seen.has(id)) {
@@ -2873,6 +2898,18 @@ function drawSpaceCentreBody(g: Graphics, state: Building['state']): void {
   }
 }
 
+// Whether a space unit currently has a completed Orbital Platform's deck
+// under its feet — robots only "walk" (run their walk cycle) on a deck;
+// everywhere else in the void they float.
+function spaceUnitOnPlatform(state: GameState, su: SpaceUnit): boolean {
+  const half = BUILDING_DEFS.orbital_platform.size / 2;
+  for (const sb of state.spaceBuildings.values()) {
+    if (sb.building.kind !== 'orbital_platform' || sb.building.state === 'constructing') continue;
+    if (Math.abs(su.pos.x - sb.pos.x) <= half && Math.abs(su.pos.y - sb.pos.y) <= half) return true;
+  }
+  return false;
+}
+
 function makeSpaceUnitView(robot: boolean): SpaceUnitView {
   const container = new Container();
   const selectionRing = new Graphics();
@@ -3547,7 +3584,12 @@ export function render(state: GameState, ctx: RenderContext) {
     let v = ctx.spaceBuildingViews.get(sb.id);
     if (!v) {
       v = makeSpaceBuildingView(sb);
-      ctx.spaceLayer.addChild(v.container);
+      // Fixed stacking: platforms under the Centres that stand on them,
+      // everything else (hauled-up ground buildings) underneath both.
+      const layer = sb.building.kind === 'orbital_platform' ? ctx.spacePlatformLayer
+        : sb.building.kind === 'space_centre' ? ctx.spaceCentreLayer
+        : ctx.spaceMiscLayer;
+      layer.addChild(v.container);
       ctx.spaceBuildingViews.set(sb.id, v);
     }
     v.container.position.set(sb.pos.x, sb.pos.y);
@@ -3564,13 +3606,14 @@ export function render(state: GameState, ctx: RenderContext) {
     }
     // Robot-built assembly state: dim scaffold + yellow build bar while
     // constructing, with a "needs robot" tag whenever no robot is on site.
+    // The bar sits just inside the top edge, exactly like a ground build.
     const sbDef = BUILDING_DEFS[sb.building.kind];
     v.progress.clear();
     if (sb.building.state === 'constructing') {
       if (v.body) v.body.alpha = 0.55;
       const w = sbDef.size - 10;
       const h = 5;
-      const y = sbDef.size / 2 + 8;
+      const y = -sbDef.size / 2 + 5;
       v.progress.rect(-w / 2, y, w, h).fill({ color: 0x000000, alpha: 0.6 }).stroke({ width: 1, color: 0x000000 });
       v.progress.rect(-w / 2, y, w * sb.building.buildProgress, h).fill(0xffd96b);
       let onSite = 0;
@@ -3604,7 +3647,7 @@ export function render(state: GameState, ctx: RenderContext) {
     if (!v) {
       v = makeSpaceUnitView(!!su.robot);
       v.container.cullable = true;
-      ctx.spaceLayer.addChild(v.container);
+      ctx.spaceUnitLayer.addChild(v.container);
       ctx.spaceUnitViews.set(su.id, v);
     }
     v.container.position.set(su.pos.x, su.pos.y);
@@ -3613,9 +3656,11 @@ export function render(state: GameState, ctx: RenderContext) {
     let suPx = opts.goblinDisplayPx;
     if (suSheet) {
       const dir = dirIndex(suSheet.meta, su.facing);
-      // Robots animate while on the move or on the job (walking covers
-      // commanded marches and the stroll to a parking spot).
+      // Robots only run the walk cycle with a deck underfoot — striding an
+      // Orbital Platform on the move or on the job. Crossing the open void
+      // they glide frozen instead (floating, not walking).
       const frame = su.robot && (su.workingOn !== undefined || su.walking)
+          && spaceUnitOnPlatform(state, su)
         ? Math.floor(state.now * suSheet.fps) % suSheet.meta.framesPerDirection
         : 0;
       v.sprite.texture = suSheet.frames[dir][frame];
@@ -3662,9 +3707,6 @@ export function render(state: GameState, ctx: RenderContext) {
       og.rect(px - half, py - half, def.size, def.size)
         .fill({ color, alpha: 0.25 })
         .stroke({ width: 2, color });
-      // Building views are appended to spaceLayer as they're created —
-      // re-append the ghost while armed so it always draws on top.
-      ctx.spaceLayer.addChild(og);
     } else if (state.view === 'space' && state.pendingSpaceCentre && ctx.orbitalCursor) {
       const def = BUILDING_DEFS.space_centre;
       // Snap the preview onto the platform the drop would land on, exactly
@@ -3680,7 +3722,6 @@ export function render(state: GameState, ctx: RenderContext) {
       og.rect(px - half, py - half, def.size, def.size)
         .fill({ color, alpha: 0.25 })
         .stroke({ width: 2, color });
-      ctx.spaceLayer.addChild(og);
     }
   }
 

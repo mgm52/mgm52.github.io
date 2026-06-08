@@ -3,7 +3,7 @@ import { BUILDING_DEFS, BuildingKind, CELL, COLS, DEMON, DRAGON, DRAGON_KILL_REW
 import { DEMON_FACING_ANGLE, getOptions } from './options';
 import {
   ALL_DIRS, Building, Cell, DX, DY, Demon, Dir, Dragon, GameState, Ghost, Goblin, HOLE_SIZE, LollyTarget, Minotaur, SoulChair, SpaceBuilding, SpaceUnit, Vec2, WaterSource,
-  appendLog, buildingAtCell, buildingCenter, buildingFootprint, buildingPerimeter,
+  anySpawnHole, appendLog, buildingAtCell, buildingCenter, buildingFootprint, buildingPerimeter,
   cellCenter, cellKey, chairSoulSnapshot, constructedDragonBeacon, currentPowerBoost, defOf, demonScaleOf, destroyBuilding, dragonTargetBuilding,
   earnBlood, earnDragonBone, earnMoney, findHoleEmergenceCell,
   getSpawnCapacity, holeBlockedByBuilding, holeCenter, isCellBlocked, isCellInBuilding, isCellInWaterSource,
@@ -52,6 +52,18 @@ export function tick(state: GameState) {
   }
 
   // ── 1. Spawn queue ────────────────────────────────────────────────
+  // Lolly has torn out every hole — nothing hole-born can hatch any more.
+  // Drop every in-flight summon (the holes they'd crawl from no longer
+  // exist); the UI greys the buttons out on the same anySpawnHole test.
+  if (!anySpawnHole(state)
+      && (state.spawnQueue.length > 0 || state.minotaurSpawnQueue.length > 0
+          || state.robotSpawnQueue.length > 0 || state.terminatorSpawnQueue.length > 0)) {
+    state.spawnQueue.length = 0;
+    state.minotaurSpawnQueue.length = 0;
+    state.robotSpawnQueue.length = 0;
+    state.terminatorSpawnQueue.length = 0;
+    appendLog(state, 'No holes remain. Nothing more will hatch.');
+  }
   // After a reactor meltdown, autospawn holds its breath until the green
   // radiation wash has fully faded (REACTOR_MELTDOWN.tintSeconds) — no point
   // hatching goblins straight into the shockwave. The cadence timer simply
@@ -1584,7 +1596,9 @@ export function maybeDepartBobAndLolly(
 // nothing — this is a calamity, not a harvest. Once nothing is left she
 // wanders the ruins.
 
-// Spawn Lolly at the original Goblin Hole (poetically, her first target).
+// Spawn Lolly at the right edge of the play area — she arrives from outside
+// the world and marches in on the colony (the original Goblin Hole is still
+// her likely first target; it's just a walk away now).
 // Bob leaves wherever he currently is — alive on the ground, a soul in hell,
 // even adrift in space — to take his seat on her shoulders. Returns the
 // spawn point so the caller can swing the camera onto it.
@@ -1596,7 +1610,11 @@ export function spawnLollyRampage(state: GameState): Vec2 {
   for (const [id, su] of [...state.spaceUnits]) {
     if (su.bob) state.spaceUnits.delete(id);
   }
-  const c = holeCenter(state);
+  const pa = state.playArea;
+  const c = {
+    x: Math.min(WORLD.width - CELL * 2, pa.x1 * CELL - CELL),
+    y: ((pa.y0 + pa.y1) / 2) * CELL,
+  };
   state.lolly = {
     pos: { x: c.x, y: c.y },
     facing: Math.PI / 2,
@@ -2487,7 +2505,8 @@ function updateSpaceBuilding(sb: SpaceBuilding) {
 }
 
 // One robot per job. Each structure under robot assembly needs exactly one
-// builder (extra hands don't speed it up — see advanceOrbitalPlatforms), and
+// builder (extra hands compound the fast-build cut, but only if the player
+// marches them over — see advanceOrbitalPlatforms), and
 // each completed Space Centre needs exactly one robot stationed on its deck
 // as crew. Greedily claim the nearest free robot for every job so the rest
 // stay parked instead of the whole fleet piling onto the same site.
@@ -2666,7 +2685,9 @@ function isRobotBuilt(kind: BuildingKind): boolean {
 
 // Robots holding station at an unfinished Orbital Platform or Space Centre
 // advance its build. buildersRequired is 1, so a single robot on site keeps
-// the work moving; extra robots don't speed it up (there's only one wrench).
+// the work moving — and exactly like a ground site, every robot on site
+// compounds the ROBOT.buildTimeMult (0.7×) "fast build" cut, so marching
+// extra robots over genuinely speeds the assembly up.
 function advanceOrbitalPlatforms(state: GameState) {
   for (const sb of state.spaceBuildings.values()) {
     const b = sb.building;
@@ -2678,7 +2699,7 @@ function advanceOrbitalPlatforms(state: GameState) {
       if (Math.hypot(su.pos.x - sb.pos.x, su.pos.y - sb.pos.y) <= def.size / 2 + ROBOT.buildRange) workers++;
     }
     if (workers < def.buildersRequired) continue;
-    b.buildProgress += TICK_S / def.buildTime;
+    b.buildProgress += TICK_S / (def.buildTime * Math.pow(ROBOT.buildTimeMult, workers));
     if (b.buildProgress >= 1) {
       b.buildProgress = 1;
       b.activatedAt = state.now;
@@ -2782,6 +2803,9 @@ function nearestFreeNeighbor(state: GameState, cell: Cell, hunter: Goblin): Cell
 // just kill them on the next tick) and rejects cells already held by another
 // minotaur. Used at summon time to prevent two minotaurs sharing a square.
 function pickMinotaurSpawnCell(state: GameState): Cell | null {
+  // Minotaurs crawl out of the original hole specifically — once Lolly has
+  // torn it out of the earth there is nothing to crawl out of.
+  if (state.holeDestroyed) return null;
   const h = state.hole.cell;
   const cx0 = h.cx + (HOLE_SIZE - 1) / 2;
   const cy0 = h.cy + (HOLE_SIZE - 1) / 2;
