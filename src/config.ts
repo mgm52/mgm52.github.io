@@ -396,7 +396,7 @@ export const GOBLIN_HOLE_CAPACITY_PER_BUILDING = 5;
 // goblins, minotaurs, and dragons — granting their usual kill rewards, and
 // powers a temporary surge that decays linearly to zero.
 export const LIGHTNING = {
-  cellsWide: 8,                    // blast diameter, in cells
+  cellsWide: 7,                    // blast diameter, in cells
   bloodCost: 32,                   // blood spent per strike
   powerBoostWatts: 1_000_000_000,  // 1 GW peak surge
   powerBoostSeconds: 5,            // surge decays to 0 over this many seconds
