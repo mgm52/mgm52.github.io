@@ -2411,9 +2411,9 @@ function updateGoblin(state: GameState, g: Goblin) {
         g.goal = null;
         g.path = [];
         g.state = { kind: 'building', buildingId: b.id };
-        // A robot setting to work announces its compounding 0.7× build-time
-        // bonus (see updateConstruction) with a white tag above its head.
-        if (g.robot) pushFloater(state, g.pos.x, g.pos.y - 14, 'fast build', 0xffffff, 3);
+        // A robot's compounding 0.7× build-time bonus (see updateConstruction)
+        // is announced by the renderer: a white "fast build" tag pinned above
+        // its head for as long as it stays in this state (syncFastBuildTags).
         return true;
       };
 

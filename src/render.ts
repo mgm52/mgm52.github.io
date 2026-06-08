@@ -587,6 +587,9 @@ export type RenderContext = {
   // keyed by a per-host string. Each lives in its scene's dedicated top
   // nametag layer so the label is never covered by other units/buildings.
   bobTags: Map<string, Text>;
+  // White "fast build" tag pinned above each robot actively building (see
+  // syncFastBuildTags) — lives until the build finishes or the robot leaves.
+  fastBuildTags: Map<number, Text>;
   worldTagLayer: Container;
   spaceTagLayer: Container;
   hellTagLayer: Container;
@@ -967,6 +970,7 @@ export async function createRender(parent: HTMLElement, state: GameState): Promi
     orbitalCursor: null,
     orbitalGhostGfx,
     bobTags: new Map(),
+    fastBuildTags: new Map(),
     worldTagLayer, spaceTagLayer, hellTagLayer,
     hellEffectsLayer,
     hellFloatersLayer,
@@ -1341,6 +1345,44 @@ function syncBobTags(ctx: RenderContext, state: GameState): void {
   // which would stack them over the tag layer — re-appending while a tag is
   // live keeps Bob's name on top of everything in orbit.
   if (ctx.spaceTagLayer.children.length > 0) ctx.spaceLayer.addChild(ctx.spaceTagLayer);
+}
+
+// White "fast build" tag above each robot actively building — the on-screen
+// face of the compounding ROBOT.buildTimeMult bonus (see updateConstruction).
+// Unlike a one-shot floater, the tag is synced per-frame and so persists for
+// exactly as long as the robot stays on the job: it vanishes the moment the
+// build completes or the robot is pulled away. Tags ride worldTagLayer, same
+// as Bob's nameplate, so nothing on the ground covers them.
+function syncFastBuildTags(ctx: RenderContext, state: GameState): void {
+  const opts = getOptions();
+  const px = opts.goblinDisplayPx * opts.robotScale;
+  const seen = new Set<number>();
+  for (const g of state.goblins.values()) {
+    if (!g.robot || g.state.kind !== 'building') continue;
+    seen.add(g.id);
+    let t = ctx.fastBuildTags.get(g.id);
+    if (!t) {
+      t = new Text({
+        text: 'fast build',
+        style: {
+          fontFamily: fontFamilyById(getOptions().fonts.buildingLabel.family).css,
+          fontSize: 13,
+          fill: 0xffffff,
+          stroke: { color: 0x000000, width: 2 },
+        },
+      });
+      t.anchor.set(0.5, 1);
+      ctx.worldTagLayer.addChild(t);
+      ctx.fastBuildTags.set(g.id, t);
+    }
+    t.position.set(g.pos.x, g.pos.y - px * 0.55);
+  }
+  for (const [id, t] of ctx.fastBuildTags) {
+    if (!seen.has(id)) {
+      t.destroy();
+      ctx.fastBuildTags.delete(id);
+    }
+  }
 }
 
 function makeMinotaurView(): MinotaurView {
@@ -3373,6 +3415,7 @@ export function render(state: GameState, ctx: RenderContext) {
 
   // Bob's nametag(s) — synced across all scenes after every host has moved.
   syncBobTags(ctx, state);
+  syncFastBuildTags(ctx, state);
 
   // ─── Hell red beam ───
   // One vertical red line per Hell Portal, drawn from the portal's

@@ -120,7 +120,8 @@ export const ROBOT = {
   buildRange: 30,     // px past a platform's edge that counts as "on site"
   // Each robot actively building a ground site multiplies the build time by
   // this factor, compounding — two robots run a build at 1/0.49 ≈ 2× rate.
-  // Announced by the white "fast build" floater when a robot sets to work.
+  // Announced by a white "fast build" tag pinned above the robot's head for
+  // as long as it stays on the job (render's syncFastBuildTags).
   buildTimeMult: 0.7,
   // Robots assemble on a timed queue like the other summons (one at a time,
   // mirroring the Minotaur's single-slot ritual track).
