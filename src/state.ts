@@ -333,7 +333,7 @@ export type Floater = {
   // Floaters in the hell scene (the soul-chair power surge) carry hell
   // coordinates and ride the hell transform rather than the ground layer.
   hell?: boolean;
-  // Multiplier on the floater's base font size — the "x87" soul-surge text
+  // Multiplier on the floater's base font size — the soul-surge multiplier text
   // renders much bigger than a kill reward. 1 when absent.
   sizeMult?: number;
 };
@@ -420,13 +420,17 @@ export type Ghost = {
 // outer ring of a Hell Portal's mirror, up to five per ring. Pentagram lines
 // spring between them as they're placed; once all five stand they become soul
 // chairs, and seating a soul in one multiplies the portal's power output by
-// SOUL_SIGIL.soulMultiplier. See SOUL_SIGIL.
+// the soul's strength multiplier (SOUL_SIGIL.soulMultipliers). See SOUL_SIGIL.
 export type SoulChair = {
   id: number;
   portalId: number;     // the hell_portal building whose outer ring this candle sits on
   index: number;        // position around the ring by angle (drives the pentagram edges)
   hx: number; hy: number;
   occupied: boolean;
+  // The seated soul's power multiplier (weak/strong/very strong — see
+  // soulStrengthOf), recorded at binding. Absent on chairs from saves
+  // predating soul strengths; sigilPortalOutput counts those as strong.
+  mult?: number;
   placedAt?: number;    // state.now when the candle was placed — drives the place-in VFX
   filledAt?: number;    // state.now when seated — drives the seat-in VFX
   // Ephemeral: id of the soul currently walking to claim this chair, so a crowd
@@ -1266,7 +1270,7 @@ export function placeCandle(state: GameState, spot: CandleSpot): SoulChair {
   return chair;
 }
 
-// Seated-soul count for a portal's sigil — the exponent in sigilPortalOutput.
+// Seated-soul count for a portal's sigil.
 export function sigilSeatedCount(state: GameState, portalId: number): number {
   let n = 0;
   for (const c of state.soulChairs) {

@@ -328,6 +328,9 @@ type DemonView = {
   // (see syncSpriteShadow). Independent of the radial foot shadow above.
   spriteShadow: Sprite;
   sprite: Sprite;
+  // Per-demon hue rotation on the sprite alone — the all-demons hue dial is
+  // a demonLayer filter (applyOptions), so individual hues need their own.
+  hueFilter: ColorMatrixFilter;
   selectionRing: Graphics;
 };
 
@@ -527,8 +530,8 @@ export type RenderContext = {
   soulSigilGfx: Graphics;
   soulChairGfx: Graphics;
   soulChairLabels: Map<number, Text>;
-  // Live wattage readout on each portal's mirror ("1 W" → ×87 per seated
-  // soul), keyed by portalId.
+  // Live wattage readout on each portal's mirror ("1 W" → × each seated
+  // soul's strength), keyed by portalId.
   sigilPowerLabels: Map<number, Text>;
   // Cursor position in hell coords while candle placement is armed — drives
   // the snapped candle ghost on the outer ring. Updated by input.ts.
@@ -554,7 +557,7 @@ export type RenderContext = {
   // appearance of a ghost). Drawn from the same DeathEffect entries flagged
   // hell:true; the renderer maps their world coords into hell coords.
   hellEffectsLayer: Container;
-  // Floating-text overlay for the hell scene (the "x87" surge above a mirror
+  // Floating-text overlay for the hell scene (the multiplier surge above a mirror
   // when a soul is seated). Mirrors floatersLayer but rides the hell
   // transform so the text tracks its hell coordinates.
   hellFloatersLayer: Container;
@@ -1340,7 +1343,7 @@ function makeDemonView(variant: DemonVariant): DemonView {
   container.addChild(spriteShadow);
   container.addChild(ring);
   container.addChild(sprite);
-  return { container, shadow, spriteShadow, sprite, selectionRing: ring };
+  return { container, shadow, spriteShadow, sprite, hueFilter: new ColorMatrixFilter(), selectionRing: ring };
 }
 
 // The dragon draws from an 8-direction fly sheet (dragonFlySheet). A soft glow
@@ -1513,7 +1516,7 @@ function makeSpriteShadow(): Sprite {
   return s;
 }
 
-function syncSpriteShadow(shadow: Sprite, sprite: Sprite, enabled: boolean, footY?: number): void {
+function syncSpriteShadow(shadow: Sprite, sprite: Sprite, enabled: boolean, footY?: number, gapAdjust = 0): void {
   shadow.visible = enabled;
   if (!enabled) return;
   const o = getOptions();
@@ -1525,9 +1528,10 @@ function syncSpriteShadow(shadow: Sprite, sprite: Sprite, enabled: boolean, foot
   // Defaults to the sprite's bottom edge; demons pass their dialed foot line
   // (sprite Y nudge + the radial shadow's Y) instead, because the turntable
   // art carries transparent padding that puts the texture's bottom edge well
-  // below the statue's actual feet. The gap dial then offsets from there.
+  // below the statue's actual feet. The gap dial then offsets from there;
+  // gapAdjust is a per-kind px correction on top of it.
   const g = footY ?? sprite.y + sprite.height / 2;
-  shadow.position.set(sprite.x, g + (g - sprite.y) * squash + o.hellSpriteShadowGap);
+  shadow.position.set(sprite.x, g + (g - sprite.y) * squash + o.hellSpriteShadowGap + gapAdjust);
   shadow.alpha = o.hellSpriteShadowAlpha;
   shadow.tint = o.hellSpriteShadowTint;
 }
@@ -1745,7 +1749,7 @@ function syncParlayDim(ctx: RenderContext, state: GameState): void {
 // the place-in/seat-in bursts, and — once all five souls are bound — a wave of
 // pulses chasing around the ring plus a one-shot shockwave on completion. The
 // candle labels ("needs N candles" / "needs soul") and the live wattage
-// readout on each mirror ("1 W" ×87 per seated soul) are driven here too.
+// readout on each mirror ("1 W" × each seated soul's strength) are driven here too.
 function syncSoulSigil(ctx: RenderContext, state: GameState): void {
   const now = state.now;
   const { count, ringRadius, chairRadius } = SOUL_SIGIL;
@@ -1910,8 +1914,8 @@ function syncSoulSigil(ctx: RenderContext, state: GameState): void {
       seenLabels.add(chair.id);
     }
 
-    // Live wattage readout on the mirror: "1 W" untouched, ×87 per seated
-    // soul. Sits just below the mirror body so the beam/core stay clear.
+    // Live wattage readout on the mirror: "1 W" untouched, × each seated
+    // soul's strength. Sits just below the mirror body so the beam/core stay clear.
     let power = ctx.sigilPowerLabels.get(portal.id);
     if (!power) {
       power = new Text({
@@ -1927,8 +1931,7 @@ function syncSoulSigil(ctx: RenderContext, state: GameState): void {
       ctx.soulSigilLayer.addChild(power);
       ctx.sigilPowerLabels.set(portal.id, power);
     }
-    const seated = ordered.filter((c) => c.occupied).length;
-    const watts = sigilPortalOutput(defOf(portal).powerOutput, seated);
+    const watts = sigilPortalOutput(defOf(portal).powerOutput, ordered);
     const powerText = formatPower(watts);
     if (power.text !== powerText) power.text = powerText;
     power.position.set(center.x, center.y + defOf(portal).size * 0.5 + 6);
@@ -2263,7 +2266,7 @@ function drawFloaters(ctx: RenderContext, state: GameState) {
           fontFamily: fontFamilyById(opts.fonts.mono.family).css,
           // Baseline 14 px, scaled by the global font multiplier so the same
           // slider that resizes UI text also resizes in-world numbers. Some
-          // floaters (the soul-surge "x87") carry their own size multiplier.
+          // floaters (the soul-surge multiplier) carry their own size multiplier.
           fontSize: 14 * opts.globalFontScale * (f.sizeMult ?? 1),
           fill: f.color,
           fontWeight: 'bold',
@@ -3355,7 +3358,9 @@ export function render(state: GameState, ctx: RenderContext) {
       if (sheet) v.sprite.texture = sheet.frames[dirIndex(sheet.meta, gh.facing)][0];
     }
     // Mirror the (possibly just-updated) frame into the flipped sprite shadow.
-    syncSpriteShadow(v.shadow, v.sprite, opts.hellSpriteShadowGhosts);
+    // Goblin sheets sit a little high in their frames, so their shadow takes
+    // a +24px gap correction (the global gap dial reads 24px lower for them).
+    syncSpriteShadow(v.shadow, v.sprite, opts.hellSpriteShadowGhosts, undefined, gh.kind === 'goblin' ? 24 : 0);
   }
   for (const [id, v] of ctx.ghostViews) {
     if (!seenGh.has(id)) {
@@ -3394,6 +3399,13 @@ export function render(state: GameState, ctx: RenderContext) {
     v.sprite.tint = demonVariant === 'l' ? opts.demonLTint
       : demonVariant === 'friend' ? opts.demonFriendTint
       : opts.demonRTint;
+    // Per-demon hue rides a filter on the sprite alone, composing with the
+    // demonLayer-wide saturation/brightness/hue filter. applyFilter clears
+    // the filter entirely at hue 0, so the default stays a zero-cost path.
+    const hue = demonVariant === 'l' ? opts.demonLHue
+      : demonVariant === 'friend' ? opts.demonFriendHue
+      : opts.demonRHue;
+    applyFilter(v.sprite, v.hueFilter, 1, 1, hue);
     v.shadow.visible = opts.demonShadow;
     if (opts.demonShadow) {
       // Shadow offset is its own dev dial — the patung statue's plinth sits

@@ -991,8 +991,9 @@ export function setupUI(state: GameState, callbacks: UICallbacks) {
   // Candle — the hell view's entire Build menu. Hidden on the ground/space;
   // while in hell it replaces every building button (see refreshUI). Arms
   // candle-placement mode: each tap on a mirror's outer ring sets one down
-  // for SOUL_SIGIL.candleBloodCost blood. The blue "x87" advertises what a
-  // completed ring's seated souls do to the portal's wattage.
+  // for SOUL_SIGIL.candleBloodCost blood. The blue "x soul" advertises that a
+  // completed ring's seated souls each multiply the portal's wattage by
+  // their own strength.
   const candleBtn = document.createElement('button');
   candleBtn.className = 'build-button';
   candleBtn.id = 'btn-place-candle';
@@ -1005,7 +1006,7 @@ export function setupUI(state: GameState, callbacks: UICallbacks) {
           <span class="build-cost build-blood-cost" id="blood-cost-candle">${SOUL_SIGIL.candleBloodCost} blood</span>
         </div>
       </div>
-      <div class="build-yields"><span class="yield-power">x${SOUL_SIGIL.soulMultiplier}</span></div>
+      <div class="build-yields"><span class="yield-power">x soul</span></div>
     </div>
   `;
   candleBtn.addEventListener('click', () => { playSound('click', 1, 0.75); callbacks.onPlaceCandle(); });
@@ -2115,10 +2116,10 @@ function showHellPortal(state: GameState, b: Building, panel: HTMLElement, portr
     : 'A rift torn between worlds';
   // The portal puts out a deadpan 1 W on its own — its real output is the
   // soul sigil ringed around its mirror: every seated soul multiplies the
-  // wattage by 87, so a full ring of five feeds ~5 GW into the grid.
+  // wattage by its own strength (x66 weak / x100 strong / x144 very strong).
   const ring = state.soulChairs.filter((c) => c.portalId === b.id);
   const seated = ring.filter((c) => c.occupied).length;
-  const power = `Power output: ${formatPower(sigilPortalOutput(def.powerOutput, seated))}`;
+  const power = `Power output: ${formatPower(sigilPortalOutput(def.powerOutput, ring))}`;
   const lines = [
     `<span style="color:#ff8a6a">Its light pierces down into the abyss</span>`,
     `<span style="color:#8acfff">${power}</span>`,
@@ -2126,7 +2127,7 @@ function showHellPortal(state: GameState, b: Building, panel: HTMLElement, portr
   if (b.state !== 'constructing' && ring.length < SOUL_SIGIL.count) {
     lines.push(`<span style="color:#ff8a6a">${ring.length}/${SOUL_SIGIL.count} candles on its outer ring</span>`);
   } else if (seated > 0) {
-    lines.push(`<span style="color:#8acfff">x${SOUL_SIGIL.soulMultiplier} per bound soul (${seated}/${SOUL_SIGIL.count})</span>`);
+    lines.push(`<span style="color:#8acfff">x${SOUL_SIGIL.soulMultipliers.weak}–x${SOUL_SIGIL.soulMultipliers.veryStrong} per bound soul (${seated}/${SOUL_SIGIL.count})</span>`);
   }
   extra.innerHTML = lines.join('<br>');
 }
@@ -2144,8 +2145,12 @@ function showSoulChair(state: GameState, c: SoulChair, panel: HTMLElement, portr
   const filled = ring.filter((sc) => sc.occupied).length;
   name.textContent = ringDone ? 'Soul Chair' : 'Candle';
   stateEl.textContent = c.occupied ? 'Bound' : ringDone ? 'Hungry for a soul' : 'Waiting on the ring';
+  // An occupied chair reports its own soul's multiplier; an empty one
+  // advertises the range so the player knows stronger souls bind bigger.
   const lines = ringDone
-    ? [`<span style="color:#ff8a6a">${filled}/${SOUL_SIGIL.count} bound · x${SOUL_SIGIL.soulMultiplier} each</span>`]
+    ? [`<span style="color:#ff8a6a">${filled}/${SOUL_SIGIL.count} bound${c.occupied
+        ? ` · this soul: x${c.mult ?? SOUL_SIGIL.soulMultipliers.strong}`
+        : ` · x${SOUL_SIGIL.soulMultipliers.weak}–x${SOUL_SIGIL.soulMultipliers.veryStrong} by soul strength`}</span>`]
     : [`<span style="color:#ff4a3a">needs ${SOUL_SIGIL.count - ring.length} more candle${SOUL_SIGIL.count - ring.length === 1 ? '' : 's'}</span>`];
   if (ringDone && !c.occupied) {
     lines.push(`<span style="color:#6a7080">${TOUCH_PRIMARY ? 'Long tap' : 'Right click'} to bind a soul</span>`);

@@ -1,3 +1,4 @@
+import { SOUND_NAMES, type SoundName } from './audio';
 import { HELL } from './config';
 import { getDemonSheetList, loadDemonSheetList } from './demon-sheets';
 import {
@@ -205,6 +206,10 @@ const FACING_OPTS = [
   { value: 'downright', label: 'Down-right' },
 ];
 
+// Shared sample choices for the per-demon voice pickers — every sample in
+// the audio registry.
+const VOICE_SOUND_OPTS = SOUND_NAMES.map((n) => ({ value: n, label: n }));
+
 // Per-demon art: every turntable sheet auto-discovered in assets/demons/
 // (drop a .json+.png pair in the folder and it shows up here), plus the old
 // minotaur walk cycle. Built per-rebuild — the panel re-renders once the
@@ -353,10 +358,6 @@ function rebuildPanel(panel: HTMLElement, callbacks: OptionsUICallbacks, refresh
     slider('Hue', o.demonHue, -180, 180, 1, (v) => setOption('demonHue', v)),
     slider('Saturation', o.demonSaturation, 0, 3, 0.05, (v) => setOption('demonSaturation', v)),
     slider('Brightness', o.demonBrightness, 0, 3, 0.05, (v) => setOption('demonBrightness', v)),
-    // The per-letter speech rumble (0 volume silences it).
-    slider('Voice volume', o.demonVoiceVolume, 0, 1, 0.02, (v) => setOption('demonVoiceVolume', v)),
-    slider('Voice pitch', o.demonVoicePitch, 0.05, 2, 0.01, (v) => setOption('demonVoicePitch', v)),
-    slider('Voice pitch wobble', o.demonVoicePitchWobble, 0, 0.5, 0.01, (v) => setOption('demonVoicePitchWobble', v)),
     toggle('Walk (patrol)', o.demonWalks, (v) => setOption('demonWalks', v)),
     slider('Walk speed', o.demonWalkSpeed, 0.1, 5, 0.1, (v) => setOption('demonWalkSpeed', v)),
     slider('Anim speed', o.demonAnimSpeed, 0, 4, 0.1, (v) => setOption('demonAnimSpeed', v)),
@@ -373,6 +374,12 @@ function rebuildPanel(panel: HTMLElement, callbacks: OptionsUICallbacks, refresh
     slider('Stand Y', o.demonRY, 0, HELL.height, 10, (v) => setOption('demonRY', v)),
     slider('Sprite Y offset', o.demonRSpriteYOffset, -400, 400, 5, (v) => setOption('demonRSpriteYOffset', v)),
     color('Tint', o.demonRTint, (v) => setOption('demonRTint', v)),
+    slider('Hue', o.demonRHue, -180, 180, 1, (v) => setOption('demonRHue', v)),
+    // The per-letter speech rumble (0 volume silences it).
+    select('Voice sound', o.demonRVoiceSound, VOICE_SOUND_OPTS, (v) => setOption('demonRVoiceSound', v as SoundName)),
+    slider('Voice volume', o.demonRVoiceVolume, 0, 1, 0.02, (v) => setOption('demonRVoiceVolume', v)),
+    slider('Voice pitch', o.demonRVoicePitch, 0.05, 2, 0.01, (v) => setOption('demonRVoicePitch', v)),
+    slider('Voice pitch wobble', o.demonRVoicePitchWobble, 0, 0.5, 0.01, (v) => setOption('demonRVoicePitchWobble', v)),
     // Lilly (demon L) — size also rescales her parlay / click / body radii
     // (demonScaleOf reads this live).
     subheader('Lilly (demon L)'),
@@ -383,6 +390,11 @@ function rebuildPanel(panel: HTMLElement, callbacks: OptionsUICallbacks, refresh
     slider('Stand Y', o.demonLY, 0, HELL.height, 10, (v) => setOption('demonLY', v)),
     slider('Sprite Y offset', o.demonLSpriteYOffset, -400, 400, 5, (v) => setOption('demonLSpriteYOffset', v)),
     color('Tint', o.demonLTint, (v) => setOption('demonLTint', v)),
+    slider('Hue', o.demonLHue, -180, 180, 1, (v) => setOption('demonLHue', v)),
+    select('Voice sound', o.demonLVoiceSound, VOICE_SOUND_OPTS, (v) => setOption('demonLVoiceSound', v as SoundName)),
+    slider('Voice volume', o.demonLVoiceVolume, 0, 1, 0.02, (v) => setOption('demonLVoiceVolume', v)),
+    slider('Voice pitch', o.demonLVoicePitch, 0.05, 2, 0.01, (v) => setOption('demonLVoicePitch', v)),
+    slider('Voice pitch wobble', o.demonLVoicePitchWobble, 0, 0.5, 0.01, (v) => setOption('demonLVoicePitchWobble', v)),
     // Lolly (Lilly's corner-dwelling friend) — her own independent dials.
     subheader("Lolly (Lilly's friend)"),
     select('Sprite', o.demonFriendSprite, demonSpriteOpts(), (v) => setOption('demonFriendSprite', v)),
@@ -392,6 +404,11 @@ function rebuildPanel(panel: HTMLElement, callbacks: OptionsUICallbacks, refresh
     slider('Stand Y', o.demonFriendY, 0, HELL.height, 10, (v) => setOption('demonFriendY', v)),
     slider('Sprite Y offset', o.demonFriendSpriteYOffset, -400, 400, 5, (v) => setOption('demonFriendSpriteYOffset', v)),
     color('Tint', o.demonFriendTint, (v) => setOption('demonFriendTint', v)),
+    slider('Hue', o.demonFriendHue, -180, 180, 1, (v) => setOption('demonFriendHue', v)),
+    select('Voice sound', o.demonFriendVoiceSound, VOICE_SOUND_OPTS, (v) => setOption('demonFriendVoiceSound', v as SoundName)),
+    slider('Voice volume', o.demonFriendVoiceVolume, 0, 1, 0.02, (v) => setOption('demonFriendVoiceVolume', v)),
+    slider('Voice pitch', o.demonFriendVoicePitch, 0.05, 2, 0.01, (v) => setOption('demonFriendVoicePitch', v)),
+    slider('Voice pitch wobble', o.demonFriendVoicePitchWobble, 0, 0.5, 0.01, (v) => setOption('demonFriendVoicePitchWobble', v)),
   ]));
 
   panel.appendChild(collapsibleSection('Robots', [

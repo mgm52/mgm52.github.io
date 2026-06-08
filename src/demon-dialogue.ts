@@ -7,11 +7,11 @@
 // feel). "*...*" wraps a phrase in demonic emphasis. Most lines wait for a
 // click to advance; the dramatic "…" beats auto-advance after a short pause.
 
-import { playSound } from './audio';
+import { playSound, type SoundName } from './audio';
 import { HELL } from './config';
 import { getOptions } from './options';
 import {
-  Demon, GameState, Ghost, Goblin,
+  Demon, DemonVariant, GameState, Ghost, Goblin,
   appendLog, hellToWorld, pushDeathEffect,
 } from './state';
 
@@ -209,16 +209,28 @@ function renderTyped(segs: Seg[], count: number): string {
 // How long a '⏸' marker holds the typing mid-line.
 const MID_LINE_PAUSE_MS = 1000;
 
+// The speaking demon's voice dials — each demon carries its own sample plus
+// a volume/pitch/wobble triple so the three can sound distinct.
+function demonVoiceDials(variant: DemonVariant): { sound: SoundName; volume: number; pitch: number; wobble: number } {
+  const o = getOptions();
+  return variant === 'l'
+    ? { sound: o.demonLVoiceSound, volume: o.demonLVoiceVolume, pitch: o.demonLVoicePitch, wobble: o.demonLVoicePitchWobble }
+    : variant === 'friend'
+      ? { sound: o.demonFriendVoiceSound, volume: o.demonFriendVoiceVolume, pitch: o.demonFriendVoicePitch, wobble: o.demonFriendVoicePitchWobble }
+      : { sound: o.demonRVoiceSound, volume: o.demonRVoiceVolume, pitch: o.demonRVoicePitch, wobble: o.demonRVoicePitchWobble };
+}
+
 // Type a line into the bubble character-by-character (with the trailing-off
 // hold on any ellipsis), mark it done, and let it breathe for a beat. The
 // shared core of the parlay's say() and the soul-to-soul chat lines.
-// letterSound: a low-pitched thud per visible character — the demons' voice
-// rumbling under their lines (souls type silently).
+// voice: which demon's low-pitched thud rumbles under the line, one per
+// visible character (volume/pitch/wobble ride that demon's own dev dials);
+// absent, the line types silently (souls).
 // A '⏸' in the text renders nothing; typing just halts MID_LINE_PAUSE_MS
 // after the preceding character (a silent mid-line beat).
 async function typeLineText(
   lineEl: HTMLElement, speech: HTMLElement, text: string,
-  opts: { letterSound?: boolean } = {},
+  opts: { voice?: DemonVariant } = {},
 ): Promise<void> {
   // Strip the pause markers, recording each one's position in the flat
   // (markup-free) text so the typing loop knows where to hold.
@@ -246,10 +258,12 @@ async function typeLineText(
     lineEl.innerHTML = renderTyped(segs, c);
     // Pitch wobbles a little per character so the rumble reads as a voice
     // rather than a metronome; spaces stay silent. Volume/pitch/wobble ride
-    // the dev dials.
-    const o = getOptions();
-    if (opts.letterSound && o.demonVoiceVolume > 0 && /\S/.test(flat[c - 1])) {
-      playSound('click', o.demonVoiceVolume, o.demonVoicePitch + Math.random() * o.demonVoicePitchWobble);
+    // the speaking demon's own dev dials.
+    if (opts.voice !== undefined) {
+      const v = demonVoiceDials(opts.voice);
+      if (v.volume > 0 && /\S/.test(flat[c - 1])) {
+        playSound(v.sound, v.volume, v.pitch + Math.random() * v.wobble);
+      }
     }
     await sleep(TYPE_MS_PER_CHAR);
     if (pauseAfter.has(c - 1)) await sleep(ELLIPSIS_PAUSE_MS);
@@ -362,7 +376,7 @@ export async function runDemonDialogue(state: GameState, demon: Demon, ghost: Gh
     await typeLineText(
       lineEl, speech,
       who === 'demon' && !opts.literal ? demonVoice(demon, text) : text,
-      { letterSound: who === 'demon' },
+      { voice: who === 'demon' ? demon.variant ?? 'pit' : undefined },
     );
     if (opts.hold) return;            // keep the line up; caller drives what's next
     if (opts.autoMs !== undefined) {

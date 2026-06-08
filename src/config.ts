@@ -283,9 +283,9 @@ export const DEMON = {
 // of a Hell Portal's abyssal mirror (the "beacon"). Every portal gets its own
 // ring. Candles cost blood and snap onto the ring; pentagram lines spring
 // between them as they're placed. Once all five stand, each candle becomes a
-// soul chair ("needs soul") — walking a soul (goblin ghost) onto one seats it,
-// and every seated soul multiplies the portal's deadpan 1 W output by
-// `soulMultiplier`. Five souls ≈ 87^5 W ≈ 4.98 GW per portal.
+// soul chair ("needs soul") — walking a soul onto one seats it, and every
+// seated soul multiplies the portal's deadpan 1 W output by its own strength
+// multiplier (see soulMultipliers / soulStrengthOf).
 export const SOUL_SIGIL = {
   count: 5,
   ringRadius: 290,      // hell-px from a portal's mirror out to each candle
@@ -295,13 +295,38 @@ export const SOUL_SIGIL = {
   candleBloodCost: 9,   // blood per candle placed
   placeBand: 70,        // hell-px either side of ringRadius where a tap counts as "on the ring"
   candleMinGap: 256,    // hell-px a new candle must keep from its ring-mates
-  soulMultiplier: 87,   // each seated soul multiplies its portal's power output by this
+  // Per-soul power multiplier by the strength of the bound soul: goblin souls
+  // are weak, full-size minotaur souls strong, dragon and tinytaur souls very
+  // strong. Five strong souls = 100^5 W = 10 GW per portal.
+  soulMultipliers: { weak: 66, strong: 100, veryStrong: 144 },
 };
 
-// A Hell Portal's true output: its deadpan base wattage multiplied by 87 for
-// every soul seated in its sigil. 0 souls → 1 W; 5 souls → ~4.98 GW.
-export function sigilPortalOutput(baseWatts: number, seatedSouls: number): number {
-  return baseWatts * Math.pow(SOUL_SIGIL.soulMultiplier, seatedSouls);
+export type SoulStrength = keyof typeof SOUL_SIGIL.soulMultipliers;
+
+// The floater label flashed over a chair as its soul binds.
+export const SOUL_STRENGTH_LABEL: Record<SoulStrength, string> = {
+  weak: 'weak soul',
+  strong: 'strong soul',
+  veryStrong: 'very strong soul',
+};
+
+// The strength of a unit's soul, from the ghost's kind. Tinytaurs punch far
+// above their weight: their cursed little souls bind as hard as a dragon's.
+export function soulStrengthOf(kind: 'goblin' | 'minotaur' | 'dragon', tiny?: boolean): SoulStrength {
+  if (kind === 'goblin') return 'weak';
+  if (kind === 'minotaur' && !tiny) return 'strong';
+  return 'veryStrong';
+}
+
+// A Hell Portal's true output: its deadpan base wattage multiplied by each
+// seated soul's own strength multiplier. Chairs bound before souls had
+// strengths carry no mult — they count as strong. 0 souls → 1 W.
+export function sigilPortalOutput(baseWatts: number, chairs: { occupied: boolean; mult?: number }[]): number {
+  let out = baseWatts;
+  for (const c of chairs) {
+    if (c.occupied) out *= c.mult ?? SOUL_SIGIL.soulMultipliers.strong;
+  }
+  return out;
 }
 
 // One-shot Ritual upgrades. Autobuild + Autospawn unlock once a Phone

@@ -51,6 +51,10 @@ const REGISTRY = {
 
 export type SoundName = keyof typeof REGISTRY;
 
+// Every registered sample name — the dev menu's pick-list for the demons'
+// per-letter voice sample.
+export const SOUND_NAMES = Object.keys(REGISTRY) as SoundName[];
+
 let masterVolume = 0.7;
 let musicVolume = 0.7;
 let muted = false;

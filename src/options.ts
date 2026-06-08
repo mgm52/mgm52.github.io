@@ -1,3 +1,4 @@
+import type { SoundName } from './audio';
 import { DEMON, HELL, SOUL_SIGIL } from './config';
 
 export type BgPattern = 'solid' | 'checker';
@@ -274,11 +275,6 @@ export type Options = {
   demonSaturation: number;
   demonBrightness: number;
   demonHue: number;           // hue rotation in degrees (-180..180, 0 = natural)
-  // The demons' speaking voice — the low per-letter thud under their typed
-  // dialogue (the click sample, pitched down). Volume 0 silences it.
-  demonVoiceVolume: number;
-  demonVoicePitch: number;       // playbackRate floor (1 = the sample's native pitch)
-  demonVoicePitchWobble: number; // random extra rate per letter, 0 = monotone
   // Per-demon standing position (absolute hell coords, applied each tick
   // while the demon stands; the walk toggle overrides Y) and per-demon sprite
   // Y nudge relative to the selection circle / collision centre (the ring and
@@ -288,6 +284,14 @@ export type Options = {
   demonRSprite: DemonSprite;  // which sheet the colossus draws from
   demonRSpriteYOffset: number;
   demonRTint: number;         // sprite tint over the demon art
+  demonRHue: number;          // per-demon hue rotation (degrees), on top of the all-demons hue
+  // The colossus's speaking voice — a low per-letter thud under his typed
+  // dialogue (a registry sample, pitched down). Volume 0 silences it. Each
+  // demon carries its own sample + triple so the three can sound distinct.
+  demonRVoiceSound: SoundName;    // which registry sample the per-letter thud plays
+  demonRVoiceVolume: number;
+  demonRVoicePitch: number;       // playbackRate floor (1 = the sample's native pitch)
+  demonRVoicePitchWobble: number; // random extra rate per letter, 0 = monotone
   // Demon L (Lilly) — live size (fraction of the colossus; also scales her
   // parlay/hit/body radii), standing facing, stand position, and sprite nudge.
   demonLScale: number;
@@ -297,6 +301,11 @@ export type Options = {
   demonLSprite: DemonSprite;
   demonLSpriteYOffset: number;
   demonLTint: number;
+  demonLHue: number;
+  demonLVoiceSound: SoundName;
+  demonLVoiceVolume: number;
+  demonLVoicePitch: number;
+  demonLVoicePitchWobble: number;
   // Lolly (L's friend) — her own live size plus the same per-demon dials.
   demonFriendScale: number;
   demonFriendFacing: DemonFacing;
@@ -305,6 +314,11 @@ export type Options = {
   demonFriendSprite: DemonSprite;
   demonFriendSpriteYOffset: number;
   demonFriendTint: number;
+  demonFriendHue: number;
+  demonFriendVoiceSound: SoundName;
+  demonFriendVoiceVolume: number;
+  demonFriendVoicePitch: number;
+  demonFriendVoicePitchWobble: number;
   // Robots — the late-game grey summons. Live-tunable look + orbital speed.
   robotScale: number;       // sprite size multiplier vs a regular goblin
   robotTint: number;        // chassis tint, applied over the (greyscaled) art
@@ -440,7 +454,7 @@ export const DEFAULT_OPTIONS: Options = {
   hellSpriteShadowGap: -36,
   demonScale: 1,
   // Demons stand still by default now, each facing its own direction: R
-  // faces down toward the viewer, L down-right, Lolly up-left into her
+  // faces down toward the viewer, L down-right, Lolly up-right from her
   // corner. The walk toggle resumes the old patrol for all of them. Stand
   // X/Y defaults mirror where createDemons seeds them. R and L wear the
   // young-mask art under muted grey tints; Lolly wears its dark variant
@@ -454,14 +468,16 @@ export const DEFAULT_OPTIONS: Options = {
   demonSaturation: 3,
   demonBrightness: 1.4,
   demonHue: -17,
-  demonVoiceVolume: 0.22,
-  demonVoicePitch: 0.22,
-  demonVoicePitchWobble: 0.08,
   demonRX: HELL.width / 2 + DEMON.spawnOffsetX,
   demonRY: HELL.height / 2,
   demonRSprite: 'young_mask_imitate_idle_b',
   demonRSpriteYOffset: -105,
   demonRTint: 0x8c8c8c,
+  demonRHue: 0,
+  demonRVoiceSound: 'task_complete',
+  demonRVoiceVolume: 0.22,
+  demonRVoicePitch: 0.05,
+  demonRVoicePitchWobble: 0.05,
   demonLScale: 0.5,           // mirrors DEMON.smallScale
   demonLFacing: 'downright',
   demonLX: HELL.width / 2 - DEMON.spawnOffsetX,
@@ -469,13 +485,23 @@ export const DEFAULT_OPTIONS: Options = {
   demonLSprite: 'young_mask_imitate_idle_b',
   demonLSpriteYOffset: -130,
   demonLTint: 0x4f4f4f,
+  demonLHue: 93,
+  demonLVoiceSound: 'click',
+  demonLVoiceVolume: 0.22,
+  demonLVoicePitch: 0.22,
+  demonLVoicePitchWobble: 0.08,
   demonFriendScale: 0.35,     // mirrors DEMON.friendScale
-  demonFriendFacing: 'upleft',
-  demonFriendX: DEMON.friendCorner.x,
-  demonFriendY: DEMON.friendCorner.y,
+  demonFriendFacing: 'upright',
+  demonFriendX: 2230,
+  demonFriendY: 290,
   demonFriendSprite: 'young_mask_imitate_idle_b_dark',
   demonFriendSpriteYOffset: -115,
   demonFriendTint: 0xffffff,
+  demonFriendHue: 0,
+  demonFriendVoiceSound: 'ritual',
+  demonFriendVoiceVolume: 0.22,
+  demonFriendVoicePitch: 0.22,
+  demonFriendVoicePitchWobble: 0.08,
   // Robot defaults — a small white chassis. The greyscale filter is what makes
   // the green goblin art read as metal; the tint then shades the grey.
   robotScale: 0.72,

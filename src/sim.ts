@@ -1,5 +1,5 @@
 import { playDecayingGoblinDeath, playDecayingGoblinSpawn, playDecayingGoldKillCash, playSound } from './audio';
-import { BUILDING_DEFS, CELL, COLS, DEMON, DRAGON, DRAGON_KILL_REWARD, GOBLIN, GOLD_GOBLIN_CHANCE, GOLD_KILL_REWARD, HELL, KILL_REWARD, LIGHTNING, MINOTAUR_KILL_REWARD, ROBOT, SOUL_SIGIL, SPACE, SPACE_UNIT, SUMMON_UPGRADES, TICK_S, MINOTAUR, TINYTAUR, WATER_DEPLETION_PP_PER_SEC, WATER_METER_MAX, WORLD, formatPower, sigilPortalOutput } from './config';
+import { BUILDING_DEFS, CELL, COLS, DEMON, DRAGON, DRAGON_KILL_REWARD, GOBLIN, GOLD_GOBLIN_CHANCE, GOLD_KILL_REWARD, HELL, KILL_REWARD, LIGHTNING, MINOTAUR_KILL_REWARD, ROBOT, SOUL_SIGIL, SPACE, SPACE_UNIT, SUMMON_UPGRADES, TICK_S, MINOTAUR, TINYTAUR, WATER_DEPLETION_PP_PER_SEC, WATER_METER_MAX, WORLD, SOUL_STRENGTH_LABEL, formatPower, sigilPortalOutput, soulStrengthOf } from './config';
 import { DEMON_FACING_ANGLE, getOptions } from './options';
 import {
   ALL_DIRS, Building, Cell, DX, DY, Demon, Dir, Dragon, GameState, Ghost, Goblin, HOLE_SIZE, Minotaur, SoulChair, SpaceBuilding, SpaceUnit, WaterSource,
@@ -321,7 +321,7 @@ export function tick(state: GameState) {
         } else {
           g.goal = { x: chair.hx, y: chair.hy };
           if (Math.hypot(g.hx - chair.hx, g.hy - chair.hy) <= SOUL_SIGIL.arriveRadius) {
-            seatSoulInChair(state, chair);
+            seatSoulInChair(state, chair, g);
             state.ghosts.splice(i, 1);
             continue;
           }
@@ -403,28 +403,33 @@ function shoveGhostOffDemons(state: GameState, g: Ghost): void {
 }
 
 // Bind a soul into a chair: light it, clear its pending claim, and multiply
-// the portal's power output by SOUL_SIGIL.soulMultiplier — an "x87" surge
-// flashes over the mirror and its wattage readout (drawn in render.ts) jumps.
-// The fifth soul also fires the sigil completion (sound + log + VFX timestamp).
-// The payout itself is read off the seated counts each tick in the power pass
-// below.
-function seatSoulInChair(state: GameState, chair: SoulChair) {
+// the portal's power output by the soul's strength multiplier (x66 weak
+// goblin / x100 strong minotaur / x144 very strong dragon or tinytaur) — the
+// multiplier flashes over the mirror, the strength label over the chair, and
+// the mirror's wattage readout (drawn in render.ts) jumps. The fifth soul
+// also fires the sigil completion (sound + log + VFX timestamp). The payout
+// itself is read off the seated chairs each tick in the power pass below.
+function seatSoulInChair(state: GameState, chair: SoulChair, soul: Ghost) {
   chair.occupied = true;
   chair.claimedBy = undefined;
   chair.filledAt = state.now;
+  const strength = soulStrengthOf(soul.kind, soul.tiny);
+  chair.mult = SOUL_SIGIL.soulMultipliers[strength];
   playSound('ritual', 0.6, 0.85);
   const sigil = state.soulChairs.filter((c) => c.portalId === chair.portalId);
   const filled = sigil.filter((c) => c.occupied).length;
   const portal = state.buildings.get(chair.portalId);
-  const out = portal ? sigilPortalOutput(defOf(portal).powerOutput, filled) : 0;
-  appendLog(state, `A soul takes its chair (${filled}/${SOUL_SIGIL.count}) — the mirror surges to ${formatPower(out)}.`);
-  // The hell-scene twin of a building coming online: an "x87" multiplier
-  // flash over the mirror, whose live wattage label ticks up underneath it.
-  // Rendered much bigger than a regular floater (sizeMult) so the surge
-  // reads even at hell's zoomed-out scale.
+  const out = portal ? sigilPortalOutput(defOf(portal).powerOutput, sigil) : 0;
+  appendLog(state, `A ${SOUL_STRENGTH_LABEL[strength]} takes its chair (${filled}/${SOUL_SIGIL.count}) — the mirror surges to ${formatPower(out)}.`);
+  // The hell-scene twin of a building coming online: the multiplier flashes
+  // over the mirror (whose live wattage label ticks up underneath it) while
+  // the soul's strength label flashes over the chair it just took. Rendered
+  // much bigger than a regular floater (sizeMult) so the surge reads even at
+  // hell's zoomed-out scale.
   if (portal) {
     const c = hellMirrorCenter(portal);
-    pushFloater(state, c.x, c.y - SOUL_SIGIL.chairRadius * 1.5, `x${SOUL_SIGIL.soulMultiplier}`, 0x8acfff, 1.6, undefined, false, true, 4);
+    pushFloater(state, c.x, c.y - SOUL_SIGIL.chairRadius * 1.5, `x${chair.mult}`, 0x8acfff, 1.6, undefined, false, true, 4);
+    pushFloater(state, chair.hx, chair.hy - SOUL_SIGIL.chairRadius * 1.5, SOUL_STRENGTH_LABEL[strength], 0x8acfff, 1.6, undefined, false, true, 2);
   }
   if (filled === SOUL_SIGIL.count && !state.soulSigilCompletedAt.has(chair.portalId)) {
     state.soulSigilCompletedAt.set(chair.portalId, state.now);
@@ -2640,18 +2645,21 @@ function resolvePowerAndState(state: GameState) {
   // takes the surge to decay back to nothing.
   production += currentPowerBoost(state);
 
-  // Each seated soul multiplies its portal's base output (1 W) by the sigil
-  // multiplier — 87^n W per portal. The base watt itself was already counted
-  // in the building loop above, so only the surplus is added here.
-  const occupiedPerPortal = new Map<number, number>();
+  // Each seated soul multiplies its portal's base output (1 W) by its own
+  // strength multiplier (x66/x100/x144 — see soulStrengthOf). The base watt
+  // itself was already counted in the building loop above, so only the
+  // surplus is added here.
+  const chairsPerPortal = new Map<number, SoulChair[]>();
   for (const c of state.soulChairs) {
-    if (c.occupied) occupiedPerPortal.set(c.portalId, (occupiedPerPortal.get(c.portalId) ?? 0) + 1);
+    if (!c.occupied) continue;
+    const list = chairsPerPortal.get(c.portalId);
+    if (list) list.push(c); else chairsPerPortal.set(c.portalId, [c]);
   }
-  for (const [portalId, filled] of occupiedPerPortal) {
+  for (const [portalId, chairs] of chairsPerPortal) {
     const portal = state.buildings.get(portalId);
     if (!portal || portal.state === 'constructing') continue;
     const base = defOf(portal).powerOutput;
-    production += sigilPortalOutput(base, filled) - base;
+    production += sigilPortalOutput(base, chairs) - base;
   }
 
   let consumed = 0;
