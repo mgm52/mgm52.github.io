@@ -228,6 +228,8 @@ export function tick(state: GameState) {
     const pb = state.powerBoosts[i];
     if (state.now - pb.startAt >= pb.duration) state.powerBoosts.splice(i, 1);
   }
+  // Reactor meltdown shockwaves — kills/fallout as each front expands.
+  updateMeltdowns(state);
   // Ghosts drift downward at hellGhostFallSpeed px/sec, scaled by each ghost's
   // per-spawn speedMult so a cluster of ghosts spreads out over time rather
   // than falling in lockstep. Drifting ghosts are computed lazily from spawnAt
@@ -601,20 +603,15 @@ export function lightningStrike(state: GameState, x: number, y: number): boolean
   if (killed > 0) playDecayingGoblinDeath(0.6);
   appendLog(state, `Lightning strike! ${killed} unit${killed === 1 ? '' : 's'} vaporised.`);
 
-  // Detonate any struck reactors. Their kills fold into the strike's sticky
-  // stats — it was this one bolt that set the whole thing off.
-  let totalKilled = killed;
-  let totalDragonsKilled = dragonsKilled;
-  for (const b of struckReactors) {
-    const cull = detonateReactor(state, b);
-    totalKilled += cull.killed;
-    totalDragonsKilled += cull.dragonsKilled;
-  }
+  // Detonate any struck reactors — each starts a radiating shockwave whose
+  // kills accrue over the following seconds (see updateMeltdowns; the wave
+  // folds its own cull into the sticky stats when it finishes).
+  for (const b of struckReactors) detonateReactor(state, b);
 
   // Stat: remember the biggest single-strike cull (sticky).
-  if (totalKilled > state.maxStruckAtOnce) state.maxStruckAtOnce = totalKilled;
+  if (killed > state.maxStruckAtOnce) state.maxStruckAtOnce = killed;
   // Sticky truth the demons weigh: two-plus dragons gored in one bolt.
-  if (totalDragonsKilled >= 2) state.slewTwoDragonsInOneStrike = true;
+  if (dragonsKilled >= 2) state.slewTwoDragonsInOneStrike = true;
   // 2-second cooldown to stop the player from carpet-bombing through every
   // wave of spawns in one breath. Ticked down in the sim, gated in main's
   // onLightningStrike + ui's button refresh.
@@ -663,54 +660,22 @@ function vaporiseDragon(state: GameState, d: Dragon): void {
 }
 
 // Struck by lightning, a completed Nuclear Reactor goes critical: the core
-// detonates, levelling the reactor and killing every unit in the overworld —
-// even robots, which nothing else in the game can touch. Casualties pay
-// their usual kill bounties (robots excepted: no bounty, no soul to send to
-// hell), each marked by its own white splatter so the wipe reads across the
-// whole map. The crater gets a wide fallout splatter and a fan of extra
-// bolts, and the dying core dumps one final REACTOR_MELTDOWN.powerBoostWatts
-// surge into the grid as it lets go. Returns the cull so lightningStrike can
-// fold it into the strike's sticky stats.
-function detonateReactor(state: GameState, reactor: Building): { killed: number; dragonsKilled: number } {
+// detonates and a green/white shockwave starts radiating out from the
+// reactor's centre (advanced tick by tick in updateMeltdowns — every
+// overworld unit dies as the front reaches it, even robots). This function
+// handles the instant of rupture: the reactor is levelled, a fan of extra
+// bolts answers from the sky, the dying core dumps one final
+// REACTOR_MELTDOWN.powerBoostWatts surge into the grid, and a power-up tone
+// plays pitched down as far as the resampler allows.
+function detonateReactor(state: GameState, reactor: Building): void {
   const c = buildingCenter(reactor);
   const name = `${defOf(reactor).name} #${reactor.displayNum}`;
   destroyBuilding(state, reactor.id);
+  pushDeathEffect(state, c.x, c.y, true);
 
-  let killed = 0;
-  for (const g of [...state.goblins.values()]) {
-    pushDeathEffect(state, g.pos.x, g.pos.y, true);
-    if (g.robot) removeGoblin(state, g.id);
-    else vaporiseGoblin(state, g);
-    killed++;
-  }
-  for (const m of [...state.minotaurs.values()]) {
-    pushDeathEffect(state, m.pos.x, m.pos.y, true);
-    vaporiseMinotaur(state, m);
-    killed++;
-  }
-  let dragonsKilled = 0;
-  for (const d of [...state.dragons.values()]) {
-    pushDeathEffect(state, d.pos.x, d.pos.y, true);
-    vaporiseDragon(state, d);
-    killed++;
-    dragonsKilled++;
-  }
-
-  // Fallout: white splatter over every cell whose center falls inside the
-  // meltdown radius — same painting the strike does, just much wider.
-  const radiusPx = (REACTOR_MELTDOWN.splatterCells / 2) * CELL;
-  const r2 = radiusPx * radiusPx;
-  const span = Math.ceil(REACTOR_MELTDOWN.splatterCells / 2);
-  const ccx = Math.floor(c.x / CELL), ccy = Math.floor(c.y / CELL);
-  for (let cy = ccy - span; cy <= ccy + span; cy++) {
-    for (let cx = ccx - span; cx <= ccx + span; cx++) {
-      const cc = cellCenter({ cx, cy });
-      const dx = cc.x - c.x, dy = cc.y - c.y;
-      if (dx * dx + dy * dy <= r2) pushDeathEffect(state, cc.x, cc.y, true);
-    }
-  }
   // The sky answers the rupture: a fan of extra bolts scattered around the
-  // crater, on top of the one that set it off.
+  // crater zone, on top of the one that set it off.
+  const radiusPx = (REACTOR_MELTDOWN.splatterCells / 2) * CELL;
   for (let i = 0; i < REACTOR_MELTDOWN.boltCount; i++) {
     const a = Math.random() * Math.PI * 2;
     const r = Math.random() * radiusPx;
@@ -733,12 +698,92 @@ function detonateReactor(state: GameState, reactor: Building): { killed: number;
   );
   pushFloater(state, c.x, c.y - CELL * 2, 'MELTDOWN!', 0xff4040, 4, undefined, false, false, 3);
 
-  // Deep boom (the building-destroy sample pitched way down) under the dying
-  // chorus. The strike's own thunderclap already covers the treble.
-  playSound('destroy', 1, 0.35);
-  if (killed > 0) playDecayingGoblinDeath(0.8);
-  appendLog(state, `${name} goes critical! The meltdown wipes out ${killed} unit${killed === 1 ? '' : 's'} — nothing in the overworld survives.`);
-  return { killed, dragonsKilled };
+  // The power-up sample ('online') dragged to the resampler's floor — a long
+  // electric groan as a gigawatt leaves all at once. The strike's own
+  // thunderclap covers the treble.
+  playSound('online', 1, 0.25);
+  appendLog(state, `${name} goes critical! A shockwave races out from the core...`);
+
+  // Whole-screen radiation wash — faded back out by the renderer.
+  state.lastMeltdownAt = state.now;
+  state.meltdowns.push({
+    id: state.nextId++,
+    x: c.x, y: c.y,
+    startAt: state.now,
+    lastRadius: 0,
+    killed: 0,
+    dragonsKilled: 0,
+  });
+}
+
+// Advance every active meltdown shockwave: kill the units the front passed
+// over this tick (full bounties via the vaporise helpers; robots die too but
+// leave no soul and pay nothing), paint fallout splatter across the crater
+// zone as the wave crosses it, and — once the front has cleared the whole
+// world — fold the cull into the strike stats and log the butcher's bill.
+function updateMeltdowns(state: GameState) {
+  if (state.meltdowns.length === 0) return;
+  // Far enough to swallow the world's farthest corner from any origin.
+  const maxRadius = Math.hypot(WORLD.width, WORLD.height);
+  const splatterPx = (REACTOR_MELTDOWN.splatterCells / 2) * CELL;
+  for (let i = state.meltdowns.length - 1; i >= 0; i--) {
+    const m = state.meltdowns[i];
+    const radius = (state.now - m.startAt) * REACTOR_MELTDOWN.waveSpeed;
+    const r2 = radius * radius;
+    const within = (px: number, py: number) => {
+      const dx = px - m.x, dy = py - m.y;
+      return dx * dx + dy * dy <= r2;
+    };
+
+    for (const g of [...state.goblins.values()]) {
+      if (!within(g.pos.x, g.pos.y)) continue;
+      pushDeathEffect(state, g.pos.x, g.pos.y, true);
+      if (g.robot) removeGoblin(state, g.id);
+      else vaporiseGoblin(state, g);
+      m.killed++;
+    }
+    for (const mt of [...state.minotaurs.values()]) {
+      if (!within(mt.pos.x, mt.pos.y)) continue;
+      pushDeathEffect(state, mt.pos.x, mt.pos.y, true);
+      vaporiseMinotaur(state, mt);
+      m.killed++;
+    }
+    for (const d of [...state.dragons.values()]) {
+      if (!within(d.pos.x, d.pos.y)) continue;
+      pushDeathEffect(state, d.pos.x, d.pos.y, true);
+      vaporiseDragon(state, d);
+      m.killed++;
+      m.dragonsKilled++;
+    }
+
+    // Fallout splatter, painted progressively: cells inside the crater zone
+    // whose centers sit in the (lastRadius, radius] annulus this tick.
+    if (m.lastRadius < splatterPx) {
+      const span = Math.ceil(REACTOR_MELTDOWN.splatterCells / 2);
+      const ccx = Math.floor(m.x / CELL), ccy = Math.floor(m.y / CELL);
+      const last2 = m.lastRadius * m.lastRadius;
+      const sp2 = splatterPx * splatterPx;
+      for (let cy = ccy - span; cy <= ccy + span; cy++) {
+        for (let cx = ccx - span; cx <= ccx + span; cx++) {
+          const cc = cellCenter({ cx, cy });
+          const dx = cc.x - m.x, dy = cc.y - m.y;
+          const d2 = dx * dx + dy * dy;
+          if (d2 > last2 && d2 <= r2 && d2 <= sp2) pushDeathEffect(state, cc.x, cc.y, true);
+        }
+      }
+    }
+
+    m.lastRadius = radius;
+    if (radius >= maxRadius) {
+      // Stat: the meltdown counts toward the biggest single-strike cull, and
+      // toward the demons' two-dragons truth — one bolt set it all off.
+      if (m.killed > state.maxStruckAtOnce) state.maxStruckAtOnce = m.killed;
+      if (m.dragonsKilled >= 2) state.slewTwoDragonsInOneStrike = true;
+      if (m.killed > 0) playDecayingGoblinDeath(0.8);
+      appendLog(state, `The meltdown wipes out ${m.killed} unit${m.killed === 1 ? '' : 's'} — nothing in the overworld survives.`);
+      state.meltdowns.splice(i, 1);
+    }
+  }
 }
 
 function spawnGoblin(state: GameState) {
@@ -840,7 +885,8 @@ export function spawnRobot(state: GameState): boolean {
   };
   state.goblins.set(id, g);
   occupyCell(state, cell.cx, cell.cy, id);
-  playSound('online', 0.6, 1.4);
+  // No sound here — the robotic chirp plays at queue time (onSummonRobot),
+  // like the Minotaur's ritual sting, rather than when the bar completes.
   appendLog(state, `Robot #${id} whirrs to life.`);
   if (state.autoAssignEnabled) autoAssignAllIdle(state);
   return true;
@@ -962,20 +1008,27 @@ export function autoAssignAllIdle(state: GameState) {
 
     // Construction sites poach idle robots ahead of any goblin, however far
     // away — their compounding 0.7× build-time bonus beats a goblin's head
-    // start. Within a class (and for non-build needs), nearest wins.
+    // start. Maintain needs are the inverse: robots are never auto-assigned
+    // to them (a robot maintains no better than a goblin, so it'd be a waste
+    // of one — manual commands can still do it). Within a class, nearest wins.
     const wantRobot = best.b.state === 'constructing';
-    let pickI = 0;
+    let pickI = -1;
     let pickD = Infinity;
     let pickRobot = false;
     for (let i = 0; i < idle.length; i++) {
       const g = idle[i];
       const isRobot = !!g.robot;
+      if (!wantRobot && isRobot) continue;
       if (wantRobot && pickRobot && !isRobot) continue;
       const dx = g.pos.x - best.center.x;
       const dy = g.pos.y - best.center.y;
       const d = dx * dx + dy * dy;
       if ((wantRobot && isRobot && !pickRobot) || d < pickD) { pickD = d; pickI = i; pickRobot = isRobot; }
     }
+    // Only robots left in the pool and a maintain slot on the table: nothing
+    // eligible. Retire this need and move on, so the loop can't stall (or
+    // worse, draft a robot at index 0 by default).
+    if (pickI === -1) { best.slots = 0; continue; }
     const g = idle.splice(pickI, 1)[0];
     best.b.assignedGoblins.push(g.id);
     g.goal = null;
@@ -2411,9 +2464,9 @@ function updateGoblin(state: GameState, g: Goblin) {
         g.goal = null;
         g.path = [];
         g.state = { kind: 'building', buildingId: b.id };
-        // A robot setting to work announces its compounding 0.7× build-time
-        // bonus (see updateConstruction) with a white tag above its head.
-        if (g.robot) pushFloater(state, g.pos.x, g.pos.y - 14, 'fast build', 0xffffff, 3);
+        // A robot's compounding 0.7× build-time bonus (see updateConstruction)
+        // is announced by the renderer: a white "fast build" tag pinned above
+        // its head for as long as it stays in this state (syncFastBuildTags).
         return true;
       };
 
@@ -2972,13 +3025,18 @@ function updateConstruction(state: GameState, b: Building) {
     b.buildProgress = 1;
     const keep = def.maintainersRequired;
     const newAssigned: number[] = [];
-    for (let i = 0; i < b.assignedGoblins.length; i++) {
-      const gid = b.assignedGoblins[i];
+    let kept = 0;
+    for (const gid of b.assignedGoblins) {
       const g = state.goblins.get(gid);
       if (!g) continue;
-      if (i < keep) {
+      // Robots never roll into maintaining — they bring nothing over a goblin
+      // there (unlike builds), so they idle out instead and the auto-assign
+      // sweep routes them to the next construction site within a couple of
+      // seconds. A manual command can still put one on maintain duty.
+      if (!g.robot && kept < keep) {
         newAssigned.push(gid);
         g.state = { kind: 'going_to_maintain', buildingId: b.id };
+        kept++;
       } else {
         g.state = { kind: 'idle' };
       }

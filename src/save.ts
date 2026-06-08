@@ -166,6 +166,8 @@ export function loadGame(): { state: GameState; savedAt: number } | null {
     env.state.lightningBolts ??= [];
     // Robot laser zaps — added with the robot laser command.
     env.state.laserBeams ??= [];
+    // Reactor meltdown shockwaves — added with the radiating meltdown.
+    env.state.meltdowns ??= [];
     env.state.powerBoosts ??= [];
     env.state.moneyEarned ??= 0;
     env.state.bloodEarned ??= 0;

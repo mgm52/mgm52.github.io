@@ -120,7 +120,8 @@ export const ROBOT = {
   buildRange: 30,     // px past a platform's edge that counts as "on site"
   // Each robot actively building a ground site multiplies the build time by
   // this factor, compounding — two robots run a build at 1/0.49 ≈ 2× rate.
-  // Announced by the white "fast build" floater when a robot sets to work.
+  // Announced by a white "fast build" tag pinned above the robot's head for
+  // as long as it stays on the job (render's syncFastBuildTags).
   buildTimeMult: 0.7,
   // Robots assemble on a timed queue like the other summons (one at a time,
   // mirroring the Minotaur's single-slot ritual track).
@@ -414,15 +415,23 @@ export const LIGHTNING = {
 };
 
 // Striking a completed Nuclear Reactor with Lightning ruptures the core: the
-// reactor detonates, levelling itself and killing every unit in the overworld
-// — even robots, which nothing else in the game can touch. The blast paints a
-// fallout splatter around the crater, hurls extra bolts skyward, and dumps
-// one final decaying surge into the grid as the core lets go.
+// reactor detonates, and a green/white shockwave radiates out from its
+// centre at waveSpeed, killing every unit in the overworld as the front
+// reaches it — even robots, which nothing else in the game can touch. The
+// wave paints fallout splatter as it crosses the crater zone, extra bolts
+// are hurled skyward at the rupture, and one final decaying surge is dumped
+// into the grid as the core lets go (to a super pitched-down power-up tone).
 export const REACTOR_MELTDOWN = {
   splatterCells: 20,                // fallout splatter diameter, in cells
   boltCount: 6,                     // extra bolts thrown up around the rupture
+  waveSpeed: 450,                   // shockwave expansion, px/sec
   powerBoostWatts: 10_000_000_000,  // 10 GW peak death-surge
   powerBoostSeconds: 10,            // surge decays to 0 over this many seconds
+  // Whole-screen radiation tint at the rupture instant: a green wash over
+  // everything (canvas + panels) starting at tintAlpha and fading linearly
+  // to nothing over tintSeconds. Driven by state.lastMeltdownAt in render.
+  tintAlpha: 0.32,
+  tintSeconds: 10,
 };
 
 // Killing a goblin yields this much money + this much blood.

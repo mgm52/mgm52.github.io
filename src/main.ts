@@ -419,17 +419,27 @@ async function main() {
   // ride straight down. The flag just queues requestSkipToHell — the frame
   // loop consumes it once everything below has finished setting up.
   if (restartInHell) devSkipToHell();
+  // Error-beep fatigue on the spawn button: a player hammering Spawn while
+  // broke (or with the queue full) hears the error for the first three
+  // refusals in a row, then it goes quiet until a spawn actually succeeds.
+  // Ephemeral by design — not saved, resets with the session.
+  let spawnErrorStreak = 0;
+  const spawnError = () => {
+    spawnErrorStreak++;
+    if (spawnErrorStreak <= 3) playSound('error');
+  };
   setupUI(state, {
     onSpawnGoblin: () => {
-      if (state.money < GOBLIN.spawnCost) { playSound('error'); return; }
+      if (state.money < GOBLIN.spawnCost) { spawnError(); return; }
       const cap = getSpawnCapacity(state);
-      if (state.spawnQueue.length >= cap) { playSound('error'); return; }
+      if (state.spawnQueue.length >= cap) { spawnError(); return; }
       const used = new Set(state.spawnQueue.map((s) => s.slot));
       let slot = -1;
       for (let i = 0; i < cap; i++) {
         if (!used.has(i)) { slot = i; break; }
       }
       if (slot < 0) return;
+      spawnErrorStreak = 0;
       state.money -= GOBLIN.spawnCost;
       state.spawnQueue.push({ remaining: GOBLIN.spawnTime, slot });
       appendLog(state, 'Hatching a goblin...');
@@ -477,6 +487,9 @@ async function main() {
       if (state.robotSpawnQueue.length >= ROBOT.spawnCapacity) { playSound('error'); return; }
       state.money -= ROBOT.moneyCost;
       state.robotSpawnQueue.push({ remaining: ROBOT.spawnTime });
+      // Robotic sting right at queue time, à la the Minotaur's ritual sound —
+      // the bar completing is silent (the assembled robot just walks out).
+      playSound('online', 0.7, 1.8);
       appendLog(state, 'Robot assembly begins...');
     },
     onPlaceOrbital: () => {

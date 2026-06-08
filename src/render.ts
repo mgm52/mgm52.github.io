@@ -9,7 +9,7 @@ extensions.add(GifAsset);
 // game seconds. Used as a manual sprite-sheet — we pick the frame ourselves
 // each tick based on (state.now - spawnAt) so playback always starts at frame 0.
 type DeathFrames = { textures: Texture[]; ends: number[]; duration: number };
-import { AMBIENT_DRAGON, BUILDING_DEFS, BuildingKind, CELL, COLS, DEMON, DRAGON, GOBLIN, HELL, RENDER_SCALE, ROBOT, ROWS, MINOTAUR, SOUL_SIGIL, SPACE, SPACE_UNIT, TINYTAUR, WORLD, formatPower, sigilPortalOutput } from './config';
+import { AMBIENT_DRAGON, BUILDING_DEFS, BuildingKind, CELL, COLS, DEMON, DRAGON, GOBLIN, HELL, REACTOR_MELTDOWN, RENDER_SCALE, ROBOT, ROWS, MINOTAUR, SOUL_SIGIL, SPACE, SPACE_UNIT, TINYTAUR, WORLD, formatPower, sigilPortalOutput } from './config';
 import { DEFAULT_OPTIONS, ensureFontLoaded, fontFamilyById, getOptions, onOptionsChange, type FontConfig, type Options } from './options';
 import { loadDemonSheetList } from './demon-sheets';
 import { Building, Demon, DemonVariant, Dragon, GameState, Ghost, Goblin, HOLE_SIZE, Minotaur, SoulChair, SpaceBuilding, SpaceUnit, WaterSource, buildingCenter, candleSpotAt, cellCenter, defOf, demonScaleOf, freePlatformAt, holeCenter, isInPlayCell, maintainerCount } from './state';
@@ -587,6 +587,9 @@ export type RenderContext = {
   // keyed by a per-host string. Each lives in its scene's dedicated top
   // nametag layer so the label is never covered by other units/buildings.
   bobTags: Map<string, Text>;
+  // White "fast build" tag pinned above each robot actively building (see
+  // syncFastBuildTags) — lives until the build finishes or the robot leaves.
+  fastBuildTags: Map<number, Text>;
   worldTagLayer: Container;
   spaceTagLayer: Container;
   hellTagLayer: Container;
@@ -967,6 +970,7 @@ export async function createRender(parent: HTMLElement, state: GameState): Promi
     orbitalCursor: null,
     orbitalGhostGfx,
     bobTags: new Map(),
+    fastBuildTags: new Map(),
     worldTagLayer, spaceTagLayer, hellTagLayer,
     hellEffectsLayer,
     hellFloatersLayer,
@@ -1341,6 +1345,44 @@ function syncBobTags(ctx: RenderContext, state: GameState): void {
   // which would stack them over the tag layer — re-appending while a tag is
   // live keeps Bob's name on top of everything in orbit.
   if (ctx.spaceTagLayer.children.length > 0) ctx.spaceLayer.addChild(ctx.spaceTagLayer);
+}
+
+// White "fast build" tag above each robot actively building — the on-screen
+// face of the compounding ROBOT.buildTimeMult bonus (see updateConstruction).
+// Unlike a one-shot floater, the tag is synced per-frame and so persists for
+// exactly as long as the robot stays on the job: it vanishes the moment the
+// build completes or the robot is pulled away. Tags ride worldTagLayer, same
+// as Bob's nameplate, so nothing on the ground covers them.
+function syncFastBuildTags(ctx: RenderContext, state: GameState): void {
+  const opts = getOptions();
+  const px = opts.goblinDisplayPx * opts.robotScale;
+  const seen = new Set<number>();
+  for (const g of state.goblins.values()) {
+    if (!g.robot || g.state.kind !== 'building') continue;
+    seen.add(g.id);
+    let t = ctx.fastBuildTags.get(g.id);
+    if (!t) {
+      t = new Text({
+        text: 'fast build',
+        style: {
+          fontFamily: fontFamilyById(getOptions().fonts.buildingLabel.family).css,
+          fontSize: 13,
+          fill: 0xffffff,
+          stroke: { color: 0x000000, width: 2 },
+        },
+      });
+      t.anchor.set(0.5, 1);
+      ctx.worldTagLayer.addChild(t);
+      ctx.fastBuildTags.set(g.id, t);
+    }
+    t.position.set(g.pos.x, g.pos.y - px * 0.55);
+  }
+  for (const [id, t] of ctx.fastBuildTags) {
+    if (!seen.has(id)) {
+      t.destroy();
+      ctx.fastBuildTags.delete(id);
+    }
+  }
 }
 
 function makeMinotaurView(): MinotaurView {
@@ -2348,9 +2390,67 @@ function drawFloaters(ctx: RenderContext, state: GameState) {
   }
 }
 
+// Whole-screen radiation tint after a reactor rupture: a green wash laid over
+// everything — canvas and DOM panels alike, which is why this is a DOM div
+// rather than a stage rect — starting at REACTOR_MELTDOWN.tintAlpha and
+// fading linearly to nothing over tintSeconds. Driven per-frame from
+// state.lastMeltdownAt (game time, so it pauses with the sim); the div is
+// created on first use, never intercepts input, and is display:none'd once
+// the fade completes.
+let meltdownTintEl: HTMLDivElement | null = null;
+function syncMeltdownTint(state: GameState): void {
+  let alpha = 0;
+  if (state.lastMeltdownAt !== undefined) {
+    const age = state.now - state.lastMeltdownAt;
+    if (age >= 0 && age < REACTOR_MELTDOWN.tintSeconds) {
+      alpha = REACTOR_MELTDOWN.tintAlpha * (1 - age / REACTOR_MELTDOWN.tintSeconds);
+    }
+  }
+  if (alpha <= 0) {
+    if (meltdownTintEl) meltdownTintEl.style.display = 'none';
+    return;
+  }
+  if (!meltdownTintEl) {
+    meltdownTintEl = document.createElement('div');
+    meltdownTintEl.id = 'meltdown-tint';
+    const s = meltdownTintEl.style;
+    s.position = 'fixed';
+    s.inset = '0';
+    s.background = '#3aff80';
+    s.pointerEvents = 'none';
+    s.zIndex = '9999';
+    document.body.appendChild(meltdownTintEl);
+  }
+  meltdownTintEl.style.display = '';
+  meltdownTintEl.style.opacity = String(alpha);
+}
+
 function drawLightning(ctx: RenderContext, state: GameState) {
   const g = ctx.lightningGfx;
   g.clear();
+  // Reactor meltdown shockwaves — drawn first so bolts/lasers stay on top.
+  // Each wave is a green annulus riding the kill front (its radius comes
+  // straight from the sim's expansion numbers), backed by a white-hot inner
+  // ring and a green-tinted core flash that fades as the front travels.
+  for (const m of state.meltdowns) {
+    const radius = (state.now - m.startAt) * REACTOR_MELTDOWN.waveSpeed;
+    if (radius <= 0) continue;
+    // Fade the whole wave out over its trip across the world.
+    const maxRadius = Math.hypot(WORLD.width, WORLD.height);
+    const fade = Math.max(0, 1 - radius / maxRadius);
+    // Outer front: thick toxic-green ring with a soft halo.
+    g.circle(m.x, m.y, radius).stroke({ width: 26, color: 0x4aff90, alpha: 0.18 + 0.22 * fade });
+    g.circle(m.x, m.y, radius).stroke({ width: 10, color: 0x6affb0, alpha: 0.35 + 0.35 * fade });
+    // Inner front: thin white-hot ring trailing just behind the green.
+    g.circle(m.x, m.y, radius * 0.88).stroke({ width: 4, color: 0xffffff, alpha: 0.5 + 0.4 * fade });
+    // Core flash: a green-white bloom over the crater for the first beats.
+    const age = state.now - m.startAt;
+    const coreAlpha = Math.max(0, 1 - age / 1.2);
+    if (coreAlpha > 0) {
+      g.circle(m.x, m.y, CELL * 4).fill({ color: 0xffffff, alpha: coreAlpha * 0.55 });
+      g.circle(m.x, m.y, CELL * 7).fill({ color: 0x4aff90, alpha: coreAlpha * 0.3 });
+    }
+  }
   for (const bolt of state.lightningBolts) {
     if (bolt.points.length < 2) continue;
     const age = state.now - bolt.spawnAt;
@@ -3373,6 +3473,8 @@ export function render(state: GameState, ctx: RenderContext) {
 
   // Bob's nametag(s) — synced across all scenes after every host has moved.
   syncBobTags(ctx, state);
+  syncFastBuildTags(ctx, state);
+  syncMeltdownTint(state);
 
   // ─── Hell red beam ───
   // One vertical red line per Hell Portal, drawn from the portal's
