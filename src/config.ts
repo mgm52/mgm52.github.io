@@ -402,6 +402,18 @@ export const LIGHTNING = {
   powerBoostSeconds: 5,            // surge decays to 0 over this many seconds
 };
 
+// Striking a completed Nuclear Reactor with Lightning ruptures the core: the
+// reactor detonates, levelling itself and killing every unit in the overworld
+// — even robots, which nothing else in the game can touch. The blast paints a
+// fallout splatter around the crater, hurls extra bolts skyward, and dumps
+// one final decaying surge into the grid as the core lets go.
+export const REACTOR_MELTDOWN = {
+  splatterCells: 20,                // fallout splatter diameter, in cells
+  boltCount: 6,                     // extra bolts thrown up around the rupture
+  powerBoostWatts: 10_000_000_000,  // 10 GW peak death-surge
+  powerBoostSeconds: 10,            // surge decays to 0 over this many seconds
+};
+
 // Killing a goblin yields this much money + this much blood.
 export const KILL_REWARD = { money: 25, blood: 1 };
 // A gold-tinted goblin (rolled at spawn time when Goldgoblins is owned)

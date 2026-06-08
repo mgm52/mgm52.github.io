@@ -1,5 +1,5 @@
 import { playDecayingGoblinDeath, playDecayingGoblinSpawn, playDecayingGoldKillCash, playSound } from './audio';
-import { BUILDING_DEFS, BuildingKind, CELL, COLS, DEMON, DRAGON, DRAGON_KILL_REWARD, GOBLIN, GOLD_GOBLIN_CHANCE, GOLD_KILL_REWARD, HELL, KILL_REWARD, LIGHTNING, MINOTAUR_KILL_REWARD, ROBOT, SOUL_SIGIL, SPACE, SPACE_UNIT, SUMMON_UPGRADES, TICK_S, MINOTAUR, TINYTAUR, WATER_DEPLETION_PP_PER_SEC, WATER_METER_MAX, WORLD, SOUL_STRENGTH_LABEL, formatPower, sigilPortalOutput, soulStrengthOf } from './config';
+import { BUILDING_DEFS, BuildingKind, CELL, COLS, DEMON, DRAGON, DRAGON_KILL_REWARD, GOBLIN, GOLD_GOBLIN_CHANCE, GOLD_KILL_REWARD, HELL, KILL_REWARD, LIGHTNING, MINOTAUR_KILL_REWARD, REACTOR_MELTDOWN, ROBOT, SOUL_SIGIL, SPACE, SPACE_UNIT, SUMMON_UPGRADES, TICK_S, MINOTAUR, TINYTAUR, WATER_DEPLETION_PP_PER_SEC, WATER_METER_MAX, WORLD, SOUL_STRENGTH_LABEL, formatPower, sigilPortalOutput, soulStrengthOf } from './config';
 import { DEMON_FACING_ANGLE, getOptions } from './options';
 import {
   ALL_DIRS, Building, Cell, DX, DY, Demon, Dir, Dragon, GameState, Ghost, Goblin, HOLE_SIZE, Minotaur, SoulChair, SpaceBuilding, SpaceUnit, WaterSource,
@@ -528,51 +528,24 @@ export function lightningStrike(state: GameState, x: number, y: number): boolean
     // Robots are unkillable — the bolt washes right over them.
     if (g.robot) continue;
     if (within(g.pos.x, g.pos.y)) {
-      const r = goblinKillReward(state, g);
-      const tx = g.pos.x, ty = g.pos.y;
-      earnMoney(state, r.money);
-      earnBlood(state, r.blood);
-      state.bloodUnlocked = true;
-      pushFloater(state, tx, ty, `+Ƶ${r.money.toLocaleString('en-US')}`, 0xffd96b, 1.6);
-      pushFloater(state, tx, ty - 14, `+${r.blood} blood`, 0xff8a8a, 1.6);
-      recordGhost(state, 'goblin', tx, ty, g.facing, { gold: g.gold, bob: g.bob });
-      removeGoblin(state, g.id);
+      vaporiseGoblin(state, g);
       killed++;
     }
   }
   for (const m of [...state.minotaurs.values()]) {
     if (within(m.pos.x, m.pos.y)) {
-      const tx = m.pos.x, ty = m.pos.y;
-      if (MINOTAUR_KILL_REWARD.money > 0) {
-        earnMoney(state, MINOTAUR_KILL_REWARD.money);
-        pushFloater(state, tx, ty, `+Ƶ${MINOTAUR_KILL_REWARD.money.toLocaleString('en-US')}`, 0xffd96b, 1.6);
-      }
-      earnBlood(state, MINOTAUR_KILL_REWARD.blood);
-      state.bloodUnlocked = true;
-      pushFloater(state, tx, ty - 14, `+${MINOTAUR_KILL_REWARD.blood} blood`, 0xff8a8a, 1.6);
-      recordGhost(state, 'minotaur', tx, ty, m.facing, { tiny: m.tiny });
-      state.minotaurs.delete(m.id);
+      vaporiseMinotaur(state, m);
       killed++;
     }
   }
   let dragonsKilled = 0;
   for (const d of [...state.dragons.values()]) {
     if (within(d.pos.x, d.pos.y)) {
-      const tx = d.pos.x, ty = d.pos.y;
-      earnDragonBone(state, DRAGON_KILL_REWARD.dragonBone);
-      state.dragonBoneUnlocked = true;
-      pushFloater(state, tx, ty, `+${DRAGON_KILL_REWARD.dragonBone} dragon bone${DRAGON_KILL_REWARD.dragonBone === 1 ? '' : 's'}`, 0xeae0c0, 1.8);
-      recordGhost(state, 'dragon', tx, ty, d.facing);
-      removeDragon(state, d.id);
+      vaporiseDragon(state, d);
       killed++;
       dragonsKilled++;
     }
   }
-
-  // Stat: remember the biggest single-strike cull (sticky).
-  if (killed > state.maxStruckAtOnce) state.maxStruckAtOnce = killed;
-  // Sticky truth the demons weigh: two-plus dragons gored in one bolt.
-  if (dragonsKilled >= 2) state.slewTwoDragonsInOneStrike = true;
 
   // White blood over every cell whose center falls inside the blast.
   const span = Math.ceil(LIGHTNING.cellsWide / 2);
@@ -592,12 +565,21 @@ export function lightningStrike(state: GameState, x: number, y: number): boolean
   // footprint cell centers lands in the blast — same test the splatter loop
   // above uses — so a large building visibly painted by the strike always
   // counts, even when its own center sits just outside the blast radius.
+  const struckReactors: Building[] = [];
   for (const b of state.buildings.values()) {
     const struck = buildingFootprint(b).some((cell) => {
       const cc = cellCenter(cell);
       return within(cc.x, cc.y);
     });
     if (!struck) continue;
+    // A completed Nuclear Reactor doesn't surge — it goes critical. Collected
+    // here and detonated after the loop, since the meltdown deletes buildings
+    // from the very map this loop is iterating. A mere construction site has
+    // no fuel in it yet, so it takes the ordinary surge like anything else.
+    if (b.kind === 'nuclear_reactor' && b.state !== 'constructing') {
+      struckReactors.push(b);
+      continue;
+    }
     const c = buildingCenter(b);
     state.powerBoosts.push({
       startAt: state.now,
@@ -618,11 +600,145 @@ export function lightningStrike(state: GameState, x: number, y: number): boolean
   playSound('lightning', 0.7, 0.4);
   if (killed > 0) playDecayingGoblinDeath(0.6);
   appendLog(state, `Lightning strike! ${killed} unit${killed === 1 ? '' : 's'} vaporised.`);
+
+  // Detonate any struck reactors. Their kills fold into the strike's sticky
+  // stats — it was this one bolt that set the whole thing off.
+  let totalKilled = killed;
+  let totalDragonsKilled = dragonsKilled;
+  for (const b of struckReactors) {
+    const cull = detonateReactor(state, b);
+    totalKilled += cull.killed;
+    totalDragonsKilled += cull.dragonsKilled;
+  }
+
+  // Stat: remember the biggest single-strike cull (sticky).
+  if (totalKilled > state.maxStruckAtOnce) state.maxStruckAtOnce = totalKilled;
+  // Sticky truth the demons weigh: two-plus dragons gored in one bolt.
+  if (totalDragonsKilled >= 2) state.slewTwoDragonsInOneStrike = true;
   // 2-second cooldown to stop the player from carpet-bombing through every
   // wave of spawns in one breath. Ticked down in the sim, gated in main's
   // onLightningStrike + ui's button refresh.
   state.lightningStrikeCooldown = 2;
   return true;
+}
+
+// Kill-with-bounty bookkeeping shared by Lightning Strike and the reactor
+// meltdown: pay the victim's usual reward, raise its floaters over the
+// corpse, record the hell ghost, and remove it from the world. Robots never
+// come through here — they pay no bounty and have no soul to record.
+function vaporiseGoblin(state: GameState, g: Goblin): void {
+  const r = goblinKillReward(state, g);
+  const tx = g.pos.x, ty = g.pos.y;
+  earnMoney(state, r.money);
+  earnBlood(state, r.blood);
+  state.bloodUnlocked = true;
+  pushFloater(state, tx, ty, `+Ƶ${r.money.toLocaleString('en-US')}`, 0xffd96b, 1.6);
+  pushFloater(state, tx, ty - 14, `+${r.blood} blood`, 0xff8a8a, 1.6);
+  recordGhost(state, 'goblin', tx, ty, g.facing, { gold: g.gold, bob: g.bob });
+  removeGoblin(state, g.id);
+}
+
+function vaporiseMinotaur(state: GameState, m: Minotaur): void {
+  const tx = m.pos.x, ty = m.pos.y;
+  if (MINOTAUR_KILL_REWARD.money > 0) {
+    earnMoney(state, MINOTAUR_KILL_REWARD.money);
+    pushFloater(state, tx, ty, `+Ƶ${MINOTAUR_KILL_REWARD.money.toLocaleString('en-US')}`, 0xffd96b, 1.6);
+  }
+  earnBlood(state, MINOTAUR_KILL_REWARD.blood);
+  state.bloodUnlocked = true;
+  pushFloater(state, tx, ty - 14, `+${MINOTAUR_KILL_REWARD.blood} blood`, 0xff8a8a, 1.6);
+  recordGhost(state, 'minotaur', tx, ty, m.facing, { tiny: m.tiny });
+  state.minotaurs.delete(m.id);
+}
+
+// Any building the dragon was carrying is lost with it, matching dragonKill's
+// semantics.
+function vaporiseDragon(state: GameState, d: Dragon): void {
+  const tx = d.pos.x, ty = d.pos.y;
+  earnDragonBone(state, DRAGON_KILL_REWARD.dragonBone);
+  state.dragonBoneUnlocked = true;
+  pushFloater(state, tx, ty, `+${DRAGON_KILL_REWARD.dragonBone} dragon bone${DRAGON_KILL_REWARD.dragonBone === 1 ? '' : 's'}`, 0xeae0c0, 1.8);
+  recordGhost(state, 'dragon', tx, ty, d.facing);
+  removeDragon(state, d.id);
+}
+
+// Struck by lightning, a completed Nuclear Reactor goes critical: the core
+// detonates, levelling the reactor and killing every unit in the overworld —
+// even robots, which nothing else in the game can touch. Casualties pay
+// their usual kill bounties (robots excepted: no bounty, no soul to send to
+// hell), each marked by its own white splatter so the wipe reads across the
+// whole map. The crater gets a wide fallout splatter and a fan of extra
+// bolts, and the dying core dumps one final REACTOR_MELTDOWN.powerBoostWatts
+// surge into the grid as it lets go. Returns the cull so lightningStrike can
+// fold it into the strike's sticky stats.
+function detonateReactor(state: GameState, reactor: Building): { killed: number; dragonsKilled: number } {
+  const c = buildingCenter(reactor);
+  const name = `${defOf(reactor).name} #${reactor.displayNum}`;
+  destroyBuilding(state, reactor.id);
+
+  let killed = 0;
+  for (const g of [...state.goblins.values()]) {
+    pushDeathEffect(state, g.pos.x, g.pos.y, true);
+    if (g.robot) removeGoblin(state, g.id);
+    else vaporiseGoblin(state, g);
+    killed++;
+  }
+  for (const m of [...state.minotaurs.values()]) {
+    pushDeathEffect(state, m.pos.x, m.pos.y, true);
+    vaporiseMinotaur(state, m);
+    killed++;
+  }
+  let dragonsKilled = 0;
+  for (const d of [...state.dragons.values()]) {
+    pushDeathEffect(state, d.pos.x, d.pos.y, true);
+    vaporiseDragon(state, d);
+    killed++;
+    dragonsKilled++;
+  }
+
+  // Fallout: white splatter over every cell whose center falls inside the
+  // meltdown radius — same painting the strike does, just much wider.
+  const radiusPx = (REACTOR_MELTDOWN.splatterCells / 2) * CELL;
+  const r2 = radiusPx * radiusPx;
+  const span = Math.ceil(REACTOR_MELTDOWN.splatterCells / 2);
+  const ccx = Math.floor(c.x / CELL), ccy = Math.floor(c.y / CELL);
+  for (let cy = ccy - span; cy <= ccy + span; cy++) {
+    for (let cx = ccx - span; cx <= ccx + span; cx++) {
+      const cc = cellCenter({ cx, cy });
+      const dx = cc.x - c.x, dy = cc.y - c.y;
+      if (dx * dx + dy * dy <= r2) pushDeathEffect(state, cc.x, cc.y, true);
+    }
+  }
+  // The sky answers the rupture: a fan of extra bolts scattered around the
+  // crater, on top of the one that set it off.
+  for (let i = 0; i < REACTOR_MELTDOWN.boltCount; i++) {
+    const a = Math.random() * Math.PI * 2;
+    const r = Math.random() * radiusPx;
+    pushLightningBolt(state, c.x + Math.cos(a) * r, c.y + Math.sin(a) * r);
+  }
+
+  // The core's last act: a decaying death-surge an order of magnitude beyond
+  // the reactor's rated output, with the countdown floater riding the crater.
+  state.powerBoosts.push({
+    startAt: state.now,
+    peak: REACTOR_MELTDOWN.powerBoostWatts,
+    duration: REACTOR_MELTDOWN.powerBoostSeconds,
+  });
+  pushFloater(
+    state, c.x, c.y,
+    `+${(REACTOR_MELTDOWN.powerBoostWatts / 1e9).toFixed(2)} GW`,
+    0x8acfff,
+    REACTOR_MELTDOWN.powerBoostSeconds,
+    REACTOR_MELTDOWN.powerBoostWatts,
+  );
+  pushFloater(state, c.x, c.y - CELL * 2, 'MELTDOWN!', 0xff4040, 4, undefined, false, false, 3);
+
+  // Deep boom (the building-destroy sample pitched way down) under the dying
+  // chorus. The strike's own thunderclap already covers the treble.
+  playSound('destroy', 1, 0.35);
+  if (killed > 0) playDecayingGoblinDeath(0.8);
+  appendLog(state, `${name} goes critical! The meltdown wipes out ${killed} unit${killed === 1 ? '' : 's'} — nothing in the overworld survives.`);
+  return { killed, dragonsKilled };
 }
 
 function spawnGoblin(state: GameState) {
