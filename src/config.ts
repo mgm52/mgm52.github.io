@@ -119,6 +119,14 @@ export const ROBOT = {
   // hitscan laser (no chase, no range limit — even a dragon on the wing).
   // The windup is the charge-up beat before the beam fires.
   laserWindup: 0.5,
+  // In orbit, an idle robot paddles to the nearest completed Orbital
+  // Platform and parks on its deck, at a per-robot spot on a ring this far
+  // (px) inside the deck edge — out on the walkable rim a Space Centre
+  // leaves uncovered.
+  parkInset: 18,
+  // A commanded robot (see SpaceUnit.goal) counts as arrived within this
+  // many px of its goal, then stands fast there.
+  arriveDist: 3,
 };
 
 // Units hauled to space by a dragon. Anything that isn't a robot suffocates
@@ -648,9 +656,9 @@ export const BUILDING_DEFS = {
   // orbit (mirroring how the Candle takes over in hell). Requires 1 builder,
   // and the vacuum means only robots qualify — the player has to have a
   // dragon snatch a robot up first. Once assembled it's the foundation a
-  // Space Centre can be set down on — its footprint matches the Centre's
-  // exactly, so the Centre sits flush on its deck.
-  orbital_platform: def(7, {
+  // Space Centre can be set down on — its deck is a bit wider than the
+  // Centre's footprint, leaving a walkable rim where robots park.
+  orbital_platform: def(9, {
     name: 'Orbital Platform',
     short: 'OP',
     cost: 1_000_000,
@@ -670,9 +678,10 @@ export const BUILDING_DEFS = {
   // Space Centre — the endgame income building, built in orbit and ONLY on
   // top of a completed Orbital Platform (one Centre per platform — tapping
   // bare void refuses with a "no platform" floater). Bigger than a
-  // Hypercentre, robot-assembled like the platform under it, and a glutton:
-  // each one draws 10 GW from the ground grid but pays out a fortune while
-  // the power link holds.
+  // Hypercentre but a bit smaller than its platform, so robots still fit on
+  // the deck around it. Robot-assembled like the platform under it, and a
+  // glutton: each one draws 10 GW from the ground grid but pays out a
+  // fortune while the power link holds.
   space_centre: def(7, {
     name: 'Space Centre',
     short: 'SC',

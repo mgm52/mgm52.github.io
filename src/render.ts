@@ -3308,7 +3308,9 @@ export function render(state: GameState, ctx: RenderContext) {
     const suSheet = su.kind === 'minotaur' ? minotaurWalkSheet : (goblinIdleSheet ?? goblinWalkSheet);
     if (suSheet) {
       const dir = dirIndex(suSheet.meta, su.facing);
-      const frame = su.robot && su.workingOn !== undefined
+      // Robots animate while on the move or on the job (walking covers
+      // commanded marches and the stroll to a parking spot).
+      const frame = su.robot && (su.workingOn !== undefined || su.walking)
         ? Math.floor(state.now * suSheet.fps) % suSheet.meta.framesPerDirection
         : 0;
       v.sprite.texture = suSheet.frames[dir][frame];

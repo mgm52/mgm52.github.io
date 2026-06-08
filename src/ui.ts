@@ -2019,7 +2019,10 @@ function refreshInfoPanel(state: GameState) {
     portrait.innerHTML = `<div class="portrait-goblin" style="background:#101830;border-color:#9fd0ff;color:#dbecff">✦</div>`;
     name.textContent = `${selectedSpaceUnits.length} castaways in orbit`;
     stateEl.textContent = '';
-    extra.innerHTML = `<span style="color:#6a7080">Adrift among the stars</span>`;
+    // Robots in the group take orders; the rest are just along for the ride.
+    extra.innerHTML = selectedSpaceUnits.some((su) => su.robot)
+      ? `<span style="color:#6a7080">${commandHintText('anywhere')}</span>`
+      : `<span style="color:#6a7080">Adrift among the stars</span>`;
   } else if (selectedSpace.length === 1) {
     showSpaceBuilding(state, selectedSpace[0], panel, portrait, name, stateEl, extra);
   } else if (selectedSpace.length > 1) {
@@ -2150,10 +2153,15 @@ function showSpaceUnit(state: GameState, su: SpaceUnit, panel: HTMLElement, port
     : su.gold ? 'Gold Goblin' : 'Goblin';
   name.textContent = `${kindLabel} in orbit`;
   if (su.robot) {
-    stateEl.textContent = su.workingOn !== undefined
-      ? 'Assembling an Orbital Platform'
+    const working = su.workingOn !== undefined
+      ? state.spaceBuildings.get(su.workingOn) : undefined;
+    stateEl.textContent = working
+      ? `Assembling ${defOf(working.building).name} #${working.building.displayNum}`
+      : su.goal ? (su.walking ? 'Marching as ordered' : 'Standing fast at its post')
+      : su.walking ? 'Heading for an Orbital Platform'
       : 'Functioning normally in the vacuum';
-    extra.innerHTML = `<span style="color:#6a7080">${su.workingOn !== undefined ? 'The only hands that work up here' : 'Awaiting an Orbital Platform to build'}</span>`;
+    // Robots take orders in orbit like goblins do below.
+    extra.innerHTML = `<span style="color:#6a7080">${commandHintText('anywhere')}</span>`;
   } else {
     const left = su.diesAt !== undefined ? Math.max(0, su.diesAt - state.now) : 0;
     stateEl.textContent = `Perishing — ${left.toFixed(1)}s of air left`;

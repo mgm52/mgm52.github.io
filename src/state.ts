@@ -265,9 +265,11 @@ export type SpaceBuilding = {
 };
 
 // A unit a dragon has hauled into space. Non-robots tumble helplessly and
-// suffocate after SPACE_UNIT.lifetime seconds (diesAt); robots live forever
-// and paddle toward any Orbital Platform under construction to assemble it.
-// pos/vel are in space-scene px, like SpaceBuilding.
+// suffocate after SPACE_UNIT.lifetime seconds (diesAt); robots live forever:
+// they paddle toward any constructing space structure to assemble it, park on
+// the nearest completed Orbital Platform when idle, and obey player move
+// commands (goal) like a ground goblin. pos/vel are in space-scene px, like
+// SpaceBuilding.
 export type SpaceUnit = {
   id: number;
   kind: 'goblin' | 'minotaur';
@@ -286,6 +288,14 @@ export type SpaceUnit = {
   // Id of the constructing space building this robot is working toward/on.
   // Recomputed every tick; only used to drive the walk animation.
   workingOn?: number;
+  // Player-commanded destination (robots only). The robot walks there, then
+  // STAYS there — standing fast like a commanded goblin — until construction
+  // work appears or a new command replaces it. Cleared when work claims the
+  // robot, so it resumes auto-parking afterwards.
+  goal?: Vec2;
+  // True on ticks the robot actually stepped (toward work, a goal, or its
+  // parking spot) — drives the walk animation in the renderer.
+  walking?: boolean;
 };
 
 export type BuildingState = 'constructing' | 'active' | 'dormant';

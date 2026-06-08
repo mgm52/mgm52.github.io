@@ -38,7 +38,7 @@ const defs = await page.evaluate(() => import('/src/config.ts').then((c) => ({
   income: c.BUILDING_DEFS.space_centre.income,
 })));
 check('Space Centre bigger than Hypercentre', defs.sc > defs.hc, JSON.stringify(defs));
-check('Orbital Platform same size as Space Centre', defs.op === defs.sc);
+check('Space Centre a bit smaller than its platform (walkable rim)', defs.op > defs.sc);
 check('Space Centre draws 10 GW', defs.power === -10_000_000_000);
 check('Space Centre costs money and earns a lot', defs.cost > 0 && defs.income >= 100_000);
 
@@ -157,7 +157,85 @@ const built = await page.evaluate(() => {
 });
 check('robot assembles the Centre (finishes dormant, no grid power yet)', built.state === 'dormant', JSON.stringify(built));
 
-// ── 5) 10 GW link: powered → active + earning; unpowered → dormant ──
+// ── 5) Idle robot auto-parks on the platform's deck rim ──
+await page.waitForFunction(({ platPos }) => {
+  const { state } = window.__game;
+  const su = [...state.spaceUnits.values()].find((u) => u.robot);
+  const d = Math.hypot(su.pos.x - platPos.x, su.pos.y - platPos.y);
+  // Park ring = platform half (144) - parkInset (18) = 126.
+  return Math.abs(d - 126) < 8 && !su.walking;
+}, { platPos }, { timeout: 30000 });
+check('idle robot auto-parks on the platform rim', true);
+const onDeck = await page.evaluate(({ platPos }) => {
+  const { state } = window.__game;
+  const su = [...state.spaceUnits.values()].find((u) => u.robot);
+  return Math.abs(su.pos.x - platPos.x) <= 144 && Math.abs(su.pos.y - platPos.y) <= 144;
+}, { platPos });
+check('parked robot stands within the deck footprint', onDeck);
+await page.screenshot({ path: 'screenshots/sc-3-robot-parked.png' });
+
+// ── 6) Robots take move commands in space like ground goblins ──
+const robotScreen = await page.evaluate(() => {
+  const { state, ctx } = window.__game;
+  const su = [...state.spaceUnits.values()].find((u) => u.robot);
+  const g = ctx.spaceLayer.toGlobal({ x: su.pos.x, y: su.pos.y });
+  const r = document.querySelector('canvas').getBoundingClientRect();
+  return { x: r.left + g.x, y: r.top + g.y };
+});
+await page.mouse.click(robotScreen.x, robotScreen.y); // select the robot
+const robotSelected = await page.evaluate(() =>
+  [...window.__game.state.spaceUnits.values()].find((u) => u.robot).selected);
+check('parked robot is tap-selectable over the platform', robotSelected);
+// Somewhere on-screen but well clear of the platform (space camera sits at
+// the top-left of the void on this run).
+const orderPt = { x: platPos.x + 230, y: platPos.y + 170 };
+const p3 = await screenAt(orderPt.x, orderPt.y);
+await page.mouse.click(p3.x, p3.y, { button: 'right' });
+const ordered = await page.evaluate(() => {
+  const su = [...window.__game.state.spaceUnits.values()].find((u) => u.robot);
+  return { goal: su.goal, log: window.__game.state.log.at(-1)?.msg };
+});
+check('right-click issues a move command', !!ordered.goal, JSON.stringify(ordered));
+await page.waitForFunction(({ orderPt }) => {
+  const su = [...window.__game.state.spaceUnits.values()].find((u) => u.robot);
+  return Math.hypot(su.pos.x - orderPt.x, su.pos.y - orderPt.y) < 6;
+}, { orderPt }, { timeout: 30000 });
+check('robot marches to the ordered spot', true);
+await sleep(3000);
+const heldPost = await page.evaluate(({ orderPt }) => {
+  const su = [...window.__game.state.spaceUnits.values()].find((u) => u.robot);
+  return Math.hypot(su.pos.x - orderPt.x, su.pos.y - orderPt.y) < 6 && !!su.goal;
+}, { orderPt });
+check('robot stands fast at its post (no auto-park yank-back)', heldPost);
+
+// Fresh construction work claims a standing robot off its post.
+await page.evaluate(({ platPos }) => {
+  const { state } = window.__game;
+  const b = {
+    id: state.nextId++, displayNum: 2, kind: 'orbital_platform',
+    cell: { cx: 0, cy: 0 }, state: 'constructing', buildProgress: 0,
+    assignedGoblins: [], selected: false,
+  };
+  state.spaceBuildings.set(b.id, {
+    id: b.id, building: b,
+    pos: { x: platPos.x - 700, y: platPos.y },
+    vel: { x: 0, y: 0 }, spin: 0, spinRate: 0, selected: false,
+  });
+}, { platPos });
+await page.waitForFunction(() => {
+  const su = [...window.__game.state.spaceUnits.values()].find((u) => u.robot);
+  return su.goal === undefined && su.workingOn !== undefined;
+}, undefined, { timeout: 15000 });
+check('new construction claims the standing robot off its post', true);
+await page.evaluate(() => {
+  // Clean up the second scaffold so the power checks below stay focused.
+  const { state } = window.__game;
+  for (const [id, sb] of state.spaceBuildings) {
+    if (sb.building.displayNum === 2 && sb.building.kind === 'orbital_platform') state.spaceBuildings.delete(id);
+  }
+});
+
+// ── 7) 10 GW link: powered → active + earning; unpowered → dormant ──
 const moneyBefore = await page.evaluate(() => {
   const { state } = window.__game;
   // A long flat-ish 30 GW surge comfortably covers the Centre's 10 GW draw.
