@@ -9,7 +9,7 @@ extensions.add(GifAsset);
 // game seconds. Used as a manual sprite-sheet — we pick the frame ourselves
 // each tick based on (state.now - spawnAt) so playback always starts at frame 0.
 type DeathFrames = { textures: Texture[]; ends: number[]; duration: number };
-import { AMBIENT_DRAGON, BUILDING_DEFS, BuildingKind, CELL, COLS, DEMON, DRAGON, GOBLIN, HELL, REACTOR_MELTDOWN, RENDER_SCALE, ROBOT, ROWS, MINOTAUR, SOUL_SIGIL, SPACE, SPACE_UNIT, TINYTAUR, WORLD, formatPower, sigilPortalOutput } from './config';
+import { AMBIENT_DRAGON, BUILDING_DEFS, BuildingKind, CELL, COLS, DEMON, DRAGON, GOBLIN, HELL, LOLLY, REACTOR_MELTDOWN, RENDER_SCALE, ROBOT, ROWS, MINOTAUR, SOUL_SIGIL, SPACE, SPACE_UNIT, TINYTAUR, WORLD, formatPower, sigilPortalOutput } from './config';
 import { DEFAULT_OPTIONS, ensureFontLoaded, fontFamilyById, getOptions, onOptionsChange, type FontConfig, type Options } from './options';
 import { loadDemonSheetList } from './demon-sheets';
 import { Building, Demon, DemonVariant, Dragon, GameState, Ghost, Goblin, HOLE_SIZE, Minotaur, SoulChair, SpaceBuilding, SpaceUnit, WaterSource, buildingCenter, candleSpotAt, cellCenter, chairSoulSnapshot, defOf, demonScaleOf, freePlatformAt, holeCenter, isInPlayCell, maintainerCount } from './state';
@@ -468,6 +468,15 @@ type BuildingView = {
   greyscaled: boolean;
 };
 
+// Lolly loose on the overworld (the Pain Gabbonsaw payoff): her demon sprite
+// plus Bob riding on top. One of her at most, so a single nullable view.
+type LollyView = {
+  container: Container;
+  shadow: Sprite;
+  sprite: Sprite;
+  bob: Sprite;
+};
+
 export type RenderContext = {
   app: Application;
   worldLayer: Container;
@@ -479,6 +488,9 @@ export type RenderContext = {
   minotaurViews: Map<number, MinotaurView>;
   dragonLayer: Container;
   dragonViews: Map<number, DragonView>;
+  // Lolly's rampage — topmost ground unit (she looms over even the dragons).
+  lollyLayer: Container;
+  lollyView: LollyView | null;
   waterLayer: Container;
   waterViews: Map<number, WaterView>;
   buildingViews: Map<number, BuildingView>;
@@ -697,6 +709,7 @@ export async function createRender(parent: HTMLElement, state: GameState): Promi
   const goblinLayer = new Container();
   const minotaurLayer = new Container();
   const dragonLayer = new Container();
+  const lollyLayer = new Container();
   const waterLayer = new Container();
   const uiLayer = new Container();
 
@@ -747,6 +760,7 @@ export async function createRender(parent: HTMLElement, state: GameState): Promi
   worldLayer.addChild(goblinLayer);
   worldLayer.addChild(minotaurLayer);
   worldLayer.addChild(dragonLayer);
+  worldLayer.addChild(lollyLayer);
   worldLayer.addChild(holeRing);
   worldLayer.addChild(bobPickerGfx);
   worldLayer.addChild(effectsLayer);
@@ -945,6 +959,7 @@ export async function createRender(parent: HTMLElement, state: GameState): Promi
     goblinViews: new Map(),
     minotaurLayer, minotaurViews: new Map(),
     dragonLayer, dragonViews: new Map(),
+    lollyLayer, lollyView: null,
     waterLayer, waterViews: new Map(),
     buildingViews: new Map(),
     camera: { x: 0, y: 0 },
@@ -1320,6 +1335,16 @@ function syncBobTags(ctx: RenderContext, state: GameState): void {
     if (!su.bob) continue;
     specs.push({ key: `su${su.id}`, layer: ctx.spaceTagLayer, x: su.pos.x, y: su.pos.y - px * 0.55, alpha: 1, sizeMult: 1 });
   }
+  // Riding on top of Lolly during her rampage — the tag hangs over the
+  // rider sprite, well above her colossal frame.
+  if (state.lolly) {
+    specs.push({
+      key: 'lolly', layer: ctx.worldTagLayer,
+      x: state.lolly.pos.x,
+      y: state.lolly.pos.y - LOLLY.displayPx * LOLLY.bobRideHeight - px * 0.55,
+      alpha: 1, sizeMult: 1,
+    });
+  }
   // His soul in hell — double size (the scene zooms out) at half opacity.
   // No tag while he's vanished between an untruth strike and its respawn.
   for (const gh of state.ghosts) {
@@ -1444,6 +1469,23 @@ function makeDemonView(variant: DemonVariant): DemonView {
   container.addChild(ring);
   container.addChild(sprite);
   return { container, shadow, spriteShadow, sprite, hueFilter: new ColorMatrixFilter(), selectionRing: ring };
+}
+
+// Lolly on the overworld — her hell sprite at a colossal size, with Bob
+// (a regular goblin sprite) perched on top. Her nametag-free: the yellow
+// "bob" tag above the rider comes from syncBobTags like everywhere else.
+function makeLollyView(): LollyView {
+  const container = new Container();
+  const shadow = new Sprite(getShadowTexture());
+  shadow.anchor.set(0.5);
+  const sprite = new Sprite(demonSheetFor('friend')?.frames[0][0] ?? Texture.EMPTY);
+  sprite.anchor.set(0.5);
+  const bob = new Sprite((goblinIdleSheet ?? goblinWalkSheet)?.frames[0][0] ?? Texture.EMPTY);
+  bob.anchor.set(0.5);
+  container.addChild(shadow);
+  container.addChild(sprite);
+  container.addChild(bob);
+  return { container, shadow, sprite, bob };
 }
 
 // The dragon draws from an 8-direction fly sheet (dragonFlySheet). A soft glow
@@ -2314,10 +2356,12 @@ function drawHoleAt(g: Graphics, x: number, y: number) {
 }
 
 function drawHole(ctx: RenderContext, state: GameState) {
-  const c = holeCenter(state);
   ctx.holeGfx.clear();
-  drawHoleAt(ctx.holeGfx, c.x, c.y);
   ctx.holeRing.clear();
+  // Lolly tore it out of the earth — nothing left to draw (or select).
+  if (state.holeDestroyed) return;
+  const c = holeCenter(state);
+  drawHoleAt(ctx.holeGfx, c.x, c.y);
   if (state.hole.selected) {
     const half = (CELL * HOLE_SIZE) / 2 + 2;
     ctx.holeRing
@@ -2343,8 +2387,10 @@ function drawBobPicker(ctx: RenderContext, state: GameState) {
       .rect(cx - half - inflate, cy - half - inflate, (half + inflate) * 2, (half + inflate) * 2)
       .stroke({ width: 3, color: 0xffd96b, alpha: pulse });
   };
-  const main = holeCenter(state);
-  ring(main.x, main.y, (CELL * HOLE_SIZE) / 2 + 2);
+  if (!state.holeDestroyed) {
+    const main = holeCenter(state);
+    ring(main.x, main.y, (CELL * HOLE_SIZE) / 2 + 2);
+  }
   for (const b of state.buildings.values()) {
     if (b.kind !== 'goblin_hole' || b.state === 'constructing') continue;
     const bc = buildingCenter(b);
@@ -3278,6 +3324,48 @@ export function render(state: GameState, ctx: RenderContext) {
       v.container.destroy({ children: true });
       ctx.dragonViews.delete(id);
     }
+  }
+
+  // Lolly's rampage — her hell sprite stomping the overworld with Bob riding
+  // on top. Same per-demon dials (sprite pick, tint) as her hell self so the
+  // two read as one creature; Bob animates from the goblin walk sheet in
+  // lockstep with her heading.
+  if (state.lolly) {
+    let v = ctx.lollyView;
+    if (!v) {
+      v = makeLollyView();
+      v.container.cullable = true;
+      ctx.lollyLayer.addChild(v.container);
+      ctx.lollyView = v;
+    }
+    const L = state.lolly;
+    v.container.position.set(L.pos.x, L.pos.y);
+    v.shadow.visible = opts.goblinShadow;
+    if (opts.goblinShadow) {
+      v.shadow.position.set(0, LOLLY.displayPx * 0.3);
+      const sy = LOLLY.displayPx / 64;
+      v.shadow.scale.set(sy * 0.75, sy);
+    }
+    const sheet = demonSheetFor('friend');
+    if (sheet) {
+      const dir = dirIndex(sheet.meta, L.facing);
+      const fpd = sheet.meta.framesPerDirection;
+      const frame = Math.floor(state.now * sheet.fps * opts.demonAnimSpeed) % fpd;
+      v.sprite.texture = sheet.frames[dir][frame];
+      v.sprite.scale.set(LOLLY.displayPx / sheet.meta.spriteSize);
+    }
+    v.sprite.tint = opts.demonFriendTint;
+    const bobSheet = (L.target ? goblinWalkSheet : goblinIdleSheet) ?? goblinWalkSheet ?? goblinIdleSheet;
+    if (bobSheet) {
+      const dir = dirIndex(bobSheet.meta, L.facing);
+      const fpd = bobSheet.meta.framesPerDirection;
+      v.bob.texture = bobSheet.frames[dir][Math.floor(state.now * bobSheet.fps) % fpd];
+      v.bob.scale.set(displayPx / bobSheet.meta.spriteSize);
+    }
+    v.bob.position.set(0, -LOLLY.displayPx * LOLLY.bobRideHeight);
+  } else if (ctx.lollyView) {
+    ctx.lollyView.container.destroy({ children: true });
+    ctx.lollyView = null;
   }
 
   // Water sources — region rectangles with a few ripple highlights for life.

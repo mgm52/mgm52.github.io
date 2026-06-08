@@ -462,6 +462,151 @@ export async function runBobCutscene(ordinal: string, kindName: string, onHold?:
   return picked === 0 ? 'yes' : 'no';
 }
 
+// ─── The Pain Gabbonsaw cutscene ─────────────────────────────────────
+// Fires when the player buys the 99-dragon-bone "Pain Gabbonsaw" ritual:
+// Bob slides back up one last time, realises what the player has done, and
+// an anagram reveal rearranges "pain gabbonsaw" into "spawn bob again"
+// letter by letter. Resolves only after he has fully walked off screen —
+// the caller spawns Lolly (with Bob riding on top) the moment he's gone.
+
+const ANAGRAM_FROM = 'pain gabbonsaw';
+const ANAGRAM_TO = 'spawn bob again';
+
+// Map each letter of the source phrase onto a slot in the target phrase
+// (greedy first-match — the two are exact anagrams, so every letter pairs).
+function buildAnagramMapping(): { ch: string; from: number; to: number }[] {
+  const used = new Set<number>();
+  const out: { ch: string; from: number; to: number }[] = [];
+  for (let to = 0; to < ANAGRAM_TO.length; to++) {
+    const ch = ANAGRAM_TO[to];
+    if (ch === ' ') continue;
+    for (let from = 0; from < ANAGRAM_FROM.length; from++) {
+      if (used.has(from) || ANAGRAM_FROM[from] !== ch) continue;
+      used.add(from);
+      out.push({ ch, from, to });
+      break;
+    }
+  }
+  return out;
+}
+
+// The reveal itself: the ritual's name fades in, holds, then every letter
+// glides to its position in "spawn bob again" (monospace, so the slots line
+// up cleanly), holds again, and fades out. Self-contained DOM — built inside
+// the intro overlay and removed afterwards. Uses the pausable sleep, so P
+// freezes the beats (the in-flight CSS glide itself keeps easing — fine).
+async function playAnagramReveal(overlay: HTMLElement): Promise<void> {
+  const wrap = document.createElement('div');
+  wrap.id = 'anagram-overlay';
+  wrap.style.cssText =
+    'position:absolute; left:50%; top:32%; width:0; height:1.4em; overflow:visible; '
+    + "font-family:'VT323', monospace; font-size:clamp(28px, 7vmin, 72px); color:#ffd96b; "
+    + 'text-shadow:0 0 14px rgba(255,90,40,0.85), 0 2px 2px #000; '
+    + 'opacity:0; transition:opacity 600ms ease; pointer-events:none;';
+  overlay.appendChild(wrap);
+  // Measure the monospace advance width so slot positions are exact.
+  const probe = document.createElement('span');
+  probe.textContent = 'm';
+  probe.style.visibility = 'hidden';
+  wrap.appendChild(probe);
+  const chW = probe.getBoundingClientRect().width || 28;
+  probe.remove();
+  const srcCenter = (ANAGRAM_FROM.length - 1) / 2;
+  const dstCenter = (ANAGRAM_TO.length - 1) / 2;
+  const letters = buildAnagramMapping().map((m) => {
+    const el = document.createElement('span');
+    el.textContent = m.ch;
+    el.style.cssText =
+      'position:absolute; top:0; left:0; '
+      + 'transition:transform 1700ms cubic-bezier(0.65, 0, 0.35, 1), color 1700ms ease; '
+      + `transform:translateX(${((m.from - srcCenter) * chW - chW / 2).toFixed(1)}px);`;
+    wrap.appendChild(el);
+    return { el, m };
+  });
+  await sleep(80);                 // let the initial transforms commit
+  wrap.style.opacity = '1';
+  playSound('online', 0.5, 0.8);
+  await sleep(1700);               // "pain gabbonsaw" registers
+  playSound('ritual', 0.7, 0.8);   // the letters begin to crawl
+  for (const { el, m } of letters) {
+    el.style.transform = `translateX(${((m.to - dstCenter) * chW - chW / 2).toFixed(1)}px)`;
+    el.style.color = '#ff5a4a';
+  }
+  await sleep(1900);               // glide completes
+  playSound('online', 0.6, 1.3);
+  await sleep(1800);               // "spawn bob again" lands
+  wrap.style.opacity = '0';
+  await sleep(650);
+  wrap.remove();
+}
+
+// A spoken beat that auto-advances (no click) — Bob trailing off, the same
+// ". . ." cadence the demons use.
+async function speakBeat(overlay: HTMLElement, speechEl: HTMLElement, text: string): Promise<void> {
+  speechEl.textContent = '';
+  overlay.classList.add('speaking');
+  await typeLine(speechEl, text);
+  await sleep(1300);
+  overlay.classList.remove('speaking');
+  await sleep(400);
+}
+
+export async function runGabbonsawCutscene(): Promise<void> {
+  const overlay = document.getElementById('intro-overlay');
+  const goblinEl = document.getElementById('intro-goblin');
+  const speechEl = document.getElementById('intro-speech');
+  const yesBtn = document.getElementById('intro-yes') as HTMLButtonElement | null;
+  const noBtn  = document.getElementById('intro-no')  as HTMLButtonElement | null;
+  const clickWall = document.getElementById('intro-clickwall');
+  if (!overlay || !goblinEl || !speechEl || !yesBtn || !noBtn || !clickWall) return;
+
+  // Same staging as runBobCutscene: reset to back-facing, keep the click
+  // wall transparent (and the world live) through the slide-up.
+  goblinEl.style.setProperty('--row', '0');
+  overlay.classList.remove('faced', 'exit', 'speaking', 'click-armed', 'show-buttons');
+  speechEl.textContent = '';
+  speechEl.classList.remove('done');
+  clickWall.style.pointerEvents = 'none';
+
+  overlay.classList.add('visible');
+  await sleep(50);
+  overlay.classList.add('up');
+  await sleep(SLIDE_UP_MS + 100);
+  await sleep(POST_SLIDE_BEAT_MS);
+  overlay.classList.add('faced');
+  await turnGoblinAround(goblinEl);
+
+  // Facing the player: freeze the world and absorb clicks for the dialogue.
+  document.body.classList.add('bob-cutscene-hold');
+  clickWall.style.pointerEvents = '';
+
+  await runSpeak(overlay, speechEl, clickWall, 'oh');
+  await runSpeak(overlay, speechEl, clickWall, 'oh no…');
+  await runSpeak(overlay, speechEl, clickWall, 'lolly was right.');
+  await speakBeat(overlay, speechEl, '. . .');
+  await playAnagramReveal(overlay);
+  await runSpeak(overlay, speechEl, clickWall, 'you really would click it.');
+  // A glance off to the side, a beat of silence, then back to the player.
+  await faceRow(goblinEl, 3);
+  await speakBeat(overlay, speechEl, '. . .');
+  await faceRow(goblinEl, 4);
+  await runSpeak(overlay, speechEl, clickWall, 'now i know what must be done');
+
+  // Walk-off — the world resumes behind him, and unlike runBobCutscene we
+  // AWAIT the exit: Lolly only spawns once Bob is fully off screen.
+  document.body.classList.remove('bob-cutscene-hold');
+  clickWall.style.pointerEvents = 'none';
+  await sleep(200);
+  await faceRow(goblinEl, EXIT_FACING_ROW);
+  overlay.classList.remove('up');
+  overlay.classList.add('exit');
+  await sleep(SLIDE_OUT_MS + 100);
+  overlay.classList.remove('visible');
+  await sleep(700);
+  overlay.classList.remove('exit', 'faced');
+  clickWall.style.pointerEvents = '';
+}
+
 // For new games only: how long the player gets to wander and click the empty
 // world before the goblin slides up and starts talking.
 const PRE_INTRO_FREE_CLICK_MS = 6_500;
@@ -499,5 +644,10 @@ export async function playIntroSequence(reveal: IntroReveal): Promise<void> {
     reveal.onTaskReveal();
   } finally {
     introActive = false;
+    // Clear the abort flag once the sequence is over — it's only meaningful
+    // mid-intro, and leaving it set would make every pausable sleep in the
+    // LATER cutscenes (Bob's tag-in, the Pain Gabbonsaw reveal) resolve
+    // instantly after a dev-skipped intro.
+    introAborted = false;
   }
 }

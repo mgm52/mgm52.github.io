@@ -79,6 +79,31 @@ export type Goblin = {
   commandFlashAt?: number;
 };
 
+// What Lolly is currently bearing down on. Buildings/units are referenced by
+// id (re-resolved each tick — a vanished target just triggers re-acquisition);
+// 'hole' is the original spawning hole, the one thing no other force in the
+// game can destroy.
+export type LollyTarget =
+  | { kind: 'building'; id: number }
+  | { kind: 'hole' }
+  | { kind: 'goblin'; id: number }
+  | { kind: 'minotaur'; id: number };
+
+// Lolly loose on the overworld (the Pain Gabbonsaw ritual's payoff), with Bob
+// riding on top. Functions like a Minotaur — walk to the nearest prey, wind
+// up, smash — except grid-free and aimed at everything: buildings (holes
+// included), goblins, robots, minotaurs. Persisted; the rampage survives a
+// reload. See updateLolly in sim.ts.
+export type Lolly = {
+  pos: Vec2;
+  facing: number;          // radians, drives the sprite's direction row
+  target: LollyTarget | null;
+  attackAt?: number;       // state.now when the current windup lands
+  wanderGoal?: Vec2;       // once nothing is left to destroy
+  nextWanderAt: number;
+  spawnAt: number;
+};
+
 export type MinotaurState =
   | { kind: 'wander' }
   | { kind: 'moving_to'; goal: Cell }
@@ -542,7 +567,9 @@ export type Hole = {
 // completed Goblin Hole building. Computed fresh each tick so the spawn queue
 // always reflects the latest infrastructure.
 export function getSpawnCapacity(state: GameState): number {
-  let cap = BASE_SPAWN_CAPACITY;
+  // The base capacity belongs to the original hole — once Lolly has torn it
+  // out of the earth, only built Goblin Holes (those still standing) count.
+  let cap = state.holeDestroyed ? 0 : BASE_SPAWN_CAPACITY;
   for (const b of state.buildings.values()) {
     if (b.kind === 'goblin_hole' && b.state !== 'constructing') cap += GOBLIN_HOLE_CAPACITY_PER_BUILDING;
   }
@@ -768,6 +795,17 @@ export type GameState = {
   // cutscene regardless of the 10-minute playtime threshold or bobSpawned state.
   // Self-clearing once the cutscene fires.
   bobCheatPending: boolean;
+  // Sticky: the Pain Gabbonsaw ritual has been bought (99 dragon bones).
+  // One-shot — the button retires, Bob comes back for one last word, and
+  // Lolly is loosed on the overworld.
+  gabbonsawBought: boolean;
+  // Lolly's overworld rampage (with Bob riding on top), spawned by the Pain
+  // Gabbonsaw ritual. Null/absent until then. Persisted — she does not stop.
+  lolly?: Lolly | null;
+  // Sticky: Lolly has torn the original Goblin Hole out of the earth. The
+  // hole stops rendering, spawning, and being selectable; its base spawn
+  // capacity goes with it.
+  holeDestroyed: boolean;
   // Ghosts of every unit the player has killed (goblin, minotaur, dragon),
   // displayed in Hell as static silhouettes at the world-x/y where they died.
   ghosts: Ghost[];
@@ -1037,7 +1075,7 @@ export function findHoleEmergenceCell(
 // Mirrors the per-hole walk in spawnGoblin; Lilly's "Prevent goblin spawning"
 // optional task is judged against this.
 export function goblinSpawningBlocked(state: GameState): boolean {
-  if (!holeBlockedByBuilding(state)
+  if (!state.holeDestroyed && !holeBlockedByBuilding(state)
       && findHoleEmergenceCell(state, state.hole.cell.cx, state.hole.cell.cy)) return false;
   for (const b of state.buildings.values()) {
     if (b.kind !== 'goblin_hole' || b.state === 'constructing') continue;
@@ -1219,6 +1257,9 @@ export function createInitialState(): GameState {
     bobSpawned: false,
     bobPickingHole: false,
     bobCheatPending: false,
+    gabbonsawBought: false,
+    lolly: null,
+    holeDestroyed: false,
     ghosts: [],
     view: 'ground',
   };

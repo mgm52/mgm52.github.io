@@ -1,7 +1,7 @@
 import { playSound, playMinotaurCommand } from './audio';
 import {
   AUTOSPAWN_TIERS, BUILDABLE_KINDS, BUILDING_DEFS, BuildingKind, DRAG_SELECT_HINT_DELAY_SEC, MULTI_SPAWN_HINT_DELAY_SEC,
-  DRAGON, GOBLIN, LIGHTNING, PAN_HINT_DELAY_SEC, ROBOT, SPAWN_HINT_NO_SPAWN_SEC,
+  DRAGON, GOBLIN, LIGHTNING, PAIN_GABBONSAW, PAN_HINT_DELAY_SEC, ROBOT, SPAWN_HINT_NO_SPAWN_SEC,
   SPAWN_HINT_NO_TASK_SEC, SUMMON_UPGRADES, TERMINATOR, WATER_HINT_DELAY_SEC, digBloodCost, MINOTAUR, minotaurBloodCost, TINYTAUR, formatPower, SOUL_SIGIL, sigilPortalOutput,
 } from './config';
 import {
@@ -687,6 +687,9 @@ export type UICallbacks = {
   onQuickTravel: (view: 'ground' | 'hell' | 'space') => void;
   onBuyGoldgoblins: () => void;
   onBuyGoldgoblinsX10: () => void;
+  // Pain Gabbonsaw — the demo's true closing ritual (99 dragon bones),
+  // surfaced once the final Collect-9,999,999-blood task reveals.
+  onBuyPainGabbonsaw: () => void;
   onDig: (dir: 'n' | 'e' | 's' | 'w') => void;
   onBuildBuilding: (kind: BuildingKind) => void;
   onPlaceCandle: () => void;
@@ -1083,6 +1086,26 @@ export function setupUI(state: GameState, callbacks: UICallbacks) {
   `;
   lightningBtn.addEventListener('click', (e) => { playSound('click', 1, 0.75); flashSummonClick(lightningBtn); emanateAtCursor(e.clientX, e.clientY, 'white'); callbacks.onLightningStrike(); });
   ritualList.appendChild(lightningBtn);
+
+  // Pain Gabbonsaw — the demo's true closing ritual, revealed by the final
+  // (Collect 9,999,999 blood) task. 99 dragon bones. The name is an anagram
+  // the player is meant to discover the hard way; buying it brings Bob back
+  // for one last word and then spawns Lolly's rampage. One-shot: the button
+  // retires forever once bought (see refreshUI).
+  const gabbonsawBtn = document.createElement('button');
+  gabbonsawBtn.className = 'build-button build-button-compact';
+  gabbonsawBtn.id = 'btn-buy-gabbonsaw';
+  gabbonsawBtn.style.display = 'none';
+  gabbonsawBtn.innerHTML = `
+    <div class="build-content">
+      <div class="build-text">
+        <div class="build-name">Pain Gabbonsaw</div>
+      </div>
+      <div class="build-cost-side"><span class="build-cost build-bone-cost" id="cost-buy-gabbonsaw">${PAIN_GABBONSAW.dragonBoneCost} bones</span></div>
+    </div>
+  `;
+  gabbonsawBtn.addEventListener('click', (e) => { playSound('click', 1, 0.75); flashSummonClick(gabbonsawBtn); emanateAtCursor(e.clientX, e.clientY); callbacks.onBuyPainGabbonsaw(); });
+  ritualList.appendChild(gabbonsawBtn);
 
   // Map each buildable kind back to the task that unlocks it. Used both for
   // gating and for placing visual separators between task-unlock groups.
@@ -1875,6 +1898,15 @@ export function refreshUI(state: GameState) {
     revealedTaskIds.has('destroy_robot'),
     state.autoDragonEnabled, state.blood >= SUMMON_UPGRADES.autoDragon.bloodCost,
     `${SUMMON_UPGRADES.autoDragon.bloodCost} blood`,
+  );
+  // Pain Gabbonsaw — surfaces once the final task's celebration clears, and
+  // retires forever the moment it's bought (the ritual is very much one-shot).
+  refreshRitualButton(
+    'btn-buy-gabbonsaw', 'cost-buy-gabbonsaw',
+    revealedTaskIds.has('collect_blood') && !state.gabbonsawBought,
+    false,
+    state.dragonBone >= PAIN_GABBONSAW.dragonBoneCost,
+    `${PAIN_GABBONSAW.dragonBoneCost} bones`,
   );
   // Goldblins → Goldblins x10 form a replace chain (like Autospawn): base
   // button hides once owned, x10 takes its place; x10 hides once owned.

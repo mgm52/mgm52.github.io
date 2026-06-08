@@ -1,16 +1,16 @@
 import { getAudioDebugInfo, playSound, preloadSounds, setCrackleEnabled, setGhostSendGain, setInHellView, setMasterVolume, setMusicDepth, setMusicVolume, startBackgroundCrackle, startBackgroundMusic } from './audio';
 import {
-  AUTOSPAWN_TIERS, CAMERA_SPEED, CELL, DRAGON, GOBLIN, GOLD_KILL_REWARD, HELL, KILL_REWARD, ROBOT, SOUL_SIGIL,
+  AUTOSPAWN_TIERS, CAMERA_SPEED, CELL, DRAGON, GOBLIN, GOLD_KILL_REWARD, HELL, KILL_REWARD, PAIN_GABBONSAW, ROBOT, SOUL_SIGIL,
   START_CELL, SUMMON_UPGRADES, TERMINATOR, TICK_MS, MINOTAUR, WORLD, digBloodCost, minotaurBloodCost,
 } from './config';
 import { setupInput } from './input';
 import { runDemonDialogue, runGhostChat } from './demon-dialogue';
-import { playIntroSequence, setIntroPaused, skipIntro } from './intro';
+import { playIntroSequence, runGabbonsawCutscene, setIntroPaused, skipIntro } from './intro';
 import { getOptions, onOptionsChange } from './options';
 import { getRestartInHell, relockOptionsCog, setupOptionsUI } from './options-ui';
 import { applyDomOptions, centerCameraOn, centerHellCameraOnWorld, centerSpaceCamera, clampCamera, clampHellCamera, clampSpaceCamera, createRender, currentHellScale, preloadRenderAssets, render, spaceCameraMaxY } from './render';
 import { appendLog, buildingCenter, cellCenter, countHypercentres, countSpaceCentres, createInitialState, destroyBuilding, digDirection, earnBlood, earnDragonBone, earnMoney, getSpawnCapacity, pushDeathEffect, pushFloater, recordGhost, removeGoblin, type GameState, type Ghost } from './state';
-import { autoAssignAllIdle, spawnDragon, spawnMinotaur, spawnRobot, spawnTinytaur, tick } from './sim';
+import { autoAssignAllIdle, spawnDragon, spawnLollyRampage, spawnMinotaur, spawnRobot, spawnTinytaur, tick } from './sim';
 import { ensureHellPortal, executeTaskSkip, refreshUI, setupUI } from './ui';
 import { clearSave, formatRelativeTime, getLastSaveStats, loadGame, saveGame, saveGameInBackground } from './save';
 
@@ -592,6 +592,24 @@ async function main() {
       appendLog(state, next.multiplier === 1
         ? `Autospawn — a goblin hatches every ${SUMMON_UPGRADES.autoSpawn.intervalSeconds}s.`
         : `Autospawn x${next.multiplier} — staggered cadence.`);
+    },
+    onBuyPainGabbonsaw: () => {
+      // The demo's true closing ritual. One-shot: the bones are spent, Bob
+      // slides back up for one last word (and the anagram reveal), and once
+      // he's walked off screen Lolly spawns — with Bob riding on top — to
+      // destroy everything. The player is pulled back to the overworld
+      // first so they actually see it happen.
+      if (state.gabbonsawBought) return;
+      if (state.dragonBone < PAIN_GABBONSAW.dragonBoneCost) { playSound('error'); return; }
+      state.dragonBone -= PAIN_GABBONSAW.dragonBoneCost;
+      state.gabbonsawBought = true;
+      playSound('ritual', 1, 0.4);
+      appendLog(state, 'The pain gabbonsaw ritual begins...');
+      if (state.view !== 'ground') quickTravel('ground');
+      void runGabbonsawCutscene().then(() => {
+        const at = spawnLollyRampage(state);
+        centerCameraOn(ctx, at.x, at.y);
+      });
     },
     onBuyGoldgoblins: () => {
       if (state.goldgoblinsEnabled) return;
