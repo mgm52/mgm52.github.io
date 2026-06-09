@@ -1717,14 +1717,16 @@ function drawFinale(ctx: RenderContext, state: GameState, opts: Options): void {
     bob.anchor.set(0.5);
     const groundMoon = new Graphics();
     const spaceMoon = new Graphics();
-    // Ground actors ride the lollyLayer (topmost ground layer); space actors
-    // ride the floating-building layer.
+    // Ground actors ride the lollyLayer (topmost ground layer). In space, Lolly
+    // rides the floating-building layer, but the moon goes in the ambient layer
+    // beneath it so it reads as a distant body — behind the buildings, the
+    // dragons, and Lolly herself.
     ctx.lollyLayer.addChild(bobShadow);
     ctx.lollyLayer.addChild(bob);
     ctx.lollyLayer.addChild(groundRig.container);
     ctx.lollyLayer.addChild(groundMoon);
+    ctx.spaceAmbientLayer.addChild(spaceMoon);
     ctx.spaceMiscLayer.addChild(spaceRig.container);
-    ctx.spaceMiscLayer.addChild(spaceMoon);
     v = ctx.finaleView = { groundRig, spaceRig, bob, bobShadow, groundMoon, spaceMoon };
   }
 
@@ -1732,9 +1734,12 @@ function drawFinale(ctx: RenderContext, state: GameState, opts: Options): void {
   positionFinaleRig(v.groundRig, ground, true, state, opts);
   positionFinaleRig(v.spaceRig, !ground, false, state, opts);
 
-  // Bob, dismounted on the surface for the whole cinematic.
+  // Bob, dismounted on the surface for the whole cinematic. He swings on the
+  // moon (swipe sheet) at the smash, walks to the centre, idles otherwise.
   const bobMoving = !F.bobAtCentre && F.phase !== 'summon';
-  const bobSheet = (bobMoving ? goblinWalkSheet : goblinIdleSheet) ?? goblinWalkSheet ?? goblinIdleSheet;
+  const bobSheet = F.bobAttacking
+    ? (goblinSwipeSheet ?? goblinWalkSheet ?? goblinIdleSheet)
+    : (bobMoving ? goblinWalkSheet : goblinIdleSheet) ?? goblinWalkSheet ?? goblinIdleSheet;
   v.bob.position.set(F.bobPos.x, F.bobPos.y);
   if (bobSheet) {
     const dir = dirIndex(bobSheet.meta, F.bobFacing);

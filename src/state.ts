@@ -112,8 +112,9 @@ export type Moon = {
   pos: Vec2;
   scene: 'space' | 'ground';
   // floating: adrift in space · grabbed: in Lolly's grip (rides with her) ·
-  // shattering: the moment Bob breaks it (render plays the shatter).
-  state: 'floating' | 'grabbed' | 'shattering';
+  // placed: set down on the ground between Lolly and Bob · shattering: the
+  // moment Bob breaks it (render plays the shatter).
+  state: 'floating' | 'grabbed' | 'placed' | 'shattering';
   seed: number;            // fixes the crater layout + float wobble phase
   shatterAt?: number;      // state.now the break began (drives the shatter anim)
 };
@@ -148,6 +149,8 @@ export type Finale = {
   bobPos: Vec2;
   bobFacing: number;
   bobAtCentre: boolean;
+  // Set at the smash: Bob swings on the moon (render plays his attack sheet).
+  bobAttacking?: boolean;
   // The space target currently being closed on (a SpaceBuilding or SpaceUnit id).
   target?: { kind: 'building' | 'unit'; id: number } | null;
   attackAt?: number;       // state.now the current space-smash lands

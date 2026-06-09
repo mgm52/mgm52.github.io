@@ -80,7 +80,7 @@ while (Date.now() < deadline) {
       ctx.spaceCamera.y = F.lollyPos.y - ctx.viewport.height / (2 * ctx.renderScale);
     }
     const overlay = document.getElementById('demon-overlay');
-    const game = document.getElementById('game');
+    const game = document.getElementById('app');
     const white = document.getElementById('finale-white');
     // The real confrontation modal is a non-rebuke overlay (barks use .rebuke).
     const modalOpen = !!overlay && overlay.classList.contains('visible') && !overlay.classList.contains('rebuke');
@@ -137,7 +137,7 @@ while (Date.now() < deadline) {
 
 const final = await page.evaluate(() => {
   const { state } = window.__game;
-  const game = document.getElementById('game');
+  const game = document.getElementById('app');
   const white = document.getElementById('finale-white');
   return {
     phase: state.finale ? state.finale.phase : null,

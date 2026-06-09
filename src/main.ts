@@ -952,30 +952,30 @@ async function main() {
   async function runFinaleShatter() {
     const F = state.finale;
     if (!F) return;
-    const gameEl = document.getElementById('game');
+    const appEl = document.getElementById('app');
     if (!finaleWhiteEl) {
       finaleWhiteEl = document.createElement('div');
       finaleWhiteEl.id = 'finale-white';
       document.body.appendChild(finaleWhiteEl);
     }
-    // Bob turns to the moon, grabs it out of Lolly's hands, and it goes.
-    F.bobFacing = Math.PI;                        // face Lolly, on his right
+    // Bob turns to the moon resting between them and winds up his swing.
     if (F.moon) {
-      F.moon.scene = 'ground';
-      F.moon.pos = { x: F.bobPos.x + 40, y: F.bobPos.y - 30 };
-      F.moon.state = 'shattering';
-      F.moon.shatterAt = state.now;
+      F.bobFacing = Math.atan2(F.moon.pos.y - F.bobPos.y, F.moon.pos.x - F.bobPos.x);
+      F.bobAttacking = true;
     }
+    await sleep(440);                              // he raises a fist and brings it down
+    // Impact — the moon goes.
+    if (F.moon) { F.moon.state = 'shattering'; F.moon.shatterAt = state.now; }
     playSound('destroy', 1, 0.3);
     playSound('lightning', 0.8, 0.5);
     void finaleBark(state, 'lolly', '*NO—*');
-    // The brief, violent tear.
-    gameEl?.classList.add('finale-glitch');
+    // The brief, violent tear — the whole app shakes and splits.
+    appEl?.classList.add('finale-glitch');
     await sleep(680);
-    gameEl?.classList.remove('finale-glitch');
-    // The BIG pull-back, the universe whiting out under it.
+    appEl?.classList.remove('finale-glitch');
+    // The BIG pull-back, everything receding to a point as it whites out.
     playSound('ritual', 1, 0.25);
-    gameEl?.classList.add('finale-zoom');
+    appEl?.classList.add('finale-zoom');
     if (finaleWhiteEl) {
       finaleWhiteEl.style.transition = 'opacity 1700ms ease-in';
       requestAnimationFrame(() => { if (finaleWhiteEl) finaleWhiteEl.style.opacity = '1'; });
@@ -1022,11 +1022,14 @@ async function main() {
         }
         const pa = state.playArea;
         centerCameraOn(ctx, ((pa.x0 + pa.x1) / 2) * CELL, ((pa.y0 + pa.y1) / 2) * CELL);
-        // Freeze the world for the modal + shatter.
+        // Freeze the world for the (static) modal conversation.
         document.body.classList.add('finale-hold');
         await runFinaleConfrontation(state);
-        await runFinaleShatter();
+        // Resume time before the smash so Bob's swing and the moon's shards
+        // actually animate (both key off state.now). updateFinale just holds
+        // through 'confront'/'shattered', so nothing else moves.
         document.body.classList.remove('finale-hold');
+        await runFinaleShatter();
       })();
     }
   }

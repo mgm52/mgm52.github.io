@@ -1914,6 +1914,15 @@ function updateFinale(state: GameState): void {
         F.lollyFacing = Math.PI;
         if (r.arrived) {
           F.dragonShown = false;     // she dismounts; the dragon wheels away (render)
+          // She sets the moon down on the ground between herself and Bob — her
+          // offering, there for the taking (or the breaking).
+          if (F.moon) {
+            F.moon.scene = 'ground';
+            F.moon.state = 'placed';
+            // Down on the ground midway between them, dropped toward the camera
+            // so it rests in the foreground rather than over her torso.
+            F.moon.pos = { x: (F.lollyPos.x + F.bobPos.x) / 2, y: (F.lollyPos.y + F.bobPos.y) / 2 + 78 };
+          }
           F.confrontReady = true;    // hand the modal to main.ts
           enter('confront');
         }
