@@ -2799,7 +2799,15 @@ function drawFloaters(ctx: RenderContext, state: GameState) {
       const remaining = f.powerCountdownWatts * (1 - k);
       t.text = `+${(remaining / 1e9).toFixed(2)} GW`;
     }
-    t.position.set(f.x, f.y - 18 - k * 28);
+    // Lolly's surge floaters ride above her live position (x/y are offsets);
+    // they vanish with her if she's gone (e.g. the finale takes over).
+    if (f.followLolly) {
+      if (!state.lolly) { t.visible = false; continue; }
+      t.visible = true;
+      t.position.set(state.lolly.pos.x + f.x, state.lolly.pos.y + f.y - 18 - k * 28);
+    } else {
+      t.position.set(f.x, f.y - 18 - k * 28);
+    }
     t.alpha = 1 - k;
   }
   for (const [id, t] of ctx.floaterViews) {

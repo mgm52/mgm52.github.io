@@ -489,6 +489,10 @@ export type Floater = {
   // Multiplier on the floater's base font size — the soul-surge multiplier text
   // renders much bigger than a kill reward. 1 when absent.
   sizeMult?: number;
+  // When set, x/y are treated as an offset from Lolly's live position rather
+  // than absolute world coords, so the floater rides above her head as she
+  // moves (her "speed up!" surge text). Hidden if she's gone.
+  followLolly?: boolean;
 };
 
 // One-shot blood-explosion GIF effect played at a world position. The Lightning
@@ -1753,6 +1757,7 @@ export function pushFloater(
   space = false,
   hell = false,
   sizeMult?: number,
+  followLolly = false,
 ) {
   state.floaters.push({
     id: state.nextId++,
@@ -1763,6 +1768,7 @@ export function pushFloater(
     space,
     hell,
     sizeMult,
+    followLolly: followLolly || undefined,
   });
 }
 
