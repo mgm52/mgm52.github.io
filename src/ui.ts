@@ -297,22 +297,14 @@ function emanateAtCursor(x: number, y: number, variant?: 'white'): void {
   el.addEventListener('animationend', () => el.remove(), { once: true });
 }
 
-// The "demo just stops" pair of alerts + the secret options-cog unlock. Fired
-// once the Collect-5-dragon-bones task reveals (gated in refreshUI). The cog
-// can also be revealed silently (no alerts) by the shift-click / long-press R
-// gesture in options-ui.ts. Idempotency is handled at the call site via
-// `!state.optionsUnlocked`.
+// The secret options-cog unlock. Fired once the Collect-9,999,999-blood task
+// reveals (gated in refreshUI). The cog can also be revealed by the shift-click
+// / long-press R gesture in options-ui.ts. Idempotency is handled at the call
+// site via `!state.optionsUnlocked`. (This used to also pop a pair of "the game
+// is unfinished" demo alerts — removed now that the game continues past here.)
 export function revealSecretSettings(state: GameState): void {
-  window.alert(
-    "congrats the game is incomplete!!!!! It's unfinished!!!! "
-    + "There should be something here next happening but it's not!!!!"
-  );
   state.optionsUnlocked = true;
   unlockOptionsCog();
-  window.alert(
-    "BUT WAIT --- YOU HAVE UNLOCKED THE SECRET SETTINGS MENU OF JUSTICE!!!!!!!!!! "
-    + "FIND IT IN THE BOTTOM RIGHT OF THE PLAY AREA. ENJOY"
-  );
 }
 
 // Click-to-skip bookkeeping for the WORK COMPLETE overlay. Each in-flight
@@ -603,9 +595,8 @@ const TASKS: Task[] = [
     optional: true,
   },
   {
-    // Main closing task: amassing 9,999,999 blood fires the demo's "game's
-    // incomplete" alerts and unlocks the secret settings menu (see the
-    // revealSecretSettings gate in refreshUI). That figure is exactly what
+    // Main closing task: amassing 9,999,999 blood unlocks the secret settings
+    // menu (see the revealSecretSettings gate in refreshUI). That figure is exactly what
     // the pit colossus grants for feeding him 5 dragon bones (see
     // demon-dialogue.ts), so the intended route runs through the Dragon
     // Beacon (build_hypercentre) and a trip to hell. Grants no building.
@@ -1818,10 +1809,10 @@ export function refreshUI(state: GameState) {
   const phaseGasTurbine = revealedTaskIds.has('build_gas_engine');
   const minotaurTaskDone = revealedTaskIds.has('summon_minotaurs');
 
-  // Amassing 9,999,999 blood is the demo's closing easter egg: once that task
-  // reveals, fire the "game's incomplete" alerts and unlock the secret settings
-  // menu. revealSecretSettings is guarded so it only runs once. (Old saves may
-  // carry the legacy 'collect_dragon_bones' id — migrated on load above.)
+  // Amassing 9,999,999 blood is the closing easter egg: once that task reveals,
+  // unlock the secret settings menu. revealSecretSettings is guarded so it only
+  // runs once. (Old saves may carry the legacy 'collect_dragon_bones' id —
+  // migrated on load above.)
   if (revealedTaskIds.has('collect_blood') && !state.optionsUnlocked) {
     revealSecretSettings(state);
   }
