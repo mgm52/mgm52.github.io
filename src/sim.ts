@@ -1,8 +1,8 @@
 import { playDecayingGoblinDeath, playDecayingGoblinSpawn, playDecayingGoldKillCash, playSound } from './audio';
-import { BUILDING_DEFS, BuildingKind, CELL, COLS, DEMON, DRAGON, DRAGON_KILL_REWARD, FINALE, GOBLIN, GOLD_GOBLIN_CHANCE, GOLD_KILL_REWARD, HELL, KILL_REWARD, LIGHTNING, LOLLY, MINOTAUR_KILL_REWARD, REACTOR_MELTDOWN, ROBOT, SOUL_SIGIL, SPACE, SPACE_UNIT, SUMMON_UPGRADES, TICK_S, MINOTAUR, TINYTAUR, WATER_DEPLETION_PP_PER_SEC, WATER_METER_MAX, WORLD, SOUL_STRENGTH_LABEL, formatPower, sigilPortalOutput, soulStrengthOf } from './config';
+import { BUILDING_DEFS, BuildingKind, CELL, COLS, DEMON, DRAGON, DRAGON_KILL_REWARD, FINALE, GOBLIN, GOLD_GOBLIN_CHANCE, GOLD_KILL_REWARD, HELL, KILL_REWARD, LIGHTNING, LOLLY, LOLLY_BOOST, MINOTAUR_KILL_REWARD, REACTOR_MELTDOWN, ROBOT, SOUL_SIGIL, SPACE, SPACE_UNIT, SUMMON_UPGRADES, TICK_S, MINOTAUR, TINYTAUR, WATER_DEPLETION_PP_PER_SEC, WATER_METER_MAX, WORLD, SOUL_STRENGTH_LABEL, formatPower, sigilPortalOutput, soulStrengthOf } from './config';
 import { DEMON_FACING_ANGLE, getOptions } from './options';
 import {
-  ALL_DIRS, Building, Cell, DX, DY, Demon, Dir, Dragon, Finale, FinalePhase, GameState, Ghost, Goblin, HOLE_SIZE, LollyTarget, Minotaur, SoulChair, SpaceBuilding, SpaceUnit, Vec2, WaterSource,
+  ALL_DIRS, Building, Cell, DX, DY, Demon, Dir, Dragon, Finale, FinalePhase, GameState, Ghost, Goblin, HOLE_SIZE, LollyBoostKind, LollyTarget, Minotaur, SoulChair, SpaceBuilding, SpaceUnit, Vec2, WaterSource, lollyBoostState,
   anySpawnHole, appendLog, buildingAtCell, buildingCenter, buildingFootprint, buildingPerimeter,
   cellCenter, cellKey, chairSoulSnapshot, constructedDragonBeacon, currentPowerBoost, defOf, demonScaleOf, destroyBuilding, dragonTargetBuilding,
   earnBlood, earnDragonBone, earnMoney, findHoleEmergenceCell,
@@ -617,6 +617,10 @@ export function lightningStrike(state: GameState, x: number, y: number): boolean
       dragonsKilled++;
     }
   }
+  // Lolly mid-rampage isn't killed by the bolt — she drinks it, and surges.
+  if (state.lolly && !state.finale && within(state.lolly.pos.x, state.lolly.pos.y)) {
+    applyLollyBoost(state, 'lightning');
+  }
 
   // White blood over every cell whose center falls inside the blast.
   const span = Math.ceil(LIGHTNING.cellsWide / 2);
@@ -830,6 +834,12 @@ function updateMeltdowns(state: GameState) {
       vaporiseDragon(state, d);
       m.killed++;
       m.dragonsKilled++;
+    }
+    // The front washing over Lolly doesn't kill her — the fallout supercharges
+    // her. Once per meltdown, the first tick the wave reaches her.
+    if (state.lolly && !state.finale && !m.lollyBoosted && within(state.lolly.pos.x, state.lolly.pos.y)) {
+      m.lollyBoosted = true;
+      applyLollyBoost(state, 'nuclear');
     }
 
     // Fallout splatter, painted progressively: cells inside the crater zone
@@ -1737,9 +1747,33 @@ function lollySmash(state: GameState, t: LollyTarget): void {
   appendLog(state, `Minotaur #${m.id} devoured by Lolly.`);
 }
 
+// Feed Lolly a speed surge: a lightning hit (blue, ~10s) or reactor fallout
+// (green, bigger, ~30s). Stacks on any boost already running, throws up its
+// "speed up!" floaters (one for lightning, three for the meltdown), and chimes.
+function applyLollyBoost(state: GameState, kind: LollyBoostKind): void {
+  const L = state.lolly;
+  if (!L) return;
+  const cfg = LOLLY_BOOST[kind];
+  (L.boosts ??= []).push({ kind, start: state.now, duration: cfg.duration, peak: cfg.peak });
+  for (let i = 0; i < cfg.floaters; i++) {
+    pushFloater(state, L.pos.x, L.pos.y - LOLLY.displayPx * 0.42 - i * 24, 'speed up!', cfg.floaterColor, 1.7 + i * 0.25);
+  }
+  playSound('online', 0.6, kind === 'nuclear' ? 1.3 : 1.0);
+  appendLog(state, kind === 'lightning'
+    ? 'Lolly drinks the lightning — she only gets faster.'
+    : 'The fallout supercharges Lolly — faster still.');
+}
+
 function updateLolly(state: GameState): void {
   const L = state.lolly;
   if (!L) return;
+  // Drop any boosts that have fully decayed, then read the live speed surge.
+  if (L.boosts && L.boosts.length > 0) {
+    L.boosts = L.boosts.filter((b) => state.now - b.start < b.duration);
+    if (L.boosts.length === 0) L.boosts = undefined;
+  }
+  const speedMult = lollyBoostState(L, state.now).speedMult;
+  const speed = LOLLY.speed * speedMult;
   // Re-validate the current target (it may have died, been destroyed, or —
   // for a unit — moved); re-acquire when it's gone.
   let spot = L.target ? lollyTargetSpot(state, L.target) : null;
@@ -1753,9 +1787,9 @@ function updateLolly(state: GameState): void {
     const dy = spot.y - L.pos.y;
     const d = Math.hypot(dx, dy);
     if (d <= spot.reach) {
-      // Windup → smash, same beat as a Minotaur's.
+      // Windup → smash, same beat as a Minotaur's — and a surge shortens it too.
       if (L.attackAt === undefined) {
-        L.attackAt = state.now + LOLLY.attackWindup;
+        L.attackAt = state.now + LOLLY.attackWindup / speedMult;
         if (d > 1e-3) L.facing = Math.atan2(dy, dx);
         return;
       }
@@ -1766,7 +1800,7 @@ function updateLolly(state: GameState): void {
       return;
     }
     L.attackAt = undefined;
-    const step = LOLLY.speed * TICK_S;
+    const step = speed * TICK_S;
     L.pos.x += (dx / d) * step;
     L.pos.y += (dy / d) * step;
     L.facing = Math.atan2(dy, dx);
@@ -1792,7 +1826,7 @@ function updateLolly(state: GameState): void {
     L.wanderGoal = undefined;
     return;
   }
-  const step = LOLLY.speed * 0.5 * TICK_S; // an unhurried victory lap
+  const step = speed * 0.5 * TICK_S; // an unhurried victory lap (still boostable)
   L.pos.x += (dx / d) * step;
   L.pos.y += (dy / d) * step;
   L.facing = Math.atan2(dy, dx);

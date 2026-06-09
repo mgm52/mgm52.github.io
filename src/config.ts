@@ -424,6 +424,18 @@ export const LOLLY = {
   bobRideHeight: 0.46,
 };
 
+// Striking Lolly mid-rampage doesn't hurt her — it feeds her. A lightning bolt
+// makes her surge (blue, ~10s); a reactor meltdown's fallout supercharges her
+// (green, bigger, ~30s). `peak` is the added speed fraction at the instant of
+// the hit, decaying linearly to nothing over `duration`; boosts stack. The
+// dominant boost colours her sprite (tint fades with the remaining time), and
+// she throws up a "speed up!" floater per `floaters`. See lollyBoostState in
+// state.ts and applyLollyBoost in sim.ts.
+export const LOLLY_BOOST = {
+  lightning: { peak: 1.0, duration: 10, tint: 0x66bbff, floaterColor: 0x9fd8ff, floaters: 1 },
+  nuclear:   { peak: 2.0, duration: 30, tint: 0x6cff6c, floaterColor: 0x9dffa0, floaters: 3 },
+} as const;
+
 // The finale: once Lolly has scoured the overworld bare, she calls down a
 // dragon, mounts it, and rides up to wreck what's left in space — telling Bob
 // to stay behind. There's a moon up there; she takes it, brings it down, and

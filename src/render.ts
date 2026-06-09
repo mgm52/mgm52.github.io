@@ -12,7 +12,7 @@ type DeathFrames = { textures: Texture[]; ends: number[]; duration: number };
 import { AMBIENT_DRAGON, BUILDING_DEFS, BuildingKind, CELL, COLS, DEMON, DRAGON, FINALE, GOBLIN, HELL, LOLLY, REACTOR_MELTDOWN, RENDER_SCALE, ROBOT, ROWS, MINOTAUR, SOUL_SIGIL, SPACE, SPACE_UNIT, TINYTAUR, WORLD, formatPower, sigilPortalOutput } from './config';
 import { DEFAULT_OPTIONS, ensureFontLoaded, fontFamilyById, getOptions, onOptionsChange, type FontConfig, type Options } from './options';
 import { loadDemonSheetList } from './demon-sheets';
-import { Building, Demon, DemonVariant, Dragon, GameState, Ghost, Goblin, HOLE_SIZE, Minotaur, SoulChair, SpaceBuilding, SpaceUnit, WaterSource, buildingCenter, candleSpotAt, cellCenter, chairSoulSnapshot, defOf, demonScaleOf, freePlatformAt, holeCenter, isInPlayCell, maintainerCount, spaceCentreMaintained, spaceStructureOverlapAt } from './state';
+import { Building, Demon, DemonVariant, Dragon, GameState, Ghost, Goblin, HOLE_SIZE, Minotaur, SoulChair, SpaceBuilding, SpaceUnit, WaterSource, buildingCenter, candleSpotAt, cellCenter, chairSoulSnapshot, defOf, demonScaleOf, freePlatformAt, holeCenter, isInPlayCell, lollyBoostState, maintainerCount, spaceCentreMaintained, spaceStructureOverlapAt } from './state';
 import { getParlaySpeaker, isModalDialogueActive } from './demon-dialogue';
 
 export type Camera = { x: number; y: number };
@@ -3698,6 +3698,10 @@ export function render(state: GameState, ctx: RenderContext) {
       v.sprite.texture = sheet.frames[dir][frame];
       v.sprite.scale.set(LOLLY.displayPx / sheet.meta.spriteSize);
     }
+    // Struck-speed tint: blue while a lightning surge runs, green for a
+    // meltdown's fallout, fading with the boost (white when she's unboosted).
+    const boost = lollyBoostState(L, state.now);
+    v.sprite.tint = boost.tintAlpha > 0 ? lerpHex(0xffffff, boost.tint, boost.tintAlpha) : 0xffffff;
     const bobSheet = (L.target ? goblinWalkSheet : goblinIdleSheet) ?? goblinWalkSheet ?? goblinIdleSheet;
     if (bobSheet) {
       const dir = dirIndex(bobSheet.meta, L.facing);

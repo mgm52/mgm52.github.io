@@ -1,6 +1,6 @@
 import {
   BASE_SPAWN_CAPACITY, BUILDING_DEFS, BuildingDef, BuildingKind, CELL, COLS,
-  DEMON, DIG_GROWTH_CELLS, GOBLIN_HOLE_CAPACITY_PER_BUILDING, HELL, ROWS, SOUL_SIGIL,
+  DEMON, DIG_GROWTH_CELLS, GOBLIN_HOLE_CAPACITY_PER_BUILDING, HELL, LOLLY_BOOST, ROWS, SOUL_SIGIL,
   INITIAL_PLAY_COLS, INITIAL_PLAY_ROWS, INITIAL_PLAY_X0, INITIAL_PLAY_Y0, ROBOT,
   START_CELL, START_GOBLINS, START_MONEY, WALL_BORDER, WORLD, formatPower,
 } from './config';
@@ -94,6 +94,12 @@ export type LollyTarget =
 // up, smash — except grid-free and aimed at everything: buildings (holes
 // included), goblins, robots, minotaurs. Persisted; the rampage survives a
 // reload. See updateLolly in sim.ts.
+// A speed surge from being struck mid-rampage: lightning (blue) or reactor
+// fallout (green). Adds `peak` to her speed multiplier at `start`, decaying
+// linearly to 0 over `duration`. They stack; see lollyBoostState.
+export type LollyBoostKind = 'lightning' | 'nuclear';
+export type LollySpeedBoost = { kind: LollyBoostKind; start: number; duration: number; peak: number };
+
 export type Lolly = {
   pos: Vec2;
   facing: number;          // radians, drives the sprite's direction row
@@ -102,7 +108,31 @@ export type Lolly = {
   wanderGoal?: Vec2;       // once nothing is left to destroy
   nextWanderAt: number;
   spawnAt: number;
+  // Active speed surges from lightning / meltdown hits (see lollyBoostState).
+  boosts?: LollySpeedBoost[];
 };
+
+// The live effect of Lolly's active boosts: her speed multiplier (1 = base),
+// and the sprite tint colour + alpha (the dominant boost, fading with its
+// remaining time). Expired boosts contribute nothing.
+export function lollyBoostState(L: Lolly, now: number): { speedMult: number; tint: number; tintAlpha: number } {
+  let bonus = 0;
+  let domContrib = 0;
+  let tint = 0xffffff;
+  let tintAlpha = 0;
+  for (const b of L.boosts ?? []) {
+    const frac = 1 - (now - b.start) / b.duration;
+    if (frac <= 0) continue;
+    const contrib = b.peak * frac;
+    bonus += contrib;
+    if (contrib > domContrib) {
+      domContrib = contrib;
+      tint = LOLLY_BOOST[b.kind].tint;
+      tintAlpha = Math.min(0.75, frac);
+    }
+  }
+  return { speedMult: 1 + bonus, tint, tintAlpha };
+}
 
 // The moon Lolly hauls out of space during the finale. Drawn, not a sprite —
 // see drawMoon in render.ts. It floats in space until she hoists it, rides down
@@ -610,6 +640,9 @@ export type Meltdown = {
   lastRadius: number;
   killed: number;
   dragonsKilled: number;
+  // Set once the front has reached Lolly, so the green speed surge it grants
+  // her is applied a single time per meltdown.
+  lollyBoosted?: boolean;
 };
 
 // A decaying power surge (Lightning Strike). Contributes `peak` watts at
