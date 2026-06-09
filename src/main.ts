@@ -1,4 +1,4 @@
-import { getAudioDebugInfo, playSound, preloadSounds, setCrackleEnabled, setGhostSendGain, setInHellView, setMasterVolume, setMusicDepth, setMusicVolume, startBackgroundCrackle, startBackgroundMusic } from './audio';
+import { fadeOutMusicForever, getAudioDebugInfo, playSound, preloadSounds, setCrackleEnabled, setGhostSendGain, setInHellView, setMasterVolume, setMusicDepth, setMusicVolume, startBackgroundCrackle, startBackgroundMusic } from './audio';
 import {
   AUTODRAGON_TIERS, AUTOSPAWN_TIERS, CAMERA_SPEED, CELL, DRAGON, GOBLIN, GOLD_KILL_REWARD, HELL, KILL_REWARD, PAIN_GABBONSAW, ROBOT, SOUL_SIGIL,
   START_CELL, SUMMON_UPGRADES, TERMINATOR, TICK_MS, MINOTAUR, WORLD, digBloodCost, minotaurBloodCost,
@@ -528,6 +528,16 @@ async function main() {
       // purchased maximum.
       state.autoSpawnLevel = Math.max(0, Math.min(state.autoSpawnMultiplier, multiplier));
     },
+    onSetTerminating: (on: boolean) => {
+      // The terminating slider under the Terminator button — one switch for
+      // the whole chassis line. Off: terminators stand down (any in-flight
+      // shot finishes, then they idle). The slider's power cues play in ui.ts.
+      if (state.terminatorsTerminating === on) return;
+      state.terminatorsTerminating = on;
+      appendLog(state, on
+        ? 'Terminators resume the hunt.'
+        : 'Terminators stand down.');
+    },
     onBuyAutoDragon: () => {
       // Lilly's destroy-a-robot reward, levelling through AUTODRAGON_TIERS
       // like Autospawn. Each tier demands as many active Dragon Beacons as
@@ -624,22 +634,19 @@ async function main() {
         : `Autospawn x${next.multiplier} — staggered cadence.`);
     },
     onBuyPainGabbonsaw: () => {
-      // The demo's true closing ritual. One-shot: the bones are spent, Bob
-      // slides back up for one last word (and the anagram reveal), and once
-      // he's walked off screen Lolly spawns — with Bob riding on top — to
-      // destroy everything. The player is pulled back to the overworld
-      // first so they actually see it happen.
-      if (state.gabbonsawBought) return;
+      // The demo's true closing ritual. One-shot: the bones are spent and the
+      // ritual channels on a summon bar like any other unit; when the bar
+      // completes (sim tick) Bob slides back up for one last word (and the
+      // anagram reveal), and once he's walked off screen Lolly spawns — with
+      // Bob riding on top — to destroy everything. The button survives as a
+      // greyed-out "owned" trophy (refreshUI). The cutscene handoff lives in
+      // the game loop (gabbonsawCutscenePending).
+      if (state.gabbonsawBought || state.gabbonsawRitualRemaining !== null) return;
       if (state.dragonBone < PAIN_GABBONSAW.dragonBoneCost) { playSound('error'); return; }
       state.dragonBone -= PAIN_GABBONSAW.dragonBoneCost;
-      state.gabbonsawBought = true;
+      state.gabbonsawRitualRemaining = PAIN_GABBONSAW.spawnTime;
       playSound('ritual', 1, 0.4);
       appendLog(state, 'The pain gabbonsaw ritual begins...');
-      if (state.view !== 'ground') quickTravel('ground');
-      void runGabbonsawCutscene().then(() => {
-        const at = spawnLollyRampage(state);
-        centerCameraOn(ctx, at.x, at.y);
-      });
     },
     onBuyGoldgoblins: () => {
       if (state.goldgoblinsEnabled) return;
@@ -1003,16 +1010,18 @@ async function main() {
     await sleep(70);
     white.style.transition = 'opacity 300ms ease-in';
     white.style.opacity = '0';
-    // The brief, violent tear — the whole app shakes and splits.
+    // The violent tear — the whole app shakes and splits, held for two full
+    // glitch cycles so the wobble lingers.
     appEl?.classList.add('finale-glitch');
-    await sleep(680);
+    await sleep(1460);
     appEl?.classList.remove('finale-glitch');
-    // The BIG pull-back, everything receding to a point as it whites out.
+    // The BIG pull-back, everything receding to a point as it slowly whites
+    // out (both eased longer so the ending breathes).
     playSound('ritual', 1, 0.25);
     appEl?.classList.add('finale-zoom');
-    white.style.transition = 'opacity 1700ms ease-in';
+    white.style.transition = 'opacity 3200ms ease-in';
     requestAnimationFrame(() => { white.style.opacity = '1'; });
-    await sleep(2000);
+    await sleep(3600);
     // Held on white — the next part of the game picks up from here.
     finaleEndApplied = true;
     F.phase = 'shattered';
@@ -1088,6 +1097,9 @@ async function main() {
     if ((F.confrontReady || F.phase === 'confront') && !finaleConfrontStarted) {
       finaleConfrontStarted = true;
       void (async () => {
+        // The quartet bows out for good as the last conversation begins —
+        // only the vinyl crackle keeps riding the empty groove.
+        fadeOutMusicForever();
         // Bring the player down to the surface to watch it happen.
         if (state.view !== 'ground') {
           quickTravel('ground');
@@ -1266,6 +1278,16 @@ async function main() {
             })()
           : null,
       );
+      // Pain Gabbonsaw's summon bar just completed (sim tick): pull the
+      // player back to the overworld, run Bob's cutscene, then loose Lolly.
+      if (state.gabbonsawCutscenePending) {
+        state.gabbonsawCutscenePending = false;
+        if (state.view !== 'ground') quickTravel('ground');
+        void runGabbonsawCutscene().then(() => {
+          const at = spawnLollyRampage(state);
+          centerCameraOn(ctx, at.x, at.y);
+        });
+      }
       if (fpsHud) frameTimings.tickMs = performance.now() - tickStart;
       saveAcc += dt;
       if (saveAcc >= SAVE_INTERVAL_MS) backgroundSave();

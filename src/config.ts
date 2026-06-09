@@ -127,7 +127,7 @@ export const ROBOT = {
   buildTimeMult: 0.7,
   // Robots assemble on a timed queue like the other summons (one at a time,
   // mirroring the Minotaur's single-slot ritual track).
-  spawnTime: 2,
+  spawnTime: 1,
   spawnCapacity: 1,
   // Commanded onto another unit, a robot stands fast and shoots it with a
   // hitscan laser (no chase, no range limit — even a dragon on the wing).
@@ -294,6 +294,11 @@ export const DEMON = {
   speed: 16,          // hell-px/sec — a slow, ponderous patrol (dev toggle only)
   displayPx: 900,     // colossal, ~9x a summoned Minotaur
   patrolHalf: 360,    // hell-px travelled either side of the spawn centre
+  // Lilly's attention-seeking pace after Bob first meets Lolly: a tighter
+  // back-and-forth than the dev patrol, either side of her standing spot,
+  // run until Bob next parlays with her. See updateDemon / lillyPacing.
+  pacingHalf: 200,    // hell-px either side of her standing centre
+  pacingSpeed: 90,    // hell-px/sec — a brisk, fidgety pace (not the slow patrol)
   parlayRadius: 360,  // a ghost within this (hell-px) of the demon starts a parlay
   hitRadius: 390,     // click radius (hell-px) for selecting the demon
   // The demon is solid: no soul may stand within this (hell-px) of his centre —
@@ -383,8 +388,10 @@ export const SUMMON_UPGRADES = {
   // bought, a dragon summon is queued automatically every intervalSeconds
   // (divided by the owned AUTODRAGON_TIERS multiplier), provided the player
   // can cover the usual DRAGON.bloodCost and an active Dragon Beacon has a
-  // free ritual slot (same gates as the manual button).
-  autoDragon: { intervalSeconds: 5 },
+  // free ritual slot (same gates as the manual button). The cadence matches
+  // DRAGON.spawnTime so the ritual track stays continuously busy, the same
+  // way Autospawn keeps the goblin holes pulsing.
+  autoDragon: { intervalSeconds: 2 },
 };
 
 // Tier ladder for the Autodragon ritual, mirroring AUTOSPAWN_TIERS — each
@@ -406,7 +413,9 @@ export const AUTODRAGON_TIERS: { multiplier: number; bloodCost: number }[] = [
 // discover the hard way ("pain gabbonsaw" → "spawn bob again"). Buying it
 // brings Bob back for one last word, then spawns Lolly — with Bob riding on
 // top — to rampage across the overworld (see LOLLY below).
-export const PAIN_GABBONSAW = { dragonBoneCost: 99 };
+// spawnTime: the ritual channels on a summon bar like any other unit; Bob's
+// cutscene fires the moment the bar completes.
+export const PAIN_GABBONSAW = { dragonBoneCost: 99, spawnTime: 5 };
 
 // Lolly's overworld rampage. She works like a Minotaur — walks the map,
 // hunts the nearest prey — except she's colossal, grid-free (she crushes
@@ -797,7 +806,7 @@ export const BUILDING_DEFS = {
     short: 'OP',
     cost: 1_000_000,
     buildersRequired: 1,
-    buildTime: 20,
+    buildTime: 4,
     maintainersRequired: 0,
     income: 0,
     powerOutput: 0,
@@ -823,7 +832,7 @@ export const BUILDING_DEFS = {
     short: 'SC',
     cost: 25_000_000,
     buildersRequired: 1,
-    buildTime: 30,
+    buildTime: 9,
     maintainersRequired: 1,
     income: 200_000,
     powerOutput: -10_000_000_000, // 10 GW draw

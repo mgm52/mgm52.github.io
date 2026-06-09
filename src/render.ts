@@ -12,7 +12,7 @@ type DeathFrames = { textures: Texture[]; ends: number[]; duration: number };
 import { AMBIENT_DRAGON, BUILDING_DEFS, BuildingKind, CELL, COLS, DEMON, DRAGON, FINALE, GOBLIN, HELL, LOLLY, REACTOR_MELTDOWN, RENDER_SCALE, ROBOT, ROWS, MINOTAUR, SOUL_SIGIL, SPACE, SPACE_UNIT, TINYTAUR, WORLD, formatPower, sigilPortalOutput } from './config';
 import { DEFAULT_OPTIONS, ensureFontLoaded, fontFamilyById, getOptions, onOptionsChange, type FontConfig, type Options } from './options';
 import { loadDemonSheetList } from './demon-sheets';
-import { Building, Demon, DemonVariant, Dragon, GameState, Ghost, Goblin, HOLE_SIZE, Minotaur, SoulChair, SpaceBuilding, SpaceUnit, WaterSource, buildingCenter, candleSpotAt, cellCenter, chairSoulSnapshot, defOf, demonScaleOf, freePlatformAt, holeCenter, isInPlayCell, lollyBoostState, maintainerCount, spaceCentreMaintained, spaceStructureOverlapAt } from './state';
+import { Building, Demon, DemonVariant, Dragon, GameState, Ghost, Goblin, HOLE_SIZE, Minotaur, SoulChair, SpaceBuilding, SpaceUnit, WaterSource, buildingCenter, candleSpotAt, cellCenter, chairSoulSnapshot, defOf, demonScaleOf, freePlatformAt, holeCenter, isInPlayCell, lollyBoostState, maintainerCount, spaceCentreMaintainerCount, spaceStructureOverlapAt } from './state';
 import { getParlaySpeaker, isModalDialogueActive } from './demon-dialogue';
 
 export type Camera = { x: number; y: number };
@@ -152,6 +152,9 @@ type GoblinView = {
   // Soft white halo behind a robot's chassis (pulsed per-frame; flares red
   // through a laser windup). Absent for flesh-and-blood goblins.
   glow?: Sprite;
+  // Cached child-order state for the terminator lamp's front/behind dev
+  // toggle, so we only reorder children when the option actually flips.
+  lampInFront?: boolean;
   outline: Sprite[];   // 4 cardinal-offset copies, black-tinted
   sprite: Sprite;
   selectionRing: Graphics;
@@ -477,6 +480,7 @@ type LollyView = {
   shadow: Sprite;
   sprite: Sprite;
   bob: Sprite;
+  selectionRing: Graphics;
 };
 
 // One Lolly-on-a-dragon rig: a shadow, the dragon she rides, and Lolly herself
@@ -1575,10 +1579,16 @@ function makeLollyView(): LollyView {
   sprite.filters = [getLollyBrightFilter()];
   const bob = new Sprite((goblinIdleSheet ?? goblinWalkSheet)?.frames[0][0] ?? Texture.EMPTY);
   bob.anchor.set(0.5);
+  // Selection ring scaled to her colossal footprint — she's tap-selectable
+  // like any other unit (orders aimed at her come from OTHER units).
+  const selectionRing = new Graphics();
+  selectionRing.circle(0, 0, LOLLY.displayPx * 0.38).stroke({ width: 3, color: 0xffd96b });
+  selectionRing.visible = false;
   container.addChild(shadow);
+  container.addChild(selectionRing);
   container.addChild(sprite);
   container.addChild(bob);
-  return { container, shadow, sprite, bob };
+  return { container, shadow, sprite, bob, selectionRing };
 }
 
 // ─── Finale rendering ───────────────────────────────────────────────
@@ -3494,7 +3504,8 @@ export function render(state: GameState, ctx: RenderContext) {
     const idleFor = (g.state.kind === 'idle' && g.idleSince !== null)
       ? state.now - g.idleSince : 0;
     const breakdancing = idleFor >= GOBLIN.breakdanceAfter;
-    const swinging = g.state.kind === 'going_to_kill' && g.state.attackAt !== undefined;
+    const swinging = (g.state.kind === 'going_to_kill' || g.state.kind === 'attacking_lolly')
+      && g.state.attackAt !== undefined;
     const sheet =
       (swinging ? goblinSwipeSheet : null) ??
       (breakdancing ? goblinBreakdanceSheet : null) ??
@@ -3542,6 +3553,13 @@ export function render(state: GameState, ctx: RenderContext) {
         v.glow.alpha = charging
           ? 0.85 + 0.15 * Math.sin(state.now * 24)
           : 0.55 + 0.18 * Math.sin(state.now * 5 + g.id);
+        // Dev toggle: lamp drawn over the chassis or tucked behind it.
+        // Reorder children only when the option flips (cached on the view).
+        if (opts.terminatorLampInFront !== v.lampInFront) {
+          if (opts.terminatorLampInFront) v.container.addChild(v.glow);
+          else v.container.setChildIndex(v.glow, 1); // back behind, above the shadow
+          v.lampInFront = opts.terminatorLampInFront;
+        }
       } else {
         v.glow.scale.set(px * 2.0 / 128);
         v.glow.position.set(0, 0);
@@ -3584,7 +3602,8 @@ export function render(state: GameState, ctx: RenderContext) {
     }
     v.sprite.y = t.tiny ? 0 : opts.minotaurSpriteYOffset;
     const winding =
-      (t.state.kind === 'going_to_kill' || t.state.kind === 'going_to_kill_minotaur' || t.state.kind === 'going_to_destroy')
+      (t.state.kind === 'going_to_kill' || t.state.kind === 'going_to_kill_minotaur'
+        || t.state.kind === 'going_to_kill_lolly' || t.state.kind === 'going_to_destroy')
       && t.state.attackAt !== undefined;
     const sheet = (winding ? minotaurSwipeSheet : null) ?? minotaurWalkSheet;
     if (sheet) {
@@ -3692,6 +3711,7 @@ export function render(state: GameState, ctx: RenderContext) {
     }
     const L = state.lolly;
     v.container.position.set(L.pos.x, L.pos.y);
+    v.selectionRing.visible = !!L.selected;
     v.shadow.visible = opts.goblinShadow;
     if (opts.goblinShadow) {
       v.shadow.position.set(0, LOLLY.displayPx * 0.3);
@@ -3912,10 +3932,26 @@ export function render(state: GameState, ctx: RenderContext) {
       v.warning.visible = onSite === 0;
     } else {
       if (v.body) v.body.alpha = 1;
-      // A finished Space Centre re-uses the tag as its crew warning: it needs
-      // one robot stationed on the deck to run (see spaceCentreMaintained).
-      v.warning.visible = sb.building.kind === 'space_centre'
-        && !spaceCentreMaintained(state, sb);
+      // A finished Space Centre re-uses the tag for its dormant reasons,
+      // mirroring the ground buildings' floating warning: "needs N robots"
+      // while its crew is short (robots standing in for goblin maintainers),
+      // otherwise "underpowered" when the ground grid can't spare its draw
+      // (state stays dormant either way).
+      if (sb.building.kind === 'space_centre') {
+        let tag = '';
+        const crewNeed = BUILDING_DEFS.space_centre.maintainersRequired
+          - spaceCentreMaintainerCount(state, sb);
+        if (crewNeed > 0) tag = `needs ${crewNeed} robot${crewNeed === 1 ? '' : 's'}`;
+        else if (sb.building.state === 'dormant') tag = 'underpowered';
+        if (tag) {
+          if (v.warning.text !== tag) v.warning.text = tag;
+          v.warning.visible = true;
+        } else {
+          v.warning.visible = false;
+        }
+      } else {
+        v.warning.visible = false;
+      }
     }
   }
   for (const [id, v] of ctx.spaceBuildingViews) {

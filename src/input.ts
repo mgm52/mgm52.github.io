@@ -2,7 +2,7 @@ import { Application, Container, FederatedPointerEvent, Graphics } from 'pixi.js
 import { playSound, playGhostCommand, playMinotaurCommand } from './audio';
 import { flashCursor } from './cursor-fx';
 import { bobOverworldBark, demonRebuke, finaleBark } from './demon-dialogue';
-import { BUILDABLE_KINDS, BUILDING_DEFS, BuildingKind, CELL, DRAGON, GOBLIN, HELL, LIGHTNING, MAX_SELECTED_UNITS, MINOTAUR, SOUL_SIGIL, SPACE, SPACE_UNIT, WORLD, formatPower } from './config';
+import { BUILDABLE_KINDS, BUILDING_DEFS, BuildingKind, CELL, DRAGON, GOBLIN, HELL, LIGHTNING, LOLLY, MAX_SELECTED_UNITS, MINOTAUR, SOUL_SIGIL, SPACE, SPACE_UNIT, WORLD, formatPower } from './config';
 import { runBobCutscene } from './intro';
 import { RenderContext, ambientDragonAt, clampCamera, clampHellCamera, clampSpaceCamera, currentHellScale, ghostAtHell, ghostHellPos } from './render';
 import { autoAssignAllIdle, lightningStrike, spawnBob, unseatSoulFromChair } from './sim';
@@ -524,10 +524,13 @@ export function setupInput(
       const g = goblinAt(state, local.x, local.y);
       const d = g ? null : dragonAt(state, local.x, local.y);
       const m = (g || d) ? null : minotaurAt(state, local.x, local.y);
+      // The rampaging duo are selectable like any other unit (small units
+      // near her bulk stay pickable — they're checked first).
+      const lolly = (g || d || m) ? false : lollyAt(state, local.x, local.y);
       let b: Building | null = null;
       let onHole = false;
       let w: WaterSource | null = null;
-      if (!g && !d && !m) {
+      if (!g && !d && !m && !lolly) {
         const c = pixelToCell(local.x, local.y);
         b = buildingAtCell(state, c.cx, c.cy);
         // A hole Lolly has destroyed no longer renders, so it shouldn't take
@@ -545,6 +548,7 @@ export function setupInput(
       else if (g) { g.selected = true; playSound('select', 0.33); }
       else if (d) { d.selected = true; playSound('select', 0.33); }
       else if (m) { m.selected = true; playSound('select', 0.33); }
+      else if (lolly) { state.lolly!.selected = true; playSound('select', 0.33); }
       else if (b) { b.selected = true; playSound('select', 0.33); }
       else if (onHole) { state.hole.selected = true; playSound('select', 0.33); }
       else if (w) { w.selected = true; playSound('select', 0.33); }
@@ -875,7 +879,17 @@ function drawSpaceSelectionRect(input: InputState, x0: number, y0: number, x1: n
     .stroke({ width: 1, color: 0xffd96b });
 }
 
+// Rampaging Lolly under the cursor (a generous radius on her colossal
+// sprite). Only while the rampage is live — the finale's scripted Lolly
+// takes no taps.
+function lollyAt(state: GameState, x: number, y: number): boolean {
+  const L = state.lolly;
+  if (!L || state.finale) return false;
+  return Math.hypot(L.pos.x - x, L.pos.y - y) <= LOLLY.displayPx * 0.35;
+}
+
 function clearSelection(state: GameState) {
+  if (state.lolly) state.lolly.selected = false;
   for (const g of state.goblins.values()) g.selected = false;
   for (const m of state.minotaurs.values()) m.selected = false;
   for (const d of state.dragons.values()) d.selected = false;
@@ -1385,11 +1399,15 @@ function handleRightClick(state: GameState, x: number, y: number) {
       if (Math.hypot(d.pos.x - x, d.pos.y - y) <= DRAGON.displayPx * 0.42) { targetDragon = d; break; }
     }
   }
+  // Rampaging Lolly under the cursor — an attack order for whatever's
+  // selected (futile, but allowed). Real units near her bulk win the tap.
+  const targetLolly = !targetGoblin && !targetMinotaur && !targetDragon
+    && !goblinHostBuilding && lollyAt(state, x, y);
   const targetCell = pixelToCell(x, y);
-  const targetBuilding = (targetGoblin || targetMinotaur || targetDragon)
+  const targetBuilding = (targetGoblin || targetMinotaur || targetDragon || targetLolly)
     ? null
     : (goblinHostBuilding ?? buildingAtCell(state, targetCell.cx, targetCell.cy));
-  const targetWater = (!targetGoblin && !targetMinotaur && !targetDragon && !targetBuilding)
+  const targetWater = (!targetGoblin && !targetMinotaur && !targetDragon && !targetLolly && !targetBuilding)
     ? waterSourceAt(state, targetCell)
     : null;
 
@@ -1493,18 +1511,19 @@ function handleRightClick(state: GameState, x: number, y: number) {
 
   // Minotaur commands.
   if (selectedMinotaurs.length > 0) {
-    if (targetGoblin && !targetGoblin.robot) {
+    if (targetGoblin) {
       // Manual kill order — flagged `manual` so the auto-targeter doesn't
       // immediately re-assign each minotaur to its own nearest prey. The
-      // target's ring flashes like every other command target. (Robots can't
-      // die, so a click on one falls through to a plain move below.)
+      // target's ring flashes like every other command target. Robots are
+      // fair game to ORDER onto — the minotaur swings, an "immune" floater
+      // pops over the chassis, and nothing dies (see updateMinotaur).
       targetGoblin.commandFlashAt = state.now;
       for (const m of selectedMinotaurs) {
         m.target = null;
         m.state = { kind: 'going_to_kill', targetId: targetGoblin.id, manual: true };
         resetMinotaurStuck(m, state.now);
       }
-      appendLog(state, `${selectedMinotaurs.length} minotaur(s) ordered to kill goblin #${targetGoblin.id}.`);
+      appendLog(state, `${selectedMinotaurs.length} minotaur(s) ordered to kill ${targetGoblin.robot ? 'Robot' : 'goblin'} #${targetGoblin.id}.`);
     } else if (targetMinotaur) {
       // Minotaur-on-minotaur — the target itself is excluded.
       const attackers = selectedMinotaurs.filter(m => m.id !== targetMinotaur.id);
@@ -1517,6 +1536,14 @@ function handleRightClick(state: GameState, x: number, y: number) {
         targetMinotaur.commandFlashAt = state.now;
         appendLog(state, `${attackers.length} minotaur(s) ordered to gore Minotaur #${targetMinotaur.id}.`);
       }
+    } else if (targetLolly) {
+      // Goring Lolly achieves nothing — but they're allowed to try.
+      for (const m of selectedMinotaurs) {
+        m.target = null;
+        m.state = { kind: 'going_to_kill_lolly' };
+        resetMinotaurStuck(m, state.now);
+      }
+      appendLog(state, `${selectedMinotaurs.length} minotaur(s) hurl themselves at Lolly.`);
     } else if (targetBuilding) {
       targetBuilding.commandFlashAt = state.now;
       for (const m of selectedMinotaurs) {
@@ -1538,25 +1565,53 @@ function handleRightClick(state: GameState, x: number, y: number) {
 
   if (selectedGoblins.length === 0) return;
 
+  // Attack orders on Lolly: robots stand fast and laser her, everyone else
+  // charges in swinging. None of it works — she answers every hit with a
+  // 'no effect' floater — but morale matters.
+  if (targetLolly) {
+    const selectedRobotsForLolly = selectedGoblins.filter((g) => g.robot);
+    for (const r of selectedRobotsForLolly) {
+      releaseFromBuilding(state, r);
+      r.goal = null;
+      r.path = [];
+      r.state = { kind: 'firing_laser', targetKind: 'lolly', targetId: 0 };
+    }
+    if (selectedRobotsForLolly.length > 0) {
+      appendLog(state, `${selectedRobotsForLolly.length} robot(s) lock lasers on Lolly.`);
+    }
+    const melee = selectedGoblins.filter((g) => !g.robot);
+    for (const g of melee) {
+      releaseFromBuilding(state, g);
+      g.goal = null;
+      g.path = [];
+      g.state = { kind: 'attacking_lolly' };
+    }
+    if (melee.length > 0) appendLog(state, `${melee.length} goblin(s) hurl themselves at Lolly.`);
+    return;
+  }
+
   // Robot laser order: commanding a robot onto any unit — goblin, minotaur,
-  // or even a dragon — has it stand fast and shoot a laser instead of the
-  // melee chase. (Another robot is no target: nothing can kill a robot, so
-  // a click on one falls through to the plain move order below.)
+  // a dragon, or even another robot — has it stand fast and shoot a laser
+  // instead of the melee chase. A robot target soaks the beam with an
+  // "immune" floater (nothing kills a robot); the shooter itself is excluded
+  // so the order never resolves to "shoot yourself".
   const laserTarget =
-    (targetGoblin && !targetGoblin.robot) ? { kind: 'goblin' as const, unit: targetGoblin, label: `goblin #${targetGoblin.id}` }
+    targetGoblin ? { kind: 'goblin' as const, unit: targetGoblin, label: `${targetGoblin.robot ? 'Robot' : 'goblin'} #${targetGoblin.id}` }
     : targetMinotaur ? { kind: 'minotaur' as const, unit: targetMinotaur, label: `Minotaur #${targetMinotaur.id}` }
     : targetDragon ? { kind: 'dragon' as const, unit: targetDragon, label: `Dragon #${targetDragon.id}` }
     : null;
-  const lasering = selectedRobots.length > 0 && laserTarget !== null;
-  if (lasering) {
+  const laserers = laserTarget === null ? []
+    : selectedRobots.filter((r) => !(laserTarget.kind === 'goblin' && r.id === laserTarget.unit.id));
+  const lasering = laserers.length > 0;
+  if (lasering && laserTarget) {
     laserTarget.unit.commandFlashAt = state.now;
-    for (const r of selectedRobots) {
+    for (const r of laserers) {
       releaseFromBuilding(state, r);
       r.goal = null;
       r.path = [];
       r.state = { kind: 'firing_laser', targetKind: laserTarget.kind, targetId: laserTarget.unit.id };
     }
-    appendLog(state, `${selectedRobots.length} robot(s) lock lasers on ${laserTarget.label}.`);
+    appendLog(state, `${laserers.length} robot(s) lock lasers on ${laserTarget.label}.`);
   }
   // Robots with a firing order are spoken for; the rest of the click applies
   // to the remaining selection.
@@ -1565,9 +1620,9 @@ function handleRightClick(state: GameState, x: number, y: number) {
 
   // Kill order: right-click on another goblin sends every selected attacker
   // toward it. The target itself, even if selected, is excluded so the order
-  // never resolves to "kill yourself". Robots can't die — a click on one
-  // falls through to a plain move order instead of an unwinnable hunt.
-  if (targetGoblin && !targetGoblin.robot) {
+  // never resolves to "kill yourself". A robot target takes the swings with
+  // an "immune" floater and survives (see updateGoblin's going_to_kill).
+  if (targetGoblin) {
     const attackers = commandables.filter(g => g.id !== targetGoblin.id);
     if (attackers.length > 0) {
       targetGoblin.commandFlashAt = state.now;

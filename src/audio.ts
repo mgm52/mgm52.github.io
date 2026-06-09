@@ -207,6 +207,50 @@ export function playSound(name: SoundName, volume = 1, playbackRate?: number, gh
   src.start();
 }
 
+// ─── Reversed playback ──────────────────────────────────────────────
+// Some cues want a sample played backwards (the terminator slider's
+// power-down is the power-up cue run in reverse). Build the reversed
+// AudioBuffer lazily from the forward one and cache it per sound.
+const reversedBuffers = new Map<string, AudioBuffer>();
+function getReversedBuffer(ctx: AudioContext, name: SoundName): AudioBuffer | null {
+  const cached = reversedBuffers.get(name);
+  if (cached) return cached;
+  const fwd = buffers.get(name);
+  if (!fwd) return null;
+  const rev = ctx.createBuffer(fwd.numberOfChannels, fwd.length, fwd.sampleRate);
+  for (let ch = 0; ch < fwd.numberOfChannels; ch++) {
+    const src = fwd.getChannelData(ch);
+    const dst = rev.getChannelData(ch);
+    const n = src.length;
+    for (let i = 0; i < n; i++) dst[i] = src[n - 1 - i];
+  }
+  reversedBuffers.set(name, rev);
+  return rev;
+}
+
+// Play a registered sample backwards (and optionally slowed). One-shot — it
+// skips the voice pool since the reversed cues are infrequent UI feedback.
+export function playSoundReversed(name: SoundName, volume = 1, playbackRate = 1) {
+  if (muted) return;
+  const ctx = audioCtx;
+  if (!ctx) return;
+  const rev = getReversedBuffer(ctx, name);
+  if (!rev) return;
+  if (ctx.state !== 'running') {
+    if (!gestureSeen) return;
+    void ctx.resume();
+  }
+  const src = ctx.createBufferSource();
+  src.buffer = rev;
+  src.playbackRate.value = Math.max(0.25, Math.min(4, playbackRate));
+  const gain = ctx.createGain();
+  gain.gain.value = Math.max(0, Math.min(1, masterVolume * volume));
+  src.connect(gain);
+  gain.connect(ctx.destination);
+  src.onended = () => { src.disconnect(); gain.disconnect(); };
+  src.start();
+}
+
 // ─── Decaying spawn / death volumes ─────────────────────────────────
 // Late-game spam can spawn dozens of goblins per second. Each successive
 // goblin_spawn / goblin_death plays a hair quieter than the last so the
@@ -270,12 +314,12 @@ export function playGhostCommand(kind: 'goblin' | 'minotaur' | 'dragon', count =
 
 export function setMasterVolume(v: number) {
   masterVolume = Math.max(0, Math.min(1, v));
-  if (musicEl) musicEl.volume = effectiveMusicVolume();
+  if (musicEl && !musicStopped) musicEl.volume = effectiveMusicVolume();
   if (crackleEl) crackleEl.volume = effectiveCrackleVolume();
 }
 export function setMusicVolume(v: number) {
   musicVolume = Math.max(0, Math.min(1, v));
-  if (musicEl) musicEl.volume = effectiveMusicVolume();
+  if (musicEl && !musicStopped) musicEl.volume = effectiveMusicVolume();
   if (crackleEl) crackleEl.volume = effectiveCrackleVolume();
 }
 export function setMuted(m: boolean) { muted = m; }
@@ -329,6 +373,30 @@ export function startBackgroundMusic(url: string): void {
   ensurePlaybackWatchdog();
 }
 
+// ─── Permanent music stop (the finale's closing conversation) ────────
+// Fades the quartet out over `ms` and never brings it back: the watchdog
+// stops resuscitating it and the volume setters leave it silent. The vinyl
+// crackle is untouched — the needle keeps riding the empty groove.
+let musicStopped = false;
+export function fadeOutMusicForever(ms = 4000): void {
+  if (musicStopped) return;
+  musicStopped = true;
+  const el = musicEl;
+  if (!el) return;
+  const v0 = el.volume;
+  const start = Date.now();
+  const iv = window.setInterval(() => {
+    const t = (Date.now() - start) / ms;
+    if (t >= 1) {
+      el.volume = 0;
+      el.pause();
+      window.clearInterval(iv);
+      return;
+    }
+    el.volume = Math.max(0, v0 * (1 - t));
+  }, 50);
+}
+
 // ─── Playback watchdog ──────────────────────────────────────────────
 // The `ended` listener above only catches a loop hiccup at the track's end —
 // but that's the rare case. The common way background audio "disappears"
@@ -343,10 +411,10 @@ export function startBackgroundMusic(url: string): void {
 const WATCHDOG_MS = 1000;
 let watchdogInterval: number | null = null;
 function resumeStalledAudio(): void {
-  // We never intentionally pause the music, so any paused state is a stall to
-  // recover from. Crackle, by contrast, is paused on purpose when disabled —
-  // only resume it while it's meant to be on.
-  if (musicEl && musicEl.paused) musicEl.play().catch(() => {});
+  // Any paused music is a stall to recover from — unless the finale has
+  // permanently faded it out (musicStopped). Crackle, by contrast, is paused
+  // on purpose when disabled — only resume it while it's meant to be on.
+  if (musicEl && musicEl.paused && !musicStopped) musicEl.play().catch(() => {});
   if (crackleEl && crackleEnabled && crackleEl.paused) crackleEl.play().catch(() => {});
   // The SFX context can land in 'interrupted' after a call/Siri/another app
   // grabs audio focus on iOS — re-kick it alongside the music layers.

@@ -34,10 +34,15 @@ export type GoblinState =
   // the current trip; they have to dwell for 1s before phase flips to to_dc.
   | { kind: 'fetching_water'; buildingId: number; sourceId: number; phase: 'to_source' | 'to_dc'; firstLoopDone?: boolean; initialTarget?: Cell; collectingSince?: number }
   | { kind: 'going_to_kill'; targetId: number; attackAt?: number }
+  // Chase rampaging Lolly and swing at her — futile ('no effect' floater),
+  // but the player is allowed to try.
+  | { kind: 'attacking_lolly'; attackAt?: number }
   // Robot-only: stand fast and shoot the target with a laser. Hitscan — no
   // chase, no range limit — so a commanded robot can swat even a dragon out
-  // of the sky. fireAt is the end of the charge-up beat.
-  | { kind: 'firing_laser'; targetKind: 'goblin' | 'minotaur' | 'dragon'; targetId: number; fireAt?: number };
+  // of the sky. fireAt is the end of the charge-up beat. targetKind 'lolly'
+  // (terminators auto-fire at her; commands too) ignores targetId — the beam
+  // splashes off her with no effect.
+  | { kind: 'firing_laser'; targetKind: 'goblin' | 'minotaur' | 'dragon' | 'lolly'; targetId: number; fireAt?: number };
 
 export type Goblin = {
   id: number;
@@ -110,6 +115,15 @@ export type Lolly = {
   spawnAt: number;
   // Active speed surges from lightning / meltdown hits (see lollyBoostState).
   boosts?: LollySpeedBoost[];
+  // Buildings she's crushed so far — drives her opening priority (the two
+  // nearest buildings first, then every spawn hole, then everything).
+  buildingsSmashed?: number;
+  // Tap-selectable like any other unit (info panel only — she takes no
+  // orders). Ephemeral; not meaningful once the finale takes over.
+  selected?: boolean;
+  // Last time an ineffective attack pinged a floater off her, so a wall of
+  // terminator fire doesn't stack "immune" text into a blur.
+  lastImmuneAt?: number;
 };
 
 // The live effect of Lolly's active boosts: her speed multiplier (1 = base),
@@ -199,6 +213,8 @@ export type MinotaurState =
   // the auto-targeter leaves those alone instead of re-assigning the prey.
   | { kind: 'going_to_kill'; targetId: number; attackAt?: number; manual?: boolean }
   | { kind: 'going_to_kill_minotaur'; targetId: number; attackAt?: number }
+  // Charge rampaging Lolly and gore at her — futile, but commandable.
+  | { kind: 'going_to_kill_lolly'; attackAt?: number }
   | { kind: 'going_to_destroy'; buildingId: number; attackAt?: number };
 
 // A discovered water source — fills a rectangular region (the far third of
@@ -277,6 +293,11 @@ export type Demon = {
   // state.lillyTasksGiven); every visit afterwards gets only the curt
   // "get back to kroW". Optional for saves predating the alibi.
   heardOfGolf?: boolean;
+  // Demon L only: she paces back and forth to catch the player's eye after
+  // Bob first hears Lolly's corner piece, until Bob next parlays with her —
+  // a nudge to come talk again. Set true when Lolly's conversation finishes,
+  // cleared the moment Bob opens a parlay with Lilly. See updateDemon.
+  pacing?: boolean;
   // Demon R only: set once Bob has completed the colossus's 5-dragon-bone
   // trade (the 9,999,999-blood "gift") at least once. One of the three beats
   // behind Bob & Lolly's quiet exit from hell (see maybeDepartBobAndLolly in
@@ -423,6 +444,12 @@ export type SpaceUnit = {
   // Id of the constructing space building this robot is working toward/on.
   // Recomputed every tick; only used to drive the walk animation.
   workingOn?: number;
+  // Id of the completed Space Centre this robot is the claimed maintainer for
+  // (assignRobotDuties' maintain duty; recomputed every tick). Mirrors a
+  // ground maintainer's assignment: the robot only counts as crew once it's
+  // both assigned here AND standing on the deck (spaceCentreMaintainerCount),
+  // the same way a goblin mid-walk to a building doesn't staff it yet.
+  maintains?: number;
   // Player-commanded destination (robots only). The robot walks there, then
   // STAYS there — standing fast like a commanded goblin — until construction
   // work appears or a new command replaces it. Cleared when work claims the
@@ -798,6 +825,10 @@ export type GameState = {
   // Increments per goblin spawn so successive goblins emerge from a different
   // hole (main + each completed Goblin Hole building, round-robin).
   spawnHoleRotation: number;
+  // Consecutive blocked-spawn failures. Once it hits 3 we stop playing the
+  // "error" beep on each further fail (the soundscape would otherwise machine-
+  // gun); reset to 0 on the next successful spawn.
+  spawnFailStreak: number;
   autoSpawnMultiplier: number; // 1 baseline; 2 with x2; 4 with x4
   // The multiplier autospawn actually RUNS at — normally pinned to
   // autoSpawnMultiplier (each purchase re-pins it), but once Lilly's
@@ -853,6 +884,13 @@ export type GameState = {
   // Terminators get their own single-slot track (capacity
   // TERMINATOR.spawnCapacity) so a hunt order doesn't block robot assembly.
   terminatorSpawnQueue: { remaining: number }[];
+  // Set true the moment the first terminator finishes assembling — gates the
+  // terminating slider's appearance (it stays once shown, even if every
+  // terminator later dies).
+  terminatorEverSpawned: boolean;
+  // The terminating slider's mode, shared by every terminator: true (default)
+  // = hunt everything fleshy; false = stand down (acquire no new targets).
+  terminatorsTerminating: boolean;
   pendingBuild: PendingBuild;
   // True while the player is placing hell candles (the Candle option in the
   // hell-view Build panel; each tap on a mirror's outer ring places one for
@@ -915,9 +953,17 @@ export type GameState = {
   // Self-clearing once the cutscene fires.
   bobCheatPending: boolean;
   // Sticky: the Pain Gabbonsaw ritual has been bought (99 dragon bones).
-  // One-shot — the button retires, Bob comes back for one last word, and
-  // Lolly is loosed on the overworld.
+  // One-shot — set when the ritual's summon bar completes. The button stays
+  // visible as a greyed-out "owned" trophy, Bob comes back for one last word,
+  // and Lolly is loosed on the overworld.
   gabbonsawBought: boolean;
+  // Pain Gabbonsaw summon bar: seconds left on the channel after purchase,
+  // null when not channeling. Persisted so a reload resumes the countdown.
+  gabbonsawRitualRemaining: number | null;
+  // Flipped by the sim tick when the bar completes; main.ts (which owns the
+  // cutscene + camera) picks it up, runs Bob's cutscene, and spawns Lolly.
+  // Persisted so a save in the gap can't lose the payoff.
+  gabbonsawCutscenePending: boolean;
   // Sticky: the player has used the quick-travel strip (Lilly's fully-feed
   // reward) at least once. Until then the freshly-unlocked strip pulses gold
   // for attention (see refreshUI). Optional for saves predating the strip.
@@ -1350,6 +1396,7 @@ export function createInitialState(): GameState {
     autoDragonMultiplier: 0,
     autoDragonTimer: 0,
     spawnHoleRotation: 0,
+    spawnFailStreak: 0,
     dugDirections: new Set(),
     playArea: initialPlayArea(),
     floaters: [],
@@ -1367,6 +1414,8 @@ export function createInitialState(): GameState {
     dragonSpawnQueue: [],
     robotSpawnQueue: [],
     terminatorSpawnQueue: [],
+    terminatorEverSpawned: false,
+    terminatorsTerminating: true,
     pendingBuild: null,
     pendingCandle: false,
     buildingCounts: emptyBuildingCounts(),
@@ -1393,6 +1442,8 @@ export function createInitialState(): GameState {
     bobPickingHole: false,
     bobCheatPending: false,
     gabbonsawBought: false,
+    gabbonsawRitualRemaining: null,
+    gabbonsawCutscenePending: false,
     bobLollyDeparted: false,
     lolly: null,
     finale: null,
@@ -1959,17 +2010,27 @@ export function spaceStructureOverlapAt(
   return false;
 }
 
-// True if a robot is standing on (or hovering just off) the given Space
-// Centre's deck — the one-robot crew an assembled Centre needs to run. Uses
-// the platform's footprint plus the robot build range, so a robot parked on
-// the walkable rim (robotParkSpot's ring) comfortably counts.
-export function spaceCentreMaintained(state: GameState, sb: SpaceBuilding): boolean {
+// Crew count for a Space Centre, mirroring the ground maintainerCount: only
+// robots ASSIGNED to this Centre (assignRobotDuties' maintain duty) that have
+// actually arrived — standing on (or hovering just off) the deck — count,
+// the same way an assigned goblin doesn't staff a ground building until it's
+// inside and `maintaining`. Range is the platform's footprint plus the robot
+// build range, so a robot parked on the walkable rim (robotParkSpot's ring)
+// comfortably counts.
+export function spaceCentreMaintainerCount(state: GameState, sb: SpaceBuilding): number {
   const range = BUILDING_DEFS.orbital_platform.size / 2 + ROBOT.buildRange;
+  let n = 0;
   for (const su of state.spaceUnits.values()) {
-    if (!su.robot) continue;
-    if (Math.hypot(su.pos.x - sb.pos.x, su.pos.y - sb.pos.y) <= range) return true;
+    if (!su.robot || su.maintains !== sb.id) continue;
+    if (Math.hypot(su.pos.x - sb.pos.x, su.pos.y - sb.pos.y) <= range) n++;
   }
-  return false;
+  return n;
+}
+
+// Whether the Centre's crew demand (maintainersRequired) is met.
+export function spaceCentreMaintained(state: GameState, sb: SpaceBuilding): boolean {
+  return spaceCentreMaintainerCount(state, sb)
+    >= BUILDING_DEFS.space_centre.maintainersRequired;
 }
 
 // Drifting space unit within a generous tap radius of a SPACE-coord point, or
@@ -1987,26 +2048,28 @@ export function spaceUnitAt(state: GameState, x: number, y: number): SpaceUnit |
   return best;
 }
 
-// Hypercentres the player can point at — finished ground ones plus any hauled
-// into orbit. Gates the Robot summon (ROBOT.hypercentresRequired).
+// Powered Hypercentres the player can point at — active ground ones plus any
+// hauled into orbit and running. Gates the Robot summon
+// (ROBOT.hypercentresRequired): a dormant/underpowered HC doesn't count.
 export function countHypercentres(state: GameState): number {
   let n = 0;
   for (const b of state.buildings.values()) {
-    if (b.kind === 'hypercentre' && b.state !== 'constructing') n++;
+    if (b.kind === 'hypercentre' && b.state === 'active') n++;
   }
   for (const sb of state.spaceBuildings.values()) {
-    if (sb.building.kind === 'hypercentre') n++;
+    if (sb.building.kind === 'hypercentre' && sb.building.state === 'active') n++;
   }
   return n;
 }
 
-// Completed Space Centres in orbit — the industrial gate on Terminator
-// assembly (TERMINATOR.spaceCentresRequired). Space Centres only ever exist
-// as space buildings, so there's no ground pass to make.
+// Powered Space Centres in orbit — the industrial gate on Terminator
+// assembly (TERMINATOR.spaceCentresRequired): only ones actively running
+// (crewed + on the grid) count. Space Centres only ever exist as space
+// buildings, so there's no ground pass to make.
 export function countSpaceCentres(state: GameState): number {
   let n = 0;
   for (const sb of state.spaceBuildings.values()) {
-    if (sb.building.kind === 'space_centre' && sb.building.state !== 'constructing') n++;
+    if (sb.building.kind === 'space_centre' && sb.building.state === 'active') n++;
   }
   return n;
 }

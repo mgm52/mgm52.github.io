@@ -1,4 +1,4 @@
-import { playSound, playMinotaurCommand } from './audio';
+import { playSound, playSoundReversed, playMinotaurCommand } from './audio';
 import {
   AUTODRAGON_TIERS, AUTOSPAWN_TIERS, BUILDABLE_KINDS, BUILDING_DEFS, BuildingKind, DRAG_SELECT_HINT_DELAY_SEC, MULTI_SPAWN_HINT_DELAY_SEC,
   DRAGON, GOBLIN, LIGHTNING, PAIN_GABBONSAW, PAN_HINT_DELAY_SEC, ROBOT, SPAWN_HINT_NO_SPAWN_SEC,
@@ -7,8 +7,8 @@ import {
 import {
   Building, Cell, Demon, DragonState, GameState, Ghost, Goblin, GoblinState, SoulChair, SpaceBuilding, SpaceUnit, WaterSource,
   anySpawnHole, appendLog, buildingAtCell, buildingCenter, buildingLabel, buildingMoneyCost, cellCenter, cellKey, chairSoulSnapshot, countHypercentres, countIdle, countSpaceCentres, defOf, digDirection,
-  earnDragonBone, getSpawnCapacity, goblinSpawningBlocked, hellMirrorCenter, holeBlockedByBuilding, isCellBlocked, isInBounds,
-  maintainerCount, markBuildingsChanged, nextBuildingDisplayNum, occupyCell, spaceCentreMaintained, waterCarrierCount,
+  earnDragonBone, getSpawnCapacity, goblinSpawningBlocked, hellMirrorCenter, holeBlockedByBuilding, holeCells, isCellBlocked, isCellInBuilding, isInBounds,
+  maintainerCount, markBuildingsChanged, nextBuildingDisplayNum, occupyCell, spaceCentreMaintainerCount, waterCarrierCount,
 } from './state';
 import { spawnDragon, spawnMinotaur, unseatSoulFromChair } from './sim';
 import { isModalDialogueActive } from './demon-dialogue';
@@ -99,6 +99,13 @@ const NEW_BADGE_EXEMPT = new Set(['btn-build-goblin_wheel', 'btn-build-phone_far
 function newBadgeTarget(btnId: string): string {
   return btnId.startsWith('btn-dig-') ? 'dig-row' : btnId;
 }
+// Rows that must stay glued directly beneath their parent button (the slider
+// rows) — newly-unlocked content otherwise jumps to the bottom of its menu,
+// which would strand a slider far from the button it modifies.
+const ANCHORED_BELOW = new Map([
+  ['autospawn-level-row', 'btn-buy-autospawn'],
+  ['terminating-row', 'btn-summon-terminator'],
+]);
 // Flips true at the end of the first refresh. Buttons already present on load
 // (a resumed save) shouldn't be flagged as "newly unlocked" — only ones that
 // appear afterwards do.
@@ -150,9 +157,16 @@ function applyFadeInOnFirstShow(btnId: string): void {
     // Newly-unlocked content always lands at the bottom of its menu — that's
     // where the player's eye already is (task line, scroll cue). Buttons
     // present on the initial seed keep their curated order. The dig buttons
-    // move as their whole row (the newBadgeTarget unit).
+    // move as their whole row (the newBadgeTarget unit). Slider rows are the
+    // exception: they slot in directly beneath the button they modify.
     const moveEl = document.getElementById(target);
-    moveEl?.parentElement?.appendChild(moveEl);
+    const anchorId = ANCHORED_BELOW.get(target);
+    const anchor = anchorId ? document.getElementById(anchorId) : null;
+    if (moveEl && anchor && anchor.parentElement === moveEl.parentElement) {
+      anchor.after(moveEl);
+    } else {
+      moveEl?.parentElement?.appendChild(moveEl);
+    }
     // Mid-celebration: hold the item invisible and queue it for the staged
     // one-at-a-time reveal instead of the plain fade-in.
     if (revealHoldActive()) {
@@ -336,9 +350,10 @@ function playTaskCompleteAnimation(taskId: string): void {
   // runUnlockRevealSequence (main.ts checks this class in its frame loop).
   celebrationsInFlight++;
   document.body.classList.add('unlock-reveal-hold');
-  // Optional side-tasks read "OPTIONAL COMPLETE" rather than "WORK COMPLETE".
+  // Optional side-tasks read "OPTIONAL COMPLETE" rather than "WORK COMPLETE" —
+  // except Lilly's handout, which is Work by decree ("you need more Work").
   const task = TASKS.find(t => t.id === taskId);
-  const isOptional = task?.optional ?? false;
+  const isOptional = (task?.optional ?? false) && !LILLY_TASK_IDS.includes(taskId);
   const textEl = overlay.querySelector('.task-complete-text');
   if (textEl) textEl.innerHTML = `${isOptional ? 'OPTIONAL' : 'WORK'}<br>COMPLETE`;
   // Subtitle recalls what the finished task actually was.
@@ -683,6 +698,9 @@ export type UICallbacks = {
   // otherwise an owned tier multiplier), the Autodragon ritual, and the
   // quick-travel strip.
   onSetAutoSpawnLevel: (multiplier: number) => void;
+  // The terminating slider under the Terminator button — off / terminating,
+  // shared by every terminator.
+  onSetTerminating: (on: boolean) => void;
   onBuyAutoDragon: () => void;
   onQuickTravel: (view: 'ground' | 'hell' | 'space') => void;
   onBuyGoldgoblins: () => void;
@@ -896,6 +914,35 @@ export function setupUI(state: GameState, callbacks: UICallbacks) {
   terminatorBtn.addEventListener('click', (e) => { playSound('click', 1, 0.75); flashSummonClick(terminatorBtn); emanateAtCursor(e.clientX, e.clientY, 'white'); callbacks.onSummonTerminator(); });
   summonList.appendChild(terminatorBtn);
 
+  // Terminating slider — appears once the first terminator has been assembled
+  // (refreshUI). Two positions: 0 = off (terminators stand down), 1 =
+  // terminating (the default — hunt everything fleshy). Shared by every
+  // terminator. Turning it on plays the power-up cue slowed down; off plays
+  // that same cue reversed and slowed.
+  const terminatingRow = document.createElement('div');
+  terminatingRow.className = 'build-button build-button-compact';
+  terminatingRow.id = 'terminating-row';
+  terminatingRow.style.display = 'none';
+  terminatingRow.innerHTML = `
+    <div class="build-content" style="align-items:center; gap:8px">
+      <div class="build-text" style="flex:0 0 auto">
+        <div class="build-name" id="terminating-label">terminating</div>
+      </div>
+      <input type="range" id="terminating-slider" min="0" max="1" step="1" value="1"
+             style="flex:1; min-width:0; accent-color:#ff5a4a">
+    </div>
+  `;
+  const terminatingSlider = terminatingRow.querySelector('#terminating-slider') as HTMLInputElement;
+  terminatingSlider.addEventListener('input', () => {
+    const on = terminatingSlider.value === '1';
+    // The power-up sting slowed right down for "terminating"; the same sting
+    // reversed + slowed for "off".
+    if (on) playSound('online', 0.7, 0.5);
+    else playSoundReversed('online', 0.7, 0.5);
+    callbacks.onSetTerminating(on);
+  });
+  summonList.appendChild(terminatingRow);
+
   // Ritual upgrades — surfaced once a Phone Farm has finished building.
   // Bought ones stay visible but go disabled.
   const autoAssignBtn = document.createElement('button');
@@ -1092,14 +1139,16 @@ export function setupUI(state: GameState, callbacks: UICallbacks) {
 
   // Pain Gabbonsaw — the demo's true closing ritual, revealed by the final
   // (Collect 9,999,999 blood) task. 99 dragon bones. The name is an anagram
-  // the player is meant to discover the hard way; buying it brings Bob back
-  // for one last word and then spawns Lolly's rampage. One-shot: the button
-  // retires forever once bought (see refreshUI).
+  // the player is meant to discover the hard way; buying it channels a summon
+  // bar like any other unit, then brings Bob back for one last word and
+  // spawns Lolly's rampage. One-shot: the button stays put as a greyed-out
+  // "owned" trophy once the bar completes (see refreshUI).
   const gabbonsawBtn = document.createElement('button');
   gabbonsawBtn.className = 'build-button build-button-compact';
   gabbonsawBtn.id = 'btn-buy-gabbonsaw';
   gabbonsawBtn.style.display = 'none';
   gabbonsawBtn.innerHTML = `
+    ${progressTrack('buy-gabbonsaw', 1)}
     <div class="build-content">
       <div class="build-text">
         <div class="build-name">Pain Gabbonsaw</div>
@@ -1251,6 +1300,14 @@ export function setupUI(state: GameState, callbacks: UICallbacks) {
   destroyBtn.addEventListener('click', () => {
     const target = [...state.buildings.values()].find(b => b.selected);
     if (!target) return;
+    // A building squatting on the original Goblin Hole can be torn down by
+    // hand, no minotaur needed — the player must never be able to brick
+    // their spawn point just because nothing big enough is alive to smash it.
+    if (!state.holeDestroyed
+        && holeCells(state).some((c) => isCellInBuilding(target, c.cx, c.cy))) {
+      callbacks.onDestroyBuilding(target.id);
+      return;
+    }
     const minotaurs = [...state.minotaurs.values()];
     const warn = document.getElementById('info-destroy-warning')!;
     if (minotaurs.length === 0) {
@@ -1742,6 +1799,23 @@ export function refreshUI(state: GameState) {
     setBuyFlash('btn-summon-terminator', false);
   }
 
+  // Terminating slider — revealed once the first terminator has ever been
+  // assembled, and stays put thereafter. Reflects state.terminatorsTerminating
+  // (don't fight the user mid-drag).
+  const terminatingRow = document.getElementById('terminating-row');
+  if (terminatingRow) {
+    const showSlider = state.terminatorEverSpawned;
+    terminatingRow.style.display = showSlider ? '' : 'none';
+    if (showSlider) {
+      applyFadeInOnFirstShow('terminating-row');
+      const slider = document.getElementById('terminating-slider') as HTMLInputElement;
+      const label = document.getElementById('terminating-label')!;
+      const val = state.terminatorsTerminating ? '1' : '0';
+      if (document.activeElement !== slider && slider.value !== val) slider.value = val;
+      label.textContent = state.terminatorsTerminating ? 'terminating' : 'off';
+    }
+  }
+
   // Quick-travel strip — Lilly's fully-feed reward: Space / Earth / Hell
   // jumps stacked at the top of the play area (Earth in the middle,
   // mirroring the world). Space stays hidden until orbit is reachable at
@@ -1949,15 +2023,30 @@ export function refreshUI(state: GameState) {
   // Autodragon — Lilly's destroy-a-robot reward, levelling through
   // AUTODRAGON_TIERS (the same replace-chain treatment as Autospawn).
   refreshAutodragonButton(state, revealedTaskIds.has('destroy_robot'));
-  // Pain Gabbonsaw — surfaces once the final task's celebration clears, and
-  // retires forever the moment it's bought (the ritual is very much one-shot).
-  refreshRitualButton(
-    'btn-buy-gabbonsaw', 'cost-buy-gabbonsaw',
-    revealedTaskIds.has('collect_blood') && !state.gabbonsawBought,
-    false,
-    state.dragonBone >= PAIN_GABBONSAW.dragonBoneCost,
-    `${PAIN_GABBONSAW.dragonBoneCost} bones`,
-  );
+  // Pain Gabbonsaw — surfaces once the final task's celebration clears.
+  // Buying it runs a summon bar (one-shot); while it channels the button is
+  // locked + in-progress, and once it completes the button stays put as a
+  // greyed-out "owned" trophy.
+  {
+    const gabVisible = revealedTaskIds.has('collect_blood');
+    const channeling = state.gabbonsawRitualRemaining !== null;
+    refreshRitualButton(
+      'btn-buy-gabbonsaw', 'cost-buy-gabbonsaw',
+      gabVisible,
+      state.gabbonsawBought,
+      !channeling && state.dragonBone >= PAIN_GABBONSAW.dragonBoneCost,
+      `${PAIN_GABBONSAW.dragonBoneCost} bones`,
+    );
+    if (gabVisible) {
+      const gabBtn = document.getElementById('btn-buy-gabbonsaw') as HTMLButtonElement;
+      gabBtn.classList.toggle('in-progress', channeling);
+      if (channeling) gabBtn.disabled = true;
+      const gabFill = channeling
+        ? 1 - (state.gabbonsawRitualRemaining ?? 0) / PAIN_GABBONSAW.spawnTime
+        : 0;
+      setFillWidth('fill-buy-gabbonsaw-0', gabFill);
+    }
+  }
   // Goldblins → Goldblins x10 form a replace chain (like Autospawn): base
   // button hides once owned, x10 takes its place; x10 hides once owned.
   // Base Goldblins unlocks via the optional Summon-2-Minotaurs side-task; x10
@@ -2012,7 +2101,9 @@ export function refreshUI(state: GameState) {
     // which added up when this ran every refresh.
     const taskHtml = activeTasks
       .map(t => {
-        const label = t.optional ? 'Optional' : 'Work';
+        // Lilly's three handed-down tasks are Work by decree ("you need more
+        // Work"), not Optional — only true side-tasks keep the softer label.
+        const label = t.optional && !LILLY_TASK_IDS.includes(t.id) ? 'Optional' : 'Work';
         const text = t.dynamicText ? t.dynamicText(state) : t.text;
         return `<div id="${taskLineElId(t.id)}"><strong>${label}:</strong> ${text}</div>`;
       })
@@ -2359,7 +2450,16 @@ function refreshInfoPanel(state: GameState) {
   unseatBtn.style.display = 'none';
   const selectedDemon = [...state.demons.values()].find((d) => d.selected) ?? null;
   const selectedChair = state.soulChairs.find((c) => c.selected) ?? null;
-  if (selectedDemon) {
+  const lollySelected = !!state.lolly?.selected && !state.finale;
+  if (lollySelected) {
+    // The rampaging duo — selectable like any other unit, but they take no
+    // orders (commands aimed at them are attack orders from OTHER units).
+    panel.classList.add('visible');
+    portrait.innerHTML = `<div class="portrait-goblin" style="background:#2a0612;border-color:#ff5a8a;color:#ffb0c8">☠</div>`;
+    name.textContent = 'Lolly & Bob';
+    stateEl.textContent = 'Rampaging';
+    extra.innerHTML = `<span style="color:#6a7080">They take no orders. The world simply gets smaller.</span>`;
+  } else if (selectedDemon) {
     showDemon(state, selectedDemon, panel, portrait, name, stateEl, extra);
   } else if (selectedHellPortal) {
     showHellPortal(state, selectedHellPortal, panel, portrait, name, stateEl, extra);
@@ -2480,6 +2580,7 @@ function describeMinotaurState(state: GameState, s: import('./state').MinotaurSt
     case 'moving_to': return 'Moving';
     case 'going_to_kill': return `Hunting goblin #${s.targetId}`;
     case 'going_to_kill_minotaur': return `Charging Minotaur #${s.targetId}`;
+    case 'going_to_kill_lolly': return 'Charging Lolly (futile)';
     case 'going_to_destroy': return `Smashing ${buildingLabel(state, s.buildingId)}`;
   }
 }
@@ -2661,8 +2762,15 @@ function showGoblin(state: GameState, g: Goblin, panel: HTMLElement, portrait: H
     ? `<div class="portrait-goblin" style="background:#1c2026;border-color:#9aa3ad;color:#cfd5dc">R</div>`
     : `<div class="portrait-goblin">G</div>`;
   name.textContent = g.terminator ? `Terminator #${g.id}` : g.robot ? `Robot #${g.id}` : `Goblin #${g.id}`;
-  stateEl.textContent = describeGoblinState(state, g.state)
-    || (g.terminator ? 'Scanning for targets' : g.robot ? 'Allergic to radioactive waste' : '');
+  if (g.robot && !g.terminator) {
+    // The robot's one weakness sits pinned right under its name, always —
+    // with whatever it's currently doing on the line beneath.
+    const doing = describeGoblinState(state, g.state);
+    stateEl.innerHTML = `Allergic to radioactive blasts${doing ? `<br>${doing}` : ''}`;
+  } else {
+    stateEl.textContent = describeGoblinState(state, g.state)
+      || (g.terminator ? 'Scanning for targets' : '');
+  }
   setCommandHint(extra, state);
 }
 
@@ -2773,11 +2881,24 @@ function showSpaceBuilding(state: GameState, sb: SpaceBuilding, panel: HTMLEleme
   }
   // Consumers in orbit still need the ground grid — `state` reflects whether
   // resolvePowerAndState could spare the draw this tick. Generators stay
-  // active in orbit (no upkeep). A Space Centre additionally needs its
-  // one-robot crew on deck; report that ahead of the power link since an
-  // unstaffed Centre doesn't draw at all.
-  if (b.kind === 'space_centre' && !isActive && !spaceCentreMaintained(state, sb)) {
-    stateEl.textContent = 'Dormant — needs a robot maintainer';
+  // active in orbit (no upkeep). The Space Centre is staffed + powered like a
+  // ground building (one-robot crew standing in for the maintainers), so its
+  // panel reads exactly like theirs: Active — earning/drawing, or Dormant —
+  // staffing first, then "underpowered".
+  const crewHave = b.kind === 'space_centre' ? spaceCentreMaintainerCount(state, sb) : 0;
+  if (b.kind === 'space_centre') {
+    const need = def.maintainersRequired;
+    if (isActive) {
+      const bits: string[] = [];
+      if (def.income) bits.push(`earning Ƶ${def.income.toLocaleString('en-US')}/s`);
+      if (def.powerOutput < 0) bits.push(`drawing ${formatPower(-def.powerOutput)}`);
+      stateEl.textContent = `Active — ${bits.join(', ')}`;
+    } else {
+      const why = crewHave < need
+        ? `needs ${need - crewHave} more robot${need - crewHave === 1 ? '' : 's'}`
+        : `underpowered`;
+      stateEl.textContent = `Dormant — ${why}`;
+    }
   } else if (def.powerOutput < 0) {
     stateEl.textContent = isActive ? 'Active — powered from below' : 'Dormant — power link severed';
   } else if (def.powerOutput > 0) {
@@ -2786,6 +2907,11 @@ function showSpaceBuilding(state: GameState, sb: SpaceBuilding, panel: HTMLEleme
     stateEl.textContent = isActive ? 'Active' : 'Dormant';
   }
   const lines: string[] = [];
+  // The Space Centre reports its staffing the same way a ground building
+  // reports its maintainers, so its panel reads like theirs.
+  if (b.kind === 'space_centre') {
+    lines.push(`Maintained by ${crewHave} / ${def.maintainersRequired} robot${def.maintainersRequired === 1 ? '' : 's'}`);
+  }
   if (def.income > 0) lines.push(`Income: Ƶ${def.income.toLocaleString('en-US')}/s`);
   if (def.powerOutput > 0) lines.push(`Power output: ${formatPower(def.powerOutput)}`);
   else if (def.powerOutput < 0) lines.push(`Power draw: ${formatPower(-def.powerOutput)}`);
@@ -2821,7 +2947,9 @@ function describeGoblinState(state: GameState, s: GoblinState): string {
         ? `Fetching water for ${buildingLabel(state, s.buildingId)}`
         : `Delivering water to ${buildingLabel(state, s.buildingId)}`;
     case 'going_to_kill': return `Hunting goblin #${s.targetId}`;
+    case 'attacking_lolly': return 'Attacking Lolly (futile)';
     case 'firing_laser': {
+      if (s.targetKind === 'lolly') return 'Firing laser at Lolly (futile)';
       const noun = s.targetKind === 'goblin' ? 'goblin' : s.targetKind === 'minotaur' ? 'Minotaur' : 'Dragon';
       return `Firing laser at ${noun} #${s.targetId}`;
     }

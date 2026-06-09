@@ -180,6 +180,9 @@ export function loadGame(): { state: GameState; savedAt: number } | null {
     // cell→building index. Seed it so the first markBuildingsChanged++ doesn't
     // turn undefined into NaN (which would defeat the index's cache tag).
     env.state.buildingsVersion ??= 0;
+    // Consecutive blocked-spawn streak (mutes the repeated error beep) — added
+    // with that mute; ephemeral enough to just reset on load.
+    env.state.spawnFailStreak ??= 0;
     // Dragons / space scene — added with the Dragon Beacon payoff. Default for
     // saves predating them, and always resume on the ground (the climb is a
     // live-only animation).
@@ -190,6 +193,11 @@ export function loadGame(): { state: GameState; savedAt: number } | null {
     // Terminator track + Lilly's task rewards (autospawn throttle pins to the
     // purchased multiplier on older saves; Autodragon starts unbought).
     env.state.terminatorSpawnQueue ??= [];
+    // Terminating slider — added after launch. Default it shown-once-spawned
+    // (seed from any live terminator) and to its on position.
+    env.state.terminatorEverSpawned ??=
+      [...env.state.goblins.values()].some((g) => g.terminator);
+    env.state.terminatorsTerminating ??= true;
     env.state.autoSpawnLevel ??= env.state.autoSpawnMultiplier;
     env.state.autoDragonEnabled ??= false;
     // Autodragon tiers — a pre-tier save that owned Autodragon maps to x1.
@@ -228,6 +236,9 @@ export function loadGame(): { state: GameState; savedAt: number } | null {
     // Pain Gabbonsaw ritual + Lolly's rampage — added together. The rampage
     // itself persists (she does not stop), so only seed the defaults.
     env.state.gabbonsawBought ??= false;
+    // The ritual's summon bar + cutscene handoff — added with the bar.
+    env.state.gabbonsawRitualRemaining ??= null;
+    env.state.gabbonsawCutscenePending ??= false;
     // Bob & Lolly's quiet exit from hell — must default before
     // ensureDemonRoster below, which uses it to keep a departed Lolly from
     // being re-seeded into the corner.

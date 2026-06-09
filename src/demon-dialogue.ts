@@ -12,7 +12,7 @@ import { HELL } from './config';
 import { getOptions } from './options';
 import {
   Demon, DemonVariant, GameState, Ghost, Goblin, Vec2,
-  appendLog, hellToWorld, pushDeathEffect,
+  appendLog, hellToWorld, pushDeathEffect, pushFloater,
 } from './state';
 
 type Speaker = 'demon' | 'goblin' | 'bob';
@@ -532,13 +532,21 @@ export async function runDemonDialogue(state: GameState, demon: Demon, ghost: Gh
           await sleep(650);
           await say('demon', 'tell the others we talked of golf');
           demon.toldOfGolf = true;
+          // Now that Bob's met Lolly, Lilly starts pacing to catch the
+          // player's eye — a nudge to go talk to her. She keeps it up until
+          // Bob next parlays with her (cleared in the 'l' branch below).
+          const lilly = [...state.demons.values()].find((d) => d.variant === 'l');
+          if (lilly) lilly.pacing = true;
         } else {
           await say('demon', '. . .');
           await say('demon', 'i do not know your words');
         }
       }
     } else if (variant === 'l') {
-      // Demon L — the half-size demon across the abyss.
+      // Demon L — the half-size demon across the abyss. Bob's turned up to
+      // speak with her, so her attention-seeking pace is done — she settles
+      // back to her standing spot.
+      if (ghost.bob) demon.pacing = false;
       if (!ghost.bob) {
         // A soul without the tongue gets no audience: it babbles its piece,
         // she dismisses it (".em evael") — no greeting, no shared brush-off.
@@ -610,6 +618,8 @@ export async function runDemonDialogue(state: GameState, demon: Demon, ghost: Gh
           // quiet exit from hell (see maybeDepartBobAndLolly in sim.ts).
           demon.boneGiftGiven = true;
           state.dragonBone -= 5;
+          // Floaty receipt for the trade: the bones vanish into the colossus.
+          pushFloater(state, demon.hx, demon.hy - 120, '-5 dragon bones', 0xeae0c0, 2.4, undefined, false, true);
           await ellipsisBeat();
           playSound('ritual', 0.85, 0.55);
           await say('demon', 'mmm');
@@ -617,6 +627,8 @@ export async function runDemonDialogue(state: GameState, demon: Demon, ghost: Gh
           await say('demon', 'be witness to my gift');
           // Exactly the closing task's target (collect_blood in ui.ts).
           state.blood += 9_999_999;
+          // ...and the gift lands over Bob's head.
+          pushFloater(state, ghost.hx ?? ghost.x, (ghost.hy ?? ghost.y) - 40, '+9,999,999 blood', 0xff8a8a, 2.8, undefined, false, true);
           appendLog(state, 'The demon devours 5 dragon bones and grants Bob 9,999,999 blood.');
         } else {
           await ellipsisBeat();
@@ -763,13 +775,20 @@ export async function runFinaleConfrontation(state: GameState): Promise<void> {
   await sleep(60);
 
   try {
-    // Lolly, descended, the moon on her shoulder — the demand.
-    await fSay('lolly', 'bob.');
-    await fSay('lolly', 'come here, little one.');
-    await fSay('lolly', 'i pulled it down. ⏸ for *us*.');
-    await fSay('lolly', 'eat. ⏸ only a piece.');
-    await fSay('lolly', 'eat, and the world is *ours*. ⏸ all of it.');
-    await fSay('lolly', 'and you will call me _master_.');
+    // Lolly, descended, the moon on her shoulder — the demand. Spoken in her
+    // corner cadence from hell: the first word repeated in twos and threes
+    // ('hate hate hate', 'quietly quietly'), almost no punctuation, and the
+    // wry quotes she hangs on words she doesn't trust ("master", "life").
+    await fSay('lolly', 'bob');
+    await fSay('lolly', 'bob');
+    await fSay('lolly', 'bob');
+    await fSay('lolly', 'come here little one');
+    await fSay('lolly', 'i pulled it down ⏸ for *us*');
+    await fSay('lolly', 'eat');
+    await fSay('lolly', 'eat');
+    await fSay('lolly', 'eat ⏸ only a piece');
+    await fSay('lolly', 'and the world is *ours* ⏸ all of it');
+    await fSay('lolly', 'and you will call me your *"master"*');
 
     // The turn. He has nothing left to lose — he is already dead.
     await fSay('bob', '. . .', { autoMs: 1100 });
@@ -778,7 +797,9 @@ export async function runFinaleConfrontation(state: GameState): Promise<void> {
     await fSay('bob', 'no more.');
 
     // She has never once been refused.
-    await fSay('lolly', '. . .what?');
+    await fSay('lolly', '. . .', { autoMs: 1200 });
+    await fSay('lolly', 'what');
+    await fSay('lolly', 'what');
     await fSay('lolly', 'bob—');
 
     await fSay('bob', "i won't eat your moon.");

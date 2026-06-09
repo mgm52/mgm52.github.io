@@ -440,6 +440,7 @@ function rebuildPanel(panel: HTMLElement, callbacks: OptionsUICallbacks, refresh
     color('Lamp color', o.terminatorLampColor, (v) => setOption('terminatorLampColor', v)),
     slider('Lamp size', o.terminatorLampScale, 0.2, 3, 0.05, (v) => setOption('terminatorLampScale', v)),
     slider('Lamp height', o.terminatorLampHeight, 0, 1, 0.02, (v) => setOption('terminatorLampHeight', v)),
+    toggle('Lamp in front of sprite', o.terminatorLampInFront, (v) => setOption('terminatorLampInFront', v)),
     slider('Laser windup (s)', o.terminatorLaserWindup, 0.05, 3, 0.05, (v) => setOption('terminatorLaserWindup', v)),
   ]));
 
