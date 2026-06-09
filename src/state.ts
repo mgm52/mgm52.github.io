@@ -293,6 +293,11 @@ export type Demon = {
   // state.lillyTasksGiven); every visit afterwards gets only the curt
   // "get back to kroW". Optional for saves predating the alibi.
   heardOfGolf?: boolean;
+  // Demon L only: she paces back and forth to catch the player's eye after
+  // Bob first hears Lolly's corner piece, until Bob next parlays with her —
+  // a nudge to come talk again. Set true when Lolly's conversation finishes,
+  // cleared the moment Bob opens a parlay with Lilly. See updateDemon.
+  pacing?: boolean;
   // Demon R only: set once Bob has completed the colossus's 5-dragon-bone
   // trade (the 9,999,999-blood "gift") at least once. One of the three beats
   // behind Bob & Lolly's quiet exit from hell (see maybeDepartBobAndLolly in

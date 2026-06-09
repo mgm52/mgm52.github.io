@@ -294,6 +294,11 @@ export const DEMON = {
   speed: 16,          // hell-px/sec — a slow, ponderous patrol (dev toggle only)
   displayPx: 900,     // colossal, ~9x a summoned Minotaur
   patrolHalf: 360,    // hell-px travelled either side of the spawn centre
+  // Lilly's attention-seeking pace after Bob first meets Lolly: a tighter
+  // back-and-forth than the dev patrol, either side of her standing spot,
+  // run until Bob next parlays with her. See updateDemon / lillyPacing.
+  pacingHalf: 200,    // hell-px either side of her standing centre
+  pacingSpeed: 90,    // hell-px/sec — a brisk, fidgety pace (not the slow patrol)
   parlayRadius: 360,  // a ghost within this (hell-px) of the demon starts a parlay
   hitRadius: 390,     // click radius (hell-px) for selecting the demon
   // The demon is solid: no soul may stand within this (hell-px) of his centre —

@@ -1557,6 +1557,19 @@ function updateDemon(state: GameState, d: Demon) {
     if (d.hy >= d.y1) { d.hy = d.y1; d.dir = -1; }
     else if (d.hy <= d.y0) { d.hy = d.y0; d.dir = 1; }
     d.facing = d.dir > 0 ? Math.PI / 2 : -Math.PI / 2;
+  } else if (d.variant === 'l' && d.pacing) {
+    // Lilly's attention-seeking pace: a tight vertical back-and-forth around
+    // her standing spot (demonLX/Y), brisker than the dev patrol. Runs until
+    // Bob next parlays with her (clears d.pacing in demon-dialogue). Her
+    // standing X is held; only the Y oscillates so she stays in her lane.
+    d.hx = o.demonLX;
+    const scale = demonScaleOf(d);
+    const lo = o.demonLY - DEMON.pacingHalf * scale;
+    const hi = o.demonLY + DEMON.pacingHalf * scale;
+    d.hy += d.dir * DEMON.pacingSpeed * TICK_S;
+    if (d.hy >= hi) { d.hy = hi; d.dir = -1; }
+    else if (d.hy <= lo) { d.hy = lo; d.dir = 1; }
+    d.facing = d.dir > 0 ? Math.PI / 2 : -Math.PI / 2;
   } else {
     const variant = d.variant ?? 'pit';
     const facing = variant === 'l' ? o.demonLFacing

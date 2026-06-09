@@ -532,13 +532,21 @@ export async function runDemonDialogue(state: GameState, demon: Demon, ghost: Gh
           await sleep(650);
           await say('demon', 'tell the others we talked of golf');
           demon.toldOfGolf = true;
+          // Now that Bob's met Lolly, Lilly starts pacing to catch the
+          // player's eye — a nudge to go talk to her. She keeps it up until
+          // Bob next parlays with her (cleared in the 'l' branch below).
+          const lilly = [...state.demons.values()].find((d) => d.variant === 'l');
+          if (lilly) lilly.pacing = true;
         } else {
           await say('demon', '. . .');
           await say('demon', 'i do not know your words');
         }
       }
     } else if (variant === 'l') {
-      // Demon L — the half-size demon across the abyss.
+      // Demon L — the half-size demon across the abyss. Bob's turned up to
+      // speak with her, so her attention-seeking pace is done — she settles
+      // back to her standing spot.
+      if (ghost.bob) demon.pacing = false;
       if (!ghost.bob) {
         // A soul without the tongue gets no audience: it babbles its piece,
         // she dismisses it (".em evael") — no greeting, no shared brush-off.
