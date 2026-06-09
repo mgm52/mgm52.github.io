@@ -207,6 +207,50 @@ export function playSound(name: SoundName, volume = 1, playbackRate?: number, gh
   src.start();
 }
 
+// ─── Reversed playback ──────────────────────────────────────────────
+// Some cues want a sample played backwards (the terminator slider's
+// power-down is the power-up cue run in reverse). Build the reversed
+// AudioBuffer lazily from the forward one and cache it per sound.
+const reversedBuffers = new Map<string, AudioBuffer>();
+function getReversedBuffer(ctx: AudioContext, name: SoundName): AudioBuffer | null {
+  const cached = reversedBuffers.get(name);
+  if (cached) return cached;
+  const fwd = buffers.get(name);
+  if (!fwd) return null;
+  const rev = ctx.createBuffer(fwd.numberOfChannels, fwd.length, fwd.sampleRate);
+  for (let ch = 0; ch < fwd.numberOfChannels; ch++) {
+    const src = fwd.getChannelData(ch);
+    const dst = rev.getChannelData(ch);
+    const n = src.length;
+    for (let i = 0; i < n; i++) dst[i] = src[n - 1 - i];
+  }
+  reversedBuffers.set(name, rev);
+  return rev;
+}
+
+// Play a registered sample backwards (and optionally slowed). One-shot — it
+// skips the voice pool since the reversed cues are infrequent UI feedback.
+export function playSoundReversed(name: SoundName, volume = 1, playbackRate = 1) {
+  if (muted) return;
+  const ctx = audioCtx;
+  if (!ctx) return;
+  const rev = getReversedBuffer(ctx, name);
+  if (!rev) return;
+  if (ctx.state !== 'running') {
+    if (!gestureSeen) return;
+    void ctx.resume();
+  }
+  const src = ctx.createBufferSource();
+  src.buffer = rev;
+  src.playbackRate.value = Math.max(0.25, Math.min(4, playbackRate));
+  const gain = ctx.createGain();
+  gain.gain.value = Math.max(0, Math.min(1, masterVolume * volume));
+  src.connect(gain);
+  gain.connect(ctx.destination);
+  src.onended = () => { src.disconnect(); gain.disconnect(); };
+  src.start();
+}
+
 // ─── Decaying spawn / death volumes ─────────────────────────────────
 // Late-game spam can spawn dozens of goblins per second. Each successive
 // goblin_spawn / goblin_death plays a hair quieter than the last so the

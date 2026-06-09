@@ -797,7 +797,7 @@ export const BUILDING_DEFS = {
     short: 'OP',
     cost: 1_000_000,
     buildersRequired: 1,
-    buildTime: 20,
+    buildTime: 4,
     maintainersRequired: 0,
     income: 0,
     powerOutput: 0,
@@ -823,7 +823,7 @@ export const BUILDING_DEFS = {
     short: 'SC',
     cost: 25_000_000,
     buildersRequired: 1,
-    buildTime: 30,
+    buildTime: 9,
     maintainersRequired: 1,
     income: 200_000,
     powerOutput: -10_000_000_000, // 10 GW draw

@@ -178,11 +178,15 @@ export function tick(state: GameState) {
   // Terminator pass first: any idle terminator locks its laser onto the
   // nearest non-robot unit. The regular firing_laser state machine handles
   // the windup/shot and drops back to idle, so this re-acquires every kill —
-  // a terminator simply never stops hunting while prey remains.
-  for (const g of state.goblins.values()) {
-    if (!g.terminator || g.state.kind !== 'idle') continue;
-    const target = nearestTerminatorTarget(state, g);
-    if (target) g.state = { kind: 'firing_laser', targetKind: target.kind, targetId: target.id };
+  // a terminator simply never stops hunting while prey remains. The
+  // terminating slider gates the acquisition: switched off, terminators
+  // stand down (any in-flight shot finishes, then they sit idle).
+  if (state.terminatorsTerminating) {
+    for (const g of state.goblins.values()) {
+      if (!g.terminator || g.state.kind !== 'idle') continue;
+      const target = nearestTerminatorTarget(state, g);
+      if (target) g.state = { kind: 'firing_laser', targetKind: target.kind, targetId: target.id };
+    }
   }
   for (const g of state.goblins.values()) updateGoblin(state, g);
 
@@ -905,7 +909,11 @@ function spawnGoblin(state: GameState) {
   if (!cell) {
     state.money += GOBLIN.spawnCost;
     appendLog(state, 'All Goblin Holes blocked; spawn refunded.');
-    playSound('error');
+    // Once three spawns in a row have been blocked, mute the error beep so a
+    // permanently walled-in hole doesn't machine-gun the soundscape. The next
+    // successful spawn resets the streak and the beep returns.
+    state.spawnFailStreak++;
+    if (state.spawnFailStreak < 3) playSound('error');
     return;
   }
   const id = state.nextId++;
@@ -921,6 +929,7 @@ function spawnGoblin(state: GameState) {
   state.goblins.set(id, g);
   occupyCell(state, cell.cx, cell.cy, id);
   state.spawnsCompleted++;
+  state.spawnFailStreak = 0;
   // Decaying-volume helper in audio.ts so a wall of late-game goblins
   // doesn't drown the rest of the soundscape. A slight random pitch wobble
   // (±4%) stops a burst of spawns sounding like one machine-gun tone.
@@ -991,6 +1000,9 @@ export function spawnRobot(state: GameState, terminator = false): boolean {
   };
   state.goblins.set(id, g);
   occupyCell(state, cell.cx, cell.cy, id);
+  // First terminator ever assembled reveals the terminating slider (stays
+  // visible thereafter even if every terminator later dies).
+  if (terminator) state.terminatorEverSpawned = true;
   // No sound here — the robotic chirp plays at queue time (onSummonRobot),
   // like the Minotaur's ritual sting, rather than when the bar completes.
   appendLog(state, terminator
@@ -2928,6 +2940,9 @@ function updateSpaceUnit(state: GameState, su: SpaceUnit, duties: Map<number, Ro
   if (su.robot) {
     su.walking = false;
     const duty = duties.get(su.id);
+    // Maintainer assignment mirrors a ground goblin's: it only holds while
+    // assignRobotDuties keeps handing this robot the same Centre.
+    su.maintains = duty?.kind === 'maintain' ? duty.siteId : undefined;
     // 1) Player command — walk to the goal, then STAY there (a commanded
     // goblin doesn't wander off its post). Only fresh construction work may
     // claim a robot off its post once it's standing (mirroring autobuild

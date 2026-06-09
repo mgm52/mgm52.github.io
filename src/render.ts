@@ -12,7 +12,7 @@ type DeathFrames = { textures: Texture[]; ends: number[]; duration: number };
 import { AMBIENT_DRAGON, BUILDING_DEFS, BuildingKind, CELL, COLS, DEMON, DRAGON, FINALE, GOBLIN, HELL, LOLLY, REACTOR_MELTDOWN, RENDER_SCALE, ROBOT, ROWS, MINOTAUR, SOUL_SIGIL, SPACE, SPACE_UNIT, TINYTAUR, WORLD, formatPower, sigilPortalOutput } from './config';
 import { DEFAULT_OPTIONS, ensureFontLoaded, fontFamilyById, getOptions, onOptionsChange, type FontConfig, type Options } from './options';
 import { loadDemonSheetList } from './demon-sheets';
-import { Building, Demon, DemonVariant, Dragon, GameState, Ghost, Goblin, HOLE_SIZE, Minotaur, SoulChair, SpaceBuilding, SpaceUnit, WaterSource, buildingCenter, candleSpotAt, cellCenter, chairSoulSnapshot, defOf, demonScaleOf, freePlatformAt, holeCenter, isInPlayCell, lollyBoostState, maintainerCount, spaceCentreMaintained, spaceStructureOverlapAt } from './state';
+import { Building, Demon, DemonVariant, Dragon, GameState, Ghost, Goblin, HOLE_SIZE, Minotaur, SoulChair, SpaceBuilding, SpaceUnit, WaterSource, buildingCenter, candleSpotAt, cellCenter, chairSoulSnapshot, defOf, demonScaleOf, freePlatformAt, holeCenter, isInPlayCell, lollyBoostState, maintainerCount, spaceCentreMaintainerCount, spaceStructureOverlapAt } from './state';
 import { getParlaySpeaker, isModalDialogueActive } from './demon-dialogue';
 
 export type Camera = { x: number; y: number };
@@ -3912,10 +3912,26 @@ export function render(state: GameState, ctx: RenderContext) {
       v.warning.visible = onSite === 0;
     } else {
       if (v.body) v.body.alpha = 1;
-      // A finished Space Centre re-uses the tag as its crew warning: it needs
-      // one robot stationed on the deck to run (see spaceCentreMaintained).
-      v.warning.visible = sb.building.kind === 'space_centre'
-        && !spaceCentreMaintained(state, sb);
+      // A finished Space Centre re-uses the tag for its dormant reasons,
+      // mirroring the ground buildings' floating warning: "needs N robots"
+      // while its crew is short (robots standing in for goblin maintainers),
+      // otherwise "underpowered" when the ground grid can't spare its draw
+      // (state stays dormant either way).
+      if (sb.building.kind === 'space_centre') {
+        let tag = '';
+        const crewNeed = BUILDING_DEFS.space_centre.maintainersRequired
+          - spaceCentreMaintainerCount(state, sb);
+        if (crewNeed > 0) tag = `needs ${crewNeed} robot${crewNeed === 1 ? '' : 's'}`;
+        else if (sb.building.state === 'dormant') tag = 'underpowered';
+        if (tag) {
+          if (v.warning.text !== tag) v.warning.text = tag;
+          v.warning.visible = true;
+        } else {
+          v.warning.visible = false;
+        }
+      } else {
+        v.warning.visible = false;
+      }
     }
   }
   for (const [id, v] of ctx.spaceBuildingViews) {

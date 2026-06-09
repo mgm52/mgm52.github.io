@@ -423,6 +423,12 @@ export type SpaceUnit = {
   // Id of the constructing space building this robot is working toward/on.
   // Recomputed every tick; only used to drive the walk animation.
   workingOn?: number;
+  // Id of the completed Space Centre this robot is the claimed maintainer for
+  // (assignRobotDuties' maintain duty; recomputed every tick). Mirrors a
+  // ground maintainer's assignment: the robot only counts as crew once it's
+  // both assigned here AND standing on the deck (spaceCentreMaintainerCount),
+  // the same way a goblin mid-walk to a building doesn't staff it yet.
+  maintains?: number;
   // Player-commanded destination (robots only). The robot walks there, then
   // STAYS there — standing fast like a commanded goblin — until construction
   // work appears or a new command replaces it. Cleared when work claims the
@@ -798,6 +804,10 @@ export type GameState = {
   // Increments per goblin spawn so successive goblins emerge from a different
   // hole (main + each completed Goblin Hole building, round-robin).
   spawnHoleRotation: number;
+  // Consecutive blocked-spawn failures. Once it hits 3 we stop playing the
+  // "error" beep on each further fail (the soundscape would otherwise machine-
+  // gun); reset to 0 on the next successful spawn.
+  spawnFailStreak: number;
   autoSpawnMultiplier: number; // 1 baseline; 2 with x2; 4 with x4
   // The multiplier autospawn actually RUNS at — normally pinned to
   // autoSpawnMultiplier (each purchase re-pins it), but once Lilly's
@@ -853,6 +863,13 @@ export type GameState = {
   // Terminators get their own single-slot track (capacity
   // TERMINATOR.spawnCapacity) so a hunt order doesn't block robot assembly.
   terminatorSpawnQueue: { remaining: number }[];
+  // Set true the moment the first terminator finishes assembling — gates the
+  // terminating slider's appearance (it stays once shown, even if every
+  // terminator later dies).
+  terminatorEverSpawned: boolean;
+  // The terminating slider's mode, shared by every terminator: true (default)
+  // = hunt everything fleshy; false = stand down (acquire no new targets).
+  terminatorsTerminating: boolean;
   pendingBuild: PendingBuild;
   // True while the player is placing hell candles (the Candle option in the
   // hell-view Build panel; each tap on a mirror's outer ring places one for
@@ -1350,6 +1367,7 @@ export function createInitialState(): GameState {
     autoDragonMultiplier: 0,
     autoDragonTimer: 0,
     spawnHoleRotation: 0,
+    spawnFailStreak: 0,
     dugDirections: new Set(),
     playArea: initialPlayArea(),
     floaters: [],
@@ -1367,6 +1385,8 @@ export function createInitialState(): GameState {
     dragonSpawnQueue: [],
     robotSpawnQueue: [],
     terminatorSpawnQueue: [],
+    terminatorEverSpawned: false,
+    terminatorsTerminating: true,
     pendingBuild: null,
     pendingCandle: false,
     buildingCounts: emptyBuildingCounts(),
@@ -1959,17 +1979,27 @@ export function spaceStructureOverlapAt(
   return false;
 }
 
-// True if a robot is standing on (or hovering just off) the given Space
-// Centre's deck — the one-robot crew an assembled Centre needs to run. Uses
-// the platform's footprint plus the robot build range, so a robot parked on
-// the walkable rim (robotParkSpot's ring) comfortably counts.
-export function spaceCentreMaintained(state: GameState, sb: SpaceBuilding): boolean {
+// Crew count for a Space Centre, mirroring the ground maintainerCount: only
+// robots ASSIGNED to this Centre (assignRobotDuties' maintain duty) that have
+// actually arrived — standing on (or hovering just off) the deck — count,
+// the same way an assigned goblin doesn't staff a ground building until it's
+// inside and `maintaining`. Range is the platform's footprint plus the robot
+// build range, so a robot parked on the walkable rim (robotParkSpot's ring)
+// comfortably counts.
+export function spaceCentreMaintainerCount(state: GameState, sb: SpaceBuilding): number {
   const range = BUILDING_DEFS.orbital_platform.size / 2 + ROBOT.buildRange;
+  let n = 0;
   for (const su of state.spaceUnits.values()) {
-    if (!su.robot) continue;
-    if (Math.hypot(su.pos.x - sb.pos.x, su.pos.y - sb.pos.y) <= range) return true;
+    if (!su.robot || su.maintains !== sb.id) continue;
+    if (Math.hypot(su.pos.x - sb.pos.x, su.pos.y - sb.pos.y) <= range) n++;
   }
-  return false;
+  return n;
+}
+
+// Whether the Centre's crew demand (maintainersRequired) is met.
+export function spaceCentreMaintained(state: GameState, sb: SpaceBuilding): boolean {
+  return spaceCentreMaintainerCount(state, sb)
+    >= BUILDING_DEFS.space_centre.maintainersRequired;
 }
 
 // Drifting space unit within a generous tap radius of a SPACE-coord point, or
@@ -1987,26 +2017,28 @@ export function spaceUnitAt(state: GameState, x: number, y: number): SpaceUnit |
   return best;
 }
 
-// Hypercentres the player can point at — finished ground ones plus any hauled
-// into orbit. Gates the Robot summon (ROBOT.hypercentresRequired).
+// Powered Hypercentres the player can point at — active ground ones plus any
+// hauled into orbit and running. Gates the Robot summon
+// (ROBOT.hypercentresRequired): a dormant/underpowered HC doesn't count.
 export function countHypercentres(state: GameState): number {
   let n = 0;
   for (const b of state.buildings.values()) {
-    if (b.kind === 'hypercentre' && b.state !== 'constructing') n++;
+    if (b.kind === 'hypercentre' && b.state === 'active') n++;
   }
   for (const sb of state.spaceBuildings.values()) {
-    if (sb.building.kind === 'hypercentre') n++;
+    if (sb.building.kind === 'hypercentre' && sb.building.state === 'active') n++;
   }
   return n;
 }
 
-// Completed Space Centres in orbit — the industrial gate on Terminator
-// assembly (TERMINATOR.spaceCentresRequired). Space Centres only ever exist
-// as space buildings, so there's no ground pass to make.
+// Powered Space Centres in orbit — the industrial gate on Terminator
+// assembly (TERMINATOR.spaceCentresRequired): only ones actively running
+// (crewed + on the grid) count. Space Centres only ever exist as space
+// buildings, so there's no ground pass to make.
 export function countSpaceCentres(state: GameState): number {
   let n = 0;
   for (const sb of state.spaceBuildings.values()) {
-    if (sb.building.kind === 'space_centre' && sb.building.state !== 'constructing') n++;
+    if (sb.building.kind === 'space_centre' && sb.building.state === 'active') n++;
   }
   return n;
 }

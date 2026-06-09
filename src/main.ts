@@ -528,6 +528,16 @@ async function main() {
       // purchased maximum.
       state.autoSpawnLevel = Math.max(0, Math.min(state.autoSpawnMultiplier, multiplier));
     },
+    onSetTerminating: (on: boolean) => {
+      // The terminating slider under the Terminator button — one switch for
+      // the whole chassis line. Off: terminators stand down (any in-flight
+      // shot finishes, then they idle). The slider's power cues play in ui.ts.
+      if (state.terminatorsTerminating === on) return;
+      state.terminatorsTerminating = on;
+      appendLog(state, on
+        ? 'Terminators resume the hunt.'
+        : 'Terminators stand down.');
+    },
     onBuyAutoDragon: () => {
       // Lilly's destroy-a-robot reward, levelling through AUTODRAGON_TIERS
       // like Autospawn. Each tier demands as many active Dragon Beacons as
