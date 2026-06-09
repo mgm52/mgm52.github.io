@@ -1018,7 +1018,14 @@ async function main() {
     // The BIG pull-back, everything receding to a point as it slowly whites
     // out (both eased longer so the ending breathes).
     playSound('ritual', 1, 0.25);
-    appEl?.classList.add('finale-zoom');
+    // The glitch animation drove `transform` right up until the class was
+    // removed above. A CSS transition won't start for a property an animation
+    // was just controlling unless that property has settled to a stable base
+    // first — add .finale-zoom in a later frame so the transform has cleared
+    // to identity, otherwise the pull-back snaps to its end state instantly.
+    requestAnimationFrame(() => {
+      requestAnimationFrame(() => { appEl?.classList.add('finale-zoom'); });
+    });
     white.style.transition = 'opacity 3200ms ease-in';
     requestAnimationFrame(() => { white.style.opacity = '1'; });
     await sleep(3600);

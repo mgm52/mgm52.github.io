@@ -800,7 +800,8 @@ export async function runFinaleConfrontation(state: GameState): Promise<void> {
     await fSay('lolly', '. . .', { autoMs: 1200 });
     await fSay('lolly', 'what');
     await fSay('lolly', 'what');
-    await fSay('lolly', 'bob—');
+    await fSay('lolly', 'bob');
+    await fSay('lolly', 'bob');
 
     await fSay('bob', "i won't eat your moon.");
     await fSay('bob', "i'm going to *break* it.");

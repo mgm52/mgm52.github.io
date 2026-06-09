@@ -311,22 +311,14 @@ function emanateAtCursor(x: number, y: number, variant?: 'white'): void {
   el.addEventListener('animationend', () => el.remove(), { once: true });
 }
 
-// The "demo just stops" pair of alerts + the secret options-cog unlock. Fired
-// once the Collect-5-dragon-bones task reveals (gated in refreshUI). The cog
-// can also be revealed silently (no alerts) by the shift-click / long-press R
-// gesture in options-ui.ts. Idempotency is handled at the call site via
-// `!state.optionsUnlocked`.
+// The secret options-cog unlock, fired once the Collect-9,999,999-blood task
+// reveals (gated in refreshUI). The cog can also be revealed by the
+// shift-click / long-press R gesture in options-ui.ts. Idempotency is handled
+// at the call site via `!state.optionsUnlocked`. The old "demo just stops"
+// alert pair has been retired — the cog now appears silently.
 export function revealSecretSettings(state: GameState): void {
-  window.alert(
-    "congrats the game is incomplete!!!!! It's unfinished!!!! "
-    + "There should be something here next happening but it's not!!!!"
-  );
   state.optionsUnlocked = true;
   unlockOptionsCog();
-  window.alert(
-    "BUT WAIT --- YOU HAVE UNLOCKED THE SECRET SETTINGS MENU OF JUSTICE!!!!!!!!!! "
-    + "FIND IT IN THE BOTTOM RIGHT OF THE PLAY AREA. ENJOY"
-  );
 }
 
 // Click-to-skip bookkeeping for the WORK COMPLETE overlay. Each in-flight
@@ -1151,7 +1143,7 @@ export function setupUI(state: GameState, callbacks: UICallbacks) {
     ${progressTrack('buy-gabbonsaw', 1)}
     <div class="build-content">
       <div class="build-text">
-        <div class="build-name">Pain Gabbonsaw</div>
+        <div class="build-name">pain gabbonsaw</div>
       </div>
       <div class="build-cost-side"><span class="build-cost build-bone-cost" id="cost-buy-gabbonsaw">${PAIN_GABBONSAW.dragonBoneCost} bones</span></div>
     </div>

@@ -414,8 +414,9 @@ export const AUTODRAGON_TIERS: { multiplier: number; bloodCost: number }[] = [
 // brings Bob back for one last word, then spawns Lolly — with Bob riding on
 // top — to rampage across the overworld (see LOLLY below).
 // spawnTime: the ritual channels on a summon bar like any other unit; Bob's
-// cutscene fires the moment the bar completes.
-export const PAIN_GABBONSAW = { dragonBoneCost: 99, spawnTime: 5 };
+// cutscene fires the moment the bar completes. Matches GOBLIN.spawnTime so the
+// channel feels like a regular goblin summon.
+export const PAIN_GABBONSAW = { dragonBoneCost: 99, spawnTime: 2 };
 
 // Lolly's overworld rampage. She works like a Minotaur — walks the map,
 // hunts the nearest prey — except she's colossal, grid-free (she crushes
