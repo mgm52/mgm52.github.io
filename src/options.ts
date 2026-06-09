@@ -347,6 +347,7 @@ export type Options = {
   terminatorLampColor: number;   // head targeting-lamp colour
   terminatorLampScale: number;   // lamp glow size, as a multiplier on the sprite px
   terminatorLampHeight: number;  // lamp centre above sprite centre, fraction of px
+  terminatorLampInFront: boolean; // draw the lamp glow over the sprite (off = behind)
   terminatorLaserWindup: number; // seconds of charge-up per auto-shot
   // The endgame finale (Lolly's moon). The camera eases to follow her flight,
   // and a speed dial lets a tester run the whole cinematic fast.
@@ -509,7 +510,7 @@ export const DEFAULT_OPTIONS: Options = {
   demonRY: HELL.height / 2,
   demonRSprite: 'young_mask_imitate_idle_b',
   demonRSpriteYOffset: -105,
-  demonRTint: 0x8c8c8c,
+  demonRTint: 0x9a8484, // rgb(154, 132, 132)
   demonRHue: 0,
   demonRVoiceSound: 'task_complete',
   demonRVoiceVolume: 0.22,
@@ -553,6 +554,7 @@ export const DEFAULT_OPTIONS: Options = {
   terminatorLampColor: 0xff2018,
   terminatorLampScale: 1.1,
   terminatorLampHeight: 0.42,
+  terminatorLampInFront: false,
   terminatorLaserWindup: 0.5,
   finaleAutoFollow: true,
   finaleSpeedMult: 1,

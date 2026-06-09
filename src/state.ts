@@ -34,10 +34,15 @@ export type GoblinState =
   // the current trip; they have to dwell for 1s before phase flips to to_dc.
   | { kind: 'fetching_water'; buildingId: number; sourceId: number; phase: 'to_source' | 'to_dc'; firstLoopDone?: boolean; initialTarget?: Cell; collectingSince?: number }
   | { kind: 'going_to_kill'; targetId: number; attackAt?: number }
+  // Chase rampaging Lolly and swing at her — futile ('no effect' floater),
+  // but the player is allowed to try.
+  | { kind: 'attacking_lolly'; attackAt?: number }
   // Robot-only: stand fast and shoot the target with a laser. Hitscan — no
   // chase, no range limit — so a commanded robot can swat even a dragon out
-  // of the sky. fireAt is the end of the charge-up beat.
-  | { kind: 'firing_laser'; targetKind: 'goblin' | 'minotaur' | 'dragon'; targetId: number; fireAt?: number };
+  // of the sky. fireAt is the end of the charge-up beat. targetKind 'lolly'
+  // (terminators auto-fire at her; commands too) ignores targetId — the beam
+  // splashes off her with no effect.
+  | { kind: 'firing_laser'; targetKind: 'goblin' | 'minotaur' | 'dragon' | 'lolly'; targetId: number; fireAt?: number };
 
 export type Goblin = {
   id: number;
@@ -110,6 +115,15 @@ export type Lolly = {
   spawnAt: number;
   // Active speed surges from lightning / meltdown hits (see lollyBoostState).
   boosts?: LollySpeedBoost[];
+  // Buildings she's crushed so far — drives her opening priority (the two
+  // nearest buildings first, then every spawn hole, then everything).
+  buildingsSmashed?: number;
+  // Tap-selectable like any other unit (info panel only — she takes no
+  // orders). Ephemeral; not meaningful once the finale takes over.
+  selected?: boolean;
+  // Last time an ineffective attack pinged a floater off her, so a wall of
+  // terminator fire doesn't stack "immune" text into a blur.
+  lastImmuneAt?: number;
 };
 
 // The live effect of Lolly's active boosts: her speed multiplier (1 = base),
@@ -199,6 +213,8 @@ export type MinotaurState =
   // the auto-targeter leaves those alone instead of re-assigning the prey.
   | { kind: 'going_to_kill'; targetId: number; attackAt?: number; manual?: boolean }
   | { kind: 'going_to_kill_minotaur'; targetId: number; attackAt?: number }
+  // Charge rampaging Lolly and gore at her — futile, but commandable.
+  | { kind: 'going_to_kill_lolly'; attackAt?: number }
   | { kind: 'going_to_destroy'; buildingId: number; attackAt?: number };
 
 // A discovered water source — fills a rectangular region (the far third of
@@ -932,9 +948,17 @@ export type GameState = {
   // Self-clearing once the cutscene fires.
   bobCheatPending: boolean;
   // Sticky: the Pain Gabbonsaw ritual has been bought (99 dragon bones).
-  // One-shot — the button retires, Bob comes back for one last word, and
-  // Lolly is loosed on the overworld.
+  // One-shot — set when the ritual's summon bar completes. The button stays
+  // visible as a greyed-out "owned" trophy, Bob comes back for one last word,
+  // and Lolly is loosed on the overworld.
   gabbonsawBought: boolean;
+  // Pain Gabbonsaw summon bar: seconds left on the channel after purchase,
+  // null when not channeling. Persisted so a reload resumes the countdown.
+  gabbonsawRitualRemaining: number | null;
+  // Flipped by the sim tick when the bar completes; main.ts (which owns the
+  // cutscene + camera) picks it up, runs Bob's cutscene, and spawns Lolly.
+  // Persisted so a save in the gap can't lose the payoff.
+  gabbonsawCutscenePending: boolean;
   // Sticky: the player has used the quick-travel strip (Lilly's fully-feed
   // reward) at least once. Until then the freshly-unlocked strip pulses gold
   // for attention (see refreshUI). Optional for saves predating the strip.
@@ -1413,6 +1437,8 @@ export function createInitialState(): GameState {
     bobPickingHole: false,
     bobCheatPending: false,
     gabbonsawBought: false,
+    gabbonsawRitualRemaining: null,
+    gabbonsawCutscenePending: false,
     bobLollyDeparted: false,
     lolly: null,
     finale: null,

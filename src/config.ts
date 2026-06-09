@@ -127,7 +127,7 @@ export const ROBOT = {
   buildTimeMult: 0.7,
   // Robots assemble on a timed queue like the other summons (one at a time,
   // mirroring the Minotaur's single-slot ritual track).
-  spawnTime: 2,
+  spawnTime: 1,
   spawnCapacity: 1,
   // Commanded onto another unit, a robot stands fast and shoots it with a
   // hitscan laser (no chase, no range limit — even a dragon on the wing).
@@ -383,8 +383,10 @@ export const SUMMON_UPGRADES = {
   // bought, a dragon summon is queued automatically every intervalSeconds
   // (divided by the owned AUTODRAGON_TIERS multiplier), provided the player
   // can cover the usual DRAGON.bloodCost and an active Dragon Beacon has a
-  // free ritual slot (same gates as the manual button).
-  autoDragon: { intervalSeconds: 5 },
+  // free ritual slot (same gates as the manual button). The cadence matches
+  // DRAGON.spawnTime so the ritual track stays continuously busy, the same
+  // way Autospawn keeps the goblin holes pulsing.
+  autoDragon: { intervalSeconds: 2 },
 };
 
 // Tier ladder for the Autodragon ritual, mirroring AUTOSPAWN_TIERS — each
@@ -406,7 +408,9 @@ export const AUTODRAGON_TIERS: { multiplier: number; bloodCost: number }[] = [
 // discover the hard way ("pain gabbonsaw" → "spawn bob again"). Buying it
 // brings Bob back for one last word, then spawns Lolly — with Bob riding on
 // top — to rampage across the overworld (see LOLLY below).
-export const PAIN_GABBONSAW = { dragonBoneCost: 99 };
+// spawnTime: the ritual channels on a summon bar like any other unit; Bob's
+// cutscene fires the moment the bar completes.
+export const PAIN_GABBONSAW = { dragonBoneCost: 99, spawnTime: 5 };
 
 // Lolly's overworld rampage. She works like a Minotaur — walks the map,
 // hunts the nearest prey — except she's colossal, grid-free (she crushes

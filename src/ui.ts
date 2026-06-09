@@ -350,9 +350,10 @@ function playTaskCompleteAnimation(taskId: string): void {
   // runUnlockRevealSequence (main.ts checks this class in its frame loop).
   celebrationsInFlight++;
   document.body.classList.add('unlock-reveal-hold');
-  // Optional side-tasks read "OPTIONAL COMPLETE" rather than "WORK COMPLETE".
+  // Optional side-tasks read "OPTIONAL COMPLETE" rather than "WORK COMPLETE" —
+  // except Lilly's handout, which is Work by decree ("you need more Work").
   const task = TASKS.find(t => t.id === taskId);
-  const isOptional = task?.optional ?? false;
+  const isOptional = (task?.optional ?? false) && !LILLY_TASK_IDS.includes(taskId);
   const textEl = overlay.querySelector('.task-complete-text');
   if (textEl) textEl.innerHTML = `${isOptional ? 'OPTIONAL' : 'WORK'}<br>COMPLETE`;
   // Subtitle recalls what the finished task actually was.
@@ -1138,14 +1139,16 @@ export function setupUI(state: GameState, callbacks: UICallbacks) {
 
   // Pain Gabbonsaw — the demo's true closing ritual, revealed by the final
   // (Collect 9,999,999 blood) task. 99 dragon bones. The name is an anagram
-  // the player is meant to discover the hard way; buying it brings Bob back
-  // for one last word and then spawns Lolly's rampage. One-shot: the button
-  // retires forever once bought (see refreshUI).
+  // the player is meant to discover the hard way; buying it channels a summon
+  // bar like any other unit, then brings Bob back for one last word and
+  // spawns Lolly's rampage. One-shot: the button stays put as a greyed-out
+  // "owned" trophy once the bar completes (see refreshUI).
   const gabbonsawBtn = document.createElement('button');
   gabbonsawBtn.className = 'build-button build-button-compact';
   gabbonsawBtn.id = 'btn-buy-gabbonsaw';
   gabbonsawBtn.style.display = 'none';
   gabbonsawBtn.innerHTML = `
+    ${progressTrack('buy-gabbonsaw', 1)}
     <div class="build-content">
       <div class="build-text">
         <div class="build-name">Pain Gabbonsaw</div>
@@ -2020,15 +2023,30 @@ export function refreshUI(state: GameState) {
   // Autodragon — Lilly's destroy-a-robot reward, levelling through
   // AUTODRAGON_TIERS (the same replace-chain treatment as Autospawn).
   refreshAutodragonButton(state, revealedTaskIds.has('destroy_robot'));
-  // Pain Gabbonsaw — surfaces once the final task's celebration clears, and
-  // retires forever the moment it's bought (the ritual is very much one-shot).
-  refreshRitualButton(
-    'btn-buy-gabbonsaw', 'cost-buy-gabbonsaw',
-    revealedTaskIds.has('collect_blood') && !state.gabbonsawBought,
-    false,
-    state.dragonBone >= PAIN_GABBONSAW.dragonBoneCost,
-    `${PAIN_GABBONSAW.dragonBoneCost} bones`,
-  );
+  // Pain Gabbonsaw — surfaces once the final task's celebration clears.
+  // Buying it runs a summon bar (one-shot); while it channels the button is
+  // locked + in-progress, and once it completes the button stays put as a
+  // greyed-out "owned" trophy.
+  {
+    const gabVisible = revealedTaskIds.has('collect_blood');
+    const channeling = state.gabbonsawRitualRemaining !== null;
+    refreshRitualButton(
+      'btn-buy-gabbonsaw', 'cost-buy-gabbonsaw',
+      gabVisible,
+      state.gabbonsawBought,
+      !channeling && state.dragonBone >= PAIN_GABBONSAW.dragonBoneCost,
+      `${PAIN_GABBONSAW.dragonBoneCost} bones`,
+    );
+    if (gabVisible) {
+      const gabBtn = document.getElementById('btn-buy-gabbonsaw') as HTMLButtonElement;
+      gabBtn.classList.toggle('in-progress', channeling);
+      if (channeling) gabBtn.disabled = true;
+      const gabFill = channeling
+        ? 1 - (state.gabbonsawRitualRemaining ?? 0) / PAIN_GABBONSAW.spawnTime
+        : 0;
+      setFillWidth('fill-buy-gabbonsaw-0', gabFill);
+    }
+  }
   // Goldblins → Goldblins x10 form a replace chain (like Autospawn): base
   // button hides once owned, x10 takes its place; x10 hides once owned.
   // Base Goldblins unlocks via the optional Summon-2-Minotaurs side-task; x10
@@ -2083,7 +2101,9 @@ export function refreshUI(state: GameState) {
     // which added up when this ran every refresh.
     const taskHtml = activeTasks
       .map(t => {
-        const label = t.optional ? 'Optional' : 'Work';
+        // Lilly's three handed-down tasks are Work by decree ("you need more
+        // Work"), not Optional — only true side-tasks keep the softer label.
+        const label = t.optional && !LILLY_TASK_IDS.includes(t.id) ? 'Optional' : 'Work';
         const text = t.dynamicText ? t.dynamicText(state) : t.text;
         return `<div id="${taskLineElId(t.id)}"><strong>${label}:</strong> ${text}</div>`;
       })
@@ -2430,7 +2450,16 @@ function refreshInfoPanel(state: GameState) {
   unseatBtn.style.display = 'none';
   const selectedDemon = [...state.demons.values()].find((d) => d.selected) ?? null;
   const selectedChair = state.soulChairs.find((c) => c.selected) ?? null;
-  if (selectedDemon) {
+  const lollySelected = !!state.lolly?.selected && !state.finale;
+  if (lollySelected) {
+    // The rampaging duo — selectable like any other unit, but they take no
+    // orders (commands aimed at them are attack orders from OTHER units).
+    panel.classList.add('visible');
+    portrait.innerHTML = `<div class="portrait-goblin" style="background:#2a0612;border-color:#ff5a8a;color:#ffb0c8">☠</div>`;
+    name.textContent = 'Lolly & Bob';
+    stateEl.textContent = 'Rampaging';
+    extra.innerHTML = `<span style="color:#6a7080">They take no orders. The world simply gets smaller.</span>`;
+  } else if (selectedDemon) {
     showDemon(state, selectedDemon, panel, portrait, name, stateEl, extra);
   } else if (selectedHellPortal) {
     showHellPortal(state, selectedHellPortal, panel, portrait, name, stateEl, extra);
@@ -2551,6 +2580,7 @@ function describeMinotaurState(state: GameState, s: import('./state').MinotaurSt
     case 'moving_to': return 'Moving';
     case 'going_to_kill': return `Hunting goblin #${s.targetId}`;
     case 'going_to_kill_minotaur': return `Charging Minotaur #${s.targetId}`;
+    case 'going_to_kill_lolly': return 'Charging Lolly (futile)';
     case 'going_to_destroy': return `Smashing ${buildingLabel(state, s.buildingId)}`;
   }
 }
@@ -2917,7 +2947,9 @@ function describeGoblinState(state: GameState, s: GoblinState): string {
         ? `Fetching water for ${buildingLabel(state, s.buildingId)}`
         : `Delivering water to ${buildingLabel(state, s.buildingId)}`;
     case 'going_to_kill': return `Hunting goblin #${s.targetId}`;
+    case 'attacking_lolly': return 'Attacking Lolly (futile)';
     case 'firing_laser': {
+      if (s.targetKind === 'lolly') return 'Firing laser at Lolly (futile)';
       const noun = s.targetKind === 'goblin' ? 'goblin' : s.targetKind === 'minotaur' ? 'Minotaur' : 'Dragon';
       return `Firing laser at ${noun} #${s.targetId}`;
     }

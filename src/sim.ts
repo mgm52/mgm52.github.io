@@ -173,6 +173,17 @@ export function tick(state: GameState) {
       }
     }
   }
+  // Pain Gabbonsaw channels on its own one-shot bar. When it completes the
+  // ritual is owned and main.ts (which owns the cutscene + camera) picks up
+  // the pending flag to bring Bob back and loose Lolly.
+  if (state.gabbonsawRitualRemaining !== null) {
+    state.gabbonsawRitualRemaining -= TICK_S;
+    if (state.gabbonsawRitualRemaining <= 0) {
+      state.gabbonsawRitualRemaining = null;
+      state.gabbonsawBought = true;
+      state.gabbonsawCutscenePending = true;
+    }
+  }
 
   // ── 2. Goblin updates ─────────────────────────────────────────────
   // Terminator pass first: any idle terminator locks its laser onto the
@@ -182,8 +193,16 @@ export function tick(state: GameState) {
   // terminating slider gates the acquisition: switched off, terminators
   // stand down (any in-flight shot finishes, then they sit idle).
   if (state.terminatorsTerminating) {
+    const lollyRampaging = !!state.lolly && !state.finale;
     for (const g of state.goblins.values()) {
       if (!g.terminator || g.state.kind !== 'idle') continue;
+      // While Lolly rampages she outranks all other prey — every terminator
+      // pours fire into her. It never lands (she shrugs every beam off with
+      // a 'no effect' floater), but a terminator doesn't know how to stop.
+      if (lollyRampaging) {
+        g.state = { kind: 'firing_laser', targetKind: 'lolly', targetId: 0 };
+        continue;
+      }
       const target = nearestTerminatorTarget(state, g);
       if (target) g.state = { kind: 'firing_laser', targetKind: target.kind, targetId: target.id };
     }
@@ -1665,10 +1684,15 @@ export function spawnLollyRampage(state: GameState): Vec2 {
   return c;
 }
 
-// Nearest thing Lolly can still destroy: any building (walls included), the
-// original hole (until she gets it), any goblin (robots aren't spared —
-// nothing is), any minotaur. Null once the overworld is picked clean.
-function acquireLollyTarget(state: GameState, pos: Vec2): LollyTarget | null {
+// What Lolly bears down on next, in her rampage's priority order:
+//   1. While she's crushed fewer than two buildings, the nearest building
+//      (any kind) — her opening statement.
+//   2. Then every spawn hole: the original Goblin Hole plus every Goblin
+//      Hole building, nearest first — she cuts off the reinforcements.
+//   3. Then the default scour: whatever's closest — buildings, the hole,
+//      goblins (robots aren't spared — nothing is), minotaurs.
+// Null once the overworld is picked clean.
+function acquireLollyTarget(state: GameState, pos: Vec2, buildingsSmashed: number): LollyTarget | null {
   let best: LollyTarget | null = null;
   let bestD = Infinity;
   const consider = (t: LollyTarget, x: number, y: number) => {
@@ -1676,7 +1700,21 @@ function acquireLollyTarget(state: GameState, pos: Vec2): LollyTarget | null {
     const d = dx * dx + dy * dy;
     if (d < bestD) { bestD = d; best = t; }
   };
+  const considerBuildings = () => {
+    for (const b of state.buildings.values()) {
+      const c = buildingCenter(b);
+      consider({ kind: 'building', id: b.id }, c.x, c.y);
+    }
+  };
+  // Phase 1 — the two nearest buildings. Falls straight through when the
+  // overworld doesn't have any left to offer.
+  if (buildingsSmashed < 2) {
+    considerBuildings();
+    if (best) return best;
+  }
+  // Phase 2 — every spawn hole, original first among equals.
   for (const b of state.buildings.values()) {
+    if (b.kind !== 'goblin_hole') continue;
     const c = buildingCenter(b);
     consider({ kind: 'building', id: b.id }, c.x, c.y);
   }
@@ -1684,6 +1722,9 @@ function acquireLollyTarget(state: GameState, pos: Vec2): LollyTarget | null {
     const c = holeCenter(state);
     consider({ kind: 'hole' }, c.x, c.y);
   }
+  if (best) return best;
+  // Phase 3 — everything else, nearest first.
+  considerBuildings();
   for (const g of state.goblins.values()) consider({ kind: 'goblin', id: g.id }, g.pos.x, g.pos.y);
   for (const m of state.minotaurs.values()) consider({ kind: 'minotaur', id: m.id }, m.pos.x, m.pos.y);
   return best;
@@ -1792,7 +1833,7 @@ function updateLolly(state: GameState): void {
   // for a unit — moved); re-acquire when it's gone.
   let spot = L.target ? lollyTargetSpot(state, L.target) : null;
   if (!spot) {
-    L.target = acquireLollyTarget(state, L.pos);
+    L.target = acquireLollyTarget(state, L.pos, L.buildingsSmashed ?? 0);
     L.attackAt = undefined;
     spot = L.target ? lollyTargetSpot(state, L.target) : null;
   }
@@ -1809,6 +1850,9 @@ function updateLolly(state: GameState): void {
       }
       if (state.now < L.attackAt) return;
       L.attackAt = undefined;
+      if (L.target.kind === 'building') {
+        L.buildingsSmashed = (L.buildingsSmashed ?? 0) + 1;
+      }
       lollySmash(state, L.target);
       L.target = null;
       return;
@@ -2215,6 +2259,41 @@ function updateMinotaur(state: GameState, t: Minotaur, autoTargets: Map<number, 
     return;
   }
 
+  if (t.state.kind === 'going_to_kill_lolly') {
+    // Commanded onto rampaging Lolly: charge, gore — and bounce. The swipe
+    // plays, a 'no effect' floater rides over her head, nothing changes.
+    const L = state.finale ? null : state.lolly;
+    if (!L) {
+      t.state = { kind: 'wander' };
+      t.nextWanderAt = state.now + MINOTAUR.wanderInterval;
+      return;
+    }
+    const s = t.state;
+    const lc = { cx: Math.floor(L.pos.x / CELL), cy: Math.floor(L.pos.y / CELL) };
+    const cdx = Math.abs(lc.cx - t.cell.cx);
+    const cdy = Math.abs(lc.cy - t.cell.cy);
+    // Her bulk: goring range from a couple of cells out.
+    if (Math.max(cdx, cdy) <= 2) {
+      if (s.attackAt === undefined) {
+        s.attackAt = state.now + windup;
+        t.facing = Math.atan2(L.pos.y - t.pos.y, L.pos.x - t.pos.x);
+        return;
+      }
+      if (state.now < s.attackAt) return;
+      lollyNoEffectFlash(state);
+      t.state = { kind: 'wander' };
+      t.nextWanderAt = state.now + MINOTAUR.wanderInterval;
+      return;
+    }
+    s.attackAt = undefined;
+    const next = minotaurStepToward(state, t, lc, -1);
+    if (next) {
+      t.target = next;
+      t.facing = Math.atan2(next.cy - t.cell.cy, next.cx - t.cell.cx);
+    }
+    return;
+  }
+
   if (t.state.kind === 'going_to_kill_minotaur') {
     const target = state.minotaurs.get(t.state.targetId);
     if (!target || target.id === t.id) {
@@ -2279,6 +2358,14 @@ function updateMinotaur(state: GameState, t: Minotaur, autoTargets: Map<number, 
         return;
       }
       if (state.now < s.attackAt) return;
+      // A robot soaks the gore: "immune" floater, no kill, back to wandering.
+      if (target.robot) {
+        robotImmuneFlash(state, target);
+        appendLog(state, `${t.tiny ? 'Tinytaur' : 'Minotaur'} #${t.id}'s horns glance off ${target.terminator ? 'Terminator' : 'Robot'} #${target.id}.`);
+        t.state = { kind: 'wander' };
+        t.nextWanderAt = state.now + MINOTAUR.wanderInterval;
+        return;
+      }
       const tx = target.pos.x, ty = target.pos.y;
       const reward = goblinKillReward(state, target);
       const wasGold = !!target.gold;
@@ -2581,6 +2668,24 @@ function dragonKill(state: GameState, d: Dragon, kind: 'goblin' | 'minotaur' | '
     playSound('goblin_death', 0.6, 0.4);
     appendLog(state, `Minotaur #${id} incinerated by Dragon #${d.id}.`);
   }
+}
+
+// A manual attack connects with a robot: the blow/beam visibly lands but the
+// chassis shrugs it off — float "immune" over the robot instead of a kill.
+function robotImmuneFlash(state: GameState, target: Goblin) {
+  pushFloater(state, target.pos.x, target.pos.y - 18, 'immune', 0xcfd5dc, 1.4);
+}
+
+// An attack connects with rampaging Lolly: nothing happens — a 'no effect'
+// floater rides above her head. Rate-limited so a wall of terminator fire
+// doesn't stack the text into an unreadable blur.
+function lollyNoEffectFlash(state: GameState): void {
+  const L = state.lolly;
+  if (!L) return;
+  if (L.lastImmuneAt !== undefined && state.now - L.lastImmuneAt < 0.8) return;
+  L.lastImmuneAt = state.now;
+  // x/y are offsets from her live position (followLolly), like her boost text.
+  pushFloater(state, 0, -LOLLY.displayPx * 0.62, 'no effect', 0xcfd5dc, 1.5, undefined, false, false, undefined, true);
 }
 
 // A robot's laser connects. Mirrors dragonKill's reward semantics: goblins
@@ -3469,8 +3574,9 @@ function updateGoblin(state: GameState, g: Goblin) {
 
     case 'going_to_kill': {
       const target = state.goblins.get(s.targetId);
-      // No target, self-target, or a robot target (unkillable) — stand down.
-      if (!target || target.id === g.id || target.robot) {
+      // No target or self-target — stand down. A robot target stays valid:
+      // the attacker chases and swings, the chassis just shrugs it off.
+      if (!target || target.id === g.id) {
         g.state = { kind: 'idle' };
         g.goal = null;
         g.path = [];
@@ -3489,6 +3595,16 @@ function updateGoblin(state: GameState, g: Goblin) {
           return;
         }
         if (state.now < s.attackAt) {
+          g.goal = null;
+          g.path = [];
+          return;
+        }
+        // The swing lands on a robot: no kill, no reward — just an "immune"
+        // floater over the chassis, and the attacker stands down.
+        if (target.robot) {
+          robotImmuneFlash(state, target);
+          appendLog(state, `Goblin #${g.id}'s blow glances off ${target.terminator ? 'Terminator' : 'Robot'} #${target.id}.`);
+          g.state = { kind: 'idle' };
           g.goal = null;
           g.path = [];
           return;
@@ -3525,16 +3641,62 @@ function updateGoblin(state: GameState, g: Goblin) {
       return;
     }
 
+    case 'attacking_lolly': {
+      // Chase rampaging Lolly and swing at her. The blow always lands and
+      // never matters — a 'no effect' floater over her head, then idle.
+      const L = state.finale ? null : state.lolly;
+      if (!L) {
+        g.state = { kind: 'idle' };
+        g.goal = null;
+        g.path = [];
+        return;
+      }
+      const dist = Math.hypot(L.pos.x - g.pos.x, L.pos.y - g.pos.y);
+      // Her bulk counts as the target: swing from just outside her footprint.
+      if (dist <= LOLLY.displayPx * 0.3) {
+        if (s.attackAt === undefined) {
+          s.attackAt = state.now + 0.4;
+          g.facing = Math.atan2(L.pos.y - g.pos.y, L.pos.x - g.pos.x);
+          g.goal = null;
+          g.path = [];
+          return;
+        }
+        if (state.now < s.attackAt) {
+          g.goal = null;
+          g.path = [];
+          return;
+        }
+        lollyNoEffectFlash(state);
+        g.state = { kind: 'idle' };
+        g.goal = null;
+        g.path = [];
+        return;
+      }
+      // Keep chasing her live position (she's grid-free; her cell is walkable).
+      s.attackAt = undefined;
+      const lc = { cx: Math.floor(L.pos.x / CELL), cy: Math.floor(L.pos.y / CELL) };
+      const adj = isCellBlocked(state, lc.cx, lc.cy, g.id) ? nearestFreeNeighbor(state, lc, g) : lc;
+      if (!adj) { g.path = []; return; }
+      if (!g.goal || g.goal.cx !== adj.cx || g.goal.cy !== adj.cy) {
+        g.goal = adj;
+        g.path = [];
+      }
+      planStep(state, g);
+      return;
+    }
+
     case 'firing_laser': {
       // Robot-only: stand fast and shoot the target with a hitscan laser —
       // no chase, no range limit, so even a dragon on the wing is fair game.
       const target =
         s.targetKind === 'goblin' ? state.goblins.get(s.targetId)
         : s.targetKind === 'minotaur' ? state.minotaurs.get(s.targetId)
+        : s.targetKind === 'lolly' ? (state.finale ? undefined : state.lolly ?? undefined)
         : state.dragons.get(s.targetId);
-      // A vanished target (or a robot target — nothing kills a robot, and
-      // only robots fire lasers in the first place) stands the unit down.
-      if (!g.robot || !target || (s.targetKind === 'goblin' && (target as Goblin).robot)) {
+      // A vanished target (or somehow the shooter itself) stands the unit
+      // down. A robot target stays valid: the beam fires and the chassis
+      // soaks it with an "immune" floater below. Same for Lolly ('no effect').
+      if (!g.robot || !target || (s.targetKind === 'goblin' && s.targetId === g.id)) {
         g.state = { kind: 'idle' };
         g.goal = null;
         g.path = [];
@@ -3559,7 +3721,16 @@ function updateGoblin(state: GameState, g: Goblin) {
       // A terminator fires non-stop while prey remains — keep its report far
       // quieter than a one-off commanded robot shot or it dominates the mix.
       playSound('lightning', g.terminator ? 0.14 : 0.45, 2.1);
-      robotLaserKill(state, g, s.targetKind, s.targetId);
+      // Robot-on-robot: the beam lands, the chassis doesn't care. And
+      // anything-on-Lolly: she barely notices.
+      if (s.targetKind === 'lolly') {
+        lollyNoEffectFlash(state);
+      } else if (s.targetKind === 'goblin' && (target as Goblin).robot) {
+        robotImmuneFlash(state, target as Goblin);
+        appendLog(state, `${g.terminator ? 'Terminator' : 'Robot'} #${g.id}'s laser washes off ${(target as Goblin).terminator ? 'Terminator' : 'Robot'} #${(target as Goblin).id}.`);
+      } else {
+        robotLaserKill(state, g, s.targetKind, s.targetId);
+      }
       g.state = { kind: 'idle' };
       return;
     }

@@ -733,11 +733,12 @@
         position: fixed; inset: 0; background: #fff;
         opacity: 0; pointer-events: none; z-index: 100000;
       }
-      /* The brief, violent tear the instant the moon shatters: a hard shake
-         with the colours splitting and tearing — the whole app (play area and
-         side panel both), since the world itself is coming apart. */
+      /* The violent tear the instant the moon shatters: a hard shake with the
+         colours splitting and tearing — the whole app (play area and side
+         panel both), since the world itself is coming apart. Two full cycles
+         so the wobble lingers a beat before the pull-back takes over. */
       #app.finale-glitch {
-        animation: finale-glitch 720ms steps(2, end) 1;
+        animation: finale-glitch 750ms steps(2, end) 2;
       }
       @keyframes finale-glitch {
         0%   { transform: translate(0, 0);        filter: none; }
@@ -753,7 +754,7 @@
          Driven by adding .finale-zoom (the transition does the easing). */
       #app.finale-zoom {
         transform: scale(0.04) rotate(8deg);
-        transition: transform 1900ms cubic-bezier(0.6, 0, 0.85, 0.2);
+        transition: transform 3500ms cubic-bezier(0.6, 0, 0.85, 0.2);
         transform-origin: 50% 50%;
       }
       /* Summon + Ritual stay live in every view — they simply act on the
