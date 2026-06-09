@@ -1856,10 +1856,52 @@ function startFinale(state: GameState): boolean {
     },
     confrontReady: false,
   };
+  // She's bound for space whether or not the player ever sent a building up —
+  // unlock the climb so they can always follow her to watch.
+  state.spaceUnlocked = true;
   pushLightningBolt(state, L.pos.x, L.pos.y - LOLLY.displayPx * 0.5);
   playSound('ritual', 1, 0.3);
   appendLog(state, 'The overworld is bare. Lolly calls down a dragon and lifts her eyes to the sky.');
   return true;
+}
+
+// Dev pacing dial: a tester can run the whole cinematic fast. Clamped so it
+// can never stall (0) or run backwards.
+function finaleSpeed(): number {
+  return Math.max(0.1, getOptions().finaleSpeedMult);
+}
+
+// Dev cheat: scour the overworld, loose Lolly, and start the finale right now —
+// from whatever point the game is at. Resets any in-flight finale first.
+export function devTriggerFinale(state: GameState): void {
+  for (const b of [...state.buildings.values()]) destroyBuilding(state, b.id);
+  for (const g of [...state.goblins.values()]) removeGoblin(state, g.id);
+  state.minotaurs.clear();
+  state.holeDestroyed = true;
+  const c = playAreaCentre(state);
+  state.lolly = { pos: { x: c.x, y: c.y }, facing: Math.PI / 2, target: null, nextWanderAt: 0, spawnAt: state.now };
+  state.finale = null;
+  startFinale(state);
+}
+
+// Dev cheat: jump straight to the moon confrontation — Lolly a hair out from her
+// landing spot with the moon in hand, so she sets down and the modal fires within
+// a tick or two.
+export function devSkipFinaleToConfront(state: GameState): void {
+  devTriggerFinale(state);
+  const F = state.finale;
+  if (!F) return;
+  const c = playAreaCentre(state);
+  F.scene = 'ground';
+  F.dragonShown = true;
+  F.bobPos = { x: c.x, y: c.y };
+  F.bobFacing = Math.PI / 2;
+  F.bobAtCentre = true;
+  F.lollyPos = { x: c.x + FINALE.landGap + 30, y: c.y };
+  F.lollyFacing = Math.PI;
+  if (F.moon) { F.moon.state = 'grabbed'; F.moon.scene = 'ground'; }
+  F.phase = 'lolly_descends';
+  F.phaseStartedAt = state.now;
 }
 
 function updateFinale(state: GameState): void {
@@ -1869,7 +1911,8 @@ function updateFinale(state: GameState): void {
   // area and turns to face the player, then holds there.
   updateFinaleBob(state, F);
 
-  const elapsed = state.now - F.phaseStartedAt;
+  const spd = finaleSpeed();
+  const elapsed = (state.now - F.phaseStartedAt) * spd;
   const enter = (phase: FinalePhase) => { F.phase = phase; F.phaseStartedAt = state.now; };
 
   switch (F.phase) {
@@ -1880,7 +1923,7 @@ function updateFinale(state: GameState): void {
     }
     case 'lolly_ascends': {
       F.lollyFacing = -Math.PI / 2;
-      F.lollyPos.y -= FINALE.flySpeed * TICK_S;
+      F.lollyPos.y -= FINALE.flySpeed * spd * TICK_S;
       if (F.lollyPos.y <= state.playArea.y0 * CELL - FINALE.edgeOffset) {
         // Cross into the orbit scene, entering from above the top edge.
         F.scene = 'space';
@@ -1900,7 +1943,7 @@ function updateFinale(state: GameState): void {
     case 'lolly_descends': {
       F.lollyFacing = Math.PI / 2;
       if (F.scene === 'space') {
-        F.lollyPos.y += FINALE.flySpeed * TICK_S;
+        F.lollyPos.y += FINALE.flySpeed * spd * TICK_S;
         if (F.lollyPos.y >= SPACE.height + FINALE.edgeOffset) {
           // Re-enter the overworld from above the centre, the moon still hers.
           F.scene = 'ground';
@@ -1910,7 +1953,7 @@ function updateFinale(state: GameState): void {
       } else {
         // Settle just to the side of Bob, facing him across the centre.
         const c = playAreaCentre(state);
-        const r = stepToward(F.lollyPos, { x: c.x + FINALE.landGap, y: c.y }, FINALE.flySpeed * 0.7, 6);
+        const r = stepToward(F.lollyPos, { x: c.x + FINALE.landGap, y: c.y }, FINALE.flySpeed * 0.7 * spd, 6);
         F.lollyFacing = Math.PI;
         if (r.arrived) {
           F.dragonShown = false;     // she dismounts; the dragon wheels away (render)
@@ -1941,7 +1984,7 @@ function updateFinale(state: GameState): void {
 function updateFinaleBob(state: GameState, F: Finale): void {
   if (F.phase === 'summon' || F.phase === 'confront' || F.phase === 'shattered') return;
   if (F.bobAtCentre) { F.bobFacing = Math.PI / 2; return; }
-  const r = stepToward(F.bobPos, playAreaCentre(state), FINALE.bobWalkSpeed, 4);
+  const r = stepToward(F.bobPos, playAreaCentre(state), FINALE.bobWalkSpeed * finaleSpeed(), 4);
   if (r.arrived) { F.bobAtCentre = true; F.bobFacing = Math.PI / 2; }
   else F.bobFacing = r.facing;
 }
@@ -1984,6 +2027,7 @@ function finaleSpaceSmash(state: GameState, t: NonNullable<Finale['target']>): v
 }
 
 function finaleSpaceRampage(state: GameState, F: Finale): void {
+  const spd = finaleSpeed();
   let spot = F.target ? finaleTargetSpot(state, F.target) : null;
   if (!spot) {
     F.target = acquireFinaleSpaceTarget(state, F.lollyPos);
@@ -1995,7 +2039,7 @@ function finaleSpaceRampage(state: GameState, F: Finale): void {
     const d = Math.hypot(dx, dy);
     if (d <= FINALE.smashReach) {
       if (F.attackAt === undefined) {
-        F.attackAt = state.now + FINALE.smashWindup;
+        F.attackAt = state.now + FINALE.smashWindup / spd;
         if (d > 1e-3) F.lollyFacing = Math.atan2(dy, dx);
         return;
       }
@@ -2006,7 +2050,7 @@ function finaleSpaceRampage(state: GameState, F: Finale): void {
       return;
     }
     F.attackAt = undefined;
-    const step = FINALE.flySpeed * TICK_S;
+    const step = FINALE.flySpeed * spd * TICK_S;
     F.lollyPos.x += (dx / d) * step;
     F.lollyPos.y += (dy / d) * step;
     F.lollyFacing = Math.atan2(dy, dx);
@@ -2019,12 +2063,13 @@ function finaleSpaceRampage(state: GameState, F: Finale): void {
 }
 
 function finaleGrabMoon(state: GameState, F: Finale): void {
+  const spd = finaleSpeed();
   const m = F.moon;
   if (!m) { F.phase = 'lolly_descends'; F.phaseStartedAt = state.now; return; }
   const dx = m.pos.x - F.lollyPos.x, dy = m.pos.y - F.lollyPos.y;
   const d = Math.hypot(dx, dy);
   if (d > FINALE.moonGrabDist) {
-    const step = FINALE.flySpeed * TICK_S;
+    const step = FINALE.flySpeed * spd * TICK_S;
     F.lollyPos.x += (dx / d) * step;
     F.lollyPos.y += (dy / d) * step;
     F.lollyFacing = Math.atan2(dy, dx);
@@ -2032,7 +2077,7 @@ function finaleGrabMoon(state: GameState, F: Finale): void {
     return;
   }
   // In reach — hover a beat of menace, then hoist it onto her shoulder.
-  if (F.grabHoverUntil === undefined) { F.grabHoverUntil = state.now + FINALE.moonGrabHover; playSound('ritual', 0.7, 0.5); return; }
+  if (F.grabHoverUntil === undefined) { F.grabHoverUntil = state.now + FINALE.moonGrabHover / spd; playSound('ritual', 0.7, 0.5); return; }
   if (state.now < F.grabHoverUntil) return;
   m.state = 'grabbed';
   appendLog(state, 'Lolly tears the moon down from the sky.');

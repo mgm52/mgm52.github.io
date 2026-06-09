@@ -348,6 +348,10 @@ export type Options = {
   terminatorLampScale: number;   // lamp glow size, as a multiplier on the sprite px
   terminatorLampHeight: number;  // lamp centre above sprite centre, fraction of px
   terminatorLaserWindup: number; // seconds of charge-up per auto-shot
+  // The endgame finale (Lolly's moon). The camera eases to follow her flight,
+  // and a speed dial lets a tester run the whole cinematic fast.
+  finaleAutoFollow: boolean;     // ease the camera to keep Lolly framed
+  finaleSpeedMult: number;       // multiplier on her flight/walk pace (dev pacing dial)
 };
 
 // A sheet base-name from assets/demons/ (auto-discovered via the manifest —
@@ -550,6 +554,8 @@ export const DEFAULT_OPTIONS: Options = {
   terminatorLampScale: 1.1,
   terminatorLampHeight: 0.42,
   terminatorLaserWindup: 0.5,
+  finaleAutoFollow: true,
+  finaleSpeedMult: 1,
 };
 
 // Set every font key to the same family at once. Convenience for the options

@@ -10,7 +10,7 @@ import { getOptions, onOptionsChange } from './options';
 import { getRestartInHell, relockOptionsCog, setupOptionsUI } from './options-ui';
 import { applyDomOptions, centerCameraOn, centerHellCameraOnWorld, centerSpaceCamera, clampCamera, clampHellCamera, clampSpaceCamera, createRender, currentHellScale, preloadRenderAssets, render, spaceCameraMaxY } from './render';
 import { appendLog, buildingCenter, cellCenter, countHypercentres, countSpaceCentres, createInitialState, destroyBuilding, digDirection, earnBlood, earnDragonBone, earnMoney, getSpawnCapacity, pushDeathEffect, pushFloater, recordGhost, removeGoblin, type GameState, type Ghost } from './state';
-import { autoAssignAllIdle, maybeDepartBobAndLolly, spawnDragon, spawnLollyRampage, spawnMinotaur, spawnRobot, spawnTinytaur, tick } from './sim';
+import { autoAssignAllIdle, devSkipFinaleToConfront, devTriggerFinale, maybeDepartBobAndLolly, spawnDragon, spawnLollyRampage, spawnMinotaur, spawnRobot, spawnTinytaur, tick } from './sim';
 import { ensureHellPortal, executeTaskSkip, refreshUI, setupUI } from './ui';
 import { clearSave, formatRelativeTime, getLastSaveStats, loadGame, saveGame, saveGameInBackground } from './save';
 
@@ -417,6 +417,20 @@ async function main() {
     onSkipToHell: devSkipToHell,
     onTaskSkip: () => { skipIntro(); executeTaskSkip(state); },
     onShowTitleScreen: () => { void showTitleScreen(); },
+    onTriggerFinale: () => {
+      skipIntro();
+      if (state.view !== 'ground') quickTravel('ground');
+      resetFinaleGuards();
+      devTriggerFinale(state);
+      appendLog(state, 'Cheat: finale loosed.');
+    },
+    onSkipToConfront: () => {
+      skipIntro();
+      if (state.view !== 'ground') quickTravel('ground');
+      resetFinaleGuards();
+      devSkipFinaleToConfront(state);
+      appendLog(state, 'Cheat: skipped to the moon confrontation.');
+    },
   });
   // "Restart in hell": this run started fresh (choice forced to 'new'), so
   // ride straight down. The flag just queues requestSkipToHell — the frame
@@ -882,6 +896,7 @@ async function main() {
         || document.body.classList.contains('demon-parlay-hold')
         || document.body.classList.contains('bob-spawn-hold')
         || document.body.classList.contains('unlock-reveal-hold')
+        || document.body.classList.contains('finale-hold')
         || state.bobPickingHole) return;
     if (view === 'hell' && !state.hellUnlocked) { playSound('error'); return; }
     if (view === 'space' && !state.spaceUnlocked) { playSound('error'); return; }
@@ -945,30 +960,49 @@ async function main() {
   let finaleBarkedStay = false;
   let finaleBarkedCheck = false;
   let finaleConfrontStarted = false;
-  // The white-out, on <body> so the big #game zoom never shrinks it.
+  // The white-out, on <body> so the big #app zoom never shrinks it.
   let finaleWhiteEl: HTMLElement | null = null;
+  let finaleEndApplied = false;
+  const finaleWhite = (): HTMLElement => {
+    if (!finaleWhiteEl) {
+      finaleWhiteEl = document.createElement('div');
+      finaleWhiteEl.id = 'finale-white';
+      document.body.appendChild(finaleWhiteEl);
+    }
+    return finaleWhiteEl;
+  };
+  // Reset the once-per-run guards so a dev re-trigger replays the cinematic
+  // cleanly (the white-out + zoom are also cleared).
+  const resetFinaleGuards = () => {
+    finaleLastPhase = null;
+    finaleBarkedStay = finaleBarkedCheck = finaleConfrontStarted = finaleEndApplied = false;
+    document.body.classList.remove('finale-hold');
+    document.getElementById('app')?.classList.remove('finale-glitch', 'finale-zoom');
+    if (finaleWhiteEl) { finaleWhiteEl.style.transition = 'none'; finaleWhiteEl.style.opacity = '0'; }
+  };
 
   // The smash: Bob takes the moon, breaks it, and the world tears itself white.
   async function runFinaleShatter() {
     const F = state.finale;
     if (!F) return;
     const appEl = document.getElementById('app');
-    if (!finaleWhiteEl) {
-      finaleWhiteEl = document.createElement('div');
-      finaleWhiteEl.id = 'finale-white';
-      document.body.appendChild(finaleWhiteEl);
-    }
+    const white = finaleWhite();
     // Bob turns to the moon resting between them and winds up his swing.
     if (F.moon) {
       F.bobFacing = Math.atan2(F.moon.pos.y - F.bobPos.y, F.moon.pos.x - F.bobPos.x);
       F.bobAttacking = true;
     }
     await sleep(440);                              // he raises a fist and brings it down
-    // Impact — the moon goes.
+    // Impact — the moon goes, with a hard camera flash.
     if (F.moon) { F.moon.state = 'shattering'; F.moon.shatterAt = state.now; }
     playSound('destroy', 1, 0.3);
     playSound('lightning', 0.8, 0.5);
     void finaleBark(state, 'lolly', '*NO—*');
+    white.style.transition = 'opacity 50ms ease-out';
+    white.style.opacity = '0.85';
+    await sleep(70);
+    white.style.transition = 'opacity 300ms ease-in';
+    white.style.opacity = '0';
     // The brief, violent tear — the whole app shakes and splits.
     appEl?.classList.add('finale-glitch');
     await sleep(680);
@@ -976,25 +1010,64 @@ async function main() {
     // The BIG pull-back, everything receding to a point as it whites out.
     playSound('ritual', 1, 0.25);
     appEl?.classList.add('finale-zoom');
-    if (finaleWhiteEl) {
-      finaleWhiteEl.style.transition = 'opacity 1700ms ease-in';
-      requestAnimationFrame(() => { if (finaleWhiteEl) finaleWhiteEl.style.opacity = '1'; });
-    }
+    white.style.transition = 'opacity 1700ms ease-in';
+    requestAnimationFrame(() => { white.style.opacity = '1'; });
     await sleep(2000);
     // Held on white — the next part of the game picks up from here.
+    finaleEndApplied = true;
     F.phase = 'shattered';
     backgroundSave();
   }
+
+  // Resuming a save that's already past the break: drop straight onto the held
+  // white-out (no transition, no replay of the shatter).
+  function applyFinaleEnded() {
+    if (finaleEndApplied) return;
+    finaleEndApplied = true;
+    finaleConfrontStarted = true;
+    document.getElementById('app')?.classList.add('finale-zoom');
+    const white = finaleWhite();
+    white.style.transition = 'none';
+    white.style.opacity = '1';
+  }
+
+  const anyPanKeyHeld = () =>
+    held.has('a') || held.has('d') || held.has('w') || held.has('s')
+    || held.has('arrowleft') || held.has('arrowright') || held.has('arrowup') || held.has('arrowdown');
 
   // Run each frame. Fires barks on transitions and kicks off the confrontation.
   function driveFinale(now: number) {
     const F = state.finale;
     if (!F) { finaleLastPhase = null; return; }
 
+    // Resuming a save already past the break: re-apply the held white-out.
+    if (F.phase === 'shattered') { applyFinaleEnded(); finaleLastPhase = F.phase; return; }
+
     // First sight of the cinematic: swing the camera onto Lolly so the player
     // sees the dragon answer her call.
     if (finaleLastPhase === null && F.scene === 'ground') {
       centerCameraOn(ctx, F.lollyPos.x, F.lollyPos.y);
+    }
+
+    // Auto-follow: ease the camera to keep Lolly framed through the autonomous
+    // flight, but only in the scene the player is actually watching, and never
+    // while they're panning by hand or during the held confrontation.
+    if (getOptions().finaleAutoFollow && !anyPanKeyHeld()
+        && F.phase !== 'confront'
+        && !transitioning && !hellTransitioning) {
+      if (F.scene === 'ground' && state.view === 'ground') {
+        const tx = F.lollyPos.x - ctx.viewport.width / (2 * ctx.renderScale);
+        const ty = F.lollyPos.y - ctx.viewport.height / (2 * ctx.renderScale);
+        ctx.camera.x += (tx - ctx.camera.x) * 0.06;
+        ctx.camera.y += (ty - ctx.camera.y) * 0.06;
+        clampCamera(ctx);
+      } else if (F.scene === 'space' && state.view === 'space') {
+        const tx = F.lollyPos.x - ctx.viewport.width / (2 * ctx.renderScale);
+        const ty = F.lollyPos.y - ctx.viewport.height / (2 * ctx.renderScale);
+        ctx.spaceCamera.x += (tx - ctx.spaceCamera.x) * 0.06;
+        ctx.spaceCamera.y += (ty - ctx.spaceCamera.y) * 0.06;
+        clampSpaceCamera(ctx);
+      }
     }
 
     // Lolly tells Bob to stay as she lifts off.
@@ -1236,14 +1309,19 @@ async function main() {
     }
     // The finale cinematic's DOM-side beats (barks, the confrontation modal).
     driveFinale(now);
+    // The finale's confrontation + shatter is a held cinematic: lock the camera
+    // and swallow edge-hold transitions so the player can't pan or fly away from
+    // it (quick-travel is blocked separately).
+    const finaleCinematic = document.body.classList.contains('finale-hold');
     // Held pan vector.
     let dx = 0, dy = 0;
     if (held.has('a') || held.has('arrowleft')) dx -= 1;
     if (held.has('d') || held.has('arrowright')) dx += 1;
     if (held.has('w') || held.has('arrowup')) dy -= 1;
     if (held.has('s') || held.has('arrowdown')) dy += 1;
-    const upHeld = held.has('w') || held.has('arrowup');
-    const downHeld = held.has('s') || held.has('arrowdown');
+    let upHeld = held.has('w') || held.has('arrowup');
+    let downHeld = held.has('s') || held.has('arrowdown');
+    if (finaleCinematic) { dx = 0; dy = 0; upHeld = false; downHeld = false; }
     const panMove = (CAMERA_SPEED * dt) / 1000;
     // Any held pan key counts as the player "discovering" map movement —
     // sticky, hides the never-panned nudge forever (see refreshUI).

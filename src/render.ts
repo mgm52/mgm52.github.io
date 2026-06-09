@@ -1615,7 +1615,9 @@ function seededRng(seed: number): () => number {
 
 // Paint the moon: a pale cratered disc, or — once shatterT (0→1) is set — a
 // burst of shards flying apart and fading. Cheap enough to redraw every frame.
-function paintMoon(g: Graphics, r: number, seed: number, shatterT?: number): void {
+// groundShadow draws a soft cast shadow beneath it so a moon set down on the
+// surface reads as resting rather than floating.
+function paintMoon(g: Graphics, r: number, seed: number, shatterT?: number, groundShadow = false): void {
   g.clear();
   const rng = seededRng(seed);
   const craters: { x: number; y: number; cr: number }[] = [];
@@ -1625,6 +1627,7 @@ function paintMoon(g: Graphics, r: number, seed: number, shatterT?: number): voi
     craters.push({ x: Math.cos(a) * rad, y: Math.sin(a) * rad, cr: r * (0.06 + rng() * 0.15) });
   }
   if (shatterT === undefined) {
+    if (groundShadow) g.ellipse(0, r * 0.96, r * 0.92, r * 0.22).fill({ color: 0x000000, alpha: 0.28 });
     g.circle(0, 0, r * 1.08).fill({ color: 0x9fb4d8, alpha: 0.16 });   // cold halo
     g.circle(0, 0, r).fill({ color: 0xdbe2f2 });
     g.circle(0, 0, r).stroke({ width: 3, color: 0xaab7d6, alpha: 0.85 });
@@ -1662,14 +1665,26 @@ function positionFinaleRig(rig: FinaleRig, active: boolean, ground: boolean, sta
   const F = state.finale!;
   rig.container.position.set(F.lollyPos.x, F.lollyPos.y);
   // The dragon beneath her, shown for the whole flight (hidden once she lands
-  // and dismounts for the confrontation).
+  // and dismounts for the confrontation). On the summon beat it swoops down
+  // from off the top of the screen to settle into its seat under her — the
+  // same "arriving from above" read as a normal dragon summon.
   rig.dragon.visible = F.dragonShown;
   if (F.dragonShown && dragonFlySheet) {
-    const dir = dirIndex(dragonFlySheet.meta, F.lollyFacing);
+    const seatY = LOLLY.displayPx * 0.16;
+    let swoopY = 0;
+    if (F.phase === 'summon') {
+      const t = Math.min(1, (state.now - F.phaseStartedAt) / (FINALE.summonHold * 0.8));
+      const eased = t * t * (3 - 2 * t);
+      swoopY = -(1 - eased) * (LOLLY.displayPx * 3.2);   // starts high above, descends
+    }
+    // While swooping she faces the player; the dragon flies "down" (south row).
+    const heading = F.phase === 'summon' ? Math.PI / 2 : F.lollyFacing;
+    const dir = dirIndex(dragonFlySheet.meta, heading);
     const fpd = dragonFlySheet.meta.framesPerDirection;
     rig.dragon.texture = dragonFlySheet.frames[dir][Math.floor(state.now * dragonFlySheet.fps) % fpd];
     rig.dragon.scale.set((LOLLY.displayPx * 0.95) / dragonFlySheet.meta.spriteSize);
-    rig.dragon.position.set(0, LOLLY.displayPx * 0.16);
+    rig.dragon.position.set(0, seatY + swoopY);
+    rig.dragon.alpha = F.phase === 'summon' ? Math.min(1, 0.3 + (state.now - F.phaseStartedAt) / 0.6) : 1;
   }
   const sheet = lollyOverworldSheet();
   if (sheet) {
@@ -1775,7 +1790,8 @@ function drawFinale(ctx: RenderContext, state: GameState, opts: Options): void {
     if (shatterT === undefined || shatterT < 1) {
       disc.visible = true;
       disc.position.set(pos.x, pos.y);
-      paintMoon(disc, FINALE.moonRadius, m.seed, shatterT);
+      // A cast shadow only when it's sitting on the ground (placed).
+      paintMoon(disc, FINALE.moonRadius, m.seed, shatterT, m.scene === 'ground' && m.state === 'placed');
     }
   }
 }
