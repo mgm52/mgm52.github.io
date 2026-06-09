@@ -11,7 +11,7 @@ import { playSound, type SoundName } from './audio';
 import { HELL } from './config';
 import { getOptions } from './options';
 import {
-  Demon, DemonVariant, GameState, Ghost, Goblin,
+  Demon, DemonVariant, GameState, Ghost, Goblin, Vec2,
   appendLog, hellToWorld, pushDeathEffect,
 } from './state';
 
@@ -43,7 +43,10 @@ function demonVoice(demon: Demon, text: string): string {
 export type ParlaySpeaker =
   | { kind: 'demon'; demon: Demon }
   | { kind: 'ghost'; ghost: Ghost }
-  | { kind: 'goblin'; goblin: Goblin };
+  | { kind: 'goblin'; goblin: Goblin }
+  // A free world-space anchor (finale barks + confrontation): the bubble floats
+  // above this overworld point, read live each frame like the goblin anchor.
+  | { kind: 'world'; pos: Vec2 };
 let parlaySpeaker: ParlaySpeaker | null = null;
 export function getParlaySpeaker(): ParlaySpeaker | null { return parlaySpeaker; }
 
@@ -684,5 +687,106 @@ export async function runGhostChat(state: GameState, a: Ghost, b: Ghost): Promis
     overlay.classList.remove('visible', 'speaking', 'click-armed', 'show-buttons');
     speech.className = '';
     lineEl.innerHTML = '';
+  }
+}
+
+// ─── The finale ─────────────────────────────────────────────────────
+// A handful of world-anchored barks and the closing confrontation, all over
+// the overworld. Lolly speaks in her plain corner-demon voice; Bob in his own.
+// Positions are read live from state.finale each frame (see positionParlaySpeech
+// in render.ts), so the bubble tracks whoever is speaking.
+
+function finaleAnchor(state: GameState, who: 'lolly' | 'bob'): Vec2 | null {
+  const F = state.finale;
+  if (!F) return null;
+  return who === 'lolly' ? F.lollyPos : F.bobPos;
+}
+
+// A quick, non-modal finale bark above Lolly or Bob — same typed feel as a Bob
+// overworld bark, never freezing the world (reuses the .rebuke click-through).
+// Lolly's lines carry her demon voice; Bob's type silently, as his barks do.
+export async function finaleBark(state: GameState, who: 'lolly' | 'bob', text: string): Promise<void> {
+  const els = getEls();
+  const anchor = finaleAnchor(state, who);
+  if (!els || !anchor) return;
+  const { overlay, speech, lineEl } = els;
+  if (overlay.classList.contains('visible') && !overlay.classList.contains('rebuke')) return;
+  if (rebukeTimer !== null) { clearTimeout(rebukeTimer); rebukeTimer = null; }
+  const gen = ++bobBarkGen;
+  parlaySpeaker = { kind: 'world', pos: anchor };
+  speech.className = who === 'lolly' ? 'demon' : 'bob';
+  lineEl.innerHTML = '';
+  overlay.classList.add('visible', 'speaking', 'rebuke');
+  await typeLineText(lineEl, speech, text, { voice: who === 'lolly' ? 'friend' : undefined });
+  const superseded = () => gen !== bobBarkGen || rebukeTimer !== null || !overlay.classList.contains('rebuke');
+  if (superseded()) return;
+  await sleep(BOB_BARK_HOLD_MS);
+  if (superseded()) return;
+  overlay.classList.remove('visible', 'speaking', 'rebuke');
+  speech.className = '';
+  lineEl.innerHTML = '';
+  if (parlaySpeaker?.kind === 'world' && parlaySpeaker.pos === anchor) parlaySpeaker = null;
+}
+
+// The closing confrontation: Lolly demands Bob eat of the moon and call her
+// master; he refuses and resolves to break it. A modal, world-frozen
+// conversation (main.ts holds the world and runs the shatter once this returns).
+export async function runFinaleConfrontation(state: GameState): Promise<void> {
+  const els = getEls();
+  if (!els) return;
+  const { overlay, speech, lineEl, clickWall } = els;
+
+  async function fSay(who: 'lolly' | 'bob', text: string, opts: { autoMs?: number } = {}): Promise<void> {
+    const anchor = finaleAnchor(state, who);
+    if (!anchor) return;
+    parlaySpeaker = { kind: 'world', pos: anchor };
+    speech.className = who === 'lolly' ? 'demon' : 'bob';
+    lineEl.innerHTML = '';
+    overlay.classList.add('speaking');
+    await typeLineText(lineEl, speech, text, { voice: who === 'lolly' ? 'friend' : undefined });
+    if (opts.autoMs !== undefined) {
+      await sleep(opts.autoMs);
+    } else {
+      overlay.classList.add('click-armed');
+      await waitForClick(clickWall);
+      playSound('click', 0.29, 0.9);
+      overlay.classList.remove('click-armed');
+    }
+    overlay.classList.remove('speaking');
+  }
+
+  if (rebukeTimer !== null) { clearTimeout(rebukeTimer); rebukeTimer = null; }
+  overlay.classList.remove('speaking', 'click-armed', 'show-buttons', 'rebuke');
+  speech.className = '';
+  lineEl.innerHTML = '';
+  overlay.classList.add('visible');
+  await sleep(60);
+
+  try {
+    // Lolly, descended, the moon on her shoulder — the demand.
+    await fSay('lolly', 'bob.');
+    await fSay('lolly', 'come here, little one.');
+    await fSay('lolly', 'i pulled it down. ⏸ for *us*.');
+    await fSay('lolly', 'eat. ⏸ only a piece.');
+    await fSay('lolly', 'eat, and the world is *ours*. ⏸ all of it.');
+    await fSay('lolly', 'and you will call me _master_.');
+
+    // The turn. He has nothing left to lose — he is already dead.
+    await fSay('bob', '. . .', { autoMs: 1100 });
+    await fSay('bob', "i've taken orders my whole life, lolly.");
+    await fSay('bob', '. . . ⏸ and my whole death, too.');
+    await fSay('bob', 'no more.');
+
+    // She has never once been refused.
+    await fSay('lolly', '. . .what?');
+    await fSay('lolly', 'bob—');
+
+    await fSay('bob', "i won't eat your moon.");
+    await fSay('bob', "i'm going to *break* it.");
+  } finally {
+    overlay.classList.remove('visible', 'speaking', 'click-armed', 'show-buttons');
+    speech.className = '';
+    lineEl.innerHTML = '';
+    parlaySpeaker = null;
   }
 }

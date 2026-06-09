@@ -9,10 +9,10 @@ extensions.add(GifAsset);
 // game seconds. Used as a manual sprite-sheet — we pick the frame ourselves
 // each tick based on (state.now - spawnAt) so playback always starts at frame 0.
 type DeathFrames = { textures: Texture[]; ends: number[]; duration: number };
-import { AMBIENT_DRAGON, BUILDING_DEFS, BuildingKind, CELL, COLS, DEMON, DRAGON, GOBLIN, HELL, LOLLY, REACTOR_MELTDOWN, RENDER_SCALE, ROBOT, ROWS, MINOTAUR, SOUL_SIGIL, SPACE, SPACE_UNIT, TINYTAUR, WORLD, formatPower, sigilPortalOutput } from './config';
+import { AMBIENT_DRAGON, BUILDING_DEFS, BuildingKind, CELL, COLS, DEMON, DRAGON, FINALE, GOBLIN, HELL, LOLLY, REACTOR_MELTDOWN, RENDER_SCALE, ROBOT, ROWS, MINOTAUR, SOUL_SIGIL, SPACE, SPACE_UNIT, TINYTAUR, WORLD, formatPower, sigilPortalOutput } from './config';
 import { DEFAULT_OPTIONS, ensureFontLoaded, fontFamilyById, getOptions, onOptionsChange, type FontConfig, type Options } from './options';
 import { loadDemonSheetList } from './demon-sheets';
-import { Building, Demon, DemonVariant, Dragon, GameState, Ghost, Goblin, HOLE_SIZE, Minotaur, SoulChair, SpaceBuilding, SpaceUnit, WaterSource, buildingCenter, candleSpotAt, cellCenter, chairSoulSnapshot, defOf, demonScaleOf, freePlatformAt, holeCenter, isInPlayCell, maintainerCount, spaceCentreMaintained, spaceStructureOverlapAt } from './state';
+import { Building, Demon, DemonVariant, Dragon, GameState, Ghost, Goblin, HOLE_SIZE, Minotaur, SoulChair, SpaceBuilding, SpaceUnit, WaterSource, buildingCenter, candleSpotAt, cellCenter, chairSoulSnapshot, defOf, demonScaleOf, freePlatformAt, holeCenter, isInPlayCell, lollyBoostState, maintainerCount, spaceCentreMaintained, spaceStructureOverlapAt } from './state';
 import { getParlaySpeaker, isModalDialogueActive } from './demon-dialogue';
 
 export type Camera = { x: number; y: number };
@@ -479,6 +479,29 @@ type LollyView = {
   bob: Sprite;
 };
 
+// One Lolly-on-a-dragon rig: a shadow, the dragon she rides, and Lolly herself
+// stacked on top. Built once per scene (one parented into the ground's
+// lollyLayer, one into the space scene) — only the rig for her current scene is
+// shown. See drawFinale.
+type FinaleRig = {
+  container: Container;
+  shadow: Sprite;
+  dragon: Sprite;
+  lolly: Sprite;
+};
+
+// The whole finale cast: Lolly's two rigs, the dismounted Bob (always on the
+// surface), and the moon (drawn, one disc per scene). Lazily built and torn
+// down with state.finale.
+type FinaleView = {
+  groundRig: FinaleRig;
+  spaceRig: FinaleRig;
+  bob: Sprite;
+  bobShadow: Sprite;
+  groundMoon: Graphics;
+  spaceMoon: Graphics;
+};
+
 export type RenderContext = {
   app: Application;
   worldLayer: Container;
@@ -493,6 +516,9 @@ export type RenderContext = {
   // Lolly's rampage — topmost ground unit (she looms over even the dragons).
   lollyLayer: Container;
   lollyView: LollyView | null;
+  // The finale cinematic's cast (Lolly's dragon-rigs, Bob, the moon). Null
+  // until state.finale exists; torn down when it's gone. See drawFinale.
+  finaleView: FinaleView | null;
   waterLayer: Container;
   waterViews: Map<number, WaterView>;
   buildingViews: Map<number, BuildingView>;
@@ -986,7 +1012,7 @@ export async function createRender(parent: HTMLElement, state: GameState): Promi
     goblinViews: new Map(),
     minotaurLayer, minotaurViews: new Map(),
     dragonLayer, dragonViews: new Map(),
-    lollyLayer, lollyView: null,
+    lollyLayer, lollyView: null, finaleView: null,
     waterLayer, waterViews: new Map(),
     buildingViews: new Map(),
     camera: { x: 0, y: 0 },
@@ -1363,13 +1389,22 @@ function syncBobTags(ctx: RenderContext, state: GameState): void {
     if (!su.bob) continue;
     specs.push({ key: `su${su.id}`, layer: ctx.spaceTagLayer, x: su.pos.x, y: su.pos.y - px * 0.55, alpha: 1, sizeMult: 1 });
   }
-  // Riding on top of Lolly during her rampage — the tag hangs over the
-  // rider sprite, well above her colossal frame.
-  if (state.lolly) {
+  // Riding on top of Lolly during her rampage — the tag hangs over the rider
+  // sprite, well above her colossal frame. Suppressed once the finale begins:
+  // Bob has dismounted, so his tag follows him on the ground instead (below).
+  if (state.lolly && !state.finale) {
     specs.push({
       key: 'lolly', layer: ctx.worldTagLayer,
       x: state.lolly.pos.x,
       y: state.lolly.pos.y - LOLLY.displayPx * LOLLY.bobRideHeight - px * 0.55,
+      alpha: 1, sizeMult: 1,
+    });
+  }
+  // Dismounted on the surface for the finale — the tag tracks him on the ground.
+  if (state.finale) {
+    specs.push({
+      key: 'finale-bob', layer: ctx.worldTagLayer,
+      x: state.finale.bobPos.x, y: state.finale.bobPos.y - px * 0.55,
       alpha: 1, sizeMult: 1,
     });
   }
@@ -1544,6 +1579,221 @@ function makeLollyView(): LollyView {
   container.addChild(sprite);
   container.addChild(bob);
   return { container, shadow, sprite, bob };
+}
+
+// ─── Finale rendering ───────────────────────────────────────────────
+// Lolly + dragon rig, Bob, and the moon, all driven by state.finale (see
+// updateFinale in sim.ts). Heavy on display objects, so it's all lazily built
+// into ctx.finaleView and torn down the moment the cinematic ends.
+
+function makeFinaleRig(): FinaleRig {
+  const container = new Container();
+  const shadow = new Sprite(getShadowTexture());
+  shadow.anchor.set(0.5);
+  const dragon = new Sprite(Texture.EMPTY);
+  dragon.anchor.set(0.5);
+  const lolly = new Sprite(lollyOverworldSheet()?.frames[0][0] ?? Texture.EMPTY);
+  lolly.anchor.set(0.5);
+  lolly.filters = [getLollyBrightFilter()];
+  container.addChild(shadow);
+  container.addChild(dragon);
+  container.addChild(lolly);
+  return { container, shadow, dragon, lolly };
+}
+
+// Tiny deterministic RNG so the moon's craters (and its shatter) are stable
+// across frames from a single seed.
+function seededRng(seed: number): () => number {
+  let a = (seed >>> 0) || 1;
+  return () => {
+    a |= 0; a = (a + 0x6d2b79f5) | 0;
+    let t = Math.imul(a ^ (a >>> 15), 1 | a);
+    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+}
+
+// Paint the moon: a pale cratered disc, or — once shatterT (0→1) is set — a
+// burst of shards flying apart and fading. Cheap enough to redraw every frame.
+// groundShadow draws a soft cast shadow beneath it so a moon set down on the
+// surface reads as resting rather than floating.
+function paintMoon(g: Graphics, r: number, seed: number, shatterT?: number, groundShadow = false): void {
+  g.clear();
+  const rng = seededRng(seed);
+  const craters: { x: number; y: number; cr: number }[] = [];
+  for (let i = 0; i < 11; i++) {
+    const a = rng() * Math.PI * 2;
+    const rad = rng() * 0.72 * r;
+    craters.push({ x: Math.cos(a) * rad, y: Math.sin(a) * rad, cr: r * (0.06 + rng() * 0.15) });
+  }
+  if (shatterT === undefined) {
+    if (groundShadow) g.ellipse(0, r * 0.96, r * 0.92, r * 0.22).fill({ color: 0x000000, alpha: 0.28 });
+    g.circle(0, 0, r * 1.08).fill({ color: 0x9fb4d8, alpha: 0.16 });   // cold halo
+    g.circle(0, 0, r).fill({ color: 0xdbe2f2 });
+    g.circle(0, 0, r).stroke({ width: 3, color: 0xaab7d6, alpha: 0.85 });
+    for (const c of craters) {
+      g.circle(c.x, c.y, c.cr).fill({ color: 0xbcc6df, alpha: 0.9 }).stroke({ width: 1, color: 0x98a4c2, alpha: 0.6 });
+    }
+    g.ellipse(r * 0.34, 0, r * 0.92, r).fill({ color: 0x05060f, alpha: 0.12 });  // terminator
+    return;
+  }
+  const t = Math.min(1, shatterT);
+  const pieces = 11;
+  for (let i = 0; i < pieces; i++) {
+    const a = (i / pieces) * Math.PI * 2 + rng() * 0.5;
+    const dist = t * r * 2.6;
+    const cx = Math.cos(a) * dist;
+    const cy = Math.sin(a) * dist - t * 36;            // drift gently upward
+    const sz = r * (0.16 + rng() * 0.2) * (1 - 0.45 * t);
+    const rot = a + t * (2 + rng() * 4);
+    const pts: number[] = [];
+    for (let k = 0; k < 3; k++) {
+      const pa = rot + (k / 3) * Math.PI * 2 + rng() * 0.4;
+      pts.push(cx + Math.cos(pa) * sz, cy + Math.sin(pa) * sz);
+    }
+    g.poly(pts).fill({ color: 0xdbe2f2, alpha: Math.max(0, 1 - t) });
+  }
+}
+
+// How long the in-world moon shatter (the shards) plays before the disc is gone.
+const MOON_SHATTER_MS = 900;
+
+// Pose one rig at Lolly's scripted spot, or hide it when she's not in its scene.
+function positionFinaleRig(rig: FinaleRig, active: boolean, ground: boolean, state: GameState, opts: Options): void {
+  rig.container.visible = active;
+  if (!active) return;
+  const F = state.finale!;
+  rig.container.position.set(F.lollyPos.x, F.lollyPos.y);
+  // The dragon beneath her, shown for the whole flight (hidden once she lands
+  // and dismounts for the confrontation). On the summon beat it swoops down
+  // from off the top of the screen to settle into its seat under her — the
+  // same "arriving from above" read as a normal dragon summon.
+  rig.dragon.visible = F.dragonShown;
+  if (F.dragonShown && dragonFlySheet) {
+    const seatY = LOLLY.displayPx * 0.16;
+    let swoopY = 0;
+    if (F.phase === 'summon') {
+      const t = Math.min(1, (state.now - F.phaseStartedAt) / (FINALE.summonHold * 0.8));
+      const eased = t * t * (3 - 2 * t);
+      swoopY = -(1 - eased) * (LOLLY.displayPx * 3.2);   // starts high above, descends
+    }
+    // While swooping she faces the player; the dragon flies "down" (south row).
+    const heading = F.phase === 'summon' ? Math.PI / 2 : F.lollyFacing;
+    const dir = dirIndex(dragonFlySheet.meta, heading);
+    const fpd = dragonFlySheet.meta.framesPerDirection;
+    rig.dragon.texture = dragonFlySheet.frames[dir][Math.floor(state.now * dragonFlySheet.fps) % fpd];
+    rig.dragon.scale.set((LOLLY.displayPx * 0.95) / dragonFlySheet.meta.spriteSize);
+    rig.dragon.position.set(0, seatY + swoopY);
+    rig.dragon.alpha = F.phase === 'summon' ? Math.min(1, 0.3 + (state.now - F.phaseStartedAt) / 0.6) : 1;
+  }
+  const sheet = lollyOverworldSheet();
+  if (sheet) {
+    const dir = dirIndex(sheet.meta, F.lollyFacing);
+    const fpd = sheet.meta.framesPerDirection;
+    rig.lolly.texture = sheet.frames[dir][Math.floor(state.now * sheet.fps * opts.demonAnimSpeed) % fpd];
+    rig.lolly.scale.set(LOLLY.displayPx / sheet.meta.spriteSize);
+  }
+  // Sit her up on the dragon's back when mounted; centred otherwise.
+  rig.lolly.position.set(0, F.dragonShown ? -LOLLY.displayPx * 0.12 : 0);
+  rig.shadow.visible = ground && opts.goblinShadow && !F.dragonShown;
+  if (rig.shadow.visible) {
+    rig.shadow.position.set(0, LOLLY.displayPx * 0.32);
+    const sy = LOLLY.displayPx / 64;
+    rig.shadow.scale.set(sy * 0.8, sy);
+  }
+}
+
+// Where the moon rides while Lolly holds it — up at her shoulder.
+function moonShoulder(F: GameState['finale']): { x: number; y: number } {
+  return { x: F!.lollyPos.x, y: F!.lollyPos.y - LOLLY.displayPx * 0.34 };
+}
+
+function drawFinale(ctx: RenderContext, state: GameState, opts: Options): void {
+  const F = state.finale;
+  if (!F) {
+    if (ctx.finaleView) {
+      ctx.finaleView.groundRig.container.destroy({ children: true });
+      ctx.finaleView.spaceRig.container.destroy({ children: true });
+      ctx.finaleView.bob.destroy();
+      ctx.finaleView.bobShadow.destroy();
+      ctx.finaleView.groundMoon.destroy();
+      ctx.finaleView.spaceMoon.destroy();
+      ctx.finaleView = null;
+    }
+    return;
+  }
+  let v = ctx.finaleView;
+  if (!v) {
+    const groundRig = makeFinaleRig();
+    const spaceRig = makeFinaleRig();
+    const bobShadow = new Sprite(getShadowTexture());
+    bobShadow.anchor.set(0.5);
+    const bob = new Sprite((goblinIdleSheet ?? goblinWalkSheet)?.frames[0][0] ?? Texture.EMPTY);
+    bob.anchor.set(0.5);
+    const groundMoon = new Graphics();
+    const spaceMoon = new Graphics();
+    // Ground actors ride the lollyLayer (topmost ground layer). In space, Lolly
+    // rides the floating-building layer, but the moon goes in the ambient layer
+    // beneath it so it reads as a distant body — behind the buildings, the
+    // dragons, and Lolly herself.
+    ctx.lollyLayer.addChild(bobShadow);
+    ctx.lollyLayer.addChild(bob);
+    ctx.lollyLayer.addChild(groundRig.container);
+    ctx.lollyLayer.addChild(groundMoon);
+    ctx.spaceAmbientLayer.addChild(spaceMoon);
+    ctx.spaceMiscLayer.addChild(spaceRig.container);
+    v = ctx.finaleView = { groundRig, spaceRig, bob, bobShadow, groundMoon, spaceMoon };
+  }
+
+  const ground = F.scene === 'ground';
+  positionFinaleRig(v.groundRig, ground, true, state, opts);
+  positionFinaleRig(v.spaceRig, !ground, false, state, opts);
+
+  // Bob, dismounted on the surface for the whole cinematic. He swings on the
+  // moon (swipe sheet) at the smash, walks to the centre, idles otherwise.
+  const bobMoving = !F.bobAtCentre && F.phase !== 'summon';
+  const bobSheet = F.bobAttacking
+    ? (goblinSwipeSheet ?? goblinWalkSheet ?? goblinIdleSheet)
+    : (bobMoving ? goblinWalkSheet : goblinIdleSheet) ?? goblinWalkSheet ?? goblinIdleSheet;
+  v.bob.position.set(F.bobPos.x, F.bobPos.y);
+  if (bobSheet) {
+    const dir = dirIndex(bobSheet.meta, F.bobFacing);
+    const fpd = bobSheet.meta.framesPerDirection;
+    v.bob.texture = bobSheet.frames[dir][Math.floor(state.now * bobSheet.fps) % fpd];
+    v.bob.scale.set(opts.goblinDisplayPx / bobSheet.meta.spriteSize);
+  }
+  v.bobShadow.visible = opts.goblinShadow;
+  if (v.bobShadow.visible) {
+    v.bobShadow.position.set(F.bobPos.x, F.bobPos.y + opts.goblinDisplayPx * 0.34);
+    const sy = opts.goblinDisplayPx / 64;
+    v.bobShadow.scale.set(sy * 0.7, sy);
+  }
+
+  // The moon: floating in space, riding Lolly's shoulder, or shattering.
+  const m = F.moon;
+  v.groundMoon.visible = false;
+  v.spaceMoon.visible = false;
+  if (m) {
+    const shatterT = m.state === 'shattering' && m.shatterAt !== undefined
+      ? (state.now - m.shatterAt) / (MOON_SHATTER_MS / 1000)
+      : undefined;
+    // Pick the disc in the moon's current scene.
+    const disc = m.scene === 'ground' ? v.groundMoon : v.spaceMoon;
+    let pos: { x: number; y: number };
+    if (m.state === 'grabbed') {
+      pos = moonShoulder(F);
+    } else if (m.state === 'floating') {
+      pos = { x: m.pos.x, y: m.pos.y + Math.sin(state.now * 0.8 + m.seed) * 6 };
+    } else {
+      pos = { x: m.pos.x, y: m.pos.y };
+    }
+    if (shatterT === undefined || shatterT < 1) {
+      disc.visible = true;
+      disc.position.set(pos.x, pos.y);
+      // A cast shadow only when it's sitting on the ground (placed).
+      paintMoon(disc, FINALE.moonRadius, m.seed, shatterT, m.scene === 'ground' && m.state === 'placed');
+    }
+  }
 }
 
 // The dragon draws from an 8-direction fly sheet (dragonFlySheet). A soft glow
@@ -2473,6 +2723,8 @@ function drawDeathEffects(ctx: RenderContext, state: GameState) {
       if (e.hell) {
         sprite.position.set(worldToHellX(e.x), worldToHellY(e.y));
       } else {
+        // Space-flagged and overworld splatters both use their raw coordinate;
+        // they just live in different layers (set below).
         sprite.position.set(e.x, e.y);
       }
       // Scale once on creation to ~one cell wide.
@@ -2483,6 +2735,7 @@ function drawDeathEffects(ctx: RenderContext, state: GameState) {
       // White splatters go in the force-white layer; the tint below is left
       // alone for them so the color matrix has the raw alpha to work with.
       const layer = e.hell ? ctx.hellEffectsLayer
+                  : e.space ? ctx.spaceLayer
                   : e.white ? ctx.whiteEffectsLayer
                   : ctx.effectsLayer;
       layer.addChild(sprite);
@@ -2546,7 +2799,15 @@ function drawFloaters(ctx: RenderContext, state: GameState) {
       const remaining = f.powerCountdownWatts * (1 - k);
       t.text = `+${(remaining / 1e9).toFixed(2)} GW`;
     }
-    t.position.set(f.x, f.y - 18 - k * 28);
+    // Lolly's surge floaters ride above her live position (x/y are offsets);
+    // they vanish with her if she's gone (e.g. the finale takes over).
+    if (f.followLolly) {
+      if (!state.lolly) { t.visible = false; continue; }
+      t.visible = true;
+      t.position.set(state.lolly.pos.x + f.x, state.lolly.pos.y + f.y - 18 - k * 28);
+    } else {
+      t.position.set(f.x, f.y - 18 - k * 28);
+    }
     t.alpha = 1 - k;
   }
   for (const [id, t] of ctx.floaterViews) {
@@ -2682,14 +2943,15 @@ function positionParlaySpeech(
   }
   let sx: number;
   let sy: number;
-  if (sp.kind === 'goblin') {
-    // Bob barking in the overworld — anchor via the world layer's live
-    // transform (camera pan + climb/descend slide) instead of the hell mapping.
-    const g = sp.goblin;
+  if (sp.kind === 'goblin' || sp.kind === 'world') {
+    // Bob barking in the overworld, or a finale actor — anchor via the world
+    // layer's live transform (camera pan + climb/descend slide) instead of the
+    // hell mapping. The 'world' kind anchors to a free overworld point.
+    const p = sp.kind === 'goblin' ? sp.goblin.pos : sp.pos;
     const rs = ctx.renderScale;
-    sx = ctx.worldLayer.position.x + g.pos.x * rs;
+    sx = ctx.worldLayer.position.x + p.x * rs;
     sy = ctx.worldLayer.position.y
-      + (g.pos.y - getOptions().goblinDisplayPx * 0.5) * rs - 12 * rs;
+      + (p.y - getOptions().goblinDisplayPx * 0.5) * rs - 12 * rs;
   } else {
     let hx: number;
     let headTopHy: number;
@@ -3418,7 +3680,9 @@ export function render(state: GameState, ctx: RenderContext) {
   // on top. Same per-demon dials (sprite pick, tint) as her hell self so the
   // two read as one creature; Bob animates from the goblin walk sheet in
   // lockstep with her heading.
-  if (state.lolly) {
+  // Once the finale begins, drawFinale owns Lolly (and Bob, and the moon); the
+  // ordinary rampage view stands down so the two don't both draw her.
+  if (state.lolly && !state.finale) {
     let v = ctx.lollyView;
     if (!v) {
       v = makeLollyView();
@@ -3442,6 +3706,10 @@ export function render(state: GameState, ctx: RenderContext) {
       v.sprite.texture = sheet.frames[dir][frame];
       v.sprite.scale.set(LOLLY.displayPx / sheet.meta.spriteSize);
     }
+    // Struck-speed tint: blue while a lightning surge runs, green for a
+    // meltdown's fallout, fading with the boost (white when she's unboosted).
+    const boost = lollyBoostState(L, state.now);
+    v.sprite.tint = boost.tintAlpha > 0 ? lerpHex(0xffffff, boost.tint, boost.tintAlpha) : 0xffffff;
     const bobSheet = (L.target ? goblinWalkSheet : goblinIdleSheet) ?? goblinWalkSheet ?? goblinIdleSheet;
     if (bobSheet) {
       const dir = dirIndex(bobSheet.meta, L.facing);
@@ -3454,6 +3722,9 @@ export function render(state: GameState, ctx: RenderContext) {
     ctx.lollyView.container.destroy({ children: true });
     ctx.lollyView = null;
   }
+
+  // The finale cinematic (Lolly's flight, Bob on the ground, the moon).
+  drawFinale(ctx, state, opts);
 
   // Water sources — region rectangles with a few ripple highlights for life.
   const seenW = new Set<number>();

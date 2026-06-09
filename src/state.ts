@@ -1,6 +1,6 @@
 import {
   BASE_SPAWN_CAPACITY, BUILDING_DEFS, BuildingDef, BuildingKind, CELL, COLS,
-  DEMON, DIG_GROWTH_CELLS, GOBLIN_HOLE_CAPACITY_PER_BUILDING, HELL, ROWS, SOUL_SIGIL,
+  DEMON, DIG_GROWTH_CELLS, GOBLIN_HOLE_CAPACITY_PER_BUILDING, HELL, LOLLY_BOOST, ROWS, SOUL_SIGIL,
   INITIAL_PLAY_COLS, INITIAL_PLAY_ROWS, INITIAL_PLAY_X0, INITIAL_PLAY_Y0, ROBOT,
   START_CELL, START_GOBLINS, START_MONEY, WALL_BORDER, WORLD, formatPower,
 } from './config';
@@ -94,6 +94,12 @@ export type LollyTarget =
 // up, smash — except grid-free and aimed at everything: buildings (holes
 // included), goblins, robots, minotaurs. Persisted; the rampage survives a
 // reload. See updateLolly in sim.ts.
+// A speed surge from being struck mid-rampage: lightning (blue) or reactor
+// fallout (green). Adds `peak` to her speed multiplier at `start`, decaying
+// linearly to 0 over `duration`. They stack; see lollyBoostState.
+export type LollyBoostKind = 'lightning' | 'nuclear';
+export type LollySpeedBoost = { kind: LollyBoostKind; start: number; duration: number; peak: number };
+
 export type Lolly = {
   pos: Vec2;
   facing: number;          // radians, drives the sprite's direction row
@@ -102,6 +108,88 @@ export type Lolly = {
   wanderGoal?: Vec2;       // once nothing is left to destroy
   nextWanderAt: number;
   spawnAt: number;
+  // Active speed surges from lightning / meltdown hits (see lollyBoostState).
+  boosts?: LollySpeedBoost[];
+};
+
+// The live effect of Lolly's active boosts: her speed multiplier (1 = base),
+// and the sprite tint colour + alpha (the dominant boost, fading with its
+// remaining time). Expired boosts contribute nothing.
+export function lollyBoostState(L: Lolly, now: number): { speedMult: number; tint: number; tintAlpha: number } {
+  let bonus = 0;
+  let domContrib = 0;
+  let tint = 0xffffff;
+  let tintAlpha = 0;
+  for (const b of L.boosts ?? []) {
+    const frac = 1 - (now - b.start) / b.duration;
+    if (frac <= 0) continue;
+    const contrib = b.peak * frac;
+    bonus += contrib;
+    if (contrib > domContrib) {
+      domContrib = contrib;
+      tint = LOLLY_BOOST[b.kind].tint;
+      tintAlpha = Math.min(0.75, frac);
+    }
+  }
+  return { speedMult: 1 + bonus, tint, tintAlpha };
+}
+
+// The moon Lolly hauls out of space during the finale. Drawn, not a sprite —
+// see drawMoon in render.ts. It floats in space until she hoists it, rides down
+// on her shoulder, and shatters in Bob's hands.
+export type Moon = {
+  // Lives in space-scene coords until Lolly carries it down, then world coords.
+  pos: Vec2;
+  scene: 'space' | 'ground';
+  // floating: adrift in space · grabbed: in Lolly's grip (rides with her) ·
+  // placed: set down on the ground between Lolly and Bob · shattering: the
+  // moment Bob breaks it (render plays the shatter).
+  state: 'floating' | 'grabbed' | 'placed' | 'shattering';
+  seed: number;            // fixes the crater layout + float wobble phase
+  shatterAt?: number;      // state.now the break began (drives the shatter anim)
+};
+
+// The endgame cinematic, kicked off the instant Lolly runs out of things to
+// smash on the overworld (see maybeStartFinale / updateFinale in sim.ts). A
+// scripted state machine: Lolly mounts a called-down dragon, climbs to space,
+// scours it (sparing only dragons), grabs the moon, and rides back down to
+// confront Bob. Persisted so a reload mid-cinematic resumes rather than
+// replays.
+export type FinalePhase =
+  | 'summon'         // a dragon swoops in; Bob dismounts; Lolly tells him to stay
+  | 'lolly_ascends'  // Lolly + dragon climb off the top of the overworld
+  | 'space_rampage'  // up in space, smashing every building and unit (not dragons)
+  | 'grab_moon'      // closing on the moon and hoisting it
+  | 'lolly_descends' // riding back down to the overworld with the moon
+  | 'confront'       // the moon-eating demand + Bob's refusal (modal, in main.ts)
+  | 'shattered';     // the moon is broken, the world is coming apart
+
+export type Finale = {
+  phase: FinalePhase;
+  phaseStartedAt: number;
+  // Lolly's scripted position + heading, and which scene she's acting in
+  // ('ground' coords on the surface, 'space' coords up top). A called-down
+  // dragon is drawn beneath her the whole flight; `dragonShown` gates it.
+  lollyPos: Vec2;
+  lollyFacing: number;
+  scene: 'ground' | 'space';
+  dragonShown: boolean;
+  // Bob, dismounted to the overworld. Trudges to the centre, then turns to face
+  // the player and waits out the rest of the cinematic.
+  bobPos: Vec2;
+  bobFacing: number;
+  bobAtCentre: boolean;
+  // Set at the smash: Bob swings on the moon (render plays his attack sheet).
+  bobAttacking?: boolean;
+  // The space target currently being closed on (a SpaceBuilding or SpaceUnit id).
+  target?: { kind: 'building' | 'unit'; id: number } | null;
+  attackAt?: number;       // state.now the current space-smash lands
+  grabHoverUntil?: number; // state.now the moon hoist completes
+  moon: Moon | null;
+  // Hand-off to main.ts (which owns the DOM): set true once Lolly has landed
+  // back on the surface with the moon and the confrontation modal should run.
+  // main.ts consumes it, plays the modal, and advances the phase to 'shattered'.
+  confrontReady: boolean;
 };
 
 export type MinotaurState =
@@ -401,6 +489,10 @@ export type Floater = {
   // Multiplier on the floater's base font size — the soul-surge multiplier text
   // renders much bigger than a kill reward. 1 when absent.
   sizeMult?: number;
+  // When set, x/y are treated as an offset from Lolly's live position rather
+  // than absolute world coords, so the floater rides above her head as she
+  // moves (her "speed up!" surge text). Hidden if she's gone.
+  followLolly?: boolean;
 };
 
 // One-shot blood-explosion GIF effect played at a world position. The Lightning
@@ -414,6 +506,9 @@ export type DeathEffect = {
   spawnAt: number;
   white?: boolean;
   hell?: boolean;
+  // Splatters flagged `space` ride in the orbit scene (panned by the space
+  // camera) at their raw space-scene coordinate — Lolly's finale rampage.
+  space?: boolean;
 };
 
 // A ghost of a unit the player has killed — surfaced in Hell as a silhouette
@@ -549,6 +644,9 @@ export type Meltdown = {
   lastRadius: number;
   killed: number;
   dragonsKilled: number;
+  // Set once the front has reached Lolly, so the green speed surge it grants
+  // her is applied a single time per meltdown.
+  lollyBoosted?: boolean;
 };
 
 // A decaying power surge (Lightning Strike). Contributes `peak` watts at
@@ -834,6 +932,10 @@ export type GameState = {
   // Lolly's overworld rampage (with Bob riding on top), spawned by the Pain
   // Gabbonsaw ritual. Null/absent until then. Persisted — she does not stop.
   lolly?: Lolly | null;
+  // The endgame cinematic, kicked off once Lolly has nothing left on the
+  // overworld to destroy. Null/absent until then; once set it drives the rest
+  // of the demo (see updateFinale in sim.ts). Persisted — resumes on reload.
+  finale?: Finale | null;
   // Sticky: Lolly has torn the original Goblin Hole out of the earth. The
   // hole stops rendering, spawning, and being selectable; its base spawn
   // capacity goes with it.
@@ -1293,6 +1395,7 @@ export function createInitialState(): GameState {
     gabbonsawBought: false,
     bobLollyDeparted: false,
     lolly: null,
+    finale: null,
     holeDestroyed: false,
     ghosts: [],
     view: 'ground',
@@ -1633,13 +1736,14 @@ export function recordGhost(
   if (!opts.quiet) pushDeathEffect(state, x, y, false, true);
 }
 
-export function pushDeathEffect(state: GameState, x: number, y: number, white = false, hell = false) {
+export function pushDeathEffect(state: GameState, x: number, y: number, white = false, hell = false, space = false) {
   state.deathEffects.push({
     id: state.nextId++,
     x, y,
     spawnAt: state.now,
     white: white || undefined,
     hell: hell || undefined,
+    space: space || undefined,
   });
 }
 
@@ -1653,6 +1757,7 @@ export function pushFloater(
   space = false,
   hell = false,
   sizeMult?: number,
+  followLolly = false,
 ) {
   state.floaters.push({
     id: state.nextId++,
@@ -1663,6 +1768,7 @@ export function pushFloater(
     space,
     hell,
     sizeMult,
+    followLolly: followLolly || undefined,
   });
 }
 

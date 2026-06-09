@@ -32,5 +32,8 @@ Thumbs.db
 # Local screenshots
 screenshots/
 
+# Playwright video capture temp files (converted to .mp4, then deleted)
+videos/page@*.webm
+
 # Claude Code local settings
 .claude/

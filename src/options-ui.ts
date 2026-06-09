@@ -16,6 +16,10 @@ export type OptionsUICallbacks = {
   onSkipToHell: () => void;
   onTaskSkip: () => void;
   onShowTitleScreen: () => void;
+  // Finale cheats: loose Lolly into the endgame from scratch, or jump straight
+  // to the moon confrontation.
+  onTriggerFinale: () => void;
+  onSkipToConfront: () => void;
 };
 
 export function setupOptionsUI(root: HTMLElement, callbacks: OptionsUICallbacks): void {
@@ -461,6 +465,15 @@ function rebuildPanel(panel: HTMLElement, callbacks: OptionsUICallbacks, refresh
     toggle('Restart in hell (every reload)', getRestartInHell(), setRestartInHell),
     cheatButton('Work skip', callbacks.onTaskSkip),
     cheatButton('Show title screen', callbacks.onShowTitleScreen),
+  ]));
+
+  // The endgame finale (Lolly's moon): camera + pacing dials plus jump-in
+  // cheats for testing the cinematic without grinding the whole game.
+  panel.appendChild(collapsibleSection('Finale', [
+    toggle('Auto-follow camera', o.finaleAutoFollow, (v) => setOption('finaleAutoFollow', v)),
+    slider('Speed', o.finaleSpeedMult, 0.25, 6, 0.25, (v) => setOption('finaleSpeedMult', v)),
+    cheatButton('Cheat: trigger finale now', callbacks.onTriggerFinale),
+    cheatButton('Cheat: skip to moon confrontation', callbacks.onSkipToConfront),
   ]));
 
   // Copy the current settings (only the keys that differ from defaults) as
