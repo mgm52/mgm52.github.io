@@ -1732,14 +1732,13 @@ function drawFinale(ctx: RenderContext, state: GameState, opts: Options): void {
     bob.anchor.set(0.5);
     const groundMoon = new Graphics();
     const spaceMoon = new Graphics();
-    // Ground actors ride the lollyLayer (topmost ground layer). In space, Lolly
-    // rides the floating-building layer, but the moon goes in the ambient layer
-    // beneath it so it reads as a distant body — behind the buildings, the
-    // dragons, and Lolly herself.
+    // The moon sits at the BOTTOM of both scenes' stacks so Lolly always looms
+    // in front of it — on the ground (lollyLayer) it goes under Bob and her rig;
+    // in space it rides the ambient layer beneath the buildings and dragons.
+    ctx.lollyLayer.addChild(groundMoon);
     ctx.lollyLayer.addChild(bobShadow);
     ctx.lollyLayer.addChild(bob);
     ctx.lollyLayer.addChild(groundRig.container);
-    ctx.lollyLayer.addChild(groundMoon);
     ctx.spaceAmbientLayer.addChild(spaceMoon);
     ctx.spaceMiscLayer.addChild(spaceRig.container);
     v = ctx.finaleView = { groundRig, spaceRig, bob, bobShadow, groundMoon, spaceMoon };

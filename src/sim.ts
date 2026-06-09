@@ -1758,7 +1758,7 @@ function applyLollyBoost(state: GameState, kind: LollyBoostKind): void {
   // Floaters ride above her head (x/y are offsets from her live position — see
   // followLolly), stacked so several "speed up!"s read as a burst as she moves.
   for (let i = 0; i < cfg.floaters; i++) {
-    pushFloater(state, 0, -LOLLY.displayPx * 0.62 - i * 26, 'speed up!', cfg.floaterColor, 1.7 + i * 0.25, undefined, false, false, undefined, true);
+    pushFloater(state, 0, -LOLLY.displayPx * 0.62 - i * 26, 'speed up!', cfg.floaterColor, 4 + i * 0.25, undefined, false, false, undefined, true);
   }
   playSound('online', 0.6, kind === 'nuclear' ? 1.3 : 1.0);
   appendLog(state, kind === 'lightning'
