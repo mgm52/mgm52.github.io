@@ -1792,6 +1792,20 @@ function drawFinale(ctx: RenderContext, state: GameState, opts: Options): void {
       // A cast shadow only when it's sitting on the ground (placed).
       paintMoon(disc, FINALE.moonRadius, m.seed, shatterT, m.scene === 'ground' && m.state === 'placed');
     }
+    // Ground z-order. Once she's set the moon DOWN she stands behind it (Bob,
+    // smashing it, stays in front); while she's still carrying it at her head it
+    // rides behind everyone. (In space the moon is always the distant backdrop.)
+    if (m.scene === 'ground') {
+      const L = ctx.lollyLayer;
+      if (m.state === 'placed' || m.state === 'shattering') {
+        L.setChildIndex(v.bobShadow, 0);
+        L.setChildIndex(v.groundRig.container, 1);
+        L.setChildIndex(v.groundMoon, 2);
+        L.setChildIndex(v.bob, L.children.length - 1);
+      } else {
+        L.setChildIndex(v.groundMoon, 0);
+      }
+    }
   }
 }
 
