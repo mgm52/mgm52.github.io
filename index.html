@@ -1543,7 +1543,8 @@
          ivory world-cards with soft shadows, pale ethereal creatures. */
       #card-realm {
         position: fixed; inset: 0; z-index: 100001;
-        background: #ffffff;
+        /* A faint vignette keeps the expanse from reading as a dead page. */
+        background: radial-gradient(120% 90% at 50% 40%, #ffffff 55%, #f2f2f5 100%);
         color: #4a4a52;
         display: none;
         font-family: var(--font-body);
@@ -1562,7 +1563,22 @@
         gap: 10px;
         transition: opacity 500ms ease;
       }
-      #card-stage.intro-view { justify-content: center; }
+      /* Intro card centering via auto margins (not justify-content: center),
+         so a card taller than a short viewport stays scrollable instead of
+         having its top clipped. */
+      #card-stage.intro-view > .world-card { margin: auto; }
+      /* While the goblin holds court, the dealt card dips toward the bottom
+         of the screen so the dialogue line never sits on top of it — and
+         dips further (dimmed) while the YES/NO choice is up. The :not()
+         guards keep the deal-in and taken fly-out transforms in charge of
+         their own moments (this ID-weighted rule would beat them). */
+      #card-realm.goblin-in #card-stage.intro-view > .world-card:not(.taken):not(.deal-from-top) {
+        transform: translateY(16vh);
+      }
+      #card-realm.goblin-in.show-choice #card-stage.intro-view > .world-card:not(.taken):not(.deal-from-top) {
+        transform: translateY(30vh) scale(0.95);
+        opacity: 0.85;
+      }
       /* The between-gatherings blink (cards.ts holds it for ~700ms). */
       #card-stage.waiting { opacity: 0; }
       /* The ethereal goblin: the intro goblin's orc_idle sheet flattened to a
@@ -1570,7 +1586,7 @@
          PLACEHOLDER ART — swap for a real ethereal-creature sprite later. */
       #card-goblin {
         position: absolute; top: 0; left: 50%;
-        --csize: 44vh;
+        --csize: 40vh;
         --crow: 4;
         width: var(--csize); height: var(--csize);
         background-image: url('assets/rigged_goblin_dancing_aligol3dart_orc_idle.png');
@@ -1583,18 +1599,28 @@
         transition: transform 1800ms cubic-bezier(0.22, 1, 0.36, 1);
         filter: brightness(0) invert(0.93) drop-shadow(0 0 18px rgba(150, 150, 175, 0.55));
         opacity: 0.95;
-        animation: card-goblin-idle 1.6s steps(8) infinite;
+        animation:
+          card-goblin-idle 1.6s steps(8) infinite,
+          card-goblin-glow 3.4s ease-in-out infinite;
         pointer-events: none;
         z-index: 4;
       }
-      #card-realm.goblin-in #card-goblin { transform: translate(-50%, -16%) scaleY(-1); }
+      #card-realm.goblin-in #card-goblin { transform: translate(-50%, -14%) scaleY(-1); }
       @keyframes card-goblin-idle {
         from { background-position-x: 0; }
         to   { background-position-x: calc(var(--csize) * -8); }
       }
-      /* Dialogue near the top of the screen — the creature hangs just above. */
+      /* A slow breathing glow — the only "alive" tell a silhouette gets. */
+      @keyframes card-goblin-glow {
+        0%, 100% { filter: brightness(0) invert(0.93) drop-shadow(0 0 14px rgba(150, 150, 175, 0.4)); }
+        50%      { filter: brightness(0) invert(0.93) drop-shadow(0 0 26px rgba(140, 140, 185, 0.75)); }
+      }
+      /* Dialogue line. It opens at the top of the empty screen ("wait a
+         moment!"), then glides down ahead of the descending creature so it
+         ends up just under its head — and the card has dipped away below
+         (see the goblin-in dip above), so the two never collide. */
       #card-speech {
-        position: absolute; left: 50%; top: 31vh;
+        position: absolute; left: 50%; top: 12vh;
         transform: translateX(-50%);
         max-width: min(640px, 80vw);
         text-align: center;
@@ -1604,10 +1630,11 @@
         letter-spacing: 0.05em; line-height: 1.25;
         text-shadow: 0 0 14px rgba(255, 255, 255, 1);
         opacity: 0;
-        transition: opacity 200ms ease;
+        transition: opacity 200ms ease, top 1800ms cubic-bezier(0.22, 1, 0.36, 1);
         pointer-events: none;
         z-index: 5;
       }
+      #card-realm.goblin-in #card-speech { top: 36vh; }
       #card-realm.speaking #card-speech { opacity: 1; }
       #card-speech::after {
         content: "▍"; display: inline-block; margin-left: 4px;
@@ -1623,9 +1650,11 @@
       #card-realm.click-armed #card-clickwall {
         cursor: url('assets/GloveCursor-24.png') 9 1, pointer;
       }
-      /* YES / NO row, centred in the eyeline like the intro's. */
+      /* YES / NO row — parked between the dialogue line (36vh while the
+         creature is down) and the dipped card, not dead-centre where the
+         card lives. */
       #card-choice {
-        position: absolute; left: 50%; top: 50%;
+        position: absolute; left: 50%; top: 47vh;
         transform: translate(-50%, -50%);
         display: flex; gap: 18px;
         opacity: 0; pointer-events: none;
@@ -1662,6 +1691,22 @@
       .world-card.t-uncommon { --tier-c: #6f9fd8; }
       .world-card.t-rare { --tier-c: #d8b54a; }
       .world-card.big { width: min(280px, 80vw); }
+      /* The player's own stolen world — gold-lettered and faintly warm, so
+         it stands out the moment it appears in a creature's hand. */
+      .world-card.origin { box-shadow: 0 14px 34px rgba(170, 140, 60, 0.28), 0 3px 10px rgba(170, 140, 60, 0.18); }
+      .world-card.origin .wc-name { color: #a8842a; }
+      .world-card.origin .wc-name::before { content: "★ "; font-size: 11px; }
+      /* Laid-on-a-table jitter: alternate cards sit a hair off-square.
+         Selection (translateY) overrides it via its own transform. */
+      .ct-cards .world-card:nth-child(odd):not(.selected) { transform: rotate(-0.6deg); }
+      .ct-cards .world-card:nth-child(even):not(.selected) { transform: rotate(0.5deg); }
+      /* One-shot tier-colored flash right after an ascension. */
+      .world-card.ascended { animation: wc-ascended 1100ms ease; }
+      @keyframes wc-ascended {
+        0%   { box-shadow: 0 0 0 0 var(--tier-c), 0 14px 34px rgba(70, 70, 100, 0.18); }
+        45%  { box-shadow: 0 0 26px 6px var(--tier-c), 0 14px 34px rgba(70, 70, 100, 0.18); }
+        100% { box-shadow: 0 0 0 0 rgba(0, 0, 0, 0), 0 14px 34px rgba(70, 70, 100, 0.18); }
+      }
       .world-card.clickable { cursor: pointer; }
       .world-card.clickable:hover {
         box-shadow: 0 18px 40px rgba(70, 70, 100, 0.26), 0 4px 12px rgba(70, 70, 100, 0.16);
@@ -1701,7 +1746,16 @@
         transition: box-shadow 150ms ease, border-color 150ms ease;
       }
       .wc-enter:hover, .wc-ascend:hover { border-color: #8a8a94; box-shadow: 0 3px 12px rgba(70, 70, 100, 0.2); }
-      .wc-ascend { border-color: var(--tier-c); color: #3f8f4f; }
+      /* The progression affordance — a soft pulse draws the eye when a card
+         is ready to rise. */
+      .wc-ascend {
+        border-color: var(--tier-c); color: #3f8f4f;
+        animation: wc-ascend-pulse 1.6s ease-in-out infinite;
+      }
+      @keyframes wc-ascend-pulse {
+        0%, 100% { box-shadow: 0 2px 8px rgba(70, 70, 100, 0.12); }
+        50% { box-shadow: 0 0 14px 2px rgba(63, 143, 79, 0.45); }
+      }
       /* Table / gathering / trade furniture. */
       .ct-caption {
         font-family: var(--font-display); font-size: 12px; letter-spacing: 0.3em;
@@ -1730,12 +1784,6 @@
       }
       .ct-event-name { font-family: var(--font-display); font-size: 14px; letter-spacing: 0.08em; }
       .ct-event-sub { font-family: var(--font-mono); font-size: 11px; color: #9a9aa2; }
-      .ct-gift {
-        font-family: var(--font-dialogue, var(--font-display));
-        font-size: 14px; color: #6a6a72;
-        background: #f7f7f0; border: 1px solid #e0e0d6; border-radius: 8px;
-        padding: 8px 14px; max-width: 560px; text-align: center;
-      }
       .ct-back {
         align-self: flex-start;
         background: none; border: none; cursor: pointer;
@@ -1783,6 +1831,17 @@
         font-size: 15px; color: #6a6a72; min-height: 1.3em;
       }
       .ct-theirs, .ct-yours { min-height: 40px; }
+      /* Short viewports: the intro card is px-sized while the goblin/speech
+         are vh-sized, so shrink the card before they can meet. */
+      @media (max-height: 700px) {
+        .world-card.big { width: min(210px, 70vw); }
+        #card-stage { padding-top: 4vh; }
+      }
+      /* Finger-sized targets on touch. */
+      @media (pointer: coarse) {
+        .wc-enter, .wc-ascend { padding: 11px 4px; }
+        .ct-back, .ct-wait { padding: 12px 20px; }
+      }
 
       /* ───────── Inside a card world ─────────
          White border vignette + the big white LEAVE WORLD button — the white
@@ -1804,6 +1863,15 @@
         box-shadow: 0 6px 26px rgba(255, 255, 255, 1), 0 5px 16px rgba(40, 40, 60, 0.38);
       }
       #leave-world-btn:disabled { opacity: 0.6; cursor: default; }
+      /* Stacked portrait layout: the bottom of the screen is the sidebar
+         tray, so the white exit sits just above it (the tray caps at 44dvh —
+         see the portrait media block below). */
+      @media (orientation: portrait) and (max-width: 600px) {
+        #leave-world-btn {
+          bottom: calc(44dvh + 12px);
+          font-size: 12px; padding: 9px 18px;
+        }
+      }
 
       /* ───────── Portrait phones — stacked layout ─────────
          Held upright, the side-by-side layout has nowhere to put a 280px
