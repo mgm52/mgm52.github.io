@@ -5,10 +5,11 @@
 
 import { describe, expect, it } from 'vitest';
 import {
-  APPETITE_LINE, CardMeta, CardTier, TIER_ABOVE, TIER_RANK, WorldCard,
-  appetiteAccepts, ascendCard, breakdownGives, creatureTakesFor, decodeWorld,
-  encodeWorld, generateEvents, generateJunkWorld, generateWeirdWorld, makeCard,
-  mulberry32, regenerateEvent, reqMet, rollUpgradeReq, sameTierGives, worldName,
+  APPETITE_LINE, CardMeta, CardResources, CardTier, TIER_ABOVE, TIER_RANK,
+  WORLD_FLAVORS, WorldCard, appetiteAccepts, ascendCard, breakdownGives,
+  creatureOpenTo, creatureTakesFor, decodeWorld, encodeWorld, generateEvents,
+  generateJunkWorld, generateWeirdWorld, makeCard, mulberry32, regenerateEvent,
+  reqMet, rollUpgradeReq, sameTierGives, sceneStructureCounts, worldName,
 } from '../src/cards-core';
 import { BUILDING_DEFS } from '../src/config';
 import { GameState, cellKey, isInPlayCell } from '../src/state';
@@ -26,11 +27,13 @@ function card(tier: CardTier, over: Partial<WorldCard> = {}): WorldCard {
     name: 'test world',
     tier,
     data: '',
-    resources: { money: 0, blood: 0, dragonBone: 0 },
+    resources: { money: 0, blood: 0, dragonBone: 0, power: 0 },
     upgradeReq: null,
     ...over,
   };
 }
+
+const NO_RES: CardResources = { money: 0, blood: 0, dragonBone: 0, power: 0 };
 
 // ─── Seeded RNG ──────────────────────────────────────────────────────
 
@@ -136,6 +139,76 @@ describe('generateJunkWorld', () => {
   });
 });
 
+describe('world flavors (the spikes)', () => {
+  it('each named flavor leaves its signature on the world', () => {
+    for (let seed = 1; seed <= 4; seed++) {
+      const blood = generateWeirdWorld(seed * 11, 'common', TASK_IDS, 'bloodbath');
+      expect(blood.blood).toBeGreaterThanOrEqual(15);
+      expect(blood.blood).toBeGreaterThan(blood.money);
+
+      const mint = generateWeirdWorld(seed * 13, 'common', TASK_IDS, 'mint');
+      expect(mint.money).toBeGreaterThanOrEqual(180);
+      expect(mint.blood).toBe(0);
+
+      // Bones at common — unheard of outside a boneyard.
+      const bones = generateWeirdWorld(seed * 17, 'common', TASK_IDS, 'boneyard');
+      expect(bones.dragonBone).toBeGreaterThanOrEqual(1);
+      expect(bones.dragonBoneUnlocked).toBe(true);
+
+      const mono = generateWeirdWorld(seed * 19, 'uncommon', TASK_IDS, 'monoculture');
+      const kinds = new Set([...mono.buildings.values()].map((b) => b.kind));
+      expect(kinds.size).toBe(1);
+      expect(mono.buildings.size).toBeGreaterThanOrEqual(5);
+
+      const crowd = generateWeirdWorld(seed * 23, 'common', TASK_IDS, 'crowd');
+      expect(crowd.goblins.size).toBeGreaterThanOrEqual(5);
+
+      const haunted = generateWeirdWorld(seed * 29, 'common', TASK_IDS, 'haunted');
+      expect(haunted.ghosts.length).toBeGreaterThanOrEqual(10);
+      expect(haunted.hellUnlocked).toBe(true);
+      expect([...haunted.buildings.values()].some((b) => b.kind === 'hell_portal')).toBe(true);
+    }
+  });
+
+  it('unforced generation actually varies across seeds', () => {
+    const signatures = new Set<string>();
+    for (let seed = 1; seed <= 24; seed++) {
+      const st = generateWeirdWorld(seed * 101, 'uncommon', TASK_IDS);
+      signatures.add([
+        st.blood > st.money ? 'bloody' : 'moneyed',
+        st.goblins.size > 12 ? 'crowded' : 'sparse',
+        st.ghosts.length > 20 ? 'haunted' : 'quiet',
+      ].join('-'));
+    }
+    expect(signatures.size).toBeGreaterThanOrEqual(3);
+  });
+});
+
+describe('sceneStructureCounts (preview pane fade/glow)', () => {
+  it('walls are scenery: the junk world reads as nothing-built everywhere', () => {
+    const counts = sceneStructureCounts(generateJunkWorld(3, TASK_IDS));
+    expect(counts).toEqual({ space: 0, earth: 0, hell: 0 });
+  });
+
+  it('counts each scene separately', () => {
+    const haunted = generateWeirdWorld(7, 'common', TASK_IDS, 'haunted');
+    expect(sceneStructureCounts(haunted).hell).toBeGreaterThanOrEqual(1); // the portal
+    const mono = generateWeirdWorld(9, 'uncommon', TASK_IDS, 'monoculture');
+    const counts = sceneStructureCounts(mono);
+    const nonWall = [...mono.buildings.values()].filter((b) => b.kind !== 'wall').length;
+    expect(counts.earth).toBe(nonWall);
+    // Find a rare with space debris for the orbit count.
+    for (let seed = 1; seed < 60; seed++) {
+      const st = generateWeirdWorld(seed, 'rare', TASK_IDS);
+      if (st.spaceBuildings.size > 0) {
+        expect(sceneStructureCounts(st).space).toBe(st.spaceBuildings.size);
+        return;
+      }
+    }
+    throw new Error('no rare world with space debris in 60 seeds');
+  });
+});
+
 // ─── Serialization ───────────────────────────────────────────────────
 
 describe('world serialization', () => {
@@ -174,10 +247,10 @@ describe('world serialization', () => {
 // ─── Cards, tiers, ascension ─────────────────────────────────────────
 
 describe('rollUpgradeReq', () => {
-  it('rolls demands inside the tier bands, and none at rare', () => {
+  it('rolls demands inside the tier bands for a from-nothing world, and none at rare', () => {
     for (let seed = 0; seed < 200; seed++) {
       const rng = mulberry32(seed);
-      const common = rollUpgradeReq('common', rng);
+      const common = rollUpgradeReq('common', rng, NO_RES);
       expect(common).not.toBeNull();
       if (common!.res === 'money') {
         expect(common!.amount).toBeGreaterThanOrEqual(5_000);
@@ -187,7 +260,7 @@ describe('rollUpgradeReq', () => {
         expect(common!.amount).toBeGreaterThanOrEqual(200);
         expect(common!.amount).toBeLessThanOrEqual(800);
       }
-      const un = rollUpgradeReq('uncommon', rng);
+      const un = rollUpgradeReq('uncommon', rng, NO_RES);
       expect(un).not.toBeNull();
       if (un!.res === 'money') {
         expect(un!.amount).toBeGreaterThanOrEqual(250_000);
@@ -196,11 +269,47 @@ describe('rollUpgradeReq', () => {
         expect(un!.amount).toBeGreaterThanOrEqual(5_000);
         expect(un!.amount).toBeLessThanOrEqual(20_000);
       } else {
-        expect(un!.amount).toBeGreaterThanOrEqual(3);
-        expect(un!.amount).toBeLessThanOrEqual(10);
+        // Bones can't be demanded of a boneless world; power can.
+        expect(un!.res).toBe('power');
+        expect(un!.amount).toBeGreaterThanOrEqual(1_000_000_000);
+        expect(un!.amount).toBeLessThanOrEqual(3_000_000_000);
       }
-      expect(rollUpgradeReq('rare', rng)).toBeNull();
+      expect(rollUpgradeReq('rare', rng, NO_RES)).toBeNull();
     }
+  });
+
+  it('is never born already met: amounts lean 2–4× past a spiked holding', () => {
+    const spiked: CardResources = { money: 12, blood: 6_000, dragonBone: 0, power: 0 };
+    for (let seed = 0; seed < 200; seed++) {
+      const req = rollUpgradeReq('common', mulberry32(seed), spiked)!;
+      expect((spiked as Record<string, number>)[req.res] ?? 0).toBeLessThan(req.amount);
+      if (req.res === 'blood') {
+        expect(req.amount).toBeGreaterThanOrEqual(12_000); // ≥ 2× the spike
+        expect(req.amount).toBeLessThanOrEqual(24_000);    // ≤ 4× the spike
+      }
+    }
+  });
+
+  it('leans into the spike more often than not', () => {
+    const bloodFarm: CardResources = { money: 10, blood: 700, dragonBone: 0, power: 0 };
+    let bloodDemands = 0;
+    for (let seed = 0; seed < 200; seed++) {
+      if (rollUpgradeReq('common', mulberry32(seed), bloodFarm)!.res === 'blood') bloodDemands++;
+    }
+    expect(bloodDemands).toBeGreaterThan(100);
+  });
+
+  it('only demands bones of a world that keeps bones', () => {
+    for (let seed = 0; seed < 200; seed++) {
+      const req = rollUpgradeReq('uncommon', mulberry32(seed), NO_RES)!;
+      expect(req.res).not.toBe('dragonBone');
+    }
+    let boneDemands = 0;
+    const bony: CardResources = { money: 0, blood: 0, dragonBone: 8, power: 0 };
+    for (let seed = 0; seed < 200; seed++) {
+      if (rollUpgradeReq('uncommon', mulberry32(seed), bony)!.res === 'dragonBone') boneDemands++;
+    }
+    expect(boneDemands).toBeGreaterThan(0);
   });
 });
 
@@ -212,6 +321,14 @@ describe('reqMet / ascendCard', () => {
     c.resources.money = 10_000;
     expect(reqMet(c)).toBe(true);
     expect(reqMet(card('rare'))).toBe(false);
+  });
+
+  it('handles power demands (and metas saved before power existed)', () => {
+    const c = card('uncommon', { upgradeReq: { res: 'power', amount: 1_000_000_000 } });
+    delete (c.resources as Partial<CardResources>).power; // pre-power meta
+    expect(reqMet(c)).toBe(false);
+    c.resources.power = 1_500_000_000;
+    expect(reqMet(c)).toBe(true);
   });
 
   it('walks the full ladder: common → uncommon → rare → capped', () => {
@@ -234,6 +351,12 @@ describe('makeCard', () => {
     const junk = makeCard(meta, 'common', mulberry32(1), TASK_IDS, true);
     expect(junk.upgradeReq).toEqual({ res: 'money', amount: 10_000 });
     expect(junk.resources.money).toBe(3);
+  });
+
+  it('records the world power on the card (zero until the world has run)', () => {
+    const meta = freshMeta();
+    const c = makeCard(meta, 'common', mulberry32(4), TASK_IDS);
+    expect(c.resources.power).toBe(0);
   });
 
   it('assigns unique ids from the meta counter', () => {
@@ -298,20 +421,24 @@ describe('trade rules', () => {
 // ─── Gatherings ──────────────────────────────────────────────────────
 
 describe('generateEvents', () => {
-  it('builds one gathering per tier, decks matching, with an any-appetite creature each', () => {
+  it('grows the tables with the tiers: 1 creature (two cards), then 2, then 3 — first one always open to anything', () => {
     const meta = freshMeta();
     const events = generateEvents(meta, null, TASK_IDS);
     expect(events.map((e) => e.tier)).toEqual(['common', 'uncommon', 'rare']);
+    expect(events.map((e) => e.creatures.length)).toEqual([1, 2, 3]);
+    // The soft border's lone creature holds two commons — the first arc's
+    // two-for-one partner.
+    expect(events[0].creatures[0].deck.length).toBe(2);
     for (const ev of events) {
-      expect(ev.creatures.length).toBe(2);
-      // Progression guarantee: someone at every table will consider anything.
-      expect(ev.creatures.some((c) => c.appetite === 'any')).toBe(true);
+      expect(ev.creatures[0].appetite).toBe('any');
       for (const cr of ev.creatures) {
-        expect(cr.deck.length).toBeGreaterThanOrEqual(2);
         expect(cr.deck.every((c) => c.tier === ev.tier)).toBe(true);
         expect(APPETITE_LINE[cr.appetite]).toBeTruthy();
       }
     }
+    // Picky creatures at the same table don't share an appetite.
+    const rareAppetites = events[2].creatures.slice(1).map((c) => c.appetite);
+    expect(new Set(rareAppetites).size).toBe(rareAppetites.length);
   });
 
   it('seats the stolen origin card with the rare exchange\'s any-appetite creature', () => {
@@ -328,7 +455,7 @@ describe('generateEvents', () => {
     const stolen = card('rare', { id: 1, origin: true });
     const events = generateEvents(meta, stolen, TASK_IDS);
     const ev = events[2];
-    const strayId = ev.creatures[1].deck[0].id;
+    const strayId = ev.creatures[2].deck[0].id;
     for (let i = 0; i < 3; i++) {
       regenerateEvent(meta, ev, TASK_IDS);
       const all = ev.creatures.flatMap((c) => c.deck);
@@ -370,14 +497,48 @@ describe('progression sanity', () => {
     expect(takers).toContain(junk);
   });
 
-  it('a tier-above card can always rebuild a collection (two-for-one path)', () => {
+  it('walks the designed first arc: ascend the junk card, break it down, ascend both halves', () => {
     const meta = freshMeta();
-    const events = generateEvents(meta, null, TASK_IDS);
-    // Holding ONLY an uncommon: the common gathering's any-appetite creature
-    // must offer a two-for-one for it.
-    const onlyCard = card('uncommon', { id: 999 });
-    const anyCreature = events[0].creatures.find((c) => c.appetite === 'any')!;
-    expect(breakdownGives(anyCreature, onlyCard).length).toBeGreaterThanOrEqual(2);
+    const rng = mulberry32(31);
+    const junk = makeCard(meta, 'common', rng, TASK_IDS, true);
+    meta.cards = [junk];
+    meta.events = generateEvents(meta, null, TASK_IDS);
+    const [gatheringOne, gatheringTwo] = meta.events;
+
+    // 1. Ascend the junk common (its pinned Ƶ10,000 climb).
+    junk.resources.money = 10_000;
+    expect(reqMet(junk)).toBe(true);
+    ascendCard(meta, junk);
+    expect(junk.tier).toBe('uncommon');
+
+    // 2. The common gathering's lone creature holds two commons — it will
+    // break the uncommon down whatever its appetite says (greed beats taste).
+    const two = gatheringOne.creatures[0];
+    expect(two.deck.length).toBe(2);
+    expect(creatureOpenTo(two, junk)).toBe(true);
+    expect(breakdownGives(two, junk).length).toBe(2);
+    const halves = [...two.deck];
+    meta.cards = halves;
+    two.deck = [junk];
+
+    // 3. Ascend both halves: two uncommons — the uncommon salon's currency.
+    for (const half of halves) {
+      half.resources = { money: 99_999_999, blood: 999_999, dragonBone: 999, power: 0 };
+      expect(reqMet(half)).toBe(true);
+      ascendCard(meta, half);
+      expect(half.tier).toBe('uncommon');
+    }
+    expect(meta.cards.filter((c) => c.tier === 'uncommon').length).toBe(2);
+    expect(meta.cards.some((c) => c.tier === gatheringTwo.tier)).toBe(true);
+  });
+
+  it('breakdowns ignore appetite; same-tier swaps respect it', () => {
+    const bloodless = card('uncommon', { id: 50 }); // nothing a blood-lover wants
+    const picky = { id: 1, name: 'x', appetite: 'blood' as const, deck: [card('common', { id: 51 }), card('common', { id: 52 })] };
+    expect(appetiteAccepts(picky.appetite, bloodless)).toBe(false);
+    expect(creatureOpenTo(picky, bloodless)).toBe(true); // via the two-for-one
+    const sameTierPicky = { id: 2, name: 'y', appetite: 'blood' as const, deck: [card('uncommon', { id: 53 })] };
+    expect(creatureOpenTo(sameTierPicky, bloodless)).toBe(false); // 1:1 needs the appetite
   });
 });
 

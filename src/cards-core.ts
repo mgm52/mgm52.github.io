@@ -25,7 +25,12 @@ export const TIER_ABOVE: Record<CardTier, CardTier | null> = { common: 'uncommon
 // of one resource inside its world. Different per card — part of a card's
 // identity, and the reason to trade sideways for one whose demand suits the
 // world you can actually grow. Null once the card is rare (top tier).
-export type UpgradeReq = { res: 'money' | 'blood' | 'dragonBone'; amount: number };
+export type UpgradeReq = { res: 'money' | 'blood' | 'dragonBone' | 'power'; amount: number };
+
+// The headline numbers written on a card. `power` is the world's last
+// measured production in watts (0 until its buildings have actually run);
+// optional for metas saved before it existed.
+export type CardResources = { money: number; blood: number; dragonBone: number; power?: number };
 
 export type WorldCard = {
   id: number;
@@ -35,7 +40,7 @@ export type WorldCard = {
   // each time the player leaves the world.
   data: string;
   // Headline numbers written on the card; refreshed alongside `data`.
-  resources: { money: number; blood: number; dragonBone: number };
+  resources: CardResources;
   // Ascension demand for the next tier (see UpgradeReq). Null at rare.
   upgradeReq?: UpgradeReq | null;
   // The player's own stolen pre-finale world — winnable back at gathering III.
@@ -218,13 +223,27 @@ const KIND_POOLS: Record<CardTier, BuildingKind[]> = {
   rare: ['goblin_wheel', 'phone_farm', 'gas_engine', 'goblin_hole', 'datacentre', 'datacentre', 'nuclear_reactor', 'hypercentre', 'dragon_beacon', 'hell_portal'],
 };
 
-export function generateWeirdWorld(seed: number, tier: CardTier, taskIds: string[]): GameState {
+// The spike that defines a generated world's identity. Generated worlds are
+// deliberately lopsided — a card is a personality, not an average:
+//  - balanced:    a bit of everything (the original behavior)
+//  - bloodbath:   swimming in blood, broke
+//  - mint:        swimming in cash, bloodless
+//  - boneyard:    keeps bones (even at common, where bones are unheard of)
+//  - monoculture: one building kind, everywhere
+//  - crowd:       goblins wall to wall, little else
+//  - haunted:     hell is full; the surface is thin
+export type WorldFlavor = 'balanced' | 'bloodbath' | 'mint' | 'boneyard' | 'monoculture' | 'crowd' | 'haunted';
+export const WORLD_FLAVORS: WorldFlavor[] = ['balanced', 'bloodbath', 'mint', 'boneyard', 'monoculture', 'crowd', 'haunted'];
+
+export function generateWeirdWorld(seed: number, tier: CardTier, taskIds: string[], flavorOverride?: WorldFlavor): GameState {
   const rng = mulberry32(seed);
   const ri = (a: number, b: number) => a + Math.floor(rng() * (b - a + 1));
   const st = createInitialState();
   st.cardWorld = true;
   st.demons = new Map();
   st.log = [];
+  const flavor: WorldFlavor = flavorOverride ?? WORLD_FLAVORS[Math.floor(rng() * WORLD_FLAVORS.length)];
+  const T = TIER_RANK[tier]; // 0 / 1 / 2 — scales every spike
 
   // Dug arms — more of the plus-shape opens up with tier.
   const dirs: ('n' | 'e' | 's' | 'w')[] = ['n', 'e', 's', 'w'];
@@ -236,7 +255,7 @@ export function generateWeirdWorld(seed: number, tier: CardTier, taskIds: string
   for (const d of dirs.slice(0, digs)) digDirection(st, d);
   st.firstDugAt = 0;
 
-  // Strange resource balances by tier.
+  // Baseline balances by tier (the 'balanced' flavor), then the spike.
   if (tier === 'common') {
     st.money = ri(0, 60);
     st.blood = ri(0, 5);
@@ -249,6 +268,49 @@ export function generateWeirdWorld(seed: number, tier: CardTier, taskIds: string
     st.blood = ri(1_000, 80_000);
     st.dragonBone = ri(4, 150);
   }
+  let buildingCount = tier === 'common' ? ri(1, 4) : tier === 'uncommon' ? ri(4, 12) : ri(10, 24);
+  let goblinCount = tier === 'common' ? ri(1, 3) : tier === 'uncommon' ? ri(2, 10) : ri(5, 25);
+  let ghostCount = tier === 'common' ? ri(0, 4) : tier === 'uncommon' ? ri(2, 12) : ri(6, 40);
+  let goldChance = 0.1;
+  let dragonGhostBias = 0.1;
+  let pool = KIND_POOLS[tier];
+  let forcePortal = false;
+
+  if (flavor === 'bloodbath') {
+    st.blood = [ri(15, 60), ri(1_200, 8_000), ri(240_000, 800_000)][T];
+    st.money = ri(0, [8, 90, 900][T]);
+    st.dragonBone = 0;
+    ghostCount *= 2;
+    goblinCount += ri(2, 4 + T * 4);
+  } else if (flavor === 'mint') {
+    st.money = [ri(180, 900), ri(90_000, 400_000), ri(150_000_000, 600_000_000)][T];
+    st.blood = 0;
+    st.dragonBone = 0;
+    buildingCount = Math.max(1, Math.floor(buildingCount / 2));
+  } else if (flavor === 'boneyard') {
+    st.dragonBone = [ri(1, 3), ri(4, 12), ri(150, 500)][T];
+    st.money = ri(0, [10, 600, 40_000][T]);
+    st.blood = Math.floor(st.blood / 4);
+    dragonGhostBias = 0.7;
+    ghostCount += ri(2, 6);
+  } else if (flavor === 'monoculture') {
+    const mono = pool[Math.floor(rng() * pool.length)];
+    pool = [mono];
+    buildingCount = [ri(6, 12), ri(14, 30), ri(25, 50)][T];
+    st.money = Math.floor(st.money / 3);
+  } else if (flavor === 'crowd') {
+    goblinCount = [ri(6, 12), ri(15, 30), ri(30, 60)][T];
+    goldChance = 0.25;
+    buildingCount = Math.max(1, Math.floor(buildingCount / 2));
+  } else if (flavor === 'haunted') {
+    ghostCount = [ri(10, 25), ri(25, 60), ri(60, 120)][T];
+    forcePortal = true;
+    st.money = Math.floor(st.money / 4);
+    st.blood = Math.floor(st.blood / 2);
+    buildingCount = Math.max(1, Math.floor(buildingCount / 2));
+    goblinCount = Math.max(1, Math.floor(goblinCount / 2));
+  }
+
   st.moneyEarned = st.money;
   st.bloodEarned = st.blood;
   st.dragonBoneEarned = st.dragonBone;
@@ -257,29 +319,29 @@ export function generateWeirdWorld(seed: number, tier: CardTier, taskIds: string
 
   // Scattered, unstaffed buildings — they wake (or stay dormant) under the
   // normal sim rules once the player starts assigning goblins.
-  const pool = KIND_POOLS[tier];
-  const buildingCount = tier === 'common' ? ri(1, 4) : tier === 'uncommon' ? ri(4, 12) : ri(10, 24);
   for (let i = 0; i < buildingCount; i++) {
     const kind = pool[Math.floor(rng() * pool.length)];
     const placed = tryPlaceBuilding(st, kind, rng);
     if (placed?.kind === 'hell_portal') st.hellUnlocked = true;
   }
+  if (forcePortal && !st.hellUnlocked) {
+    const portal = tryPlaceBuilding(st, 'hell_portal', rng);
+    if (portal) st.hellUnlocked = true;
+  }
 
-  // A few inhabitants.
-  const goblinCount = tier === 'common' ? ri(1, 3) : tier === 'uncommon' ? ri(2, 10) : ri(5, 25);
+  // Inhabitants.
   for (let i = 0; i < goblinCount; i++) {
     tryPlaceGoblin(st, rng, {
-      gold: rng() < 0.1,
+      gold: rng() < goldChance,
       robot: tier === 'rare' && rng() < 0.15,
     });
   }
   st.spawnsCompleted = goblinCount;
 
   // Ghosts already drifting in this world's hell — somebody lived here.
-  const ghostCount = tier === 'common' ? ri(0, 4) : tier === 'uncommon' ? ri(2, 12) : ri(6, 40);
   const gb = computePlayBounds(st);
   for (let i = 0; i < ghostCount; i++) {
-    const kind = rng() < 0.8 ? 'goblin' : rng() < 0.5 ? 'minotaur' : 'dragon';
+    const kind = rng() < dragonGhostBias ? 'dragon' : rng() < 0.85 ? 'goblin' : 'minotaur';
     const x = (gb.x0 + rng() * (gb.x1 - gb.x0)) * CELL;
     const y = (gb.y0 + rng() * (gb.y1 - gb.y0)) * CELL;
     recordGhost(st, kind, x, y, rng() * Math.PI * 2, { gold: rng() < 0.08 });
@@ -383,54 +445,94 @@ export function sanitizeCardWorld(st: GameState): void {
   st.view = 'ground';
 }
 
+// Per-scene structure counts, driving each preview pane's treatment on the
+// card: a pane with nothing built fades; one holding three or more
+// structures glows. Walls are scenery, not development; hell counts what
+// shows in the hell scene (portal mirrors + placed candles).
+export function sceneStructureCounts(st: GameState): { space: number; earth: number; hell: number } {
+  let earth = 0, portals = 0;
+  for (const b of st.buildings.values()) {
+    if (b.kind === 'wall') continue;
+    earth++;
+    if (b.kind === 'hell_portal') portals++;
+  }
+  return {
+    space: st.spaceBuildings.size,
+    earth,
+    hell: portals + st.soulChairs.length,
+  };
+}
+
 // ─── Card construction ───────────────────────────────────────────────
 
-// Roll a card's ascension demand for its CURRENT tier. The bands are sized
-// so the climb is a real session inside the world but never a wall: a fresh
-// common can reach five figures of cash (or a few hundred blood) with basic
-// wheels and kills; an uncommon's world starts rich enough that six figures
-// (or a blood/bone harvest) is reachable with the mid-game toys.
-export function rollUpgradeReq(tier: CardTier, rng: () => number): UpgradeReq | null {
+// Roll a card's ascension demand for its CURRENT tier, shaped by what the
+// world already holds. The demand leans INTO a world's spike — a blood farm
+// is asked for more blood, a mint for more cash — at 2–4× its current
+// holding, so a freshly-rolled card is never born already met and growing a
+// world means growing its identity. Spike-blind floors keep the climb a real
+// session even in a world that starts from nothing. Bones can only be
+// demanded of a world that already keeps bones; power only at uncommon
+// (reactors are mid-game toys).
+export function rollUpgradeReq(tier: CardTier, rng: () => number, resources: CardResources): UpgradeReq | null {
   const ri = (a: number, b: number) => a + Math.floor(rng() * (b - a + 1));
   if (tier === 'rare') return null;
-  if (tier === 'common') {
-    return rng() < 0.6
-      ? { res: 'money', amount: ri(5, 15) * 1000 }
-      : { res: 'blood', amount: ri(2, 8) * 100 };
+  const bands: Partial<Record<UpgradeReq['res'], [number, number]>> = tier === 'common'
+    ? { money: [5_000, 15_000], blood: [200, 800] }
+    : { money: [250_000, 1_000_000], blood: [5_000, 20_000], dragonBone: [3, 10], power: [1_000_000_000, 3_000_000_000] };
+  const candidates: UpgradeReq['res'][] = ['money', 'blood'];
+  if (tier === 'uncommon') {
+    if (resources.dragonBone > 0 && rng() < 0.5) candidates.push('dragonBone');
+    if (rng() < 0.25) candidates.push('power');
   }
-  const roll = rng();
-  if (roll < 0.5) return { res: 'money', amount: ri(25, 100) * 10_000 };
-  if (roll < 0.85) return { res: 'blood', amount: ri(5, 20) * 1000 };
-  return { res: 'dragonBone', amount: ri(3, 10) };
+  // Bias toward the world's dominant holding (relative to its band ceiling).
+  let dominant: UpgradeReq['res'] = 'money';
+  let dominance = -1;
+  for (const res of candidates) {
+    if (res === 'power') continue; // production is measured later, not held
+    const [, hi] = bands[res]!;
+    const score = (resources[res] ?? 0) / hi;
+    if (score > dominance) { dominance = score; dominant = res; }
+  }
+  const res = dominance > 0 && rng() < 0.65 ? dominant : candidates[Math.floor(rng() * candidates.length)];
+  const [lo, hi] = bands[res]!;
+  let amount = ri(lo, hi);
+  // Lean past the spike: never born met, always 2–4× the current holding.
+  const have = resources[res] ?? 0;
+  if (have * 2 > amount) amount = Math.ceil(have * (2 + rng() * 2));
+  return { res, amount };
 }
 
 export function reqMet(card: WorldCard): boolean {
   const r = card.upgradeReq;
-  return !!r && card.resources[r.res] >= r.amount;
+  return !!r && (card.resources[r.res] ?? 0) >= r.amount;
 }
 
 // Ascend a card one tier (caller checks reqMet and persists the meta) and
-// roll its next demand.
+// roll its next demand against the world's current holdings.
 export function ascendCard(meta: CardMeta, card: WorldCard): void {
   const next = TIER_ABOVE[card.tier];
   if (!next) return;
   card.tier = next;
   const rng = mulberry32((card.id * 1103515245 + meta.nextId) >>> 0);
-  card.upgradeReq = rollUpgradeReq(next, rng);
+  card.upgradeReq = rollUpgradeReq(next, rng, card.resources);
 }
 
 export function makeCard(meta: CardMeta, tier: CardTier, rng: () => number, taskIds: string[], junk = false): WorldCard {
   const seed = Math.floor(rng() * 0xffffffff);
   const st = junk ? generateJunkWorld(seed, taskIds) : generateWeirdWorld(seed, tier, taskIds);
+  const resources: CardResources = {
+    money: st.money, blood: st.blood, dragonBone: st.dragonBone,
+    power: st.lastPowerProduced,
+  };
   return {
     id: meta.nextId++,
     name: worldName(rng),
     tier,
     data: encodeWorld(st),
-    resources: { money: st.money, blood: st.blood, dragonBone: st.dragonBone },
+    resources,
     // The junk card's ascension demand is pinned to plain cash so the
     // player's first climb out of the dirt has a legible goal.
-    upgradeReq: junk ? { res: 'money', amount: 10_000 } : rollUpgradeReq(tier, rng),
+    upgradeReq: junk ? { res: 'money', amount: 10_000 } : rollUpgradeReq(tier, rng, resources),
   };
 }
 
@@ -449,20 +551,37 @@ export const EVENT_NAMES: Record<CardTier, string> = {
 };
 
 let creatureSeq = 1;
+// The tables grow with the tiers — one creature at the soft border, two at
+// the salon, three at the rare exchange — and stay small-handed so no view
+// ever overwhelms. The first creature anywhere considers anything; the rest
+// are picky. The common gathering's lone creature holds TWO cards, making it
+// the first arc's two-for-one partner (ascend the junk common, break the
+// uncommon down into its two cards, ascend both halves); at richer tables
+// the first creature holds one card and the picky ones hold two.
+const CREATURE_SPECS: Record<CardTier, number[]> = {
+  common: [2],
+  uncommon: [1, 2],
+  rare: [1, 2, 2],
+};
 export function rollCreatures(meta: CardMeta, tier: CardTier, rng: () => number, taskIds: string[]): Creature[] {
   const names = [...CREATURE_NAMES];
-  for (let i = names.length - 1; i > 0; i--) {
-    const j = Math.floor(rng() * (i + 1));
-    [names[i], names[j]] = [names[j], names[i]];
-  }
   const appetites: Appetite[] = ['blood', 'rich', 'bones'];
-  const mk = (appetite: Appetite): Creature => {
-    const deckSize = 2 + Math.floor(rng() * 2);
+  for (const arr of [names, appetites] as unknown[][]) {
+    for (let i = arr.length - 1; i > 0; i--) {
+      const j = Math.floor(rng() * (i + 1));
+      [arr[i], arr[j]] = [arr[j], arr[i]];
+    }
+  }
+  return CREATURE_SPECS[tier].map((deckSize, i) => {
     const deck: WorldCard[] = [];
-    for (let i = 0; i < deckSize; i++) deck.push(makeCard(meta, tier, rng, taskIds));
-    return { id: creatureSeq++, name: names.pop() ?? 'the other one', appetite, deck };
-  };
-  return [mk('any'), mk(appetites[Math.floor(rng() * appetites.length)])];
+    for (let k = 0; k < deckSize; k++) deck.push(makeCard(meta, tier, rng, taskIds));
+    return {
+      id: creatureSeq++,
+      name: names.pop() ?? 'the other one',
+      appetite: i === 0 ? 'any' as const : appetites.pop() ?? 'any' as const,
+      deck,
+    };
+  });
 }
 
 export function generateEvents(meta: CardMeta, stolen: WorldCard | null, taskIds: string[]): TradeEvent[] {
@@ -507,4 +626,13 @@ export function breakdownGives(c: Creature, yours: WorldCard): WorldCard[] {
 }
 export function creatureTakesFor(c: Creature, theirs: WorldCard, mine: WorldCard[]): WorldCard[] {
   return mine.filter((m) => appetiteAccepts(c.appetite, m) && m.tier === theirs.tier);
+}
+// Is the creature open to trading for this card at all? Appetite gates
+// same-tier swaps (preference between equals); a card one tier above its
+// stock is universally coveted — every creature with two lesser cards will
+// break it down, whatever its tastes. This keeps the ascend → break down →
+// ascend-both arc open at every table.
+export function creatureOpenTo(c: Creature, card: WorldCard): boolean {
+  return (appetiteAccepts(c.appetite, card) && sameTierGives(c, card).length > 0)
+    || breakdownGives(c, card).length > 0;
 }
