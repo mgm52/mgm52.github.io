@@ -445,6 +445,24 @@ export function sanitizeCardWorld(st: GameState): void {
   st.view = 'ground';
 }
 
+// Per-scene structure counts, driving each preview pane's treatment on the
+// card: a pane with nothing built fades; one holding three or more
+// structures glows. Walls are scenery, not development; hell counts what
+// shows in the hell scene (portal mirrors + placed candles).
+export function sceneStructureCounts(st: GameState): { space: number; earth: number; hell: number } {
+  let earth = 0, portals = 0;
+  for (const b of st.buildings.values()) {
+    if (b.kind === 'wall') continue;
+    earth++;
+    if (b.kind === 'hell_portal') portals++;
+  }
+  return {
+    space: st.spaceBuildings.size,
+    earth,
+    hell: portals + st.soulChairs.length,
+  };
+}
+
 // ─── Card construction ───────────────────────────────────────────────
 
 // Roll a card's ascension demand for its CURRENT tier, shaped by what the

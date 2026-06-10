@@ -9,7 +9,7 @@ import {
   WORLD_FLAVORS, WorldCard, appetiteAccepts, ascendCard, breakdownGives,
   creatureOpenTo, creatureTakesFor, decodeWorld, encodeWorld, generateEvents,
   generateJunkWorld, generateWeirdWorld, makeCard, mulberry32, regenerateEvent,
-  reqMet, rollUpgradeReq, sameTierGives, worldName,
+  reqMet, rollUpgradeReq, sameTierGives, sceneStructureCounts, worldName,
 } from '../src/cards-core';
 import { BUILDING_DEFS } from '../src/config';
 import { GameState, cellKey, isInPlayCell } from '../src/state';
@@ -181,6 +181,31 @@ describe('world flavors (the spikes)', () => {
       ].join('-'));
     }
     expect(signatures.size).toBeGreaterThanOrEqual(3);
+  });
+});
+
+describe('sceneStructureCounts (preview pane fade/glow)', () => {
+  it('walls are scenery: the junk world reads as nothing-built everywhere', () => {
+    const counts = sceneStructureCounts(generateJunkWorld(3, TASK_IDS));
+    expect(counts).toEqual({ space: 0, earth: 0, hell: 0 });
+  });
+
+  it('counts each scene separately', () => {
+    const haunted = generateWeirdWorld(7, 'common', TASK_IDS, 'haunted');
+    expect(sceneStructureCounts(haunted).hell).toBeGreaterThanOrEqual(1); // the portal
+    const mono = generateWeirdWorld(9, 'uncommon', TASK_IDS, 'monoculture');
+    const counts = sceneStructureCounts(mono);
+    const nonWall = [...mono.buildings.values()].filter((b) => b.kind !== 'wall').length;
+    expect(counts.earth).toBe(nonWall);
+    // Find a rare with space debris for the orbit count.
+    for (let seed = 1; seed < 60; seed++) {
+      const st = generateWeirdWorld(seed, 'rare', TASK_IDS);
+      if (st.spaceBuildings.size > 0) {
+        expect(sceneStructureCounts(st).space).toBe(st.spaceBuildings.size);
+        return;
+      }
+    }
+    throw new Error('no rare world with space debris in 60 seeds');
   });
 });
 

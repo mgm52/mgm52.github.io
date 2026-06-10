@@ -29,7 +29,7 @@ import {
   APPETITE_LINE, CardMeta, CardResources, CardTier, Creature, TIER_ABOVE, TIER_RANK,
   TradeEvent, UpgradeReq, WorldCard, appetiteAccepts, ascendCard, breakdownGives,
   creatureOpenTo, creatureTakesFor, decodeWorld, encodeWorld, generateEvents, makeCard,
-  mulberry32, regenerateEvent, reqMet, sameTierGives,
+  mulberry32, regenerateEvent, reqMet, sameTierGives, sceneStructureCounts,
 } from './cards-core';
 
 const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
@@ -562,6 +562,16 @@ function buildCardEl(card: WorldCard, opts: CardElOpts = {}): HTMLElement {
     drawSpacePreview(cvSpace, st, card.id * 7919 + 17);
     drawEarthPreview(cvEarth, st);
     drawHellPreview(cvHell, st, card.id * 7919 + 17);
+    // Each pane reads its scene's development at a glance: nothing built →
+    // faded; three or more structures → a glowing edge.
+    const counts = sceneStructureCounts(st);
+    const treat = (cv: HTMLCanvasElement, n: number) => {
+      if (n === 0) cv.classList.add('pane-faded');
+      else if (n >= 3) cv.classList.add('pane-glow');
+    };
+    treat(cvSpace, counts.space);
+    treat(cvEarth, counts.earth);
+    treat(cvHell, counts.hell);
   }
   root.appendChild(panes);
 
