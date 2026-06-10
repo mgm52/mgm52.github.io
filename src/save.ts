@@ -263,22 +263,29 @@ export function loadGame(): { state: GameState; savedAt: number } | null {
     }
     // Same for a chat that arrived but hadn't launched its overlay yet.
     env.state.pendingGhostChat = null;
+    // Card worlds (the post-finale trading-card realm) are deliberately
+    // demonless — skip the reseed/roster below so an empty demons map stays
+    // empty rather than self-healing the trio back in.
+    env.state.cardWorld ??= false;
     // Demons — added with the hell parlay system. Seed them for older saves,
     // and always resume with no parlay in progress (the overlay is live-only).
-    env.state.demons ??= createDemons(env.state);
-    // Self-heal: a save can carry an empty demons map, or (from a pre-current
-    // schema) a demon with a non-finite hx/hy. Pixi silently refuses to draw a
-    // sprite at a NaN position, so such a demon is invisible everywhere — even
-    // when the player pans the whole abyss. Reseed from scratch if anything's off.
-    const demonsValid = env.state.demons.size > 0 &&
-      [...env.state.demons.values()].every(
-        (d) => Number.isFinite(d.hx) && Number.isFinite(d.hy) &&
-               Number.isFinite(d.y0) && Number.isFinite(d.y1),
-      );
-    if (!demonsValid) env.state.demons = createDemons(env.state);
-    // Bring pre-roster saves up to the full trio (the colossus, demon L, and
-    // L's corner-dwelling friend) and stamp variant/scale/facing defaults.
-    ensureDemonRoster(env.state);
+    env.state.demons ??= new Map();
+    if (!env.state.cardWorld) {
+      if (env.state.demons.size === 0) env.state.demons = createDemons(env.state);
+      // Self-heal: a save can carry an empty demons map, or (from a pre-current
+      // schema) a demon with a non-finite hx/hy. Pixi silently refuses to draw a
+      // sprite at a NaN position, so such a demon is invisible everywhere — even
+      // when the player pans the whole abyss. Reseed from scratch if anything's off.
+      const demonsValid = env.state.demons.size > 0 &&
+        [...env.state.demons.values()].every(
+          (d) => Number.isFinite(d.hx) && Number.isFinite(d.hy) &&
+                 Number.isFinite(d.y0) && Number.isFinite(d.y1),
+        );
+      if (!demonsValid) env.state.demons = createDemons(env.state);
+      // Bring pre-roster saves up to the full trio (the colossus, demon L, and
+      // L's corner-dwelling friend) and stamp variant/scale/facing defaults.
+      ensureDemonRoster(env.state);
+    }
     for (const d of env.state.demons.values()) {
       d.busyWith = null;
       d.selected = false;
@@ -347,6 +354,18 @@ export function loadGame(): { state: GameState; savedAt: number } | null {
 
 export function clearSave(): void {
   try { localStorage.removeItem(STORAGE_KEY); } catch { /* no-op */ }
+}
+
+// Raw access to the save slot, for the trading-card realm (cards.ts): entering
+// a card world stashes the outer post-finale save verbatim and writes the
+// card's world into the slot; leaving restores the stash. Neither direction
+// needs to decode the payload, so these move the opaque string as-is.
+export function getRawSave(): string | null {
+  try { return localStorage.getItem(STORAGE_KEY); } catch { return null; }
+}
+
+export function setRawSave(raw: string): void {
+  try { localStorage.setItem(STORAGE_KEY, raw); } catch { /* storage full — skip */ }
 }
 
 export function hasSave(): boolean {

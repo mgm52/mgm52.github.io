@@ -13,6 +13,10 @@ import { appendLog, buildingCenter, cellCenter, countHypercentres, countSpaceCen
 import { autoAssignAllIdle, devSkipFinaleToConfront, devTriggerFinale, maybeDepartBobAndLolly, spawnDragon, spawnLollyRampage, spawnMinotaur, spawnRobot, spawnTinytaur, tick } from './sim';
 import { ensureHellPortal, executeTaskSkip, refreshUI, setupUI } from './ui';
 import { clearSave, formatRelativeTime, getLastSaveStats, loadGame, saveGame, saveGameInBackground } from './save';
+import {
+  abandonCardWorldBoot, captureOriginWorld, cardWorldActive, clearCardData, consumeCardHop,
+  hasCardMeta, isCardHopInProgress, maybeStartCardRealm, resetCardRealm, setupCardWorldChrome,
+} from './cards';
 
 const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
 
@@ -97,6 +101,9 @@ function showTitleScreen(savedAt: number | null = null): Promise<'new' | 'resume
       // touches the save itself, so wipe the unlock here too — otherwise an
       // old unlock would survive Erase Data.
       relockOptionsCog();
+      // Likewise the trading-card metagame (player cards, the stolen-origin
+      // snapshot, the stashed outer save) — all separate keys.
+      clearCardData();
       // 900ms matches --title-fade-dur (the .fade-item opacity transition;
       // fade-out has no stagger delay). Fade out, swap to the no-save layout,
       // fade back in. Spawn's listener was attached at init so it stays live
@@ -218,14 +225,36 @@ async function main() {
   // on them (they used to load inside createRender, after the click).
   void preloadRenderAssets();
 
+  // The trading-card realm reaches this boot two ways: inside a card world
+  // (the entered card's state sits in the save slot — boot straight into it;
+  // the reload WAS the transition), or back on the outer table after leaving
+  // one. Explicit enter/leave hops skip the title screen; a cold production
+  // load still gets it (it's the audio gesture and the Erase Data access).
+  // Once the metagame has begun, dev sessions also resume the save rather
+  // than starting fresh, so the realm loop survives its reloads.
+  const cardHop = consumeCardHop();
+  let inCardWorld = cardWorldActive();
+  const metagameBegun = hasCardMeta();
+
   // Production-only title gate. Click here also satisfies the browser's
   // user-gesture requirement so audio can play immediately afterwards.
   // Saved-game lookup happens up-front so the title screen can show the
   // resume button (with relative-time meta) when one exists.
-  const saved = import.meta.env.PROD ? loadGame() : null;
-  const choicePromise: Promise<'new' | 'resume'> = import.meta.env.PROD
-    ? showTitleScreen(saved?.savedAt ?? null)
-    : Promise.resolve('new');
+  let saved = (import.meta.env.PROD || inCardWorld || metagameBegun) ? loadGame() : null;
+  if (inCardWorld && !saved) {
+    // The card's save is unreadable — restore the outer realm and fall
+    // back to a normal boot instead of a broken world.
+    abandonCardWorldBoot();
+    inCardWorld = false;
+    saved = import.meta.env.PROD ? loadGame() : null;
+  }
+  const skipTitle = (cardHop || !import.meta.env.PROD)
+    && (inCardWorld || metagameBegun) && saved !== null;
+  const choicePromise: Promise<'new' | 'resume'> = skipTitle
+    ? Promise.resolve('resume')
+    : import.meta.env.PROD
+      ? showTitleScreen(saved?.savedAt ?? null)
+      : Promise.resolve('new');
 
   // Kick off font loading in parallel — Pixi (createRender) is the only
   // consumer that needs the glyphs cached before first draw, so we just
@@ -261,7 +290,9 @@ async function main() {
   // satisfies the browser's audio user-gesture requirement.
   const restartInHell = getRestartInHell();
   const picked = await choicePromise;
-  const choice = restartInHell ? 'new' : picked;
+  // Restart-in-hell never hijacks a card-world boot — the reload into a card
+  // must land inside that card.
+  const choice = restartInHell && !skipTitle ? 'new' : picked;
   // For brand-new games we play the goblin intro before revealing the spawn
   // panel and the first task. The intro: ~10s of free clicking, then the
   // goblin slides up, monologues, slides back out. Resumed games skip it
@@ -313,6 +344,14 @@ async function main() {
   } else {
     clearSave();
     state = createInitialState();
+  }
+  // Inside a card world: the white screen border + the LEAVE WORLD button
+  // (which serializes the world back onto its card and returns to the table).
+  if (inCardWorld) setupCardWorldChrome(state);
+  // Dev shortcut: ?cardrealm mounts the trading-card realm immediately,
+  // without playing the finale first.
+  if (!import.meta.env.PROD && new URLSearchParams(window.location.search).has('cardrealm')) {
+    maybeStartCardRealm();
   }
   // Dev cheat flag: set by the options menu's "skip to hell" button,
   // consumed at the top of the frame loop (where the transition state lives).
@@ -643,6 +682,10 @@ async function main() {
       // the game loop (gabbonsawCutscenePending).
       if (state.gabbonsawBought || state.gabbonsawRitualRemaining !== null) return;
       if (state.dragonBone < PAIN_GABBONSAW.dragonBoneCost) { playSound('error'); return; }
+      // Snapshot the world as it stands — before even the bones are spent.
+      // The trading-card realm (cards.ts) deals this state back to the player
+      // after the finale as their own world's card.
+      captureOriginWorld(state);
       state.dragonBone -= PAIN_GABBONSAW.dragonBoneCost;
       state.gabbonsawRitualRemaining = PAIN_GABBONSAW.spawnTime;
       playSound('ritual', 1, 0.4);
@@ -986,6 +1029,9 @@ async function main() {
     document.body.classList.remove('finale-hold');
     document.getElementById('app')?.classList.remove('finale-glitch', 'finale-zoom');
     if (finaleWhiteEl) { finaleWhiteEl.style.transition = 'none'; finaleWhiteEl.style.opacity = '0'; }
+    // The trading-card realm mounts over the held white-out; a dev re-trigger
+    // replays the cinematic, so pull the realm back down with it.
+    resetCardRealm();
   };
 
   // The smash: Bob takes the moon, breaks it, and the world tears itself white.
@@ -1057,7 +1103,14 @@ async function main() {
     if (!F) { finaleLastPhase = null; return; }
 
     // Resuming a save already past the break: re-apply the held white-out.
-    if (F.phase === 'shattered') { applyFinaleEnded(); finaleLastPhase = F.phase; return; }
+    // Either way (live shatter or resume), the world is over — hand off to
+    // the trading-card realm, which mounts itself over the white after a beat.
+    if (F.phase === 'shattered') {
+      applyFinaleEnded();
+      maybeStartCardRealm();
+      finaleLastPhase = F.phase;
+      return;
+    }
 
     // First sight of the cinematic: swing the camera onto Lolly so the player
     // sees the dragon answer her call.
@@ -1144,8 +1197,11 @@ async function main() {
   // event-driven flushes stay synchronous because the page may be going away.
   const SAVE_INTERVAL_MS = 10_000;
   let saveAcc = 0;
-  const flushSave = () => { saveGame(state); saveAcc = 0; };
-  const backgroundSave = () => { saveGameInBackground(state); saveAcc = 0; };
+  // Card-hop guard: once cards.ts has written the destination world into the
+  // save slot (entering/leaving a card world reloads the page), the departing
+  // world must NOT flush over it — pagehide fires right on the reload.
+  const flushSave = () => { if (isCardHopInProgress()) return; saveGame(state); saveAcc = 0; };
+  const backgroundSave = () => { if (isCardHopInProgress()) return; saveGameInBackground(state); saveAcc = 0; };
   window.addEventListener('pagehide', flushSave);
   window.addEventListener('visibilitychange', () => {
     if (document.visibilityState === 'hidden') flushSave();

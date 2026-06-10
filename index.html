@@ -1537,6 +1537,274 @@
         white-space: nowrap;
       }
 
+      /* ───────── The trading-card realm (post-finale; cards.ts) ─────────
+         The game's last section, mounted above the finale's held white-out
+         (#finale-white, z 100000). Effectively light mode: a white expanse,
+         ivory world-cards with soft shadows, pale ethereal creatures. */
+      #card-realm {
+        position: fixed; inset: 0; z-index: 100001;
+        background: #ffffff;
+        color: #4a4a52;
+        display: none;
+        font-family: var(--font-body);
+        overflow: hidden;
+      }
+      #card-realm.visible { display: block; animation: card-realm-in 1200ms ease both; }
+      @keyframes card-realm-in { from { opacity: 0; } to { opacity: 1; } }
+      /* The stage holds whichever view is up (intro card / table / gathering /
+         trade); scrolls when cards overflow a small screen. */
+      #card-stage {
+        position: absolute; inset: 0;
+        overflow-y: auto; overflow-x: hidden;
+        display: flex; flex-direction: column;
+        align-items: center;
+        padding: 6vh 16px 8vh;
+        gap: 10px;
+        transition: opacity 500ms ease;
+      }
+      #card-stage.intro-view { justify-content: center; }
+      /* The between-gatherings blink (cards.ts holds it for ~700ms). */
+      #card-stage.waiting { opacity: 0; }
+      /* The ethereal goblin: the intro goblin's orc_idle sheet flattened to a
+         near-white silhouette and hung upside down from the top of the screen.
+         PLACEHOLDER ART — swap for a real ethereal-creature sprite later. */
+      #card-goblin {
+        position: absolute; top: 0; left: 50%;
+        --csize: 44vh;
+        --crow: 4;
+        width: var(--csize); height: var(--csize);
+        background-image: url('assets/rigged_goblin_dancing_aligol3dart_orc_idle.png');
+        background-repeat: no-repeat;
+        background-size: calc(var(--csize) * 8) calc(var(--csize) * 8);
+        background-position-x: 0;
+        background-position-y: calc(var(--csize) * var(--crow) * -1);
+        image-rendering: pixelated;
+        transform: translate(-50%, -110%) scaleY(-1);
+        transition: transform 1800ms cubic-bezier(0.22, 1, 0.36, 1);
+        filter: brightness(0) invert(0.93) drop-shadow(0 0 18px rgba(150, 150, 175, 0.55));
+        opacity: 0.95;
+        animation: card-goblin-idle 1.6s steps(8) infinite;
+        pointer-events: none;
+        z-index: 4;
+      }
+      #card-realm.goblin-in #card-goblin { transform: translate(-50%, -16%) scaleY(-1); }
+      @keyframes card-goblin-idle {
+        from { background-position-x: 0; }
+        to   { background-position-x: calc(var(--csize) * -8); }
+      }
+      /* Dialogue near the top of the screen — the creature hangs just above. */
+      #card-speech {
+        position: absolute; left: 50%; top: 31vh;
+        transform: translateX(-50%);
+        max-width: min(640px, 80vw);
+        text-align: center;
+        color: #5c5c66;
+        font-family: var(--font-dialogue, var(--font-display));
+        font-size: calc(clamp(16px, 2.6vh, 26px) * var(--font-dialogue-scale, 1));
+        letter-spacing: 0.05em; line-height: 1.25;
+        text-shadow: 0 0 14px rgba(255, 255, 255, 1);
+        opacity: 0;
+        transition: opacity 200ms ease;
+        pointer-events: none;
+        z-index: 5;
+      }
+      #card-realm.speaking #card-speech { opacity: 1; }
+      #card-speech::after {
+        content: "▍"; display: inline-block; margin-left: 4px;
+        color: #8a8a94;
+        animation: intro-caret 0.9s steps(2, end) infinite;
+        opacity: 0.8;
+      }
+      #card-speech.done::after { visibility: hidden; }
+      /* Click wall — absorbs clicks while a creature is talking; arms with the
+         glove cursor once a line completes (the intro overlay's protocol). */
+      #card-clickwall { position: absolute; inset: 0; pointer-events: none; z-index: 6; }
+      #card-realm.speaking #card-clickwall { pointer-events: auto; }
+      #card-realm.click-armed #card-clickwall {
+        cursor: url('assets/GloveCursor-24.png') 9 1, pointer;
+      }
+      /* YES / NO row, centred in the eyeline like the intro's. */
+      #card-choice {
+        position: absolute; left: 50%; top: 50%;
+        transform: translate(-50%, -50%);
+        display: flex; gap: 18px;
+        opacity: 0; pointer-events: none;
+        transition: opacity 400ms ease;
+        z-index: 7;
+      }
+      #card-realm.show-choice #card-choice { opacity: 1; pointer-events: auto; }
+      #card-choice .build-button {
+        width: 130px;
+        box-shadow: 0 6px 18px rgba(40, 40, 70, 0.25);
+      }
+      #card-choice .build-name {
+        font-family: var(--font-display); font-size: 22px;
+        letter-spacing: 0.2em; text-align: center;
+      }
+      /* The world cards: ivory, tier-edged, soft-shadowed. Three stacked
+         preview panes — space / earth / hell — the world as a column. */
+      .world-card {
+        --tier-c: #b6b6bc;
+        width: 200px; flex-shrink: 0;
+        background: linear-gradient(180deg, #fcfcf7, #f4f4ec);
+        border: 1px solid #d8d8cf;
+        border-top: 4px solid var(--tier-c);
+        border-radius: 10px;
+        box-shadow: 0 14px 34px rgba(70, 70, 100, 0.18), 0 3px 10px rgba(70, 70, 100, 0.12);
+        padding: 10px 10px 12px;
+        color: #44444c;
+        text-align: left;
+        transition:
+          transform 650ms cubic-bezier(0.2, 0.9, 0.25, 1.08),
+          opacity 500ms ease, box-shadow 200ms ease;
+      }
+      .world-card.t-common { --tier-c: #b6b6bc; }
+      .world-card.t-uncommon { --tier-c: #6f9fd8; }
+      .world-card.t-rare { --tier-c: #d8b54a; }
+      .world-card.big { width: min(280px, 80vw); }
+      .world-card.clickable { cursor: pointer; }
+      .world-card.clickable:hover {
+        box-shadow: 0 18px 40px rgba(70, 70, 100, 0.26), 0 4px 12px rgba(70, 70, 100, 0.16);
+      }
+      .world-card.grayed { opacity: 0.35; filter: saturate(0.2); }
+      .world-card.selected { outline: 3px solid var(--tier-c); transform: translateY(-6px); }
+      /* Dealt in from above (cards.ts removes the class a frame after append);
+         taken away upward into the goblin's hand. */
+      .world-card.deal-from-top { transform: translateY(-130vh) rotate(-7deg); }
+      .world-card.taken {
+        transform: translateY(-130vh) rotate(9deg) scale(0.7);
+        opacity: 0;
+        transition: transform 900ms cubic-bezier(0.5, 0, 0.8, 0.4), opacity 800ms ease;
+      }
+      .wc-head { display: flex; justify-content: space-between; align-items: baseline; gap: 8px; margin-bottom: 6px; }
+      .wc-name { font-family: var(--font-display); font-size: 14px; letter-spacing: 0.04em; }
+      .wc-tier {
+        font-family: var(--font-mono); font-size: 11px; color: var(--tier-c);
+        text-transform: uppercase; letter-spacing: 0.12em;
+      }
+      .wc-prevs { display: flex; flex-direction: column; gap: 3px; }
+      .wc-prev {
+        display: block; width: 100%;
+        border-radius: 4px; border: 1px solid #e0e0d6;
+        image-rendering: pixelated;
+      }
+      .wc-res { margin-top: 7px; font-family: var(--font-mono); font-size: 11px; color: #6a6a72; }
+      .wc-req { margin-top: 3px; font-family: var(--font-mono); font-size: 11px; color: #9a9aa2; }
+      .wc-req.met { color: #3f8f4f; font-weight: bold; }
+      .wc-enter, .wc-ascend {
+        width: 100%; margin-top: 8px;
+        background: #ffffff; color: #44444c;
+        border: 1px solid #c9c9c0; border-radius: 6px;
+        font-family: var(--font-display); font-size: 12px; letter-spacing: 0.14em;
+        padding: 7px 4px; cursor: pointer;
+        box-shadow: 0 2px 8px rgba(70, 70, 100, 0.12);
+        transition: box-shadow 150ms ease, border-color 150ms ease;
+      }
+      .wc-enter:hover, .wc-ascend:hover { border-color: #8a8a94; box-shadow: 0 3px 12px rgba(70, 70, 100, 0.2); }
+      .wc-ascend { border-color: var(--tier-c); color: #3f8f4f; }
+      /* Table / gathering / trade furniture. */
+      .ct-caption {
+        font-family: var(--font-display); font-size: 12px; letter-spacing: 0.3em;
+        text-transform: uppercase; color: #9a9aa2; margin-top: 12px;
+      }
+      .ct-cards {
+        display: flex; flex-wrap: wrap; gap: 16px; justify-content: center;
+        max-width: 1100px;
+      }
+      .ct-events { display: flex; flex-wrap: wrap; gap: 14px; justify-content: center; }
+      .ct-event {
+        min-width: 240px; padding: 14px 18px;
+        display: flex; flex-direction: column; gap: 4px; align-items: center;
+        background: #fcfcf7; border: 1px solid #d8d8cf; border-radius: 10px;
+        box-shadow: 0 10px 26px rgba(70, 70, 100, 0.14);
+        cursor: pointer; color: #44444c;
+        font-family: var(--font-body);
+      }
+      .ct-event:hover:not(.locked) { box-shadow: 0 14px 32px rgba(70, 70, 100, 0.22); }
+      .ct-event.locked { opacity: 0.45; cursor: not-allowed; }
+      .ct-event.shake { animation: ct-shake 300ms ease; }
+      @keyframes ct-shake {
+        0%, 100% { transform: translateX(0); }
+        25% { transform: translateX(-6px); }
+        75% { transform: translateX(6px); }
+      }
+      .ct-event-name { font-family: var(--font-display); font-size: 14px; letter-spacing: 0.08em; }
+      .ct-event-sub { font-family: var(--font-mono); font-size: 11px; color: #9a9aa2; }
+      .ct-gift {
+        font-family: var(--font-dialogue, var(--font-display));
+        font-size: 14px; color: #6a6a72;
+        background: #f7f7f0; border: 1px solid #e0e0d6; border-radius: 8px;
+        padding: 8px 14px; max-width: 560px; text-align: center;
+      }
+      .ct-back {
+        align-self: flex-start;
+        background: none; border: none; cursor: pointer;
+        color: #8a8a94; font-family: var(--font-display); font-size: 13px;
+        letter-spacing: 0.1em; padding: 6px 8px;
+      }
+      .ct-back:hover { color: #4a4a52; }
+      .ct-wait {
+        margin-top: 18px;
+        background: none; border: 1px dashed #c9c9c0; border-radius: 8px;
+        color: #8a8a94; font-family: var(--font-display); font-size: 12px;
+        letter-spacing: 0.14em; padding: 10px 18px; cursor: pointer;
+      }
+      .ct-wait:hover { color: #4a4a52; border-color: #8a8a94; }
+      /* Creatures at a gathering — pale silhouettes (placeholder sprite,
+         same sheet as #card-goblin). */
+      .ct-creatures { display: flex; flex-wrap: wrap; gap: 26px; justify-content: center; margin-top: 8px; }
+      .ct-creature {
+        display: flex; flex-direction: column; align-items: center; gap: 4px;
+        width: 200px; padding: 14px 10px;
+        border-radius: 12px; cursor: pointer;
+        transition: background 200ms ease, box-shadow 200ms ease;
+      }
+      .ct-creature:hover { background: #f7f7f0; box-shadow: 0 10px 26px rgba(70, 70, 100, 0.12); }
+      .ct-creature-sprite {
+        --csize: 110px;
+        --crow: 4;
+        width: var(--csize); height: var(--csize);
+        background-image: url('assets/rigged_goblin_dancing_aligol3dart_orc_idle.png');
+        background-repeat: no-repeat;
+        background-size: calc(var(--csize) * 8) calc(var(--csize) * 8);
+        background-position-x: 0;
+        background-position-y: calc(var(--csize) * var(--crow) * -1);
+        image-rendering: pixelated;
+        filter: brightness(0) invert(0.88) drop-shadow(0 4px 12px rgba(150, 150, 175, 0.5));
+        animation: card-goblin-idle 1.6s steps(8) infinite;
+      }
+      .ct-creature-name { font-family: var(--font-display); font-size: 14px; color: #44444c; letter-spacing: 0.06em; }
+      .ct-creature-line, .ct-creature-deck { font-family: var(--font-mono); font-size: 11px; color: #9a9aa2; }
+      .ct-trade-header { display: flex; align-items: center; gap: 14px; margin-top: 4px; }
+      .ct-trade-header .ct-creature-sprite { --csize: 84px; }
+      .ct-trade-headtext { display: flex; flex-direction: column; gap: 3px; text-align: left; }
+      .ct-trade-line {
+        font-family: var(--font-dialogue, var(--font-display));
+        font-size: 15px; color: #6a6a72; min-height: 1.3em;
+      }
+      .ct-theirs, .ct-yours { min-height: 40px; }
+
+      /* ───────── Inside a card world ─────────
+         White border vignette + the big white LEAVE WORLD button — the white
+         marks what is NOT of this world (cards.ts wires the button). */
+      body.card-world::after {
+        content: ""; position: fixed; inset: 0; pointer-events: none; z-index: 99990;
+        box-shadow: inset 0 0 0 5px #ffffff, inset 0 0 46px 8px rgba(255, 255, 255, 0.55);
+      }
+      #leave-world-btn {
+        position: fixed; bottom: 14px; left: 50%; transform: translateX(-50%);
+        z-index: 99991;
+        background: #ffffff; color: #3a3a42;
+        border: 1px solid #d0d0c8; border-radius: 8px;
+        font-family: var(--font-display); font-size: 14px; letter-spacing: 0.22em;
+        padding: 12px 26px; cursor: pointer;
+        box-shadow: 0 6px 22px rgba(255, 255, 255, 0.85), 0 4px 14px rgba(40, 40, 60, 0.3);
+      }
+      #leave-world-btn:hover {
+        box-shadow: 0 6px 26px rgba(255, 255, 255, 1), 0 5px 16px rgba(40, 40, 60, 0.38);
+      }
+      #leave-world-btn:disabled { opacity: 0.6; cursor: default; }
+
       /* ───────── Portrait phones — stacked layout ─────────
          Held upright, the side-by-side layout has nowhere to put a 280px
          sidebar, so we stack: the game canvas docks to the top and the
@@ -1799,6 +2067,30 @@
          container each frame by updateCustomScrollbar (ui.ts). Sits at body level
          so no ancestor's overflow:hidden / transform can clip or offset it. -->
     <div id="sidebar-scrollbar" aria-hidden="true"><div id="sidebar-scrollbar-thumb"></div></div>
+    <!-- The trading-card realm — the game's last section, mounted over the
+         finale's white-out by cards.ts. The stage holds whichever view is up
+         (intro card / table / gathering / trade); the goblin, speech, click
+         wall and YES/NO row mirror the intro overlay's protocol. -->
+    <div id="card-realm">
+      <div id="card-stage"></div>
+      <div id="card-goblin"></div>
+      <div id="card-speech"></div>
+      <div id="card-clickwall"></div>
+      <div id="card-choice">
+        <button id="card-yes" class="build-button" type="button">
+          <div class="build-content">
+            <div class="build-name">YES</div>
+          </div>
+        </button>
+        <button id="card-no" class="build-button" type="button">
+          <div class="build-content">
+            <div class="build-name">NO</div>
+          </div>
+        </button>
+      </div>
+    </div>
+    <!-- Inside a card world: the white way back out (shown by cards.ts). -->
+    <button id="leave-world-btn" type="button" style="display:none">LEAVE WORLD</button>
     <script type="module" src="/src/main.ts"></script>
   </body>
 </html>

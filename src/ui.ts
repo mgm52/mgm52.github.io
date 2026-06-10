@@ -673,6 +673,11 @@ const TASKS: Task[] = [
   },
 ];
 
+// Every task id, in order — the trading-card realm (cards.ts) stamps generated
+// worlds with all of them completed so entering one doesn't replay the whole
+// task-celebration chain.
+export const ALL_TASK_IDS: string[] = TASKS.map((t) => t.id);
+
 export type UICallbacks = {
   onSpawnGoblin: () => void;
   onSummonMinotaur: () => void;
