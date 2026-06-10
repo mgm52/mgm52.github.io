@@ -1,8 +1,8 @@
 // ─── The trading-card realm ──────────────────────────────────────────
 // The game's final section, picking up after the finale's screen has torn
-// itself white. Every game world is now a trading card: three stacked
-// preview panes (space / earth / hell), the world's resources, and a
-// REENTER WORLD button. The player's own pre-Gabbonsaw save is dealt onto
+// itself white. Every game world is now a trading card: stacked preview
+// panes (space / earth / hell — only the scenes that world has opened),
+// the world's resources, and a REENTER WORLD button. The player's own pre-Gabbonsaw save is dealt onto
 // the table first — and promptly swindled away by an ethereal white goblin,
 // who leaves a pitiful replacement ("now it's a trade."). From there the
 // player can re-enter any card they hold (the world boots demonless, Bob-
@@ -293,8 +293,10 @@ export function setupCardWorldChrome(state: GameState, arriving = false): void {
 }
 
 // ─── Card previews ───────────────────────────────────────────────────
-// Three stacked minimap panes painted from the card's decoded state: space
-// on top, earth in the middle, hell at the bottom — the world as a column.
+// Stacked minimap panes painted from the card's decoded state: space on
+// top, earth in the middle, hell at the bottom — the world as a column.
+// Only the scenes the world has actually opened get a pane (buildCardEl
+// checks spaceUnlocked / hellUnlocked); most commons are all ground.
 
 const decodedCache = new Map<number, { data: string; st: GameState | null }>();
 function decodedWorld(card: WorldCard): GameState | null {
@@ -574,17 +576,27 @@ function buildCardEl(card: WorldCard, opts: CardElOpts = {}): HTMLElement {
     panes.appendChild(cv);
     return cv;
   };
-  const cvSpace = mkCanvas('wc-space', 40);
-  const cvEarth = mkCanvas('wc-earth', 96);
-  const cvHell = mkCanvas('wc-hell', 40);
+  // A card only carries the scenes its world has actually opened: no space
+  // pane without space unlocked, no hell pane without the descent. The earth
+  // pane grows into whatever is missing (each absent strip is 40px + 3px
+  // gap), so an earth-only world reads as all ground — and a three-scene
+  // column quietly marks a more developed world. Undecodable worlds (st
+  // null) keep the full blank column.
+  const hasSpace = !st || st.spaceUnlocked;
+  const hasHell = !st || st.hellUnlocked;
+  const earthH = 96 + (hasSpace ? 0 : 43) + (hasHell ? 0 : 43);
+  const cvSpace = hasSpace ? mkCanvas('wc-space', 40) : null;
+  const cvEarth = mkCanvas('wc-earth', earthH);
+  const cvHell = hasHell ? mkCanvas('wc-hell', 40) : null;
   if (st) {
-    drawSpacePreview(cvSpace, st, card.id * 7919 + 17);
+    if (cvSpace) drawSpacePreview(cvSpace, st, card.id * 7919 + 17);
     drawEarthPreview(cvEarth, st);
-    drawHellPreview(cvHell, st, card.id * 7919 + 17);
+    if (cvHell) drawHellPreview(cvHell, st, card.id * 7919 + 17);
     // Each pane reads its scene's development at a glance: nothing built →
     // faded; three or more structures → a glowing edge.
     const counts = sceneStructureCounts(st);
-    const treat = (cv: HTMLCanvasElement, n: number) => {
+    const treat = (cv: HTMLCanvasElement | null, n: number) => {
+      if (!cv) return;
       if (n === 0) cv.classList.add('pane-faded');
       else if (n >= 3) cv.classList.add('pane-glow');
     };

@@ -1690,8 +1690,9 @@
         font-family: var(--font-display); font-size: 22px;
         letter-spacing: 0.2em; text-align: center;
       }
-      /* The world cards: ivory, tier-edged, soft-shadowed. Three stacked
-         preview panes — space / earth / hell — the world as a column. */
+      /* The world cards: ivory, tier-edged, soft-shadowed. Stacked preview
+         panes — space / earth / hell — the world as a column; a card only
+         carries the scenes its world has opened (cards.ts buildCardEl). */
       .world-card {
         --tier-c: #b6b6bc;
         /* Frame-pattern metrics (see the .wcf-* rules below); the creature
