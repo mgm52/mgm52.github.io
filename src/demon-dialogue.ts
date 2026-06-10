@@ -782,13 +782,12 @@ export async function runFinaleConfrontation(state: GameState): Promise<void> {
     await fSay('lolly', 'bob');
     await fSay('lolly', 'bob');
     await fSay('lolly', 'bob');
-    await fSay('lolly', 'come here little one');
-    await fSay('lolly', 'i pulled it down ⏸ for *us*');
+    await fSay('lolly', 'come');
+    await fSay('lolly', 'i pulled it ⏸ for *us*');
     await fSay('lolly', 'eat');
     await fSay('lolly', 'eat');
     await fSay('lolly', 'eat ⏸ only a piece');
-    await fSay('lolly', 'and the world is *ours* ⏸ all of it');
-    await fSay('lolly', 'and you will call me your *"master"*');
+    await fSay('lolly', 'and we will be *"master"*');
 
     // The turn. He has nothing left to lose — he is already dead.
     await fSay('bob', '. . .', { autoMs: 1100 });

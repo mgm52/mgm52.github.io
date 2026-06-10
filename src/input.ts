@@ -1538,6 +1538,7 @@ function handleRightClick(state: GameState, x: number, y: number) {
       }
     } else if (targetLolly) {
       // Goring Lolly achieves nothing — but they're allowed to try.
+      if (state.lolly) state.lolly.commandFlashAt = state.now;
       for (const m of selectedMinotaurs) {
         m.target = null;
         m.state = { kind: 'going_to_kill_lolly' };
@@ -1569,6 +1570,7 @@ function handleRightClick(state: GameState, x: number, y: number) {
   // charges in swinging. None of it works — she answers every hit with a
   // 'no effect' floater — but morale matters.
   if (targetLolly) {
+    if (state.lolly) state.lolly.commandFlashAt = state.now;
     const selectedRobotsForLolly = selectedGoblins.filter((g) => g.robot);
     for (const r of selectedRobotsForLolly) {
       releaseFromBuilding(state, r);
