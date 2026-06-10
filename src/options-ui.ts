@@ -16,8 +16,9 @@ export type OptionsUICallbacks = {
   onSkipToHell: () => void;
   onTaskSkip: () => void;
   onShowTitleScreen: () => void;
-  // Finale cheats: loose Lolly into the endgame from scratch, or jump straight
-  // to the moon confrontation.
+  // Finale cheats: stand up the whole pre-finale run, loose Lolly into the
+  // endgame from scratch, or jump straight to the moon confrontation.
+  onSkipToPreFinale: () => void;
   onTriggerFinale: () => void;
   onSkipToConfront: () => void;
 };
@@ -442,6 +443,7 @@ function rebuildPanel(panel: HTMLElement, callbacks: OptionsUICallbacks, refresh
     slider('Lamp height', o.terminatorLampHeight, 0, 1, 0.02, (v) => setOption('terminatorLampHeight', v)),
     toggle('Lamp in front of sprite', o.terminatorLampInFront, (v) => setOption('terminatorLampInFront', v)),
     slider('Laser windup (s)', o.terminatorLaserWindup, 0.05, 3, 0.05, (v) => setOption('terminatorLaserWindup', v)),
+    slider('Sprite Y offset', o.terminatorYOffset, -0.5, 0.5, 0.02, (v) => setOption('terminatorYOffset', v)),
   ]));
 
   panel.appendChild(fontsSection(o));
@@ -461,6 +463,7 @@ function rebuildPanel(panel: HTMLElement, callbacks: OptionsUICallbacks, refresh
   panel.appendChild(collapsibleSection('Finale', [
     toggle('Auto-follow camera', o.finaleAutoFollow, (v) => setOption('finaleAutoFollow', v)),
     slider('Speed', o.finaleSpeedMult, 0.25, 6, 0.25, (v) => setOption('finaleSpeedMult', v)),
+    cheatButton('Cheat: skip to pre-finale state', callbacks.onSkipToPreFinale),
     cheatButton('Cheat: trigger finale now', callbacks.onTriggerFinale),
     cheatButton('Cheat: skip to moon confrontation', callbacks.onSkipToConfront),
   ]));

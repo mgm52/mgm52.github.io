@@ -1,6 +1,6 @@
 import {
   BASE_SPAWN_CAPACITY, BUILDING_DEFS, BuildingDef, BuildingKind, CELL, COLS,
-  DEMON, DIG_GROWTH_CELLS, GOBLIN_HOLE_CAPACITY_PER_BUILDING, HELL, LOLLY_BOOST, ROWS, SOUL_SIGIL,
+  DEMON, DIG_GROWTH_CELLS, DRAGON, GOBLIN_HOLE_CAPACITY_PER_BUILDING, HELL, LOLLY_BOOST, ROWS, SOUL_SIGIL,
   INITIAL_PLAY_COLS, INITIAL_PLAY_ROWS, INITIAL_PLAY_X0, INITIAL_PLAY_Y0, ROBOT,
   START_CELL, START_GOBLINS, START_MONEY, WALL_BORDER, WORLD, formatPower,
 } from './config';
@@ -2088,6 +2088,31 @@ export function constructedDragonBeacon(state: GameState): Building | null {
     if (b.kind === 'dragon_beacon' && b.state !== 'constructing') return b;
   }
   return null;
+}
+
+// Active (powered) Dragon Beacons — the gate on dragon summoning. A
+// dormant/under-powered beacon doesn't count.
+export function activeDragonBeaconCount(state: GameState): number {
+  let n = 0;
+  for (const b of state.buildings.values()) {
+    if (b.kind === 'dragon_beacon' && b.state === 'active') n++;
+  }
+  return n;
+}
+
+// Hard ceiling on dragons loose in the overworld at once: DRAGON.maxInPlayPerBeacon
+// per active Beacon. Dragons that have flown off to space no longer live in
+// state.dragons, so they don't count against this.
+export function maxOverworldDragons(state: GameState): number {
+  return activeDragonBeaconCount(state) * DRAGON.maxInPlayPerBeacon;
+}
+
+// Whether the overworld is already holding its full complement of dragons —
+// the gate that halts further summoning (manual, autodragon, and the spawn
+// queue). Live dragons plus those mid-ritual count, so a full queue can't
+// overshoot the cap.
+export function dragonsAtCap(state: GameState): boolean {
+  return state.dragons.size + state.dragonSpawnQueue.length >= maxOverworldDragons(state);
 }
 
 export function removeDragon(state: GameState, dragonId: number) {

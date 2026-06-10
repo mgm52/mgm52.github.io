@@ -181,12 +181,17 @@ export const DRAGON = {
   manualSpeed: 160,      // px/sec
   // Ritual delay between summoning a dragon and it appearing, mirroring the
   // Minotaur's summon-in time. Only one dragon can be in the ritual at once.
-  spawnTime: 2,          // seconds
+  spawnTime: 3,          // seconds
   spawnCapacity: 1,
   // Hard ceiling for the summon-progress track. The live cap matches the
   // current active-beacon count, but the DOM pre-creates this many segments
   // so the track can grow/shrink as beacons come and go without rebuilding.
   concurrentBuildLimit: 16,
+  // Ceiling on dragons loose in the overworld at once: this many per active
+  // Dragon Beacon. Summoning (manual + autodragon + the spawn queue) halts once
+  // the live overworld count reaches it; a dragon that flies off to space stops
+  // counting, freeing room.
+  maxInPlayPerBeacon: 5,
   // A freshly-summoned dragon hovers this long before it starts auto-seeking a
   // building to haul, giving the player a beat to issue a manual command first.
   seekDelay: 2.5,        // seconds
@@ -336,7 +341,7 @@ export const SOUL_SIGIL = {
   arriveRadius: 40,     // a commanded soul seats once this close to its chair
   candleBloodCost: 9,   // blood per candle placed
   placeBand: 70,        // hell-px either side of ringRadius where a tap counts as "on the ring"
-  candleMinGap: 256,    // hell-px a new candle must keep from its ring-mates
+  candleMinGap: 230,    // hell-px a new candle must keep from its ring-mates
   // Per-soul power multiplier by the strength of the bound soul: goblin souls
   // are weak, full-size minotaur souls strong, dragon and tinytaur souls very
   // strong. Five strong souls = 100^5 W = 10 GW per portal.
@@ -380,7 +385,7 @@ export function sigilPortalOutput(baseWatts: number, chairs: { occupied: boolean
 // unlocks once Autobuild is owned and a water source has been dug.
 export const SUMMON_UPGRADES = {
   autoAssign: { bloodCost: 4 },
-  autoSpawn: { bloodCost: 13, intervalSeconds: 3 },
+  autoSpawn: { bloodCost: 13, intervalSeconds: 4 },
   autoWater: { bloodCost: 128 },
   goldgoblins: { bloodCost: 26 },
   goldgoblinsX10: { bloodCost: 128, multiplier: 10 },
@@ -388,9 +393,9 @@ export const SUMMON_UPGRADES = {
   // bought, a dragon summon is queued automatically every intervalSeconds
   // (divided by the owned AUTODRAGON_TIERS multiplier), provided the player
   // can cover the usual DRAGON.bloodCost and an active Dragon Beacon has a
-  // free ritual slot (same gates as the manual button). The cadence matches
-  // DRAGON.spawnTime so the ritual track stays continuously busy, the same
-  // way Autospawn keeps the goblin holes pulsing.
+  // free ritual slot (same gates as the manual button). The cadence is tuned a
+  // touch quicker than DRAGON.spawnTime so the ritual track stays continuously
+  // busy, the same way Autospawn keeps the goblin holes pulsing.
   autoDragon: { intervalSeconds: 2 },
 };
 

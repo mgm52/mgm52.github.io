@@ -3507,10 +3507,13 @@ export function render(state: GameState, ctx: RenderContext) {
     }
     // Per-frame sprite-Y offset so the player can tune sprite-to-cell
     // alignment from the options panel. Outline copies preserve their
-    // cardinal offsets relative to the sprite.
-    v.sprite.y = opts.goblinSpriteYOffset;
+    // cardinal offsets relative to the sprite. Terminators take an extra
+    // vertical nudge (fraction of their px) so they loom a touch above the
+    // grid; the lamp moves with them below. Shadow stays at the feet.
+    const termYOff = g.terminator ? px * opts.terminatorYOffset : 0;
+    v.sprite.y = opts.goblinSpriteYOffset + termYOff;
     for (let i = 0; i < v.outline.length; i++) {
-      v.outline[i].y = OUTLINE_OFFSETS[i][1] + opts.goblinSpriteYOffset;
+      v.outline[i].y = OUTLINE_OFFSETS[i][1] + opts.goblinSpriteYOffset + termYOff;
     }
     // Walk while interpolating between cells; idle when stationary; break into
     // breakdance once a goblin's been continuously idle for long enough.
@@ -3561,7 +3564,7 @@ export function render(state: GameState, ctx: RenderContext) {
       const charging = g.state.kind === 'firing_laser' && g.state.fireAt !== undefined;
       if (g.terminator) {
         v.glow.scale.set(px * opts.terminatorLampScale / 128);
-        v.glow.position.set(0, -px * opts.terminatorLampHeight);
+        v.glow.position.set(0, -px * opts.terminatorLampHeight + termYOff);
         v.glow.tint = opts.terminatorLampColor;
         v.glow.alpha = charging
           ? 0.85 + 0.15 * Math.sin(state.now * 24)

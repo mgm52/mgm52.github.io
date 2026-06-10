@@ -349,6 +349,7 @@ export type Options = {
   terminatorLampHeight: number;  // lamp centre above sprite centre, fraction of px
   terminatorLampInFront: boolean; // draw the lamp glow over the sprite (off = behind)
   terminatorLaserWindup: number; // seconds of charge-up per auto-shot
+  terminatorYOffset: number;     // sprite (+ lamp) vertical nudge, fraction of px (− = up)
   // The endgame finale (Lolly's moon). The camera eases to follow her flight,
   // and a speed dial lets a tester run the whole cinematic fast.
   finaleAutoFollow: boolean;     // ease the camera to keep Lolly framed
@@ -555,7 +556,8 @@ export const DEFAULT_OPTIONS: Options = {
   terminatorLampScale: 1.1,
   terminatorLampHeight: 0.42,
   terminatorLampInFront: false,
-  terminatorLaserWindup: 0.5,
+  terminatorLaserWindup: 0.65,
+  terminatorYOffset: -0.1,
   finaleAutoFollow: true,
   finaleSpeedMult: 1,
 };

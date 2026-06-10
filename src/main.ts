@@ -9,9 +9,9 @@ import { playIntroSequence, runGabbonsawCutscene, setIntroPaused, skipIntro } fr
 import { getOptions, onOptionsChange } from './options';
 import { getRestartInHell, relockOptionsCog, setupOptionsUI } from './options-ui';
 import { applyDomOptions, centerCameraOn, centerHellCameraOnWorld, centerSpaceCamera, clampCamera, clampHellCamera, clampSpaceCamera, createRender, currentHellScale, preloadRenderAssets, render, spaceCameraMaxY } from './render';
-import { appendLog, buildingCenter, cellCenter, countHypercentres, countSpaceCentres, createInitialState, destroyBuilding, digDirection, earnBlood, earnDragonBone, earnMoney, getSpawnCapacity, pushDeathEffect, pushFloater, recordGhost, removeGoblin, type GameState, type Ghost } from './state';
+import { appendLog, buildingCenter, cellCenter, countHypercentres, countSpaceCentres, createInitialState, destroyBuilding, digDirection, dragonsAtCap, earnBlood, earnDragonBone, earnMoney, getSpawnCapacity, pushDeathEffect, pushFloater, recordGhost, removeGoblin, type GameState, type Ghost } from './state';
 import { autoAssignAllIdle, devSkipFinaleToConfront, devTriggerFinale, maybeDepartBobAndLolly, spawnDragon, spawnLollyRampage, spawnMinotaur, spawnRobot, spawnTinytaur, tick } from './sim';
-import { ensureHellPortal, executeTaskSkip, refreshUI, setupUI } from './ui';
+import { ensureHellPortal, executeSkipToPreFinale, executeTaskSkip, refreshUI, setupUI } from './ui';
 import { clearSave, formatRelativeTime, getLastSaveStats, loadGame, saveGame, saveGameInBackground } from './save';
 import {
   abandonCardWorldBoot, captureOriginWorld, cardWorldActive, clearCardData, consumeCardHop,
@@ -456,6 +456,11 @@ async function main() {
     onSkipToHell: devSkipToHell,
     onTaskSkip: () => { skipIntro(); executeTaskSkip(state); },
     onShowTitleScreen: () => { void showTitleScreen(); },
+    onSkipToPreFinale: () => {
+      skipIntro();
+      if (state.view !== 'ground') quickTravel('ground');
+      executeSkipToPreFinale(state);
+    },
     onTriggerFinale: () => {
       skipIntro();
       if (state.view !== 'ground') quickTravel('ground');
@@ -520,8 +525,9 @@ async function main() {
     onSummonDragon: () => {
       // The simultaneous-spawn-queue cap equals the number of currently-active
       // Dragon Beacons — like Goblin Holes for goblins, beacons gate how many
-      // dragons can be mid-ritual at once. Live dragons are uncapped: a
-      // beacon's queue slot frees the moment its dragon takes flight.
+      // dragons can be mid-ritual at once. The overworld also holds at most
+      // DRAGON.maxInPlayPerBeacon dragons per active Beacon (live + mid-ritual);
+      // a dragon flying off to space frees a slot.
       let activeBeacons = 0;
       for (const b of state.buildings.values()) {
         if (b.kind === 'dragon_beacon' && b.state === 'active') activeBeacons++;
@@ -529,6 +535,7 @@ async function main() {
       if (activeBeacons === 0) { playSound('error'); return; }
       if (state.blood < DRAGON.bloodCost) { playSound('error'); return; }
       if (state.dragonSpawnQueue.length >= activeBeacons) { playSound('error'); return; }
+      if (dragonsAtCap(state)) { playSound('error'); return; }
       state.blood -= DRAGON.bloodCost;
       state.dragonSpawnQueue.push({ remaining: DRAGON.spawnTime });
       playSound('ritual');
@@ -1142,7 +1149,7 @@ async function main() {
     // Lolly tells Bob to stay as she lifts off.
     if (F.phase === 'lolly_ascends' && !finaleBarkedStay) {
       finaleBarkedStay = true;
-      void finaleBark(state, 'lolly', 'stay here, little one.');
+      void finaleBark(state, 'lolly', 'stay');
     }
     // Bob reaches the centre, turns to the player, and nudges them spaceward.
     if (F.bobAtCentre && !finaleBarkedCheck && (F.phase === 'space_rampage' || F.phase === 'grab_moon' || F.phase === 'lolly_ascends')) {
