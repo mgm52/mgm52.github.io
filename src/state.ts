@@ -1,8 +1,8 @@
 import {
   BASE_SPAWN_CAPACITY, BUILDING_DEFS, BuildingDef, BuildingKind, CELL, COLS,
-  DEMON, DIG_GROWTH_CELLS, DRAGON, GOBLIN_HOLE_CAPACITY_PER_BUILDING, HELL, LOLLY_BOOST, ROWS, SOUL_SIGIL,
+  DEMON, DIG_GROWTH_CELLS, DRAGON, FINALE, GOBLIN_HOLE_CAPACITY_PER_BUILDING, HELL, LOLLY_BOOST, ROWS, SOUL_SIGIL,
   INITIAL_PLAY_COLS, INITIAL_PLAY_ROWS, INITIAL_PLAY_X0, INITIAL_PLAY_Y0, ROBOT,
-  START_CELL, START_GOBLINS, START_MONEY, WALL_BORDER, WORLD, formatPower,
+  SPACE, START_CELL, START_GOBLINS, START_MONEY, WALL_BORDER, WORLD, formatPower,
 } from './config';
 import { getOptions } from './options';
 
@@ -151,9 +151,9 @@ export function lollyBoostState(L: Lolly, now: number): { speedMult: number; tin
   return { speedMult: 1 + bonus, tint, tintAlpha };
 }
 
-// The moon Lolly hauls out of space during the finale. Drawn, not a sprite —
-// see drawMoon in render.ts. It floats in space until she hoists it, rides down
-// on her shoulder, and shatters in Bob's hands.
+// The moon. Hangs in space from the very first frame of a run — drawn, not a
+// sprite (see paintMoon in render.ts) — until the finale, when Lolly hoists
+// it, rides down with it on her shoulder, and it shatters in Bob's hands.
 export type Moon = {
   // Lives in space-scene coords until Lolly carries it down, then world coords.
   pos: Vec2;
@@ -164,7 +164,22 @@ export type Moon = {
   state: 'floating' | 'grabbed' | 'placed' | 'shattering';
   seed: number;            // fixes the crater layout + float wobble phase
   shatterAt?: number;      // state.now the break began (drives the shatter anim)
+  // Tap-selectable scenery while floating in space (info panel only).
+  // Ephemeral — reset on load.
+  selected?: boolean;
 };
+
+// A fresh moon, parked in its spot in the sky. Seeded at new-game (and by
+// save migration), and re-conjured by the dev finale cheat so a replayed
+// cinematic has something to tear down again.
+export function createMoon(): Moon {
+  return {
+    pos: { x: SPACE.width * 0.5, y: SPACE.height * 0.24 },
+    scene: 'space',
+    state: 'floating',
+    seed: Math.floor(Math.random() * 1e6),
+  };
+}
 
 // The endgame cinematic, kicked off the instant Lolly runs out of things to
 // smash on the overworld (see maybeStartFinale / updateFinale in sim.ts). A
@@ -202,7 +217,7 @@ export type Finale = {
   target?: { kind: 'building' | 'unit'; id: number } | null;
   attackAt?: number;       // state.now the current space-smash lands
   grabHoverUntil?: number; // state.now the moon hoist completes
-  moon: Moon | null;
+  // (The moon itself lives on state.moon — it predates the cinematic.)
   // Hand-off to main.ts (which owns the DOM): set true once Lolly has landed
   // back on the surface with the moon and the confrontation modal should run.
   // main.ts consumes it, plays the modal, and advances the phase to 'shattered'.
@@ -985,6 +1000,10 @@ export type GameState = {
   // overworld to destroy. Null/absent until then; once set it drives the rest
   // of the demo (see updateFinale in sim.ts). Persisted — resumes on reload.
   finale?: Finale | null;
+  // The moon, hanging in space from the start of the run — selectable scenery
+  // until the finale tears it down. Always present at runtime (seeded at
+  // new-game and by save migration). Persisted, craters and all.
+  moon: Moon;
   // Sticky: Lolly has torn the original Goblin Hole out of the earth. The
   // hole stops rendering, spawning, and being selectable; its base spawn
   // capacity goes with it.
@@ -1455,6 +1474,7 @@ export function createInitialState(): GameState {
     bobLollyDeparted: false,
     lolly: null,
     finale: null,
+    moon: createMoon(),
     holeDestroyed: false,
     ghosts: [],
     view: 'ground',
@@ -2054,6 +2074,14 @@ export function spaceUnitAt(state: GameState, x: number, y: number): SpaceUnit |
     if (d <= bestD) { bestD = d; best = su; }
   }
   return best;
+}
+
+// The moon under a SPACE-coord point — tappable scenery, but only while it
+// still hangs in the sky ('floating'). Once Lolly hoists it, it's hers.
+export function moonAt(state: GameState, x: number, y: number): Moon | null {
+  const m = state.moon;
+  if (!m || m.scene !== 'space' || m.state !== 'floating') return null;
+  return Math.hypot(x - m.pos.x, y - m.pos.y) <= FINALE.moonRadius * 1.1 ? m : null;
 }
 
 // Powered Hypercentres the player can point at — active ground ones plus any

@@ -1065,13 +1065,13 @@ async function main() {
     const appEl = document.getElementById('app');
     const white = finaleWhite();
     // Bob turns to the moon resting between them and winds up his swing.
-    if (F.moon) {
-      F.bobFacing = Math.atan2(F.moon.pos.y - F.bobPos.y, F.moon.pos.x - F.bobPos.x);
-      F.bobAttacking = true;
-    }
+    const moon = state.moon;
+    F.bobFacing = Math.atan2(moon.pos.y - F.bobPos.y, moon.pos.x - F.bobPos.x);
+    F.bobAttacking = true;
     await sleep(440);                              // he raises a fist and brings it down
     // Impact — the moon goes, with a hard camera flash.
-    if (F.moon) { F.moon.state = 'shattering'; F.moon.shatterAt = state.now; }
+    moon.state = 'shattering';
+    moon.shatterAt = state.now;
     playSound('destroy', 1, 0.3);
     playSound('lightning', 0.8, 0.5);
     void finaleBark(state, 'lolly', '*no no no no no no no no no no no*');

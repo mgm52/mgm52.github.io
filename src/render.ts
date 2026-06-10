@@ -495,15 +495,15 @@ type FinaleRig = {
 };
 
 // The whole finale cast: Lolly's two rigs, the dismounted Bob (always on the
-// surface), and the moon (drawn, one disc per scene). Lazily built and torn
-// down with state.finale.
+// surface), and the moon's ground-scene disc (its space-scene disc is the
+// persistent ctx.spaceMoonGfx — the moon predates the cinematic). Lazily
+// built and torn down with state.finale.
 type FinaleView = {
   groundRig: FinaleRig;
   spaceRig: FinaleRig;
   bob: Sprite;
   bobShadow: Sprite;
   groundMoon: Graphics;
-  spaceMoon: Graphics;
 };
 
 export type RenderContext = {
@@ -549,6 +549,10 @@ export type RenderContext = {
   // Decorative dragons drifting across the void, behind the floating buildings.
   // Renderer-owned and ephemeral — spawned while in space, cleared when not.
   spaceAmbientLayer: Container;
+  // The moon's space-scene disc (see drawSpaceMoon). Lives at the bottom of
+  // the ambient layer so it hangs behind the buildings, the units, and even
+  // the distant dragons — a far-off body, present from the first frame.
+  spaceMoonGfx: Graphics;
   ambientDragons: AmbientDragon[];
   nextAmbientSpawnAt: number;
   ambientIdSeq: number;
@@ -827,6 +831,10 @@ export async function createRender(parent: HTMLElement, state: GameState): Promi
   // Ambient dragons sit above the starfield but below the floating buildings.
   const spaceAmbientLayer = new Container();
   spaceLayer.addChild(spaceAmbientLayer);
+  // The moon, behind everything in the ambient layer (dragons added later
+  // stack above it, so they drift across its face).
+  const spaceMoonGfx = new Graphics();
+  spaceAmbientLayer.addChild(spaceMoonGfx);
   // Fixed z-order for the diorama (bottom → top): hauled-up ground buildings,
   // then Orbital Platforms, then the Space Centres standing on them, then
   // units, with Bob's nametag layer and the placement ghost above everything.
@@ -1025,7 +1033,7 @@ export async function createRender(parent: HTMLElement, state: GameState): Promi
     spaceLayer, spaceBg, spaceMiscLayer, spacePlatformLayer, spaceCentreLayer, spaceUnitLayer,
     spaceBuildingViews: new Map(), spaceUnitViews: new Map(),
     spaceCamera: { x: 0, y: 0 },
-    spaceAmbientLayer, ambientDragons: [], nextAmbientSpawnAt: 0, ambientIdSeq: 1,
+    spaceAmbientLayer, spaceMoonGfx, ambientDragons: [], nextAmbientSpawnAt: 0, ambientIdSeq: 1,
     blackOverlay, skyLayer, skyGfx, cloudGfx, starGfx,
     transStars, transClouds,
     altitude: 0,
@@ -1727,7 +1735,6 @@ function drawFinale(ctx: RenderContext, state: GameState, opts: Options): void {
       ctx.finaleView.bob.destroy();
       ctx.finaleView.bobShadow.destroy();
       ctx.finaleView.groundMoon.destroy();
-      ctx.finaleView.spaceMoon.destroy();
       ctx.finaleView = null;
     }
     return;
@@ -1741,18 +1748,15 @@ function drawFinale(ctx: RenderContext, state: GameState, opts: Options): void {
     const bob = new Sprite((goblinIdleSheet ?? goblinWalkSheet)?.frames[0][0] ?? Texture.EMPTY);
     bob.anchor.set(0.5);
     const groundMoon = new Graphics();
-    const spaceMoon = new Graphics();
-    // Ground actors ride the lollyLayer (topmost ground layer). In space, Lolly
-    // rides the floating-building layer, but the moon goes in the ambient layer
-    // beneath it so it reads as a distant body — behind the buildings, the
-    // dragons, and Lolly herself.
+    // Ground actors ride the lollyLayer (topmost ground layer). In space,
+    // Lolly rides the floating-building layer; the moon's space disc is the
+    // persistent ctx.spaceMoonGfx in the ambient layer beneath it.
     ctx.lollyLayer.addChild(bobShadow);
     ctx.lollyLayer.addChild(bob);
     ctx.lollyLayer.addChild(groundRig.container);
     ctx.lollyLayer.addChild(groundMoon);
-    ctx.spaceAmbientLayer.addChild(spaceMoon);
     ctx.spaceMiscLayer.addChild(spaceRig.container);
-    v = ctx.finaleView = { groundRig, spaceRig, bob, bobShadow, groundMoon, spaceMoon };
+    v = ctx.finaleView = { groundRig, spaceRig, bob, bobShadow, groundMoon };
   }
 
   const ground = F.scene === 'ground';
@@ -1779,43 +1783,56 @@ function drawFinale(ctx: RenderContext, state: GameState, opts: Options): void {
     v.bobShadow.scale.set(sy * 0.7, sy);
   }
 
-  // The moon: floating in space, riding Lolly's shoulder, or shattering.
-  const m = F.moon;
+  // The moon's ground-scene disc: riding Lolly's shoulder down, set on the
+  // ground, or shattering. (While it's still up in space — floating, or
+  // grabbed mid-orbit — drawSpaceMoon owns it.)
+  const m = state.moon;
   v.groundMoon.visible = false;
-  v.spaceMoon.visible = false;
-  if (m) {
+  if (m.scene === 'ground') {
     const shatterT = m.state === 'shattering' && m.shatterAt !== undefined
       ? (state.now - m.shatterAt) / (MOON_SHATTER_MS / 1000)
       : undefined;
-    // Pick the disc in the moon's current scene.
-    const disc = m.scene === 'ground' ? v.groundMoon : v.spaceMoon;
-    let pos: { x: number; y: number };
-    if (m.state === 'grabbed') {
-      pos = moonShoulder(F);
-    } else if (m.state === 'floating') {
-      pos = { x: m.pos.x, y: m.pos.y + Math.sin(state.now * 0.8 + m.seed) * 6 };
-    } else {
-      pos = { x: m.pos.x, y: m.pos.y };
-    }
+    const pos = m.state === 'grabbed' ? moonShoulder(F) : { x: m.pos.x, y: m.pos.y };
     if (shatterT === undefined || shatterT < 1) {
-      disc.visible = true;
-      disc.position.set(pos.x, pos.y);
+      v.groundMoon.visible = true;
+      v.groundMoon.position.set(pos.x, pos.y);
       // A cast shadow only when it's sitting on the ground (placed).
-      paintMoon(disc, FINALE.moonRadius, m.seed, shatterT, m.scene === 'ground' && m.state === 'placed');
+      paintMoon(v.groundMoon, FINALE.moonRadius, m.seed, shatterT, m.state === 'placed');
       // Z-order against the ground rig: while she's still carrying it down
       // ('grabbed'), the moon tucks BEHIND her; once she sets it on the ground
       // it sits in FRONT, the offering between them.
-      if (disc === v.groundMoon) {
-        const layer = ctx.lollyLayer;
-        const rigIdx = layer.getChildIndex(v.groundRig.container);
-        const moonIdx = layer.getChildIndex(v.groundMoon);
-        if (m.state === 'grabbed') {
-          if (moonIdx > rigIdx) layer.setChildIndex(v.groundMoon, rigIdx);
-        } else if (moonIdx < rigIdx) {
-          layer.setChildIndex(v.groundMoon, layer.children.length - 1);
-        }
+      const layer = ctx.lollyLayer;
+      const rigIdx = layer.getChildIndex(v.groundRig.container);
+      const moonIdx = layer.getChildIndex(v.groundMoon);
+      if (m.state === 'grabbed') {
+        if (moonIdx > rigIdx) layer.setChildIndex(v.groundMoon, rigIdx);
+      } else if (moonIdx < rigIdx) {
+        layer.setChildIndex(v.groundMoon, layer.children.length - 1);
       }
     }
+  }
+}
+
+// The moon's space-scene disc — there from the very first frame of a run, not
+// just during the finale. Wobbles gently while floating; rides up at Lolly's
+// shoulder once she's grabbed it (until the descent crosses it into the
+// ground scene, where drawFinale's groundMoon takes over). Selected (it's
+// tappable scenery) it wears the usual gold ring.
+function drawSpaceMoon(ctx: RenderContext, state: GameState): void {
+  const m = state.moon;
+  const g = ctx.spaceMoonGfx;
+  if (!m || m.scene !== 'space') {
+    g.visible = false;
+    return;
+  }
+  const pos = m.state === 'grabbed' && state.finale
+    ? moonShoulder(state.finale)
+    : { x: m.pos.x, y: m.pos.y + Math.sin(state.now * 0.8 + m.seed) * 6 };
+  g.visible = true;
+  g.position.set(pos.x, pos.y);
+  paintMoon(g, FINALE.moonRadius, m.seed);
+  if (m.selected && m.state === 'floating') {
+    g.circle(0, 0, FINALE.moonRadius * 1.16).stroke({ width: 3, color: 0xffd96b });
   }
 }
 
@@ -3900,6 +3917,7 @@ export function render(state: GameState, ctx: RenderContext) {
     );
   }
   updateAmbientDragons(ctx);
+  drawSpaceMoon(ctx, state);
   const seenSB = new Set<number>();
   for (const sb of state.spaceBuildings.values()) {
     seenSB.add(sb.id);

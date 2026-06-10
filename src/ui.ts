@@ -2544,6 +2544,14 @@ function refreshInfoPanel(state: GameState) {
     name.textContent = 'Distant dragon';
     stateEl.textContent = '';
     extra.innerHTML = '';
+  } else if (state.moon?.selected) {
+    // Like the distant dragons: scenery the player can point at. It takes no
+    // orders and does nothing — for now.
+    panel.classList.add('visible');
+    portrait.innerHTML = `<div class="portrait-goblin" style="background:#0c1224;border-color:#aab7d6;color:#dbe2f2">☽</div>`;
+    name.textContent = 'The Moon';
+    stateEl.textContent = 'Hanging in the void';
+    extra.innerHTML = `<span style="color:#6a7080">Pale and patient. Surely nothing could ever tear it down.</span>`;
   } else if (selectedBuildings.length === 1 && selectedGoblins.length === 0) {
     showBuilding(state, selectedBuildings[0], panel, portrait, name, stateEl, extra);
     destroyBtn.style.display = '';

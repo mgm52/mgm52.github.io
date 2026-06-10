@@ -1,7 +1,7 @@
 import * as devalue from 'devalue';
 import { compressToUTF16, decompressFromUTF16 } from 'lz-string';
 import {
-  Building, GameState, createDemons, emptyBuildingCounts, ensureDemonRoster, pruneAllAssignedGoblins, rebuildWalls,
+  Building, GameState, Moon, createDemons, createMoon, emptyBuildingCounts, ensureDemonRoster, pruneAllAssignedGoblins, rebuildWalls,
 } from './state';
 
 const STORAGE_KEY = 'rts.savegame.v1';
@@ -249,6 +249,13 @@ export function loadGame(): { state: GameState; savedAt: number } | null {
     // ephemeral (main.ts re-arms it from the live phase on the next tick).
     env.state.finale ??= null;
     if (env.state.finale) env.state.finale.confrontReady = false;
+    // The moon — in the sky from the start of a run now, where it used to be
+    // conjured at finale time (and lived on finale.moon). Adopt a legacy
+    // mid-/post-finale save's moon so its state carries over; seed a fresh
+    // one for everything else. Selection is ephemeral.
+    env.state.moon ??=
+      (env.state.finale as unknown as { moon?: Moon } | null)?.moon ?? createMoon();
+    env.state.moon.selected = false;
     env.state.holeDestroyed ??= false;
     env.state.ghosts ??= [];
     // Pre-existing ghosts from saves predating the downward drift get a

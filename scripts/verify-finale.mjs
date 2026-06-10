@@ -87,7 +87,7 @@ while (Date.now() < deadline) {
     return {
       phase: F ? F.phase : null,
       scene: F ? F.scene : null,
-      moonState: F && F.moon ? F.moon.state : null,
+      moonState: state.moon ? state.moon.state : null,
       spaceUnits: state.spaceUnits.size,
       view: state.view,
       modalOpen,
@@ -141,7 +141,7 @@ const final = await page.evaluate(() => {
   const white = document.getElementById('finale-white');
   return {
     phase: state.finale ? state.finale.phase : null,
-    moonState: state.finale && state.finale.moon ? state.finale.moon.state : null,
+    moonState: state.moon ? state.moon.state : null,
     zoom: !!game && game.classList.contains('finale-zoom'),
     whiteOpacity: white ? Number(white.style.opacity || '0') : -1,
   };

@@ -9,7 +9,7 @@ import { autoAssignAllIdle, lightningStrike, spawnBob, unseatSoulFromChair } fro
 import {
   Building, Cell, Dragon, GameState, Ghost, Goblin, Minotaur, SpaceUnit, WaterSource,
   appendLog, buildingAtCell, buildingMoneyCost, candleSpotAt, cellKey, defOf, demonAtHell, findFreeCellNear,
-  hellPortalAt, holeAtCell, isInBounds, markBuildingsChanged, nextBuildingDisplayNum, pixelToCell, placeCandle, pushFloater,
+  hellPortalAt, holeAtCell, isInBounds, markBuildingsChanged, moonAt, nextBuildingDisplayNum, pixelToCell, placeCandle, pushFloater,
   soulChairAt, spaceBuildingAt, spaceStructureOverlapAt, spaceUnitAt, waterCarrierCount, waterSourceAtCell,
   freePlatformAt,
 } from './state';
@@ -460,11 +460,13 @@ export function setupInput(
             return;
           }
           // A small drifting unit wins over the building it may be passing in
-          // front of; ambient dragons sit behind everything, so they only get
-          // a hit when nothing higher-priority is under the pointer.
+          // front of; ambient dragons and the moon sit behind everything (the
+          // dragons drift across the moon's face, so they beat it too) — each
+          // only gets a hit when nothing higher-priority is under the pointer.
           const su = spaceUnitAt(state, lp.x, lp.y);
           const sb = su ? null : spaceBuildingAt(state, lp.x, lp.y);
           const ad = (su || sb) ? null : ambientDragonAt(ctx, lp.x, lp.y);
+          const mn = (su || sb || ad) ? null : moonAt(state, lp.x, lp.y);
           if (!e.shiftKey) clearSelection(state);
           // Drifting units count against the unit-selection cap; buildings don't.
           if (su && selectedUnitCount(state) >= MAX_SELECTED_UNITS) {
@@ -474,6 +476,7 @@ export function setupInput(
           else if (su) { su.selected = true; playSound('select', 0.33); }
           else if (sb) { sb.selected = true; playSound('select', 0.33); }
           else if (ad) { state.selectedAmbientDragonId = ad.id; playSound('select', 0.33); }
+          else if (mn) { mn.selected = true; playSound('select', 0.33); }
         } else {
           // Box corners: drag origin + release point, both mapped to space-layer
           // coords (where the floating buildings live).
@@ -902,6 +905,7 @@ function clearSelection(state: GameState) {
   for (const c of state.soulChairs) c.selected = false;
   state.hole.selected = false;
   state.selectedAmbientDragonId = null;
+  if (state.moon) state.moon.selected = false;
 }
 
 // How many units are currently selected, across every scene — ground
