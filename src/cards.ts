@@ -21,15 +21,15 @@
 // reach them; this file is the presentation + persistence half.
 
 import { playSound, type SoundName } from './audio';
-import { BUILDING_DEFS, CELL, HELL, SPACE, WORLD } from './config';
+import { BUILDING_DEFS, CELL, HELL, SPACE, WORLD, formatPower } from './config';
 import { getRawSave, saveGame, setRawSave } from './save';
 import { GameState, computePlayBounds, isInPlayCell } from './state';
 import { ALL_TASK_IDS } from './ui';
 import {
-  APPETITE_LINE, CardMeta, CardTier, Creature, TIER_ABOVE, TIER_RANK, TradeEvent,
-  UpgradeReq, WorldCard, appetiteAccepts, ascendCard, breakdownGives, creatureTakesFor,
-  decodeWorld, encodeWorld, generateEvents, makeCard, mulberry32, regenerateEvent,
-  reqMet, rollUpgradeReq, sameTierGives,
+  APPETITE_LINE, CardMeta, CardResources, CardTier, Creature, TIER_ABOVE, TIER_RANK,
+  TradeEvent, UpgradeReq, WorldCard, appetiteAccepts, ascendCard, breakdownGives,
+  creatureOpenTo, creatureTakesFor, decodeWorld, encodeWorld, generateEvents, makeCard,
+  mulberry32, regenerateEvent, reqMet, sameTierGives,
 } from './cards-core';
 
 const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
@@ -116,7 +116,10 @@ export function captureOriginWorld(state: GameState): void {
   try {
     const payload = {
       data: encodeWorld(state),
-      resources: { money: state.money, blood: state.blood, dragonBone: state.dragonBone },
+      resources: {
+        money: state.money, blood: state.blood, dragonBone: state.dragonBone,
+        power: state.lastPowerProduced,
+      },
     };
     localStorage.setItem(ORIGIN_KEY, JSON.stringify(payload));
   } catch { /* storage full — the realm falls back to a generated origin */ }
@@ -151,7 +154,19 @@ function buildOriginCard(meta: CardMeta, rng: () => number): WorldCard {
 
 // ─── Entering / leaving a card world ─────────────────────────────────
 
-function enterWorld(meta: CardMeta, card: WorldCard): void {
+// The white that bridges every world hop — created lazily at body level so
+// it sits above both the realm (100001) and the game.
+function hopWhite(): HTMLElement {
+  let el = document.getElementById('card-hop-white');
+  if (!el) {
+    el = document.createElement('div');
+    el.id = 'card-hop-white';
+    document.body.appendChild(el);
+  }
+  return el;
+}
+
+async function enterWorld(meta: CardMeta, card: WorldCard, cardEl?: HTMLElement): Promise<void> {
   const st = decodeWorld(card.data);
   if (!st) { realmSound('error'); return; }
   // Stash the outer post-finale save verbatim, then write the card's world
@@ -170,17 +185,39 @@ function enterWorld(meta: CardMeta, card: WorldCard): void {
   saveMeta(meta);
   realmSound('ritual', 1, 0.7);
   markCardHop();
+  // The dive: the chosen card swells toward the viewer while the white
+  // takes over — it bridges into the arrival zoom on the far side of the
+  // reload (setupCardWorldChrome).
+  const white = hopWhite();
+  white.style.transition = 'opacity 900ms ease-in';
+  cardEl?.classList.add('dived');
+  requestAnimationFrame(() => { white.style.opacity = '1'; });
+  // Hold until the white fully lands so the reload cuts on a clean frame.
+  await sleep(1200);
   location.reload();
 }
 
-function leaveWorld(state: GameState): void {
+async function leaveWorld(state: GameState): Promise<void> {
   const meta = loadMeta();
   if (!meta || meta.activeCardId === null) return;
+  markCardHop();
+  // The pull-back: the whole world recedes to a point as the white takes
+  // over — the finale's own exit, in miniature. The state is serialized
+  // AFTER the zoom so the final second of play still makes it onto the card.
+  const app = document.getElementById('app');
+  const white = hopWhite();
+  white.style.transition = 'opacity 1150ms ease-in';
+  app?.classList.add('card-exit-zoom');
+  requestAnimationFrame(() => { white.style.opacity = '1'; });
+  await sleep(1250);
   const card = meta.cards.find((c) => c.id === meta.activeCardId);
   if (card) {
     // The card remembers everything the player just did inside it.
     card.data = encodeWorld(state);
-    card.resources = { money: state.money, blood: state.blood, dragonBone: state.dragonBone };
+    card.resources = {
+      money: state.money, blood: state.blood, dragonBone: state.dragonBone,
+      power: state.lastPowerProduced,
+    };
   }
   meta.activeCardId = null;
   saveMeta(meta);
@@ -189,7 +226,6 @@ function leaveWorld(state: GameState): void {
     setRawSave(outer);
     try { localStorage.removeItem(OUTER_KEY); } catch { /* no-op */ }
   }
-  markCardHop();
   location.reload();
 }
 
@@ -207,17 +243,38 @@ export function abandonCardWorldBoot(): void {
 }
 
 // Inside a card world: the white screen border (body.card-world) and the big
-// white LEAVE WORLD button pinned to the bottom of the screen.
-export function setupCardWorldChrome(state: GameState): void {
+// white LEAVE WORLD button pinned to the bottom of the screen. When the boot
+// was an explicit hop (REENTER WORLD → reload), the world arrives by zooming
+// out of the white — the finale's pull-back, run in reverse.
+export function setupCardWorldChrome(state: GameState, arriving = false): void {
   document.body.classList.add('card-world');
   const btn = document.getElementById('leave-world-btn') as HTMLButtonElement | null;
-  if (!btn) return;
-  btn.style.display = '';
-  btn.addEventListener('click', () => {
-    btn.disabled = true;
-    realmSound('ritual', 1, 0.7);
-    leaveWorld(state);
-  }, { once: true });
+  if (btn) {
+    btn.style.display = '';
+    btn.addEventListener('click', () => {
+      btn.disabled = true;
+      realmSound('ritual', 1, 0.7);
+      void leaveWorld(state);
+    }, { once: true });
+  }
+  if (arriving) {
+    const app = document.getElementById('app');
+    const white = hopWhite();
+    white.style.transition = 'none';
+    white.style.opacity = '1';
+    app?.classList.add('card-enter-zoom');
+    // Two frames so the scaled-down start commits before the release.
+    requestAnimationFrame(() => {
+      requestAnimationFrame(() => {
+        app?.classList.add('card-enter-zoom-go');
+        white.style.transition = 'opacity 1600ms ease-out';
+        white.style.opacity = '0';
+      });
+    });
+    window.setTimeout(() => {
+      app?.classList.remove('card-enter-zoom', 'card-enter-zoom-go');
+    }, 1750);
+  }
 }
 
 // ─── Card previews ───────────────────────────────────────────────────
@@ -235,6 +292,38 @@ function decodedWorld(card: WorldCard): GameState | null {
 
 function hexColor(n: number): string { return `#${n.toString(16).padStart(6, '0')}`; }
 
+// Any region holding more than two structures brightens — an additive glow
+// blob over the cluster, so a built-up corner of a world reads as alive from
+// the card alone.
+function drawDensityGlow(
+  g: CanvasRenderingContext2D,
+  points: { x: number; y: number }[],
+  blockPx: number,
+  rgb: string,
+): void {
+  const blocks = new Map<string, { n: number; sx: number; sy: number }>();
+  for (const p of points) {
+    const key = `${Math.floor(p.x / blockPx)},${Math.floor(p.y / blockPx)}`;
+    const b = blocks.get(key) ?? { n: 0, sx: 0, sy: 0 };
+    b.n++; b.sx += p.x; b.sy += p.y;
+    blocks.set(key, b);
+  }
+  g.save();
+  g.globalCompositeOperation = 'lighter';
+  for (const b of blocks.values()) {
+    if (b.n <= 2) continue;
+    const cx = b.sx / b.n, cy = b.sy / b.n;
+    const r = blockPx * (1 + 0.15 * Math.min(b.n, 8));
+    const a = Math.min(0.42, 0.12 + 0.06 * (b.n - 2));
+    const grad = g.createRadialGradient(cx, cy, 0, cx, cy, r);
+    grad.addColorStop(0, `rgba(${rgb}, ${a.toFixed(2)})`);
+    grad.addColorStop(1, `rgba(${rgb}, 0)`);
+    g.fillStyle = grad;
+    g.fillRect(cx - r, cy - r, r * 2, r * 2);
+  }
+  g.restore();
+}
+
 function drawSpacePreview(cv: HTMLCanvasElement, st: GameState, seed: number): void {
   const g = cv.getContext('2d');
   if (!g) return;
@@ -242,29 +331,57 @@ function drawSpacePreview(cv: HTMLCanvasElement, st: GameState, seed: number): v
   g.fillStyle = '#05040f';
   g.fillRect(0, 0, w, h);
   const rng = mulberry32(seed);
-  for (let i = 0; i < 36; i++) {
-    g.globalAlpha = 0.3 + rng() * 0.7;
-    g.fillStyle = '#cfd4e8';
-    g.fillRect(Math.floor(rng() * w), Math.floor(rng() * h), 1, 1);
+  // A faint nebula so the void has depth.
+  for (let i = 0; i < 2; i++) {
+    const nx = rng() * w, ny = rng() * h, nr = 20 + rng() * 40;
+    const neb = g.createRadialGradient(nx, ny, 0, nx, ny, nr);
+    neb.addColorStop(0, i === 0 ? 'rgba(110, 70, 160, 0.16)' : 'rgba(60, 110, 160, 0.13)');
+    neb.addColorStop(1, 'rgba(0, 0, 0, 0)');
+    g.fillStyle = neb;
+    g.fillRect(nx - nr, ny - nr, nr * 2, nr * 2);
+  }
+  for (let i = 0; i < 44; i++) {
+    const big = rng() < 0.12;
+    g.globalAlpha = 0.35 + rng() * 0.65;
+    g.fillStyle = big ? '#ffffff' : '#cfd4e8';
+    g.fillRect(Math.floor(rng() * w), Math.floor(rng() * h), big ? 2 : 1, big ? 2 : 1);
   }
   g.globalAlpha = 1;
+  const pts: { x: number; y: number }[] = [];
   for (const sb of st.spaceBuildings.values()) {
     const x = (sb.pos.x / SPACE.width) * w;
     const y = (sb.pos.y / SPACE.height) * h;
-    g.fillStyle = sb.building.kind === 'orbital_platform' ? '#6f7480' : hexColor(BUILDING_DEFS[sb.building.kind].colors.active);
-    g.fillRect(x - 2, y - 2, 5, 4);
+    pts.push({ x, y });
+    if (sb.building.kind === 'orbital_platform') {
+      g.fillStyle = '#565b66';
+      g.fillRect(x - 4, y - 3, 9, 7);
+      g.strokeStyle = '#9aa0ac';
+      g.lineWidth = 1;
+      g.strokeRect(x - 4.5, y - 3.5, 10, 8);
+      g.fillStyle = '#8ad8ff';
+      g.fillRect(x - 3, y - 2, 1, 1);
+      g.fillRect(x + 3, y + 2, 1, 1);
+    } else {
+      const def = BUILDING_DEFS[sb.building.kind];
+      g.fillStyle = hexColor(def.colors.active);
+      g.fillRect(x - 2, y - 2, 5, 5);
+      g.strokeStyle = hexColor(def.colors.activeBorder);
+      g.lineWidth = 1;
+      g.strokeRect(x - 2.5, y - 2.5, 6, 6);
+    }
   }
   for (const su of st.spaceUnits.values()) {
-    g.fillStyle = su.robot ? '#b9c0c9' : '#7fd183';
+    g.fillStyle = su.robot ? '#c9d0d9' : '#7fd183';
     g.fillRect((su.pos.x / SPACE.width) * w, (su.pos.y / SPACE.height) * h, 2, 2);
   }
+  drawDensityGlow(g, pts, Math.max(24, w / 5), '170, 200, 255');
 }
 
 function drawEarthPreview(cv: HTMLCanvasElement, st: GameState): void {
   const g = cv.getContext('2d');
   if (!g) return;
   const w = cv.width, h = cv.height;
-  g.fillStyle = '#15130e';
+  g.fillStyle = '#11140d';
   g.fillRect(0, 0, w, h);
   const b = computePlayBounds(st);
   const bw = b.x1 - b.x0, bh = b.y1 - b.y0;
@@ -272,36 +389,59 @@ function drawEarthPreview(cv: HTMLCanvasElement, st: GameState): void {
   const ox = (w - bw * s) / 2, oy = (h - bh * s) / 2;
   const px = (cx: number) => ox + (cx - b.x0) * s;
   const py = (cy: number) => oy + (cy - b.y0) * s;
-  // Ground cells.
-  g.fillStyle = '#2e4630';
+  // Ground, with gentle per-cell mottling so it reads as terrain rather
+  // than a flat fill.
+  const greens = ['#30502f', '#2b4a2c', '#345633'];
   for (let cy = b.y0; cy < b.y1; cy++) {
     for (let cx = b.x0; cx < b.x1; cx++) {
-      if (isInPlayCell(st, cx, cy)) g.fillRect(px(cx), py(cy), s + 0.5, s + 0.5);
+      if (!isInPlayCell(st, cx, cy)) continue;
+      g.fillStyle = greens[(cx * 7 + cy * 13) % 3];
+      g.fillRect(px(cx), py(cy), s + 0.5, s + 0.5);
     }
   }
-  // Water.
-  g.fillStyle = '#2e5f8a';
+  // Water, with a light catching its upper edge.
   for (const ws of st.waterSources.values()) {
+    g.fillStyle = '#2e639a';
     g.fillRect(px(ws.x0), py(ws.y0), (ws.x1 - ws.x0) * s, (ws.y1 - ws.y0) * s);
+    g.fillStyle = 'rgba(140, 190, 235, 0.7)';
+    g.fillRect(px(ws.x0), py(ws.y0), (ws.x1 - ws.x0) * s, 1);
   }
   // The spawning hole.
   if (!st.holeDestroyed) {
-    g.fillStyle = '#0c0c0c';
+    g.fillStyle = '#0a0a0a';
     g.beginPath();
-    g.arc(px(st.hole.cell.cx + 0.5), py(st.hole.cell.cy + 0.5), Math.max(1.2, s * 0.7), 0, Math.PI * 2);
+    g.arc(px(st.hole.cell.cx + 0.5), py(st.hole.cell.cy + 0.5), Math.max(1.4, s * 0.8), 0, Math.PI * 2);
     g.fill();
+    g.strokeStyle = 'rgba(0, 0, 0, 0.5)';
+    g.lineWidth = 1;
+    g.stroke();
   }
-  // Buildings in their def colors.
+  // Buildings in their in-game colors, edged with their border colors so
+  // each block reads as a structure rather than a paint splat.
+  const pts: { x: number; y: number }[] = [];
   for (const bd of st.buildings.values()) {
     const def = BUILDING_DEFS[bd.kind];
-    g.fillStyle = hexColor(bd.state === 'active' ? def.colors.active : def.colors.dormant);
-    g.fillRect(px(bd.cell.cx), py(bd.cell.cy), Math.max(1, def.cellSize * s), Math.max(1, def.cellSize * s));
+    const x = px(bd.cell.cx), y = py(bd.cell.cy);
+    const size = Math.max(1.5, def.cellSize * s);
+    const active = bd.state === 'active';
+    g.fillStyle = hexColor(active ? def.colors.active : def.colors.dormant);
+    g.fillRect(x, y, size, size);
+    if (bd.kind !== 'wall' && size >= 3) {
+      g.strokeStyle = hexColor(active ? def.colors.activeBorder : def.colors.dormantBorder);
+      g.lineWidth = 1;
+      g.strokeRect(x + 0.5, y + 0.5, size - 1, size - 1);
+    }
+    if (bd.kind !== 'wall') {
+      pts.push({ x: x + size / 2, y: y + size / 2 });
+    }
   }
-  // Units as dots.
+  // Units as bright dots.
   for (const gob of st.goblins.values()) {
-    g.fillStyle = gob.robot ? '#b9c0c9' : gob.gold ? '#ffd96b' : '#7fd183';
-    g.fillRect(px(gob.cell.cx), py(gob.cell.cy), Math.max(1, s * 0.6), Math.max(1, s * 0.6));
+    g.fillStyle = gob.robot ? '#c9d0d9' : gob.gold ? '#ffd96b' : '#8ee492';
+    g.fillRect(px(gob.cell.cx), py(gob.cell.cy), Math.max(1.2, s * 0.7), Math.max(1.2, s * 0.7));
   }
+  // Built-up regions glow.
+  drawDensityGlow(g, pts, 7 * s, '255, 236, 170');
 }
 
 function drawHellPreview(cv: HTMLCanvasElement, st: GameState, seed: number): void {
@@ -310,47 +450,79 @@ function drawHellPreview(cv: HTMLCanvasElement, st: GameState, seed: number): vo
   const w = cv.width, h = cv.height;
   g.fillStyle = hexColor(HELL.bgColor);
   g.fillRect(0, 0, w, h);
-  const grad = g.createLinearGradient(0, 0, 0, h);
-  grad.addColorStop(0, 'rgba(74, 10, 14, 0)');
-  grad.addColorStop(1, 'rgba(74, 10, 14, 0.55)');
-  g.fillStyle = grad;
-  g.fillRect(0, 0, w, h);
-  // Portal beams, dropped at each portal's relative overworld x.
-  g.fillStyle = hexColor(HELL.lineColor);
+  // Layers of fog rising from the floor of the pit.
+  const rng = mulberry32(seed ^ 0x9e3779b9);
+  for (let i = 0; i < 3; i++) {
+    const fx = rng() * w, fy = h * (0.7 + rng() * 0.4), fr = 30 + rng() * 50;
+    const fog = g.createRadialGradient(fx, fy, 0, fx, fy, fr);
+    fog.addColorStop(0, 'rgba(96, 16, 22, 0.5)');
+    fog.addColorStop(1, 'rgba(96, 16, 22, 0)');
+    g.fillStyle = fog;
+    g.fillRect(fx - fr, fy - fr, fr * 2, fr * 2);
+  }
+  // Portal beams: a soft red shaft with a hot core, grounded in a glow pool.
   for (const bd of st.buildings.values()) {
     if (bd.kind !== 'hell_portal' || bd.state === 'constructing') continue;
     const x = ((bd.cell.cx * CELL) / WORLD.width) * w;
-    g.globalAlpha = 0.8;
+    g.fillStyle = 'rgba(255, 32, 48, 0.22)';
+    g.fillRect(x - 1.5, 0, 4, h);
+    g.fillStyle = 'rgba(255, 90, 90, 0.95)';
     g.fillRect(x, 0, 1, h);
+    const pool = g.createRadialGradient(x + 0.5, h, 0, x + 0.5, h, 12);
+    pool.addColorStop(0, 'rgba(255, 60, 70, 0.5)');
+    pool.addColorStop(1, 'rgba(255, 60, 70, 0)');
+    g.fillStyle = pool;
+    g.fillRect(x - 12, h - 12, 25, 12);
   }
-  g.globalAlpha = 1;
-  // Drifting ghosts.
-  const rng = mulberry32(seed ^ 0x9e3779b9);
+  // Drifting ghosts — soft-glowing souls rather than bare pixels.
+  g.save();
+  g.globalCompositeOperation = 'lighter';
   for (const gh of st.ghosts) {
     const x = (gh.x / WORLD.width) * w;
-    const y = 2 + rng() * (h - 4);
-    g.globalAlpha = 0.55 + rng() * 0.35;
-    g.fillStyle = gh.gold ? '#ffd96b' : '#cfd5e6';
-    g.fillRect(x, y, gh.kind === 'dragon' ? 3 : 2, 2);
+    const y = 3 + rng() * (h - 6);
+    const r = gh.kind === 'dragon' ? 3.4 : gh.kind === 'minotaur' ? 2.6 : 2;
+    const tint = gh.gold ? '255, 217, 107' : gh.kind === 'dragon' ? '255, 150, 130' : '190, 200, 235';
+    const glow = g.createRadialGradient(x, y, 0, x, y, r);
+    glow.addColorStop(0, `rgba(${tint}, ${0.5 + rng() * 0.4})`);
+    glow.addColorStop(1, `rgba(${tint}, 0)`);
+    g.fillStyle = glow;
+    g.fillRect(x - r, y - r, r * 2, r * 2);
   }
-  g.globalAlpha = 1;
+  g.restore();
   // Lit candles.
-  g.fillStyle = '#ff9a3d';
   for (const c of st.soulChairs) {
-    g.fillRect((c.hx / HELL.width) * w, (c.hy / HELL.height) * h, 2, 2);
+    const x = (c.hx / HELL.width) * w, y = (c.hy / HELL.height) * h;
+    g.fillStyle = '#ff9a3d';
+    g.fillRect(x, y, 1.5, 1.5);
   }
 }
 
 // ─── Card DOM ────────────────────────────────────────────────────────
 
-function fmtResources(r: WorldCard['resources']): string {
-  const parts = [`Ƶ ${Math.floor(r.money).toLocaleString('en-US')}`];
-  if (r.blood > 0) parts.push(`${Math.floor(r.blood).toLocaleString('en-US')} blood`);
-  if (r.dragonBone > 0) parts.push(`${Math.floor(r.dragonBone).toLocaleString('en-US')} bones`);
-  return parts.join(' · ');
+// The card's resource line: each resource in its own color (cash yellow,
+// blood red, power blue, bones grey), hidden at zero, and bold once it
+// crosses its "serious" threshold (Ƶ500k / 128 blood / 1 GW / 5 bones).
+function resourcesEl(r: CardResources): HTMLElement {
+  const wrap = document.createElement('div');
+  wrap.className = 'wc-res';
+  const fmt = (n: number) => Math.floor(n).toLocaleString('en-US');
+  const add = (cls: string, text: string, strong: boolean) => {
+    const span = document.createElement('span');
+    span.className = `${cls}${strong ? ' strong' : ''}`;
+    span.textContent = text;
+    wrap.appendChild(span);
+  };
+  const power = r.power ?? 0;
+  if (r.money > 0) add('res-cash', `Ƶ ${fmt(r.money)}`, r.money >= 500_000);
+  if (r.blood > 0) add('res-blood', `${fmt(r.blood)} blood`, r.blood >= 128);
+  if (power > 0) add('res-power', formatPower(power), power >= 1_000_000_000);
+  if (r.dragonBone > 0) add('res-bones', `${fmt(r.dragonBone)} bones`, r.dragonBone >= 5);
+  if (!wrap.firstChild) add('res-nothing', 'nothing', false);
+  return wrap;
 }
 
 function fmtReqAmount(r: UpgradeReq): string {
+  if (r.res === 'power') return formatPower(r.amount);
   const amt = r.amount.toLocaleString('en-US');
   return r.res === 'money' ? `Ƶ ${amt}` : r.res === 'blood' ? `${amt} blood` : `${amt} bones`;
 }
@@ -358,7 +530,7 @@ function fmtReqAmount(r: UpgradeReq): string {
 type CardElOpts = {
   big?: boolean;
   enterLabel?: string;       // when set, the card carries an enter button
-  onEnter?: () => void;
+  onEnter?: (cardEl: HTMLElement) => void;
   onClick?: () => void;      // whole-card click (trade views)
   onAscend?: () => void;     // table view: shown once the ascension demand is met
 };
@@ -383,9 +555,9 @@ function buildCardEl(card: WorldCard, opts: CardElOpts = {}): HTMLElement {
     panes.appendChild(cv);
     return cv;
   };
-  const cvSpace = mkCanvas('wc-space', 34);
-  const cvEarth = mkCanvas('wc-earth', 84);
-  const cvHell = mkCanvas('wc-hell', 34);
+  const cvSpace = mkCanvas('wc-space', 40);
+  const cvEarth = mkCanvas('wc-earth', 96);
+  const cvHell = mkCanvas('wc-hell', 40);
   if (st) {
     drawSpacePreview(cvSpace, st, card.id * 7919 + 17);
     drawEarthPreview(cvEarth, st);
@@ -393,10 +565,7 @@ function buildCardEl(card: WorldCard, opts: CardElOpts = {}): HTMLElement {
   }
   root.appendChild(panes);
 
-  const res = document.createElement('div');
-  res.className = 'wc-res';
-  res.textContent = fmtResources(card.resources);
-  root.appendChild(res);
+  root.appendChild(resourcesEl(card.resources));
 
   // Ascension demand, printed on every card that still has a tier above it.
   if (card.upgradeReq) {
@@ -420,7 +589,7 @@ function buildCardEl(card: WorldCard, opts: CardElOpts = {}): HTMLElement {
     btn.type = 'button';
     btn.className = 'wc-enter';
     btn.textContent = opts.enterLabel;
-    btn.addEventListener('click', (e) => { e.stopPropagation(); opts.onEnter?.(); });
+    btn.addEventListener('click', (e) => { e.stopPropagation(); opts.onEnter?.(root); });
     root.appendChild(btn);
   }
   if (opts.onClick) {
@@ -670,7 +839,7 @@ function showTable(meta: CardMeta): void {
   for (const c of meta.cards) {
     row.appendChild(buildCardEl(c, {
       enterLabel: 'REENTER WORLD',
-      onEnter: () => enterWorld(meta, c),
+      onEnter: (el) => { void enterWorld(meta, c, el); },
       onAscend: () => {
         ascendCard(meta, c);
         saveMeta(meta);
@@ -699,9 +868,10 @@ function showTable(meta: CardMeta): void {
     const btn = document.createElement('button');
     btn.type = 'button';
     btn.className = `ct-event${locked ? ' locked' : ''}`;
+    const n = ev.creatures.length;
     const sub = locked
       ? 'you hold nothing to trade here'
-      : `trades ${ev.tier} worlds · ${ev.creatures.length} creatures attending`;
+      : `trades ${ev.tier} worlds · ${n} creature${n === 1 ? '' : 's'} attending`;
     btn.innerHTML = `<span class="ct-event-name"></span><span class="ct-event-sub">${sub}</span>`;
     (btn.querySelector('.ct-event-name') as HTMLElement).textContent = ev.name;
     btn.addEventListener('click', () => {
@@ -804,8 +974,12 @@ function showTrade(meta: CardMeta, ev: TradeEvent, cr: Creature): void {
   let selectedId: number | null = null;
   let staged: number[] = [];
 
+  // Same-tier swaps need the appetite to match; breakdowns don't.
+  const sameGivesFor = (mine: WorldCard): WorldCard[] =>
+    appetiteAccepts(cr.appetite, mine) ? sameTierGives(cr, mine) : [];
+
   const offerSpeech = (mine: WorldCard): string => {
-    const same = sameTierGives(cr, mine).length > 0;
+    const same = sameGivesFor(mine).length > 0;
     const down = breakdownGives(cr, mine).length > 0;
     if (same && down) return 'for that: one of its kind, or two of the lesser.';
     if (same) return 'for that, i would give one of these.';
@@ -840,12 +1014,10 @@ function showTrade(meta: CardMeta, ev: TradeEvent, cr: Creature): void {
   const render = () => {
     theirsRow.innerHTML = '';
     yoursRow.innerHTML = '';
-    // Cards of yours the creature is open to trading for: appetite match,
-    // plus it must hold something to give back (a same-tier card, or a
-    // two-for-one's worth of the tier below).
-    const wanted = meta.cards.filter((c) =>
-      appetiteAccepts(cr.appetite, c)
-      && (sameTierGives(cr, c).length > 0 || breakdownGives(cr, c).length > 0));
+    // Cards of yours the creature is open to trading for: appetite-matched
+    // same-tier swaps, or a tier-above card it can break down two-for-one
+    // (appetite-free — greed beats taste).
+    const wanted = meta.cards.filter((c) => creatureOpenTo(cr, c));
     const selMine = meta.cards.find((c) => c.id === selectedId) ?? null;
     const selTheirs = cr.deck.find((c) => c.id === selectedId) ?? null;
 
@@ -863,7 +1035,7 @@ function showTrade(meta: CardMeta, ev: TradeEvent, cr: Creature): void {
         // lesser-tier companions are live.
         eligible = isStaged || breakdownGives(cr, selMine).includes(tc);
       } else {
-        eligible = sameTierGives(cr, selMine).includes(tc) || breakdownGives(cr, selMine).includes(tc);
+        eligible = sameGivesFor(selMine).includes(tc) || breakdownGives(cr, selMine).includes(tc);
       }
       const el = buildCardEl(tc, {
         onClick: () => {
@@ -875,7 +1047,7 @@ function showTrade(meta: CardMeta, ev: TradeEvent, cr: Creature): void {
               speech.textContent = offerSpeech(selMine);
               return;
             }
-            if (staged.length === 0 && sameTierGives(cr, selMine).includes(tc)) {
+            if (staged.length === 0 && sameGivesFor(selMine).includes(tc)) {
               executeTrade(selMine, [tc]);
               return;
             }

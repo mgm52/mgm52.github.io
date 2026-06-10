@@ -347,7 +347,9 @@ async function main() {
   }
   // Inside a card world: the white screen border + the LEAVE WORLD button
   // (which serializes the world back onto its card and returns to the table).
-  if (inCardWorld) setupCardWorldChrome(state);
+  // An explicit hop also plays the arrival zoom — the world swelling out of
+  // the white the player just dove into.
+  if (inCardWorld) setupCardWorldChrome(state, cardHop);
   // Dev shortcut: ?cardrealm mounts the trading-card realm immediately,
   // without playing the finale first.
   if (!import.meta.env.PROD && new URLSearchParams(window.location.search).has('cardrealm')) {

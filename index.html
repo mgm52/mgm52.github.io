@@ -1579,6 +1579,10 @@
         gap: 10px;
         transition: opacity 500ms ease;
       }
+      /* The stage scrolls; its rows must never compress to fit — the default
+         flex-shrink would squash the card rows over the captions below them
+         instead of overflowing into scroll. */
+      #card-stage > * { flex-shrink: 0; }
       /* Intro card centering via auto margins (not justify-content: center),
          so a card taller than a short viewport stays scrollable instead of
          having its top clipped. */
@@ -1692,9 +1696,8 @@
         --tier-c: #b6b6bc;
         width: 200px; flex-shrink: 0;
         background: linear-gradient(180deg, #fcfcf7, #f4f4ec);
-        border: 1px solid #d8d8cf;
-        border-top: 4px solid var(--tier-c);
-        border-radius: 10px;
+        border: 2px solid var(--tier-c);
+        border-radius: 18px;
         box-shadow: 0 14px 34px rgba(70, 70, 100, 0.18), 0 3px 10px rgba(70, 70, 100, 0.12);
         padding: 10px 10px 12px;
         color: #44444c;
@@ -1714,8 +1717,8 @@
       .world-card.origin .wc-name::before { content: "★ "; font-size: 11px; }
       /* Laid-on-a-table jitter: alternate cards sit a hair off-square.
          Selection (translateY) overrides it via its own transform. */
-      .ct-cards .world-card:nth-child(odd):not(.selected) { transform: rotate(-0.6deg); }
-      .ct-cards .world-card:nth-child(even):not(.selected) { transform: rotate(0.5deg); }
+      .ct-cards .world-card:nth-child(odd):not(.selected):not(.dived) { transform: rotate(-0.6deg); }
+      .ct-cards .world-card:nth-child(even):not(.selected):not(.dived) { transform: rotate(0.5deg); }
       /* One-shot tier-colored flash right after an ascension. */
       .world-card.ascended { animation: wc-ascended 1100ms ease; }
       @keyframes wc-ascended {
@@ -1746,16 +1749,25 @@
       .wc-prevs { display: flex; flex-direction: column; gap: 3px; }
       .wc-prev {
         display: block; width: 100%;
-        border-radius: 4px; border: 1px solid #e0e0d6;
+        border-radius: 7px; border: 1px solid #e0e0d6;
         image-rendering: pixelated;
       }
-      .wc-res { margin-top: 7px; font-family: var(--font-mono); font-size: 11px; color: #6a6a72; }
+      .wc-res {
+        margin-top: 7px; font-family: var(--font-mono); font-size: 11px;
+        display: flex; flex-wrap: wrap; gap: 3px 9px;
+      }
+      .wc-res .strong { font-weight: 700; }
+      .wc-res .res-cash { color: #a8861d; }
+      .wc-res .res-blood { color: #b8504d; }
+      .wc-res .res-power { color: #3e7fc1; }
+      .wc-res .res-bones { color: #84848c; }
+      .wc-res .res-nothing { color: #b6b6bc; font-style: italic; }
       .wc-req { margin-top: 3px; font-family: var(--font-mono); font-size: 11px; color: #9a9aa2; }
       .wc-req.met { color: #3f8f4f; font-weight: bold; }
       .wc-enter, .wc-ascend {
         width: 100%; margin-top: 8px;
         background: #ffffff; color: #44444c;
-        border: 1px solid #c9c9c0; border-radius: 6px;
+        border: 1px solid #c9c9c0; border-radius: 10px;
         font-family: var(--font-display); font-size: 12px; letter-spacing: 0.14em;
         padding: 7px 4px; cursor: pointer;
         box-shadow: 0 2px 8px rgba(70, 70, 100, 0.12);
@@ -1857,6 +1869,35 @@
       @media (pointer: coarse) {
         .wc-enter, .wc-ascend { padding: 11px 4px; }
         .ct-back, .ct-wait { padding: 12px 20px; }
+      }
+
+      /* ── Entering / leaving a card world: the finale's pull-back language.
+         #card-hop-white bridges the reload (created by cards.ts at body
+         level, above the realm); the app zooms to/from a point beneath it. */
+      #card-hop-white {
+        position: fixed; inset: 0; background: #fff;
+        opacity: 0; pointer-events: none; z-index: 100002;
+      }
+      #app.card-exit-zoom {
+        transform: scale(0.04) rotate(6deg);
+        transition: transform 1150ms cubic-bezier(0.6, 0, 0.85, 0.2);
+        transform-origin: 50% 50%;
+      }
+      #app.card-enter-zoom {
+        transform: scale(0.04) rotate(-6deg);
+        transform-origin: 50% 50%;
+      }
+      #app.card-enter-zoom.card-enter-zoom-go {
+        transform: none;
+        transition: transform 1600ms cubic-bezier(0.16, 1, 0.3, 1);
+      }
+      /* The chosen card swells toward the viewer as the white takes over. */
+      .world-card.dived {
+        transform: scale(5);
+        opacity: 0;
+        transition: transform 950ms cubic-bezier(0.55, 0, 0.85, 0.4), opacity 900ms ease;
+        pointer-events: none;
+        z-index: 3;
       }
 
       /* ───────── Inside a card world ─────────
