@@ -1013,6 +1013,11 @@ export type GameState = {
   // sets from this on load and writes them back each refresh. Optional for
   // back-compat with pre-existing saves.
   unlocks?: UnlockState;
+  // True for a world entered through the post-finale trading-card realm
+  // (cards.ts). Card worlds have no Bob, no Lolly, and no demons — loadGame
+  // skips the demon reseed/roster for them — and the finale can't re-trigger
+  // (gabbonsawBought is forced true on entry).
+  cardWorld?: boolean;
 };
 
 export type UnlockState = {
