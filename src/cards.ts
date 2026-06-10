@@ -603,11 +603,19 @@ function regenerateEvent(meta: CardMeta, ev: TradeEvent): void {
 }
 
 // ─── Trade rules ─────────────────────────────────────────────────────
-// Same tier in, same tier out. A creature is open to trading FOR your card
-// when it matches its appetite; the cards it offers (and asks for) are the
-// ones of matching tier.
-function creatureGivesFor(c: Creature, yours: WorldCard): WorldCard[] {
+// Same tier in, same tier out — 1:1. The one exception is breaking DOWN:
+// offer a card exactly one tier above what a creature holds and it will
+// give TWO of the lesser tier for it (1 uncommon → 2 commons, 1 rare →
+// 2 uncommons). A creature is open to trading for your card at all only
+// when it matches its appetite.
+function sameTierGives(c: Creature, yours: WorldCard): WorldCard[] {
   return c.deck.filter((d) => d.tier === yours.tier);
+}
+function breakdownGives(c: Creature, yours: WorldCard): WorldCard[] {
+  const below = TIER_RANK[yours.tier] - 1;
+  const cards = c.deck.filter((d) => TIER_RANK[d.tier] === below);
+  // A two-for-one needs two to give.
+  return cards.length >= 2 ? cards : [];
 }
 function creatureTakesFor(c: Creature, theirs: WorldCard, mine: WorldCard[]): WorldCard[] {
   return mine.filter((m) => appetiteAccepts(c.appetite, m) && m.tier === theirs.tier);
@@ -1134,14 +1142,15 @@ function showTable(meta: CardMeta): void {
   stage.appendChild(div('ct-caption', 'gatherings'));
   const evRow = div('ct-events');
   for (const ev of meta.events) {
-    // Trades are same-tier, so a gathering only opens its doors to someone
-    // actually holding a card of its tier.
-    const locked = !meta.cards.some((c) => c.tier === ev.tier);
+    // A gathering opens its doors to someone holding a card of its tier
+    // (1:1 trades) — or one tier above it (breakable into two of the tier).
+    const locked = !meta.cards.some((c) =>
+      c.tier === ev.tier || TIER_RANK[c.tier] === TIER_RANK[ev.tier] + 1);
     const btn = document.createElement('button');
     btn.type = 'button';
     btn.className = `ct-event${locked ? ' locked' : ''}`;
     const sub = locked
-      ? `you hold no ${ev.tier} world`
+      ? 'you hold nothing to trade here'
       : `trades ${ev.tier} worlds · ${ev.creatures.length} creatures attending`;
     btn.innerHTML = `<span class="ct-event-name"></span><span class="ct-event-sub">${sub}</span>`;
     (btn.querySelector('.ct-event-name') as HTMLElement).textContent = ev.name;
@@ -1253,41 +1262,90 @@ function showTrade(meta: CardMeta, ev: TradeEvent, cr: Creature): void {
 
   // Selection state: 'idle' (nothing picked), 'offer' (one of YOUR eligible
   // cards picked — they show what they'd give), or 'request' (one of THEIR
-  // cards picked — they show what they'd take).
+  // cards picked — they show what they'd take). In offer mode, `staged`
+  // holds the first pick of a two-for-one breakdown (the second pick seals
+  // it; a same-tier pick seals immediately).
   let mode: 'idle' | 'offer' | 'request' = 'idle';
   let selectedId: number | null = null;
+  let staged: number[] = [];
 
-  const executeTrade = (mine: WorldCard, theirs: WorldCard) => {
+  const offerSpeech = (mine: WorldCard): string => {
+    const same = sameTierGives(cr, mine).length > 0;
+    const down = breakdownGives(cr, mine).length > 0;
+    if (same && down) return 'for that: one of its kind, or two of the lesser.';
+    if (same) return 'for that, i would give one of these.';
+    if (down) return 'for that, i would give two of these.';
+    return 'i hold nothing to give for that. wait for the next gathering.';
+  };
+
+  const executeTrade = (mine: WorldCard, theirs: WorldCard[]) => {
     meta.cards = meta.cards.filter((c) => c.id !== mine.id);
-    cr.deck = cr.deck.filter((c) => c.id !== theirs.id);
-    meta.cards.push(theirs);
+    cr.deck = cr.deck.filter((c) => !theirs.some((t) => t.id === c.id));
+    meta.cards.push(...theirs);
     cr.deck.push(mine);
     saveMeta(meta);
     playSound('ritual', 1, 0.9);
     mode = 'idle';
     selectedId = null;
+    staged = [];
     render();
-    speech.textContent = "now it's a trade.";
+    speech.textContent = theirs.length === 2 ? "two for one. now it's a trade." : "now it's a trade.";
   };
 
   const render = () => {
     theirsRow.innerHTML = '';
     yoursRow.innerHTML = '';
     // Cards of yours the creature is open to trading for: appetite match,
-    // plus it must actually hold a same-tier card to give back.
+    // plus it must hold something to give back (a same-tier card, or a
+    // two-for-one's worth of the tier below).
     const wanted = meta.cards.filter((c) =>
-      appetiteAccepts(cr.appetite, c) && cr.deck.some((d) => d.tier === c.tier));
+      appetiteAccepts(cr.appetite, c)
+      && (sameTierGives(cr, c).length > 0 || breakdownGives(cr, c).length > 0));
     const selMine = meta.cards.find((c) => c.id === selectedId) ?? null;
     const selTheirs = cr.deck.find((c) => c.id === selectedId) ?? null;
 
     for (const tc of cr.deck) {
-      const eligible = mode === 'idle'
-        || (mode === 'offer' && selMine !== null && creatureGivesFor(cr, selMine).includes(tc))
-        || (mode === 'request' && tc.id === selectedId);
+      const isStaged = staged.includes(tc.id);
+      let eligible: boolean;
+      if (mode === 'idle') {
+        eligible = true;
+      } else if (mode === 'request') {
+        eligible = tc.id === selectedId;
+      } else if (selMine === null) {
+        eligible = false;
+      } else if (staged.length > 0) {
+        // Mid-breakdown: only the staged card (to unpick) and its remaining
+        // lesser-tier companions are live.
+        eligible = isStaged || breakdownGives(cr, selMine).includes(tc);
+      } else {
+        eligible = sameTierGives(cr, selMine).includes(tc) || breakdownGives(cr, selMine).includes(tc);
+      }
       const el = buildCardEl(tc, {
         onClick: () => {
-          if (mode === 'offer' && selMine && creatureGivesFor(cr, selMine).includes(tc)) {
-            executeTrade(selMine, tc);
+          if (mode === 'offer' && selMine) {
+            if (isStaged) {
+              // Unpick the first half of a breakdown.
+              staged = [];
+              render();
+              speech.textContent = offerSpeech(selMine);
+              return;
+            }
+            if (staged.length === 0 && sameTierGives(cr, selMine).includes(tc)) {
+              executeTrade(selMine, [tc]);
+              return;
+            }
+            if (breakdownGives(cr, selMine).includes(tc)) {
+              const first = cr.deck.find((c) => c.id === staged[0]);
+              if (first) {
+                executeTrade(selMine, [first, tc]);
+              } else {
+                staged = [tc.id];
+                render();
+                speech.textContent = 'and one more.';
+                playSound('select', 0.7, 1.2);
+              }
+              return;
+            }
             return;
           }
           if (mode === 'request' && tc.id === selectedId) {
@@ -1306,7 +1364,7 @@ function showTrade(meta: CardMeta, ev: TradeEvent, cr: Creature): void {
         },
       });
       el.classList.toggle('grayed', !eligible);
-      el.classList.toggle('selected', mode === 'request' && tc.id === selectedId);
+      el.classList.toggle('selected', (mode === 'request' && tc.id === selectedId) || isStaged);
       theirsRow.appendChild(el);
     }
 
@@ -1318,20 +1376,17 @@ function showTrade(meta: CardMeta, ev: TradeEvent, cr: Creature): void {
       const el = buildCardEl(mc, {
         onClick: () => {
           if (mode === 'request' && selTheirs && creatureTakesFor(cr, selTheirs, meta.cards).includes(mc)) {
-            executeTrade(mc, selTheirs);
+            executeTrade(mc, [selTheirs]);
             return;
           }
           if (mode === 'offer' && mc.id === selectedId) {
-            mode = 'idle'; selectedId = null; render();
+            mode = 'idle'; selectedId = null; staged = []; render();
             speech.textContent = APPETITE_LINE[cr.appetite];
             return;
           }
           if (mode !== 'request' && matches) {
-            const gives = creatureGivesFor(cr, mc);
-            mode = 'offer'; selectedId = mc.id; render();
-            speech.textContent = gives.length > 0
-              ? 'for that, i would give one of these.'
-              : 'i hold nothing to give for that. wait for the next gathering.';
+            mode = 'offer'; selectedId = mc.id; staged = []; render();
+            speech.textContent = offerSpeech(mc);
             playSound('select', 0.7, 1.1);
           } else if (mode === 'idle' && !matches) {
             playSound('error', 0.5);
