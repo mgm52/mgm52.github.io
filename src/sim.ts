@@ -4,8 +4,8 @@ import { DEMON_FACING_ANGLE, getOptions } from './options';
 import {
   ALL_DIRS, Building, Cell, DX, DY, Demon, Dir, Dragon, Finale, FinalePhase, GameState, Ghost, Goblin, HOLE_SIZE, LollyBoostKind, LollyTarget, Minotaur, SoulChair, SpaceBuilding, SpaceUnit, Vec2, WaterSource, lollyBoostState,
   anySpawnHole, appendLog, buildingAtCell, buildingCenter, buildingFootprint, buildingPerimeter,
-  cellCenter, cellKey, chairSoulSnapshot, constructedDragonBeacon, currentPowerBoost, defOf, demonScaleOf, destroyBuilding, dragonTargetBuilding,
-  earnBlood, earnDragonBone, earnMoney, findHoleEmergenceCell,
+  cellCenter, cellKey, chairSoulSnapshot, constructedDragonBeacon, currentPowerBoost, defOf, demonScaleOf, destroyBuilding, dragonsAtCap, dragonTargetBuilding,
+  earnBlood, earnDragonBone, earnMoney, findHoleEmergenceCell, maxOverworldDragons,
   getSpawnCapacity, holeBlockedByBuilding, holeCenter, isCellBlocked, isCellInBuilding, isCellInWaterSource,
   isInBounds, maintainerCount, markBuildingsChanged, nearestCellInWaterSource, occupyCell, pushDeathEffect, pushFloater,
   hellMirrorCenter, hellToWorld, pruneSoulChairs, pushLaserBeam, pushLightningBolt, recordGhost, releaseCell, removeDragon, removeGoblin,
@@ -133,7 +133,8 @@ export function tick(state: GameState) {
       }
       if (activeBeacons > 0
           && state.blood >= DRAGON.bloodCost
-          && state.dragonSpawnQueue.length < activeBeacons) {
+          && state.dragonSpawnQueue.length < activeBeacons
+          && !dragonsAtCap(state)) {
         state.blood -= DRAGON.bloodCost;
         state.dragonSpawnQueue.push({ remaining: DRAGON.spawnTime });
         appendLog(state, 'Autodragon: a summon ritual begins...');
@@ -143,6 +144,14 @@ export function tick(state: GameState) {
   for (let i = state.dragonSpawnQueue.length - 1; i >= 0; i--) {
     state.dragonSpawnQueue[i].remaining -= TICK_S;
     if (state.dragonSpawnQueue[i].remaining <= 0) {
+      // Hold a completed ritual if the overworld is already at its dragon
+      // ceiling (e.g. a Beacon went dormant mid-ritual, dropping the cap) —
+      // retry shortly rather than overshooting, the way the Minotaur track
+      // waits on a blocked hole.
+      if (state.dragons.size >= maxOverworldDragons(state)) {
+        state.dragonSpawnQueue[i].remaining = 0.5;
+        continue;
+      }
       spawnDragon(state);
       state.dragonSpawnQueue.splice(i, 1);
     }
@@ -1049,6 +1058,11 @@ function nearestTerminatorTarget(
   };
   for (const g of state.goblins.values()) {
     if (g.robot) continue;
+    // Spare goblins busy on a building — maintaining or constructing one, or on
+    // their way to do so. Terminators leave the workforce to its labour and hunt
+    // the idle/wandering/fighting rest.
+    if (g.state.kind === 'maintaining' || g.state.kind === 'building'
+        || g.state.kind === 'going_to_maintain' || g.state.kind === 'going_to_build') continue;
     consider('goblin', g.id, g.pos.x, g.pos.y, g.gold ? 2 : 0);
   }
   for (const m of state.minotaurs.values()) consider('minotaur', m.id, m.pos.x, m.pos.y, 1);

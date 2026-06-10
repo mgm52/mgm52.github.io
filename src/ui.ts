@@ -2,15 +2,15 @@ import { playSound, playSoundReversed, playMinotaurCommand } from './audio';
 import {
   AUTODRAGON_TIERS, AUTOSPAWN_TIERS, BUILDABLE_KINDS, BUILDING_DEFS, BuildingKind, DRAG_SELECT_HINT_DELAY_SEC, MULTI_SPAWN_HINT_DELAY_SEC,
   DRAGON, GOBLIN, LIGHTNING, PAIN_GABBONSAW, PAN_HINT_DELAY_SEC, ROBOT, SPAWN_HINT_NO_SPAWN_SEC,
-  SPAWN_HINT_NO_TASK_SEC, SUMMON_UPGRADES, TERMINATOR, WATER_HINT_DELAY_SEC, digBloodCost, MINOTAUR, minotaurBloodCost, TINYTAUR, formatPower, SOUL_SIGIL, sigilPortalOutput,
+  SPAWN_HINT_NO_TASK_SEC, SPACE, SPACE_UNIT, SUMMON_UPGRADES, TERMINATOR, WATER_HINT_DELAY_SEC, digBloodCost, MINOTAUR, minotaurBloodCost, TINYTAUR, formatPower, SOUL_SIGIL, sigilPortalOutput,
 } from './config';
 import {
-  Building, Cell, Demon, DragonState, GameState, Ghost, Goblin, GoblinState, SoulChair, SpaceBuilding, SpaceUnit, WaterSource,
-  anySpawnHole, appendLog, buildingAtCell, buildingCenter, buildingLabel, buildingMoneyCost, cellCenter, cellKey, chairSoulSnapshot, countHypercentres, countIdle, countSpaceCentres, defOf, digDirection,
-  earnDragonBone, getSpawnCapacity, goblinSpawningBlocked, hellMirrorCenter, holeBlockedByBuilding, holeCells, isCellBlocked, isCellInBuilding, isInBounds,
-  maintainerCount, markBuildingsChanged, nextBuildingDisplayNum, occupyCell, spaceCentreMaintainerCount, waterCarrierCount,
+  Building, Cell, Demon, DragonState, GameState, Ghost, Goblin, GoblinState, SoulChair, SpaceBuilding, SpaceUnit, Vec2, WaterSource,
+  anySpawnHole, appendLog, buildingAtCell, buildingCenter, buildingLabel, buildingMoneyCost, cellCenter, cellKey, chairSoulSnapshot, countHypercentres, countIdle, countSpaceCentres, defOf, digDirection, dragonsAtCap,
+  earnDragonBone, findHoleEmergenceCell, getSpawnCapacity, goblinSpawningBlocked, hellMirrorCenter, holeBlockedByBuilding, holeCells, isCellBlocked, isCellInBuilding, isInBounds,
+  maintainerCount, markBuildingsChanged, maxOverworldDragons, nextBuildingDisplayNum, occupyCell, spaceCentreMaintainerCount, spaceStructureOverlapAt, waterCarrierCount,
 } from './state';
-import { spawnDragon, spawnMinotaur, unseatSoulFromChair } from './sim';
+import { spawnDragon, spawnMinotaur, spawnRobot, unseatSoulFromChair } from './sim';
 import { isModalDialogueActive } from './demon-dialogue';
 import { unlockOptionsCog } from './options-ui';
 
@@ -110,6 +110,10 @@ const ANCHORED_BELOW = new Map([
 // (a resumed save) shouldn't be flagged as "newly unlocked" — only ones that
 // appear afterwards do.
 let initialButtonsSeeded = false;
+// Tracks the quick-travel strip's visibility across refreshes so its
+// grow-then-shrink unlock flourish fires exactly once, the frame it first
+// appears mid-run (not on a resumed save where it's already visible on seed).
+let qtStripWasVisible = false;
 // Joined ids of the currently-active tasks, so a change (a fresh task surfacing
 // at the bottom of the sidebar) can flag the task line as new content.
 let lastActiveTaskKey = '';
@@ -822,6 +826,7 @@ export function setupUI(state: GameState, callbacks: UICallbacks) {
       </div>
       <div class="build-cost-side"><span class="build-cost" id="cost-summon-minotaur">${MINOTAUR.bloodCost} blood</span></div>
     </div>
+    <div class="build-warning" id="warn-summon-minotaur" style="display:none">Hole blocked</div>
   `;
   minotaurBtn.addEventListener('click', (e) => { playSound('click', 1, 0.75); flashSummonClick(minotaurBtn); emanateAtCursor(e.clientX, e.clientY); callbacks.onSummonMinotaur(); });
   summonList.appendChild(minotaurBtn);
@@ -858,6 +863,7 @@ export function setupUI(state: GameState, callbacks: UICallbacks) {
       </div>
       <div class="build-cost-side"><span class="build-cost" id="cost-summon-dragon">${DRAGON.bloodCost} blood</span></div>
     </div>
+    <div class="build-warning" id="warn-summon-dragon" style="display:none">max in play</div>
   `;
   dragonBtn.addEventListener('click', (e) => { playSound('click', 1, 0.75); flashSummonClick(dragonBtn); emanateAtCursor(e.clientX, e.clientY); callbacks.onSummonDragon(); });
   summonList.appendChild(dragonBtn);
@@ -918,7 +924,9 @@ export function setupUI(state: GameState, callbacks: UICallbacks) {
   terminatingRow.innerHTML = `
     <div class="build-content" style="align-items:center; gap:8px">
       <div class="build-text" style="flex:0 0 auto">
-        <div class="build-name" id="terminating-label">terminating</div>
+        <!-- Fixed width sized to the longest label ("terminating") so the
+             slider track doesn't jump left/right as the text toggles to "off". -->
+        <div class="build-name" id="terminating-label" style="width:12ch; text-align:left; white-space:nowrap">terminating</div>
       </div>
       <input type="range" id="terminating-slider" min="0" max="1" step="1" value="1"
              style="flex:1; min-width:0; accent-color:#ff5a4a">
@@ -1641,11 +1649,23 @@ export function refreshUI(state: GameState) {
   // Once Lolly has destroyed every hole, nothing hole-born can be summoned
   // again — goblins, minotaurs, robots and terminators all grey out for good.
   const noHoles = !anySpawnHole(state);
-  spawnBtn.disabled = !canAffordGoblin || holeBlocked || noRoom || noHoles || spawnInProgress >= cap;
+  // The shared "can't hatch" banner for hole-born summons that emerge from the
+  // main hole OR any built Goblin Hole (goblins, robots, terminators). Null
+  // when hatching is possible. Reused by those buttons below so a blocked hole
+  // greys out the whole roster, not just the Goblin button.
+  const holeWarn = noHoles ? 'No holes remain' : holeBlocked ? 'Hole blocked' : noRoom ? 'No room' : null;
+  // Minotaurs crawl out of the ORIGINAL hole only — a built Goblin Hole is no
+  // help to them — so they stall the instant that one hole can't emerge one,
+  // even while goblins still pour out of a Goblin Hole elsewhere.
+  const minotaurHoleWarn = state.holeDestroyed ? 'No holes remain'
+    : holeBlocked ? 'Hole blocked'
+    : !findHoleEmergenceCell(state, state.hole.cell.cx, state.hole.cell.cy) ? 'No room'
+    : null;
+  spawnBtn.disabled = !canAffordGoblin || holeWarn !== null || spawnInProgress >= cap;
   spawnBtn.classList.toggle('in-progress', spawnInProgress > 0);
   const warnEl = document.getElementById('warn-spawn-goblin')!;
-  warnEl.textContent = noHoles ? 'No holes remain' : holeBlocked ? 'Hole blocked' : 'No room';
-  warnEl.style.display = (noHoles || holeBlocked || noRoom) ? '' : 'none';
+  warnEl.textContent = holeWarn ?? '';
+  warnEl.style.display = holeWarn ? '' : 'none';
   const spawnBySlot: Record<number, number> = {};
   for (const item of state.spawnQueue) {
     spawnBySlot[item.slot] = 1 - item.remaining / GOBLIN.spawnTime;
@@ -1673,10 +1693,13 @@ export function refreshUI(state: GameState) {
     const queued = state.minotaurSpawnQueue.length;
     const minoCost = minotaurBloodCost(state.minotaursBought, state.minotaurFirstDiscount);
     const canAffordMinotaur = state.blood >= minoCost;
-    minotaurBtn.disabled = queued > 0 || !canAffordMinotaur || noHoles;
+    minotaurBtn.disabled = queued > 0 || !canAffordMinotaur || minotaurHoleWarn !== null;
     minotaurCostEl.textContent = `${minoCost} blood`;
-    minotaurCostEl.classList.toggle('met', canAffordMinotaur && queued === 0 && !noHoles);
+    minotaurCostEl.classList.toggle('met', canAffordMinotaur && queued === 0 && minotaurHoleWarn === null);
     minotaurBtn.classList.toggle('in-progress', queued > 0);
+    const minoWarnEl = document.getElementById('warn-summon-minotaur')!;
+    minoWarnEl.textContent = minotaurHoleWarn ?? '';
+    minoWarnEl.style.display = minotaurHoleWarn ? '' : 'none';
     const remaining = queued > 0 ? state.minotaurSpawnQueue[0].remaining : MINOTAUR.spawnTime;
     const fill = queued > 0 ? 1 - remaining / MINOTAUR.spawnTime : 0;
     setFillWidth('fill-summon-minotaur-0', Math.max(0, Math.min(1, fill)));
@@ -1715,11 +1738,19 @@ export function refreshUI(state: GameState) {
     const queued = state.dragonSpawnQueue.length;
     const live = state.dragons.size;
     const atCap = queued >= activeBeaconCount;
+    // Overworld dragon ceiling (DRAGON.maxInPlayPerBeacon per active Beacon):
+    // live + mid-ritual. Once hit, the button greys out with a "Max in play"
+    // banner — like the Goblin button's blocked-hole warning — and summoning
+    // resumes only when a dragon leaves (typically by flying off to space).
+    const atMaxInPlay = dragonsAtCap(state);
     const canAffordDragon = state.blood >= DRAGON.bloodCost;
-    dragonBtn.disabled = atCap || !canAffordDragon;
+    dragonBtn.disabled = atCap || atMaxInPlay || !canAffordDragon;
     const dragonCost = document.getElementById('cost-summon-dragon')!;
-    dragonCost.classList.toggle('met', canAffordDragon && !atCap);
+    dragonCost.classList.toggle('met', canAffordDragon && !atCap && !atMaxInPlay);
     dragonBtn.classList.toggle('in-progress', queued > 0);
+    const dragonWarn = document.getElementById('warn-summon-dragon')!;
+    dragonWarn.textContent = `max in play (${maxOverworldDragons(state)})`;
+    dragonWarn.style.display = atMaxInPlay ? '' : 'none';
     // One progress line per beacon (with at least enough lines to keep showing
     // any over-cap leftovers if a beacon was just hoisted into orbit while
     // dragons were mid-ritual). Each queued dragon fills its corresponding
@@ -1750,14 +1781,18 @@ export function refreshUI(state: GameState) {
     const canAffordRobot = state.money >= ROBOT.moneyCost;
     // Assembly runs on a timed track like the other summons — one at a time.
     const robotQueued = state.robotSpawnQueue.length;
-    robotBtn.disabled = !enoughHCs || !canAffordRobot || noHoles || robotQueued >= ROBOT.spawnCapacity;
+    robotBtn.disabled = !enoughHCs || !canAffordRobot || holeWarn !== null || robotQueued >= ROBOT.spawnCapacity;
     robotBtn.classList.toggle('in-progress', robotQueued > 0);
     const robotRemaining = robotQueued > 0 ? state.robotSpawnQueue[0].remaining : ROBOT.spawnTime;
     const robotFill = robotQueued > 0 ? 1 - robotRemaining / ROBOT.spawnTime : 0;
     setFillWidth('fill-summon-robot-0', Math.max(0, Math.min(1, robotFill)));
-    document.getElementById('warn-summon-robot')!.style.display = enoughHCs ? 'none' : '';
+    // A blocked hole banner wins over the "needs hypercentres" gate — it's the
+    // immediate reason a click would fail.
+    const robotWarn = document.getElementById('warn-summon-robot')!;
+    robotWarn.textContent = holeWarn ?? `needs ${ROBOT.hypercentresRequired} hypercentres`;
+    robotWarn.style.display = (holeWarn || !enoughHCs) ? '' : 'none';
     const robotCost = document.getElementById('cost-summon-robot')!;
-    robotCost.classList.toggle('met', canAffordRobot && enoughHCs && robotQueued === 0);
+    robotCost.classList.toggle('met', canAffordRobot && enoughHCs && holeWarn === null && robotQueued === 0);
     // Nudge once the gate finally opens and the player has never built one.
     setBuyFlash('btn-summon-robot', enoughHCs && canAffordRobot && robotQueued === 0 && ![...state.goblins.values()].some((g) => g.robot) && state.spaceUnits.size === 0);
   } else {
@@ -1776,14 +1811,17 @@ export function refreshUI(state: GameState) {
     const enoughSCs = scs >= TERMINATOR.spaceCentresRequired;
     const canAffordTerminator = state.money >= TERMINATOR.moneyCost;
     const termQueued = state.terminatorSpawnQueue.length;
-    terminatorBtn.disabled = !enoughSCs || !canAffordTerminator || noHoles || termQueued >= TERMINATOR.spawnCapacity;
+    terminatorBtn.disabled = !enoughSCs || !canAffordTerminator || holeWarn !== null || termQueued >= TERMINATOR.spawnCapacity;
     terminatorBtn.classList.toggle('in-progress', termQueued > 0);
     const termRemaining = termQueued > 0 ? state.terminatorSpawnQueue[0].remaining : TERMINATOR.spawnTime;
     const termFill = termQueued > 0 ? 1 - termRemaining / TERMINATOR.spawnTime : 0;
     setFillWidth('fill-summon-terminator-0', Math.max(0, Math.min(1, termFill)));
-    document.getElementById('warn-summon-terminator')!.style.display = enoughSCs ? 'none' : '';
+    // A blocked hole banner wins over the "needs space centres" gate.
+    const termWarn = document.getElementById('warn-summon-terminator')!;
+    termWarn.textContent = holeWarn ?? `needs ${TERMINATOR.spaceCentresRequired} space centres`;
+    termWarn.style.display = (holeWarn || !enoughSCs) ? '' : 'none';
     const termCost = document.getElementById('cost-summon-terminator')!;
-    termCost.classList.toggle('met', canAffordTerminator && enoughSCs && termQueued === 0);
+    termCost.classList.toggle('met', canAffordTerminator && enoughSCs && holeWarn === null && termQueued === 0);
     // Nudge once the gate opens and no terminator has ever stalked the map.
     setBuyFlash('btn-summon-terminator', enoughSCs && canAffordTerminator && termQueued === 0 && ![...state.goblins.values()].some((g) => g.terminator));
   } else {
@@ -1819,6 +1857,14 @@ export function refreshUI(state: GameState) {
     const qtVisible = revealedTaskIds.has('feed_hell_core');
     qtStrip.classList.toggle('visible', qtVisible);
     qtStrip.classList.toggle('attention', qtVisible && !state.quickTravelUsed);
+    // The frame the strip first appears mid-run, play the grow-then-shrink
+    // flourish once. Gated on initialButtonsSeeded so a resumed save (where the
+    // strip is already visible on the seed pass) doesn't replay it.
+    if (qtVisible && !qtStripWasVisible && initialButtonsSeeded) {
+      qtStrip.classList.add('qt-unlock');
+      window.setTimeout(() => qtStrip.classList.remove('qt-unlock'), 2500);
+    }
+    qtStripWasVisible = qtVisible;
     (document.getElementById('qt-space') as HTMLButtonElement).style.display =
       state.spaceUnlocked ? '' : 'none';
     const qtViews: [string, GameState['view']][] = [
@@ -3122,6 +3168,257 @@ export function executeTaskSkip(state: GameState): void {
   previouslyCompletedTaskIds.add(skipped.id);
   revealedTaskIds.add(skipped.id);
   appendLog(state, `Work skip: "${skipped.text}" marked complete.`);
+}
+
+// ─── Skip to pre-finale (debug aid) ─────────────────────────────────
+// One button to the doorstep of the endgame: every task — the main ladder AND
+// Lilly's optional Work — completed with its infrastructure stood up, then two
+// crewed, powered Space Centres running in orbit so the Terminator button arms
+// (TERMINATOR.spaceCentresRequired). The prevent-spawning task is marked done
+// WITHOUT actually walling the holes (its normal skip drops walls everywhere) —
+// the pre-finale state should contain no placed walls and stay fully spawnable.
+// The result reads as a lived-in run poised for the Pain Gabbonsaw ritual.
+export function executeSkipToPreFinale(state: GameState): void {
+  // Lilly only hands out her optional Work after the golf-alibi beat; grant it
+  // up front so those three tasks are available to skip.
+  state.lillyTasksGiven = true;
+
+  // prevent_spawning's normal skip walls every hole shut. We want a wall-free,
+  // still-spawnable world, so mark it complete up front (sticky completion is
+  // all the rest of the UI reads) — that keeps the skip loop below from ever
+  // reaching it and dropping walls.
+  markTaskComplete('prevent_spawning');
+
+  // Walk the whole task ladder. executeTaskSkip completes exactly one ready
+  // task per call (and stands up its infra), so loop until none remain. The
+  // guard caps it well above the task count in case one can't be satisfied.
+  let guard = 0;
+  while (guard++ < TASKS.length + 5) {
+    if (!anySkippableTask(state)) break;
+    executeTaskSkip(state);
+  }
+
+  // A few Hypercentres drifting in orbit (dragon-hauled, hands-off income).
+  // Added before the Space Centres so the reactor sizing below covers their
+  // 1 GW-apiece draw too.
+  addSpaceHypercentres(state, 3);
+
+  // Two crewed Space Centres in orbit — the industrial gate on Terminator
+  // assembly.
+  ensureActiveSpaceCentres(state, TERMINATOR.spaceCentresRequired);
+
+  // The late-game robot fleet: a handful adrift in the void (they paddle over
+  // and park on the platforms) plus a few more whirring about the ground.
+  addSpaceRobots(state, 4);
+  addGroundRobots(state, 4);
+
+  // A healthy war chest for a string of terminators (Ƶ2.5M apiece).
+  state.money = Math.max(state.money, 50_000_000);
+
+  // 100 dragon bones — enough to buy the Pain Gabbonsaw ritual (99) that loosens
+  // Lolly and tips the run into the finale.
+  if (state.dragonBone < 100) earnDragonBone(state, 100 - state.dragonBone);
+  state.dragonBoneUnlocked = true;
+
+  appendLog(state, 'Cheat: skipped to the pre-finale state — all Work done, two Space Centres crewed.');
+}
+
+// Mark a task complete with no infra side-effects — just the sticky bookkeeping
+// (completed + revealed, and previously-completed so no celebration overlay
+// fires), the way executeTaskSkip finishes a task. Used to retire
+// prevent_spawning without dropping its hole-walling walls.
+function markTaskComplete(taskId: string): void {
+  if (completedTaskIds.has(taskId)) return;
+  completedTaskIds.add(taskId);
+  previouslyCompletedTaskIds.add(taskId);
+  revealedTaskIds.add(taskId);
+}
+
+// Is any task still ready to be skipped (prereqs met, availability gate open,
+// not yet complete and not already satisfied)? Mirrors executeTaskSkip's own
+// next-task search so the skip-all loop knows when to stop.
+function anySkippableTask(state: GameState): boolean {
+  for (const t of TASKS) {
+    if (completedTaskIds.has(t.id)) continue;
+    if (!taskReady(t, state)) continue;
+    if (t.isDone(state)) continue;
+    return true;
+  }
+  return false;
+}
+
+// Number of ground reactors the pre-finale state keeps standing. The skip
+// completes the feed_hell_core task, whose fully-lit sigil pours tens of GW
+// into the grid — far more than the Space Centres' 10 GW-apiece draw needs —
+// so the nuclear line is really just lived-in set dressing. A modest handful
+// reads better than the ~30 plants a strict 1 GW-per-reactor sizing demanded.
+const PRE_FINALE_REACTORS = 8;
+
+// Stand up `n` Space Centres running in orbit: a modest reactor line on the
+// ground, an Orbital Platform + Centre for each, and a robot parked on every
+// deck to crew it. Centres are dropped in already active with their crew and
+// power in place, so the next power-resolve tick keeps them lit rather than
+// flipping them dormant.
+function ensureActiveSpaceCentres(state: GameState, n: number): void {
+  let have = 0;
+  for (const sb of state.spaceBuildings.values()) {
+    if (sb.building.kind === 'space_centre') have++;
+  }
+  if (have >= n) return;
+
+  // Keep the reactor fleet to PRE_FINALE_REACTORS (the fed hell core covers the
+  // real demand). Top the horde up first so each plant grabs its 4 maintainers
+  // the instant it lands.
+  let haveReactors = 0;
+  for (const b of state.buildings.values()) {
+    if (b.kind === 'nuclear_reactor' && b.state !== 'constructing') haveReactors++;
+  }
+  const newReactors = Math.max(0, PRE_FINALE_REACTORS - haveReactors);
+  ensureGoblins(state, state.goblins.size + newReactors * 4 + 40);
+  ensureBuildingCount(state, 'nuclear_reactor', PRE_FINALE_REACTORS);
+
+  for (let i = have; i < n; i++) {
+    if (!placeActiveSpaceCentre(state)) break;
+  }
+}
+
+// Drop one Orbital Platform + a crewed, running Space Centre into a free patch
+// of the void. Returns false if the void has no room left (vanishingly
+// unlikely). Mirrors input.ts's tryPlaceOrbital/tryPlaceSpaceCentre, but skips
+// the construction phase: the structures arrive finished and a robot is parked
+// dead-centre on the deck so spaceCentreMaintained reads true straight away.
+function placeActiveSpaceCentre(state: GameState): boolean {
+  const pos = freeSpacePlatformSpot(state);
+  if (!pos) return false;
+
+  const platform: Building = {
+    id: state.nextId++,
+    displayNum: nextBuildingDisplayNum(state, 'orbital_platform'),
+    kind: 'orbital_platform',
+    cell: { cx: 0, cy: 0 },   // never on the grid — placeholder only
+    state: 'active',
+    buildProgress: 1,
+    assignedGoblins: [],
+    selected: false,
+    activatedAt: state.now,
+  };
+  state.spaceBuildings.set(platform.id, {
+    id: platform.id, building: platform,
+    pos: { x: pos.x, y: pos.y }, vel: { x: 0, y: 0 },
+    spin: 0, spinRate: 0, selected: false,
+  });
+
+  const centre: Building = {
+    id: state.nextId++,
+    displayNum: nextBuildingDisplayNum(state, 'space_centre'),
+    kind: 'space_centre',
+    cell: { cx: 0, cy: 0 },
+    state: 'active',
+    buildProgress: 1,
+    assignedGoblins: [],
+    selected: false,
+    activatedAt: state.now,
+  };
+  state.spaceBuildings.set(centre.id, {
+    id: centre.id, building: centre,
+    pos: { x: pos.x, y: pos.y }, vel: { x: 0, y: 0 },   // anchored to its platform
+    spin: 0, spinRate: 0, selected: false,
+    platformId: platform.id,
+  });
+
+  // A robot to crew the Centre. Sat on the deck centre (well inside maintain
+  // range); assignRobotDuties re-derives `maintains` each tick and paddles it
+  // out to its park spot on the rim, staying in range throughout.
+  const robotId = state.nextId++;
+  const robot: SpaceUnit = {
+    id: robotId,
+    kind: 'goblin',
+    robot: true,
+    pos: { x: pos.x, y: pos.y },
+    vel: { x: 0, y: 0 },
+    facing: Math.PI / 2,
+    spin: 0, spinRate: 0,
+    maintains: centre.id,
+    selected: false,
+  };
+  state.spaceUnits.set(robotId, robot);
+  state.spaceUnlocked = true;
+  return true;
+}
+
+// Coarse scan across the void for a point where a fresh Orbital Platform won't
+// overlap an existing one, clamped inside the scene bounds. Null if full.
+function freeSpacePlatformSpot(state: GameState): Vec2 | null {
+  const half = BUILDING_DEFS.orbital_platform.size / 2;
+  const m = Math.max(SPACE.margin, half);
+  for (let y = m; y <= SPACE.height - m; y += half) {
+    for (let x = m; x <= SPACE.width - m; x += half) {
+      if (!spaceStructureOverlapAt(state, 'orbital_platform', x, y)) return { x, y };
+    }
+  }
+  return null;
+}
+
+// Float `n` Hypercentres in orbit, spread around the void on a ring so they
+// don't all stack. Each arrives finished and drifting — exactly what a
+// dragon-hauled building looks like once it crosses into space (see
+// dragonReachSpace). They draw their 1 GW from the grid below; the reactor
+// fleet sized in ensureActiveSpaceCentres covers it.
+function addSpaceHypercentres(state: GameState, n: number): void {
+  const r = Math.min(SPACE.width, SPACE.height) * 0.3;
+  for (let i = 0; i < n; i++) {
+    const ang = i * 2.399963; // golden angle, radians — even spread
+    const b: Building = {
+      id: state.nextId++,
+      displayNum: nextBuildingDisplayNum(state, 'hypercentre'),
+      kind: 'hypercentre',
+      cell: { cx: 0, cy: 0 },   // never on the grid — placeholder only
+      state: 'active',
+      buildProgress: 1,
+      assignedGoblins: [],
+      selected: false,
+      activatedAt: state.now,
+    };
+    state.spaceBuildings.set(b.id, {
+      id: b.id, building: b,
+      pos: { x: SPACE.width / 2 + Math.cos(ang) * r, y: SPACE.height / 2 + Math.sin(ang) * r },
+      vel: { x: Math.cos(ang) * SPACE.driftSpeed, y: Math.sin(ang) * SPACE.driftSpeed },
+      spin: ang, spinRate: 0.08, selected: false,
+    });
+  }
+  state.spaceUnlocked = true;
+}
+
+// Set `n` robots adrift in the void. Idle robots paddle to the nearest
+// completed platform and park on its rim, so these settle onto the Space
+// Centres' decks on their own (the Centres keep their dedicated crew — that
+// robot sits dead-centre and always wins the maintain claim).
+function addSpaceRobots(state: GameState, n: number): void {
+  for (let i = 0; i < n; i++) {
+    const id = state.nextId++;
+    const ang = Math.random() * Math.PI * 2;
+    state.spaceUnits.set(id, {
+      id, kind: 'goblin', robot: true,
+      pos: {
+        x: SPACE.width / 2 + (Math.random() - 0.5) * SPACE.width * 0.5,
+        y: SPACE.height / 2 + (Math.random() - 0.5) * SPACE.height * 0.5,
+      },
+      vel: { x: Math.cos(ang) * SPACE_UNIT.driftSpeed, y: Math.sin(ang) * SPACE_UNIT.driftSpeed },
+      facing: Math.PI / 2,
+      spin: Math.random() * Math.PI * 2,
+      spinRate: (Math.random() - 0.5) * 0.5,
+      selected: false,
+    });
+  }
+  state.spaceUnlocked = true;
+}
+
+// Hatch `n` robots from a ground hole (the regular money-summon path), stopping
+// early if no hole can emerge one.
+function addGroundRobots(state: GameState, n: number): void {
+  for (let i = 0; i < n; i++) {
+    if (!spawnRobot(state)) break;
+  }
 }
 
 function ensureGoblins(state: GameState, count: number): void {
