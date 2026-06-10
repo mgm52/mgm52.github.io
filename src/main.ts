@@ -250,6 +250,21 @@ async function main() {
   }
   const skipTitle = (cardHop || !import.meta.env.PROD)
     && (inCardWorld || metagameBegun) && saved !== null;
+  // A skipped title must still be DISMISSED: #title-screen defaults to an
+  // opaque black cover and only showTitleScreen's click path hides it, so
+  // without this a prod card-world hop boots the world fine — behind black.
+  if (skipTitle) {
+    const titleScreen = document.getElementById('title-screen');
+    if (titleScreen) titleScreen.style.display = 'none';
+    // The title click was also the audio gesture; after a hop reload there
+    // is none, so re-arm the vinyl crackle (the only music left after the
+    // finale's fadeOutMusicForever) on the first input instead.
+    if (import.meta.env.PROD) {
+      window.addEventListener('pointerdown', () => {
+        startBackgroundCrackle(BACKGROUND_CRACKLE_URL);
+      }, { once: true });
+    }
+  }
   const choicePromise: Promise<'new' | 'resume'> = skipTitle
     ? Promise.resolve('resume')
     : import.meta.env.PROD
