@@ -124,6 +124,9 @@ export type Lolly = {
   // Last time an ineffective attack pinged a floater off her, so a wall of
   // terminator fire doesn't stack "immune" text into a blur.
   lastImmuneAt?: number;
+  // state.now when another unit was last commanded onto her — flashes her ring
+  // like any other command target (the order itself is futile).
+  commandFlashAt?: number;
 };
 
 // The live effect of Lolly's active boosts: her speed multiplier (1 = base),

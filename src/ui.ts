@@ -2450,7 +2450,7 @@ function refreshInfoPanel(state: GameState) {
     portrait.innerHTML = `<div class="portrait-goblin" style="background:#2a0612;border-color:#ff5a8a;color:#ffb0c8">☠</div>`;
     name.textContent = 'Lolly & Bob';
     stateEl.textContent = 'Rampaging';
-    extra.innerHTML = `<span style="color:#6a7080">They take no orders. The world simply gets smaller.</span>`;
+    extra.innerHTML = `<span style="color:#6a7080">They take no orders.</span>`;
   } else if (selectedDemon) {
     showDemon(state, selectedDemon, panel, portrait, name, stateEl, extra);
   } else if (selectedHellPortal) {

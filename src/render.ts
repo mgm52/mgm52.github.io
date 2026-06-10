@@ -1802,6 +1802,19 @@ function drawFinale(ctx: RenderContext, state: GameState, opts: Options): void {
       disc.position.set(pos.x, pos.y);
       // A cast shadow only when it's sitting on the ground (placed).
       paintMoon(disc, FINALE.moonRadius, m.seed, shatterT, m.scene === 'ground' && m.state === 'placed');
+      // Z-order against the ground rig: while she's still carrying it down
+      // ('grabbed'), the moon tucks BEHIND her; once she sets it on the ground
+      // it sits in FRONT, the offering between them.
+      if (disc === v.groundMoon) {
+        const layer = ctx.lollyLayer;
+        const rigIdx = layer.getChildIndex(v.groundRig.container);
+        const moonIdx = layer.getChildIndex(v.groundMoon);
+        if (m.state === 'grabbed') {
+          if (moonIdx > rigIdx) layer.setChildIndex(v.groundMoon, rigIdx);
+        } else if (moonIdx < rigIdx) {
+          layer.setChildIndex(v.groundMoon, layer.children.length - 1);
+        }
+      }
     }
   }
 }
@@ -3711,7 +3724,7 @@ export function render(state: GameState, ctx: RenderContext) {
     }
     const L = state.lolly;
     v.container.position.set(L.pos.x, L.pos.y);
-    v.selectionRing.visible = !!L.selected;
+    applyRingFlash(v.selectionRing, !!L.selected, L.commandFlashAt, state.now);
     v.shadow.visible = opts.goblinShadow;
     if (opts.goblinShadow) {
       v.shadow.position.set(0, LOLLY.displayPx * 0.3);

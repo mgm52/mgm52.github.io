@@ -1004,7 +1004,7 @@ async function main() {
     if (F.moon) { F.moon.state = 'shattering'; F.moon.shatterAt = state.now; }
     playSound('destroy', 1, 0.3);
     playSound('lightning', 0.8, 0.5);
-    void finaleBark(state, 'lolly', '*NO—*');
+    void finaleBark(state, 'lolly', '*no no no no no no no no no no no*');
     white.style.transition = 'opacity 50ms ease-out';
     white.style.opacity = '0.85';
     await sleep(70);
