@@ -450,6 +450,23 @@ describe('generateEvents', () => {
     expect(holder.deck[0].origin).toBe(true);
   });
 
+  it('gives each creature slot its own frame pattern, stamped onto its deck and stable across reshuffles', () => {
+    const meta = freshMeta();
+    const stolen = card('rare', { id: 1, origin: true });
+    const events = generateEvents(meta, stolen, TASK_IDS);
+    // The six slots map onto the six patterns: 0 / 1–2 / 3–5.
+    expect(events.flatMap((e) => e.creatures.map((c) => c.frame))).toEqual([0, 1, 2, 3, 4, 5]);
+    for (const ev of events) {
+      for (const cr of ev.creatures) {
+        // Every minted card wears its dealer's frame; the seeded origin
+        // card is player-minted and stays plain.
+        expect(cr.deck.every((c) => c.origin ? c.frame === undefined : c.frame === cr.frame)).toBe(true);
+      }
+    }
+    regenerateEvent(meta, events[2], TASK_IDS);
+    expect(events[2].creatures.map((c) => c.frame)).toEqual([3, 4, 5]);
+  });
+
   it('keeps the origin card through reshuffles and discards the rest', () => {
     const meta = freshMeta();
     const stolen = card('rare', { id: 1, origin: true });

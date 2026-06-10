@@ -26,8 +26,8 @@ import { getRawSave, saveGame, setRawSave } from './save';
 import { GameState, computePlayBounds, isInPlayCell } from './state';
 import { ALL_TASK_IDS } from './ui';
 import {
-  APPETITE_LINE, CardMeta, CardResources, CardTier, Creature, TIER_ABOVE, TIER_RANK,
-  TradeEvent, UpgradeReq, WorldCard, appetiteAccepts, ascendCard, breakdownGives,
+  APPETITE_LINE, CardMeta, CardResources, CardTier, Creature, FRAME_BASE, TIER_ABOVE,
+  TIER_RANK, TradeEvent, UpgradeReq, WorldCard, appetiteAccepts, ascendCard, breakdownGives,
   creatureOpenTo, creatureTakesFor, decodeWorld, encodeWorld, generateEvents, makeCard,
   mulberry32, regenerateEvent, reqMet, sameTierGives, sceneStructureCounts,
 } from './cards-core';
@@ -63,6 +63,21 @@ function loadMeta(): CardMeta | null {
     if (!raw) return null;
     const m = JSON.parse(raw) as CardMeta;
     if (!m || m.v !== 1 || !Array.isArray(m.cards)) return null;
+    // Metas saved before trader frames existed: stamp the stable slot
+    // patterns onto the creatures and their unclaimed decks. Cards already
+    // traded into the player's hand are unattributable and stay plain.
+    if (m.events) {
+      for (const ev of m.events) {
+        ev.creatures.forEach((c, i) => {
+          if (c.frame === undefined) {
+            c.frame = FRAME_BASE[ev.tier] + i;
+            for (const wc of c.deck) {
+              if (wc.frame === undefined && !wc.origin) wc.frame = c.frame;
+            }
+          }
+        });
+      }
+    }
     return m;
   } catch { return null; }
 }
@@ -538,6 +553,10 @@ type CardElOpts = {
 function buildCardEl(card: WorldCard, opts: CardElOpts = {}): HTMLElement {
   const root = document.createElement('div');
   root.className = `world-card t-${card.tier}${opts.big ? ' big' : ''}${card.origin ? ' origin' : ''}`;
+  // The trade animations find a card's element by its id; the frame class
+  // draws its minting trader's border pattern (player-minted cards: none).
+  root.dataset.cardId = String(card.id);
+  if (card.frame !== undefined) root.classList.add(`wcf-${card.frame}`);
   const head = document.createElement('div');
   head.className = 'wc-head';
   head.innerHTML = `<span class="wc-name"></span><span class="wc-tier">${card.tier}</span>`;
@@ -765,15 +784,20 @@ async function runTradeIntro(meta: CardMeta): Promise<void> {
       enterLabel: 'REENTER WORLD',
       onEnter: () => resolve(),
     });
-    cardEl.classList.add('deal-from-top');
+    // The opening deal: the origin card slides in slowly from off-table,
+    // turning flat like a card pushed across felt. `.dealing` carries the
+    // slow transition and is dropped once the slide settles, so the later
+    // goblin-dip transforms run at normal speed.
+    cardEl.classList.add('deal-across', 'dealing');
     stage.appendChild(cardEl);
     // Two frames so the dealt-in transform commits before it transitions out.
     requestAnimationFrame(() => {
       requestAnimationFrame(() => {
-        cardEl.classList.remove('deal-from-top');
-        realmSound('place', 1.2, 0.9);
+        cardEl.classList.remove('deal-across');
+        realmSound('place', 1.2, 0.55);
       });
     });
+    window.setTimeout(() => cardEl.classList.remove('dealing'), 2400);
   });
   await reentered;
 
@@ -845,9 +869,16 @@ function showTable(meta: CardMeta): void {
   stage.className = 'table-view';
 
   stage.appendChild(div('ct-caption', meta.cards.length === 1 ? 'your world' : 'your worlds'));
+  // Everything on the table deals in with a small stagger (--deal-i drives
+  // the per-item delay; the gathering doors below continue the count).
+  let dealI = 0;
+  const dealIn = (el: HTMLElement) => {
+    el.classList.add('dealt');
+    el.style.setProperty('--deal-i', String(dealI++));
+  };
   const row = div('ct-cards');
   for (const c of meta.cards) {
-    row.appendChild(buildCardEl(c, {
+    const cardEl = buildCardEl(c, {
       enterLabel: 'REENTER WORLD',
       onEnter: (el) => { void enterWorld(meta, c, el); },
       onAscend: () => {
@@ -860,7 +891,9 @@ function showTable(meta: CardMeta): void {
         const idx = meta.cards.indexOf(c);
         cards[idx]?.classList.add('ascended');
       },
-    }));
+    });
+    dealIn(cardEl);
+    row.appendChild(cardEl);
   }
   stage.appendChild(row);
 
@@ -895,6 +928,7 @@ function showTable(meta: CardMeta): void {
       realmSound('click', 0.8, 1);
       swapView(() => showEvent(meta, ev));
     });
+    dealIn(btn);
     evRow.appendChild(btn);
   }
   stage.appendChild(evRow);
@@ -921,15 +955,22 @@ function showEvent(meta: CardMeta, ev: TradeEvent): void {
   stage.appendChild(backButton('← leave gathering', () => swapView(() => showTable(meta))));
   stage.appendChild(div('ct-caption ct-event-title', ev.name));
   const row = div('ct-creatures');
-  for (const cr of ev.creatures) {
+  ev.creatures.forEach((cr, i) => {
     const cel = div('ct-creature');
     cel.appendChild(creatureAvatar());
-    cel.appendChild(div('ct-creature-name', cr.name));
+    // Name + the creature's frame chip — a blank mini-card in the border
+    // pattern its dealt cards wear, so the mark is learnable at the table.
+    const nameRow = div('ct-creature-namerow');
+    nameRow.appendChild(div('ct-creature-name', cr.name));
+    nameRow.appendChild(div(`ct-frame-chip wcf-${cr.frame ?? FRAME_BASE[ev.tier] + i}`));
+    cel.appendChild(nameRow);
     cel.appendChild(div('ct-creature-line', APPETITE_LINE[cr.appetite]));
     cel.appendChild(div('ct-creature-deck', `${cr.deck.length} worlds in hand`));
     cel.addEventListener('click', () => { realmSound('click', 0.8, 1); swapView(() => showTrade(meta, ev, cr)); });
+    cel.classList.add('dealt');
+    cel.style.setProperty('--deal-i', String(i));
     row.appendChild(cel);
-  }
+  });
   stage.appendChild(row);
 
   // The reshuffle: let this gathering end and meet the next one — fresh
@@ -960,7 +1001,10 @@ function showTrade(meta: CardMeta, ev: TradeEvent, cr: Creature): void {
   const header = div('ct-trade-header');
   header.appendChild(creatureAvatar());
   const headText = div('ct-trade-headtext');
-  headText.appendChild(div('ct-creature-name', cr.name));
+  const nameRow = div('ct-creature-namerow');
+  nameRow.appendChild(div('ct-creature-name', cr.name));
+  nameRow.appendChild(div(`ct-frame-chip wcf-${cr.frame ?? 0}`));
+  headText.appendChild(nameRow);
   const speech = div('ct-trade-line', '');
   headText.appendChild(speech);
   header.appendChild(headText);
@@ -997,28 +1041,47 @@ function showTrade(meta: CardMeta, ev: TradeEvent, cr: Creature): void {
     return 'i hold nothing to give for that. wait for the next gathering.';
   };
 
+  // The handover, in motion: your card lifts away toward the creature while
+  // theirs drop toward your row; only once both are gone does the swap
+  // re-render, and the arrivals pop into their new hands (.trade-arrived).
+  // The flag walls off every card click until the exchange lands.
+  let tradeAnimating = false;
   const executeTrade = (mine: WorldCard, theirs: WorldCard[]) => {
-    meta.cards = meta.cards.filter((c) => c.id !== mine.id);
-    cr.deck = cr.deck.filter((c) => !theirs.some((t) => t.id === c.id));
-    meta.cards.push(...theirs);
-    cr.deck.push(mine);
-    saveMeta(meta);
-    mode = 'idle';
-    selectedId = null;
-    staged = [];
-    render();
-    // Winning your own world back is the realm's quiet climax; losing it
-    // again gets its own line too.
-    if (theirs.some((t) => t.origin)) {
-      realmSound('task_complete', 0.9, 1);
-      speech.textContent = 'it remembers you.';
-    } else if (mine.origin) {
-      realmSound('ritual', 1, 0.9);
-      speech.textContent = 'kept warm. someone grew this one.';
-    } else {
-      realmSound('ritual', 1, 0.9);
-      speech.textContent = theirs.length === 2 ? "two for one. now it's a trade." : "now it's a trade.";
+    if (tradeAnimating) return;
+    tradeAnimating = true;
+    yoursRow.querySelector(`[data-card-id="${mine.id}"]`)?.classList.add('trade-given');
+    for (const t of theirs) {
+      theirsRow.querySelector(`[data-card-id="${t.id}"]`)?.classList.add('trade-received');
     }
+    realmSound('select', 0.9, 0.8);
+    window.setTimeout(() => {
+      tradeAnimating = false;
+      meta.cards = meta.cards.filter((c) => c.id !== mine.id);
+      cr.deck = cr.deck.filter((c) => !theirs.some((t) => t.id === c.id));
+      meta.cards.push(...theirs);
+      cr.deck.push(mine);
+      saveMeta(meta);
+      mode = 'idle';
+      selectedId = null;
+      staged = [];
+      render();
+      for (const t of theirs) {
+        yoursRow.querySelector(`[data-card-id="${t.id}"]`)?.classList.add('trade-arrived');
+      }
+      theirsRow.querySelector(`[data-card-id="${mine.id}"]`)?.classList.add('trade-arrived');
+      // Winning your own world back is the realm's quiet climax; losing it
+      // again gets its own line too.
+      if (theirs.some((t) => t.origin)) {
+        realmSound('task_complete', 0.9, 1);
+        speech.textContent = 'it remembers you.';
+      } else if (mine.origin) {
+        realmSound('ritual', 1, 0.9);
+        speech.textContent = 'kept warm. someone grew this one.';
+      } else {
+        realmSound('ritual', 1, 0.9);
+        speech.textContent = theirs.length === 2 ? "two for one. now it's a trade." : "now it's a trade.";
+      }
+    }, 680);
   };
 
   const render = () => {
@@ -1049,6 +1112,7 @@ function showTrade(meta: CardMeta, ev: TradeEvent, cr: Creature): void {
       }
       const el = buildCardEl(tc, {
         onClick: () => {
+          if (tradeAnimating) return;
           if (mode === 'offer' && selMine) {
             if (isStaged) {
               // Unpick the first half of a breakdown.
@@ -1102,6 +1166,7 @@ function showTrade(meta: CardMeta, ev: TradeEvent, cr: Creature): void {
         || (mode === 'request' && selTheirs !== null && creatureTakesFor(cr, selTheirs, meta.cards).includes(mc));
       const el = buildCardEl(mc, {
         onClick: () => {
+          if (tradeAnimating) return;
           if (mode === 'request' && selTheirs && creatureTakesFor(cr, selTheirs, meta.cards).includes(mc)) {
             executeTrade(mc, [selTheirs]);
             return;
@@ -1125,8 +1190,19 @@ function showTrade(meta: CardMeta, ev: TradeEvent, cr: Creature): void {
       el.classList.toggle('selected', mode === 'offer' && mc.id === selectedId);
       yoursRow.appendChild(el);
     }
+
+    // Only the view's first render deals in staggered — re-renders driven by
+    // selection clicks would otherwise replay the deal on every pick.
+    if (firstDeal) {
+      firstDeal = false;
+      [...theirsRow.children, ...yoursRow.children].forEach((el, i) => {
+        (el as HTMLElement).classList.add('dealt');
+        (el as HTMLElement).style.setProperty('--deal-i', String(i));
+      });
+    }
   };
 
+  let firstDeal = true;
   render();
   const anyWanted = meta.cards.some((c) => appetiteAccepts(cr.appetite, c));
   speech.textContent = anyWanted ? APPETITE_LINE[cr.appetite] : 'you hold nothing i want. yet.';

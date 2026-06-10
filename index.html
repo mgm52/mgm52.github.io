@@ -1694,6 +1694,11 @@
          preview panes — space / earth / hell — the world as a column. */
       .world-card {
         --tier-c: #b6b6bc;
+        /* Frame-pattern metrics (see the .wcf-* rules below); the creature
+           chips override these to draw the same patterns at chip scale. */
+        --fr-thick: 5px; --fr-inset: 3px; --fr-inset2: 7px;
+        --fr-r1: 12px; --fr-r2: 8px;
+        position: relative;
         width: 200px; flex-shrink: 0;
         background: linear-gradient(180deg, #fcfcf7, #f4f4ec);
         border: 2px solid var(--tier-c);
@@ -1710,15 +1715,48 @@
       .world-card.t-uncommon { --tier-c: #6f9fd8; }
       .world-card.t-rare { --tier-c: #d8b54a; }
       .world-card.big { width: min(280px, 80vw); }
+      /* ── Per-trader card frames ──
+         Each of the six creature slots across the gatherings deals cards in
+         its own border pattern (cards-core.ts FRAME_BASE), and the card
+         keeps the pattern through every trade — so where a card was minted,
+         and which cards in a creature's hand used to be yours, both read at
+         a glance. Player-minted cards keep the plain 2px frame above.
+         Patterns: 0 one thick · 1 one thin · 2 two thin · 3 two thick ·
+         4 three thin · 5 one thin + one dotted. */
+      /* The creature's mark: a blank mini-card beside its name, in the same
+         frame pattern its dealt cards wear. (Declared before the .wcf rules
+         so their border-widths win the cascade.) */
+      .ct-creature-namerow { display: flex; align-items: center; justify-content: center; gap: 7px; }
+      .ct-frame-chip {
+        width: 22px; height: 30px; flex-shrink: 0;
+        position: relative;
+        background: linear-gradient(180deg, #fcfcf7, #f4f4ec);
+        border: 2px solid var(--tier-c);
+        border-radius: 6px;
+        --tier-c: #b0b0b8;
+        --fr-thick: 3px; --fr-inset: 2px; --fr-inset2: 5px;
+        --fr-r1: 3px; --fr-r2: 2px;
+      }
+      .wcf-0, .wcf-3 { border-width: var(--fr-thick); }
+      .wcf-1, .wcf-2, .wcf-4, .wcf-5 { border-width: 1px; }
+      .wcf-2::before, .wcf-3::before, .wcf-4::before, .wcf-4::after, .wcf-5::before {
+        content: ""; position: absolute; pointer-events: none;
+        inset: var(--fr-inset); border-radius: var(--fr-r1);
+        border: 1px solid var(--tier-c, #b6b6bc);
+      }
+      .wcf-3::before { border-width: var(--fr-thick); }
+      .wcf-4::after { inset: var(--fr-inset2); border-radius: var(--fr-r2); }
+      .wcf-5::before { border-style: dotted; border-width: 2px; }
       /* The player's own stolen world — gold-lettered and faintly warm, so
          it stands out the moment it appears in a creature's hand. */
       .world-card.origin { box-shadow: 0 14px 34px rgba(170, 140, 60, 0.28), 0 3px 10px rgba(170, 140, 60, 0.18); }
       .world-card.origin .wc-name { color: #a8842a; }
       .world-card.origin .wc-name::before { content: "★ "; font-size: 11px; }
       /* Laid-on-a-table jitter: alternate cards sit a hair off-square.
-         Selection (translateY) overrides it via its own transform. */
-      .ct-cards .world-card:nth-child(odd):not(.selected):not(.dived) { transform: rotate(-0.6deg); }
-      .ct-cards .world-card:nth-child(even):not(.selected):not(.dived) { transform: rotate(0.5deg); }
+         Selection (translateY) overrides it via its own transform, and the
+         trade fly-outs need their transforms left alone too. */
+      .ct-cards .world-card:nth-child(odd):not(.selected):not(.dived):not(.trade-given):not(.trade-received) { transform: rotate(-0.6deg); }
+      .ct-cards .world-card:nth-child(even):not(.selected):not(.dived):not(.trade-given):not(.trade-received) { transform: rotate(0.5deg); }
       /* One-shot tier-colored flash right after an ascension. */
       .world-card.ascended { animation: wc-ascended 1100ms ease; }
       @keyframes wc-ascended {
@@ -1735,6 +1773,35 @@
       /* Dealt in from above (cards.ts removes the class a frame after append);
          taken away upward into the goblin's hand. */
       .world-card.deal-from-top { transform: translateY(-130vh) rotate(-7deg); }
+      /* The opening deal: the origin card slides in slowly from off-table,
+         turning flat like a card pushed across felt. .dealing carries the
+         slow transition; cards.ts drops both classes around the slide. */
+      .world-card.deal-across { transform: translateX(-120vw) translateY(5vh) rotate(-200deg); }
+      .world-card.dealing {
+        transition:
+          transform 2200ms cubic-bezier(0.16, 1, 0.3, 1),
+          opacity 500ms ease, box-shadow 200ms ease;
+      }
+      /* Carrying out a trade (cards.ts executeTrade): your card lifts away
+         toward the creature while theirs drop toward your row; after the
+         swap re-renders, the arrivals pop in with a tier-colored flash. */
+      .world-card.trade-given,
+      .world-card.trade-received {
+        opacity: 0;
+        transition: transform 620ms cubic-bezier(0.55, 0, 0.8, 0.45), opacity 560ms ease;
+        pointer-events: none;
+      }
+      .world-card.trade-given { transform: translateY(-44vh) rotate(7deg) scale(0.72); }
+      .world-card.trade-received { transform: translateY(48vh) rotate(-6deg) scale(0.86); }
+      .world-card.trade-arrived { animation: wc-arrive 700ms cubic-bezier(0.2, 0.9, 0.25, 1.1) backwards; }
+      @keyframes wc-arrive {
+        0% { opacity: 0; transform: translateY(-34px) rotate(2deg) scale(0.9); }
+        55% { box-shadow: 0 0 26px 6px var(--tier-c), 0 14px 34px rgba(70, 70, 100, 0.18); }
+        100% {
+          opacity: 1;
+          box-shadow: 0 14px 34px rgba(70, 70, 100, 0.18), 0 3px 10px rgba(70, 70, 100, 0.12);
+        }
+      }
       .world-card.taken {
         transform: translateY(-130vh) rotate(9deg) scale(0.7);
         opacity: 0;
@@ -1805,6 +1872,16 @@
         0%, 100% { box-shadow: 0 2px 8px rgba(70, 70, 100, 0.12); }
         50% { box-shadow: 0 0 14px 2px rgba(63, 143, 79, 0.45); }
       }
+      /* Each view deals its pieces in with a small stagger (cards.ts sets
+         --deal-i per element). `backwards` keeps late items invisible until
+         their delay; one-shot — re-renders mid-interaction don't re-add it. */
+      .dealt {
+        animation: ct-dealt 480ms cubic-bezier(0.2, 0.9, 0.25, 1) backwards;
+        animation-delay: calc(var(--deal-i, 0) * 70ms);
+      }
+      @keyframes ct-dealt {
+        from { opacity: 0; transform: translateY(16px) scale(0.97); }
+      }
       /* Table / gathering / trade furniture. */
       .ct-caption {
         font-family: var(--font-display); font-size: 12px; letter-spacing: 0.3em;
@@ -1823,7 +1900,11 @@
         cursor: pointer; color: #44444c;
         font-family: var(--font-body);
       }
-      .ct-event:hover:not(.locked) { box-shadow: 0 14px 32px rgba(70, 70, 100, 0.22); }
+      .ct-event { transition: box-shadow 200ms ease, transform 200ms ease; }
+      .ct-event:hover:not(.locked) {
+        box-shadow: 0 14px 32px rgba(70, 70, 100, 0.22);
+        transform: translateY(-3px);
+      }
       .ct-event.locked { opacity: 0.45; cursor: not-allowed; }
       .ct-event.shake { animation: ct-shake 300ms ease; }
       @keyframes ct-shake {
@@ -1854,9 +1935,13 @@
         display: flex; flex-direction: column; align-items: center; gap: 4px;
         width: 200px; padding: 14px 10px;
         border-radius: 12px; cursor: pointer;
-        transition: background 200ms ease, box-shadow 200ms ease;
+        transition: background 200ms ease, box-shadow 200ms ease, transform 200ms ease;
       }
-      .ct-creature:hover { background: #f7f7f0; box-shadow: 0 10px 26px rgba(70, 70, 100, 0.12); }
+      .ct-creature:hover {
+        background: #f7f7f0;
+        box-shadow: 0 10px 26px rgba(70, 70, 100, 0.12);
+        transform: translateY(-3px);
+      }
       .ct-creature-sprite {
         --csize: 110px;
         --crow: 4;

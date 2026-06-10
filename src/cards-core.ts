@@ -45,6 +45,11 @@ export type WorldCard = {
   upgradeReq?: UpgradeReq | null;
   // The player's own stolen pre-finale world — winnable back at gathering III.
   origin?: boolean;
+  // Border-pattern index (index.html's .wcf-N rules) of the trader whose
+  // hand minted this card. It stays with the card through every trade, so
+  // where a card came from reads at a glance; player-minted cards (the
+  // origin, the junk replacement) carry none and keep the plain frame.
+  frame?: number;
 };
 
 // What a creature looks for in a card. Cards that match are the ones it's
@@ -63,7 +68,16 @@ export function appetiteAccepts(a: Appetite, card: WorldCard): boolean {
   return card.resources.dragonBone >= 1;
 }
 
-export type Creature = { id: number; name: string; appetite: Appetite; deck: WorldCard[] };
+// `frame` is the creature's own card-border pattern (see WorldCard.frame);
+// optional only because metas saved before frames existed lack it (cards.ts
+// stamps the missing values on load).
+export type Creature = { id: number; name: string; appetite: Appetite; deck: WorldCard[]; frame?: number };
+
+// The six creature slots across the three gatherings map onto the six frame
+// patterns — common's lone creature takes 0, the salon pair 1–2, the rare
+// exchange trio 3–5 — and the mapping is stable across reshuffles, so a
+// table's frames never change mid-game.
+export const FRAME_BASE: Record<CardTier, number> = { common: 0, uncommon: 1, rare: 3 };
 // Each gathering trades one tier only — creatures there hold cards of that
 // tier and accept cards of that tier. Entry needs a card of the tier (or one
 // tier above, breakable into two) in hand. Two-for-one breakdowns are the
@@ -573,13 +587,19 @@ export function rollCreatures(meta: CardMeta, tier: CardTier, rng: () => number,
     }
   }
   return CREATURE_SPECS[tier].map((deckSize, i) => {
+    const frame = FRAME_BASE[tier] + i;
     const deck: WorldCard[] = [];
-    for (let k = 0; k < deckSize; k++) deck.push(makeCard(meta, tier, rng, taskIds));
+    for (let k = 0; k < deckSize; k++) {
+      const card = makeCard(meta, tier, rng, taskIds);
+      card.frame = frame;
+      deck.push(card);
+    }
     return {
       id: creatureSeq++,
       name: names.pop() ?? 'the other one',
       appetite: i === 0 ? 'any' as const : appetites.pop() ?? 'any' as const,
       deck,
+      frame,
     };
   });
 }
