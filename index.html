@@ -1555,12 +1555,16 @@
 
       /* ───────── The trading-card realm (post-finale; cards.ts) ─────────
          The game's last section, mounted above the finale's held white-out
-         (#finale-white, z 100000). Effectively light mode: a white expanse,
-         ivory world-cards with soft shadows, pale ethereal creatures. */
+         (#finale-white, z 100000). An ethereal glass dream: a near-white
+         expanse washed by slow pastel auroras and rising light-motes, with
+         frosted-glass world-cards levitating over it. */
       #card-realm {
         position: fixed; inset: 0; z-index: 100001;
-        /* A faint vignette keeps the expanse from reading as a dead page. */
-        background: radial-gradient(120% 90% at 50% 40%, #ffffff 55%, #f2f2f5 100%);
+        /* Still reads as the finale's white at first glance — the colour
+           lives in the aurora layer beneath the glass. */
+        background:
+          radial-gradient(120% 90% at 50% 40%, rgba(255, 255, 255, 0.88) 42%, rgba(236, 238, 248, 0.9) 100%),
+          linear-gradient(160deg, #f6f3fc 0%, #eef4fb 55%, #f7f1f7 100%);
         color: #4a4a52;
         display: none;
         font-family: var(--font-body);
@@ -1568,6 +1572,87 @@
       }
       #card-realm.visible { display: block; animation: card-realm-in 1200ms ease both; }
       @keyframes card-realm-in { from { opacity: 0; } to { opacity: 1; } }
+      /* The dream behind the glass: pastel aurora blobs adrift on slow
+         loops, one slowly turning iridescent halo, and tiled sheets of
+         light-motes rising at different speeds. The cards' backdrop blur
+         samples all of it — that moving colour under the stock is what
+         makes the frosted glass read as glass rather than grey. */
+      #card-dream { position: absolute; inset: 0; pointer-events: none; overflow: hidden; }
+      .cd-blob { position: absolute; border-radius: 50%; filter: blur(60px); }
+      .cd-b1 {
+        width: 55vmax; height: 55vmax; left: -14vmax; top: -20vmax;
+        background: radial-gradient(circle at 35% 35%, rgba(168, 142, 250, 0.42), rgba(168, 142, 250, 0) 70%);
+        animation: cd-drift1 41s ease-in-out infinite alternate;
+      }
+      .cd-b2 {
+        width: 48vmax; height: 48vmax; right: -16vmax; top: 4vmax;
+        background: radial-gradient(circle at 60% 40%, rgba(118, 196, 240, 0.4), rgba(118, 196, 240, 0) 70%);
+        animation: cd-drift2 53s ease-in-out infinite alternate;
+      }
+      .cd-b3 {
+        width: 50vmax; height: 50vmax; left: -10vmax; bottom: -22vmax;
+        background: radial-gradient(circle at 50% 30%, rgba(248, 168, 208, 0.36), rgba(248, 168, 208, 0) 70%);
+        animation: cd-drift3 47s ease-in-out infinite alternate;
+      }
+      .cd-b4 {
+        width: 42vmax; height: 42vmax; right: -6vmax; bottom: -16vmax;
+        background: radial-gradient(circle at 45% 45%, rgba(252, 222, 150, 0.3), rgba(252, 222, 150, 0) 70%);
+        animation: cd-drift4 59s ease-in-out infinite alternate;
+      }
+      @keyframes cd-drift1 { to { transform: translate(16vw, 12vh) scale(1.22); } }
+      @keyframes cd-drift2 { to { transform: translate(-14vw, 16vh) scale(1.15); } }
+      @keyframes cd-drift3 { to { transform: translate(18vw, -12vh) scale(1.18); } }
+      @keyframes cd-drift4 { to { transform: translate(-12vw, -10vh) scale(1.25); } }
+      .cd-halo {
+        position: absolute; left: 50%; top: 42%;
+        width: 120vmin; height: 120vmin;
+        margin: -60vmin 0 0 -60vmin;
+        border-radius: 50%;
+        background: conic-gradient(
+          rgba(168, 142, 250, 0.16), rgba(118, 196, 240, 0.13),
+          rgba(248, 168, 208, 0.14), rgba(252, 222, 150, 0.11),
+          rgba(168, 142, 250, 0.16));
+        filter: blur(46px);
+        animation: cd-halo-spin 100s linear infinite;
+      }
+      @keyframes cd-halo-spin { to { transform: rotate(360deg); } }
+      /* Mote sheets: each carries one tile of hand-placed glints and rides
+         up by exactly its own tile height, so the loop is seamless. The
+         sheet is one tile taller than the screen to cover both loop ends. */
+      .cd-motes { position: absolute; left: 0; top: 0; width: 100%; }
+      .cd-m1 {
+        height: calc(100% + 520px);
+        background-image:
+          radial-gradient(5px 5px at 44px 76px, rgba(172, 152, 255, 0.55) 30%, transparent 100%),
+          radial-gradient(4px 4px at 196px 300px, rgba(140, 196, 252, 0.5) 30%, transparent 100%),
+          radial-gradient(6px 6px at 330px 180px, rgba(255, 255, 255, 0.95) 25%, rgba(190, 170, 255, 0.4) 60%, transparent 100%),
+          radial-gradient(4px 4px at 120px 430px, rgba(250, 182, 216, 0.5) 30%, transparent 100%);
+        background-size: 420px 520px;
+        animation: cd-rise1 46s linear infinite;
+      }
+      @keyframes cd-rise1 { to { transform: translateY(-520px); } }
+      .cd-m2 {
+        height: calc(100% + 460px);
+        background-image:
+          radial-gradient(3px 3px at 90px 130px, rgba(160, 170, 250, 0.45) 30%, transparent 100%),
+          radial-gradient(2.5px 2.5px at 410px 360px, rgba(255, 255, 255, 0.85) 30%, transparent 100%),
+          radial-gradient(3px 3px at 280px 40px, rgba(140, 200, 245, 0.45) 30%, transparent 100%),
+          radial-gradient(2.5px 2.5px at 510px 240px, rgba(190, 165, 250, 0.45) 30%, transparent 100%);
+        background-size: 560px 460px;
+        animation: cd-rise2 31s linear infinite;
+      }
+      @keyframes cd-rise2 { to { transform: translateY(-460px); } }
+      /* The slow bokeh layer: big, soft, very faint — depth-of-field. */
+      .cd-m3 {
+        height: calc(100% + 640px);
+        background-image:
+          radial-gradient(22px 22px at 130px 200px, rgba(178, 162, 250, 0.13) 40%, transparent 100%),
+          radial-gradient(16px 16px at 470px 480px, rgba(130, 195, 245, 0.12) 40%, transparent 100%),
+          radial-gradient(26px 26px at 320px 90px, rgba(248, 178, 214, 0.1) 40%, transparent 100%);
+        background-size: 620px 640px;
+        animation: cd-rise3 74s linear infinite;
+      }
+      @keyframes cd-rise3 { to { transform: translateY(-640px); } }
       /* The stage holds whichever view is up (intro card / table / gathering /
          trade); scrolls when cards overflow a small screen. */
       #card-stage {
@@ -1617,7 +1702,7 @@
         image-rendering: pixelated;
         transform: translate(-50%, -110%) scaleY(-1);
         transition: transform 1800ms cubic-bezier(0.22, 1, 0.36, 1);
-        filter: brightness(0) invert(0.93) drop-shadow(0 0 18px rgba(150, 150, 175, 0.55));
+        filter: brightness(0) invert(0.93) drop-shadow(0 0 18px rgba(162, 150, 230, 0.6));
         opacity: 0.95;
         animation:
           card-goblin-idle 1.6s steps(8) infinite,
@@ -1630,10 +1715,11 @@
         from { background-position-x: 0; }
         to   { background-position-x: calc(var(--csize) * -8); }
       }
-      /* A slow breathing glow — the only "alive" tell a silhouette gets. */
+      /* A slow breathing glow — the only "alive" tell a silhouette gets.
+         The hue drifts lavender → ice and back, an iridescent shimmer. */
       @keyframes card-goblin-glow {
-        0%, 100% { filter: brightness(0) invert(0.93) drop-shadow(0 0 14px rgba(150, 150, 175, 0.4)); }
-        50%      { filter: brightness(0) invert(0.93) drop-shadow(0 0 26px rgba(140, 140, 185, 0.75)); }
+        0%, 100% { filter: brightness(0) invert(0.93) drop-shadow(0 0 14px rgba(168, 150, 235, 0.45)); }
+        50%      { filter: brightness(0) invert(0.94) drop-shadow(0 0 28px rgba(130, 180, 240, 0.8)); }
       }
       /* Dialogue line. It opens at the top of the empty screen ("wait a
          moment!"), then glides down ahead of the descending creature so it
@@ -1644,11 +1730,11 @@
         transform: translateX(-50%);
         max-width: min(640px, 80vw);
         text-align: center;
-        color: #5c5c66;
+        color: #56566a;
         font-family: var(--font-dialogue, var(--font-display));
         font-size: calc(clamp(16px, 2.6vh, 26px) * var(--font-dialogue-scale, 1));
         letter-spacing: 0.05em; line-height: 1.25;
-        text-shadow: 0 0 14px rgba(255, 255, 255, 1);
+        text-shadow: 0 0 14px rgba(255, 255, 255, 1), 0 0 30px rgba(180, 168, 250, 0.5);
         opacity: 0;
         transition: opacity 200ms ease, top 1800ms cubic-bezier(0.22, 1, 0.36, 1);
         pointer-events: none;
@@ -1684,37 +1770,96 @@
       #card-realm.show-choice #card-choice { opacity: 1; pointer-events: auto; }
       #card-choice .build-button {
         width: 130px;
-        box-shadow: 0 6px 18px rgba(40, 40, 70, 0.25);
+        background: rgba(255, 255, 255, 0.5);
+        backdrop-filter: blur(12px) saturate(1.4);
+        -webkit-backdrop-filter: blur(12px) saturate(1.4);
+        border: 1px solid rgba(255, 255, 255, 0.85);
+        border-radius: 14px;
+        box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.95), 0 10px 30px rgba(90, 90, 150, 0.22);
+      }
+      #card-choice .build-button:hover:not(:disabled) {
+        background: rgba(255, 255, 255, 0.75);
+        border-color: rgba(255, 255, 255, 1);
+        box-shadow: inset 0 1px 0 #fff, 0 12px 34px rgba(90, 90, 150, 0.3), 0 0 22px rgba(168, 160, 240, 0.4);
       }
       #card-choice .build-name {
         font-family: var(--font-display); font-size: 22px;
         letter-spacing: 0.2em; text-align: center;
+        color: #4a4a5c;
+        text-shadow: 0 0 10px rgba(255, 255, 255, 0.9);
       }
-      /* The world cards: ivory, tier-edged, soft-shadowed. Stacked preview
-         panes — space / earth / hell — the world as a column; a card only
-         carries the scenes its world has opened (cards.ts buildCardEl). */
+      /* The realm's glass ignores the game's cut-corner button option —
+         its octagon clip + dark ::before fill would paint over the glass. */
+      body.cut-corner-buttons #card-choice .build-button {
+        border-radius: 14px;
+        border: 1px solid rgba(255, 255, 255, 0.85);
+        background: rgba(255, 255, 255, 0.5);
+        clip-path: none;
+      }
+      body.cut-corner-buttons #card-choice .build-button::before { content: none; }
+      body.cut-corner-buttons #card-choice .build-button:hover:not(:disabled) {
+        background: rgba(255, 255, 255, 0.75);
+        border-color: rgba(255, 255, 255, 1);
+      }
+      /* The world cards: panes of frosted dream-glass. Translucent facets
+         over a backdrop blur (the auroras drift visibly through the stock),
+         a tier-tinted edge-light, and a slow levitating bob. The bob rides
+         the separate `translate` property so the transform-based deals /
+         dives / trade fly-outs compose with the float instead of fighting
+         it. Stacked preview panes — space / earth / hell — the world as a
+         column; a card only carries the scenes its world has opened
+         (cards.ts buildCardEl). */
       .world-card {
-        --tier-c: #b6b6bc;
+        --tier-c: #b6b8c6;
+        --tier-b: rgba(176, 178, 198, 0.75);
+        --tier-glow: 168, 170, 200;
+        /* Resting shadow as a var so the arrive/ascend flashes (and the
+           selection glow) can return to or build on the same light. */
+        --wc-shadow:
+          inset 0 1px 0 rgba(255, 255, 255, 0.95),
+          inset 0 -16px 30px -22px rgba(var(--tier-glow), 0.7),
+          0 18px 44px -10px rgba(88, 88, 150, 0.28),
+          0 0 28px -4px rgba(var(--tier-glow), 0.4);
         /* Frame-pattern metrics (see the .wcf-* rules below); the creature
            chips override these to draw the same patterns at chip scale. */
         --fr-thick: 5px; --fr-inset: 3px; --fr-inset2: 7px;
         --fr-r1: 12px; --fr-r2: 8px;
         position: relative;
         width: 200px; flex-shrink: 0;
-        background: linear-gradient(180deg, #fcfcf7, #f4f4ec);
-        border: 2px solid var(--tier-c);
-        border-radius: 18px;
-        box-shadow: 0 14px 34px rgba(70, 70, 100, 0.18), 0 3px 10px rgba(70, 70, 100, 0.12);
+        /* Diagonal glass facets; oversized so hover can sweep the sheen. */
+        background:
+          linear-gradient(125deg,
+            rgba(255, 255, 255, 0.66) 0%, rgba(255, 255, 255, 0.24) 36%,
+            rgba(255, 255, 255, 0.1) 52%, rgba(255, 255, 255, 0.36) 100%);
+        background-size: 200% 100%;
+        background-position: 0% 0;
+        backdrop-filter: blur(14px) saturate(1.5);
+        -webkit-backdrop-filter: blur(14px) saturate(1.5);
+        border: 2px solid var(--tier-b);
+        border-radius: 20px;
+        box-shadow: var(--wc-shadow);
         padding: 10px 10px 12px;
         color: #44444c;
         text-align: left;
         transition:
           transform 650ms cubic-bezier(0.2, 0.9, 0.25, 1.08),
-          opacity 500ms ease, box-shadow 200ms ease;
+          opacity 500ms ease, box-shadow 200ms ease,
+          background-position 700ms ease;
+        animation: wc-float 7s ease-in-out infinite;
+        animation-delay: calc(var(--deal-i, 0) * -1.9s);
       }
-      .world-card.t-common { --tier-c: #b6b6bc; }
-      .world-card.t-uncommon { --tier-c: #6f9fd8; }
-      .world-card.t-rare { --tier-c: #d8b54a; }
+      /* The levitation: a few px on `translate`, phase-shifted per card. */
+      @keyframes wc-float {
+        0%, 100% { translate: 0 2px; }
+        50% { translate: 0 -4px; }
+      }
+      .world-card.t-common { --tier-c: #b6b8c6; }
+      .world-card.t-uncommon {
+        --tier-c: #6f9fd8; --tier-b: rgba(122, 168, 226, 0.8); --tier-glow: 122, 168, 226;
+      }
+      .world-card.t-rare {
+        --tier-c: #d8b54a; --tier-b: rgba(226, 192, 100, 0.85); --tier-glow: 228, 192, 110;
+      }
       .world-card.big { width: min(280px, 80vw); }
       /* ── Per-trader card frames ──
          Each of the six creature slots across the gatherings deals cards in
@@ -1731,7 +1876,8 @@
       .ct-frame-chip {
         width: 22px; height: 30px; flex-shrink: 0;
         position: relative;
-        background: linear-gradient(180deg, #fcfcf7, #f4f4ec);
+        background: linear-gradient(160deg, rgba(255, 255, 255, 0.9), rgba(255, 255, 255, 0.45));
+        box-shadow: 0 2px 8px rgba(88, 88, 150, 0.18);
         border: 2px solid var(--tier-c);
         border-radius: 6px;
         --tier-c: #b0b0b8;
@@ -1748,9 +1894,12 @@
       .wcf-3::before { border-width: var(--fr-thick); }
       .wcf-4::after { inset: var(--fr-inset2); border-radius: var(--fr-r2); }
       .wcf-5::before { border-style: dotted; border-width: 2px; }
-      /* The player's own stolen world — gold-lettered and faintly warm, so
-         it stands out the moment it appears in a creature's hand. */
-      .world-card.origin { box-shadow: 0 14px 34px rgba(170, 140, 60, 0.28), 0 3px 10px rgba(170, 140, 60, 0.18); }
+      /* The player's own stolen world — gold-lettered, wrapped in a warm
+         halo, so it stands out the moment it appears in a creature's hand. */
+      .world-card.origin {
+        --tier-glow: 226, 184, 90;
+        box-shadow: var(--wc-shadow), 0 0 38px -2px rgba(226, 184, 90, 0.45);
+      }
       .world-card.origin .wc-name { color: #a8842a; }
       .world-card.origin .wc-name::before { content: "★ "; font-size: 11px; }
       /* Laid-on-a-table jitter: alternate cards sit a hair off-square.
@@ -1758,19 +1907,26 @@
          trade fly-outs need their transforms left alone too. */
       .ct-cards .world-card:nth-child(odd):not(.selected):not(.dived):not(.trade-given):not(.trade-received) { transform: rotate(-0.6deg); }
       .ct-cards .world-card:nth-child(even):not(.selected):not(.dived):not(.trade-given):not(.trade-received) { transform: rotate(0.5deg); }
-      /* One-shot tier-colored flash right after an ascension. */
-      .world-card.ascended { animation: wc-ascended 1100ms ease; }
+      /* One-shot tier-colored flash right after an ascension (keeps the
+         float running alongside). */
+      .world-card.ascended { animation: wc-ascended 1100ms ease, wc-float 7s ease-in-out infinite; }
       @keyframes wc-ascended {
-        0%   { box-shadow: 0 0 0 0 var(--tier-c), 0 14px 34px rgba(70, 70, 100, 0.18); }
-        45%  { box-shadow: 0 0 26px 6px var(--tier-c), 0 14px 34px rgba(70, 70, 100, 0.18); }
-        100% { box-shadow: 0 0 0 0 rgba(0, 0, 0, 0), 0 14px 34px rgba(70, 70, 100, 0.18); }
+        0%   { box-shadow: var(--wc-shadow); }
+        45%  { box-shadow: var(--wc-shadow), 0 0 30px 8px var(--tier-c); }
+        100% { box-shadow: var(--wc-shadow); }
       }
       .world-card.clickable { cursor: pointer; }
+      /* Hover: the sheen sweeps across the glass and the edge-light wakes. */
       .world-card.clickable:hover {
-        box-shadow: 0 18px 40px rgba(70, 70, 100, 0.26), 0 4px 12px rgba(70, 70, 100, 0.16);
+        background-position: 100% 0;
+        box-shadow: var(--wc-shadow), 0 0 34px 0 rgba(var(--tier-glow), 0.5);
       }
-      .world-card.grayed { opacity: 0.35; filter: saturate(0.2); }
-      .world-card.selected { outline: 3px solid var(--tier-c); transform: translateY(-6px); }
+      .world-card.grayed { opacity: 0.3; filter: saturate(0.15); }
+      .world-card.selected {
+        outline: 3px solid var(--tier-c);
+        transform: translateY(-6px);
+        box-shadow: var(--wc-shadow), 0 0 42px 2px rgba(var(--tier-glow), 0.55);
+      }
       /* Dealt in from above (cards.ts removes the class a frame after append);
          taken away upward into the goblin's hand. */
       .world-card.deal-from-top { transform: translateY(-130vh) rotate(-7deg); }
@@ -1794,14 +1950,15 @@
       }
       .world-card.trade-given { transform: translateY(-44vh) rotate(7deg) scale(0.72); }
       .world-card.trade-received { transform: translateY(48vh) rotate(-6deg) scale(0.86); }
-      .world-card.trade-arrived { animation: wc-arrive 700ms cubic-bezier(0.2, 0.9, 0.25, 1.1) backwards; }
+      .world-card.trade-arrived {
+        animation:
+          wc-arrive 700ms cubic-bezier(0.2, 0.9, 0.25, 1.1) backwards,
+          wc-float 7s ease-in-out infinite;
+      }
       @keyframes wc-arrive {
         0% { opacity: 0; transform: translateY(-34px) rotate(2deg) scale(0.9); }
-        55% { box-shadow: 0 0 26px 6px var(--tier-c), 0 14px 34px rgba(70, 70, 100, 0.18); }
-        100% {
-          opacity: 1;
-          box-shadow: 0 14px 34px rgba(70, 70, 100, 0.18), 0 3px 10px rgba(70, 70, 100, 0.12);
-        }
+        55% { box-shadow: var(--wc-shadow), 0 0 30px 8px var(--tier-c); }
+        100% { opacity: 1; box-shadow: var(--wc-shadow); }
       }
       .world-card.taken {
         transform: translateY(-130vh) rotate(9deg) scale(0.7);
@@ -1815,9 +1972,12 @@
         text-transform: uppercase; letter-spacing: 0.12em;
       }
       .wc-prevs { display: flex; flex-direction: column; gap: 3px; }
+      /* Preview panes: little windows set into the glass — white-edged,
+         softly sunken, the world glowing through. */
       .wc-prev {
         display: block; width: 100%;
-        border-radius: 7px; border: 1px solid #e0e0d6;
+        border-radius: 9px; border: 1px solid rgba(255, 255, 255, 0.6);
+        box-shadow: 0 1px 6px rgba(88, 88, 150, 0.25), inset 0 0 0 1px rgba(110, 110, 150, 0.12);
         image-rendering: pixelated;
         --pane-glow: 255, 226, 150;
       }
@@ -1855,14 +2015,17 @@
       .wc-req.met { color: #3f8f4f; font-weight: bold; }
       .wc-enter, .wc-ascend {
         width: 100%; margin-top: 8px;
-        background: #ffffff; color: #44444c;
-        border: 1px solid #c9c9c0; border-radius: 10px;
+        background: rgba(255, 255, 255, 0.45); color: #45455a;
+        border: 1px solid rgba(255, 255, 255, 0.85); border-radius: 12px;
         font-family: var(--font-display); font-size: 12px; letter-spacing: 0.14em;
         padding: 7px 4px; cursor: pointer;
-        box-shadow: 0 2px 8px rgba(70, 70, 100, 0.12);
-        transition: box-shadow 150ms ease, border-color 150ms ease;
+        box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.9), 0 3px 12px rgba(88, 88, 150, 0.16);
+        transition: box-shadow 150ms ease, border-color 150ms ease, background 150ms ease;
       }
-      .wc-enter:hover, .wc-ascend:hover { border-color: #8a8a94; box-shadow: 0 3px 12px rgba(70, 70, 100, 0.2); }
+      .wc-enter:hover, .wc-ascend:hover {
+        background: rgba(255, 255, 255, 0.78);
+        box-shadow: inset 0 1px 0 #fff, 0 4px 16px rgba(88, 88, 150, 0.24), 0 0 16px rgba(168, 160, 240, 0.35);
+      }
       /* The progression affordance — a soft pulse draws the eye when a card
          is ready to rise. */
       .wc-ascend {
@@ -1870,8 +2033,8 @@
         animation: wc-ascend-pulse 1.6s ease-in-out infinite;
       }
       @keyframes wc-ascend-pulse {
-        0%, 100% { box-shadow: 0 2px 8px rgba(70, 70, 100, 0.12); }
-        50% { box-shadow: 0 0 14px 2px rgba(63, 143, 79, 0.45); }
+        0%, 100% { box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.9), 0 3px 12px rgba(88, 88, 150, 0.16); }
+        50% { box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.9), 0 0 16px 3px rgba(63, 143, 79, 0.4); }
       }
       /* Each view deals its pieces in with a small stagger (cards.ts sets
          --deal-i per element). `backwards` keeps late items invisible until
@@ -1880,30 +2043,43 @@
         animation: ct-dealt 480ms cubic-bezier(0.2, 0.9, 0.25, 1) backwards;
         animation-delay: calc(var(--deal-i, 0) * 70ms);
       }
+      /* Dealt-in world cards keep their levitation: the shorthand above
+         would otherwise knock out the base .world-card float. */
+      .world-card.dealt {
+        animation:
+          ct-dealt 480ms cubic-bezier(0.2, 0.9, 0.25, 1) backwards,
+          wc-float 7s ease-in-out infinite;
+        animation-delay: calc(var(--deal-i, 0) * 70ms), calc(var(--deal-i, 0) * -1.9s);
+      }
       @keyframes ct-dealt {
         from { opacity: 0; transform: translateY(16px) scale(0.97); }
       }
       /* Table / gathering / trade furniture. */
       .ct-caption {
         font-family: var(--font-display); font-size: 12px; letter-spacing: 0.3em;
-        text-transform: uppercase; color: #9a9aa2; margin-top: 12px;
+        text-transform: uppercase; color: #8f8fa8; margin-top: 12px;
+        text-shadow: 0 0 12px rgba(255, 255, 255, 1), 0 0 22px rgba(190, 178, 255, 0.45);
       }
       .ct-cards {
         display: flex; flex-wrap: wrap; gap: 16px; justify-content: center;
         max-width: 1100px;
       }
       .ct-events { display: flex; flex-wrap: wrap; gap: 14px; justify-content: center; }
+      /* Gathering doors: long panes of the same frosted glass. */
       .ct-event {
         min-width: 240px; padding: 14px 18px;
         display: flex; flex-direction: column; gap: 4px; align-items: center;
-        background: #fcfcf7; border: 1px solid #d8d8cf; border-radius: 10px;
-        box-shadow: 0 10px 26px rgba(70, 70, 100, 0.14);
+        background: linear-gradient(135deg, rgba(255, 255, 255, 0.6), rgba(255, 255, 255, 0.24));
+        backdrop-filter: blur(12px) saturate(1.4);
+        -webkit-backdrop-filter: blur(12px) saturate(1.4);
+        border: 1px solid rgba(255, 255, 255, 0.8); border-radius: 14px;
+        box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.9), 0 14px 34px -8px rgba(88, 88, 150, 0.25);
         cursor: pointer; color: #44444c;
         font-family: var(--font-body);
       }
       .ct-event { transition: box-shadow 200ms ease, transform 200ms ease; }
       .ct-event:hover:not(.locked) {
-        box-shadow: 0 14px 32px rgba(70, 70, 100, 0.22);
+        box-shadow: inset 0 1px 0 #fff, 0 18px 40px -8px rgba(88, 88, 150, 0.33), 0 0 26px rgba(168, 160, 240, 0.35);
         transform: translateY(-3px);
       }
       .ct-event.locked { opacity: 0.45; cursor: not-allowed; }
@@ -1918,29 +2094,39 @@
       .ct-back {
         align-self: flex-start;
         background: none; border: none; cursor: pointer;
-        color: #8a8a94; font-family: var(--font-display); font-size: 13px;
+        color: #8a8aa0; font-family: var(--font-display); font-size: 13px;
         letter-spacing: 0.1em; padding: 6px 8px;
+        text-shadow: 0 0 10px rgba(255, 255, 255, 0.9);
       }
       .ct-back:hover { color: #4a4a52; }
       .ct-wait {
         margin-top: 18px;
-        background: none; border: 1px dashed #c9c9c0; border-radius: 8px;
-        color: #8a8a94; font-family: var(--font-display); font-size: 12px;
+        background: rgba(255, 255, 255, 0.3);
+        backdrop-filter: blur(8px);
+        -webkit-backdrop-filter: blur(8px);
+        border: 1px dashed rgba(150, 150, 190, 0.55); border-radius: 10px;
+        color: #8a8aa0; font-family: var(--font-display); font-size: 12px;
         letter-spacing: 0.14em; padding: 10px 18px; cursor: pointer;
+        transition: background 200ms ease, color 200ms ease, border-color 200ms ease;
       }
-      .ct-wait:hover { color: #4a4a52; border-color: #8a8a94; }
+      .ct-wait:hover { color: #4a4a52; border-color: rgba(120, 120, 170, 0.8); background: rgba(255, 255, 255, 0.55); }
       /* Creatures at a gathering — pale silhouettes (placeholder sprite,
          same sheet as #card-goblin). */
       .ct-creatures { display: flex; flex-wrap: wrap; gap: 26px; justify-content: center; margin-top: 8px; }
       .ct-creature {
         display: flex; flex-direction: column; align-items: center; gap: 4px;
         width: 200px; padding: 14px 10px;
-        border-radius: 12px; cursor: pointer;
-        transition: background 200ms ease, box-shadow 200ms ease, transform 200ms ease;
+        background: linear-gradient(160deg, rgba(255, 255, 255, 0.32), rgba(255, 255, 255, 0.1));
+        backdrop-filter: blur(10px) saturate(1.3);
+        -webkit-backdrop-filter: blur(10px) saturate(1.3);
+        border: 1px solid rgba(255, 255, 255, 0.55);
+        border-radius: 14px; cursor: pointer;
+        transition: background 200ms ease, box-shadow 200ms ease, transform 200ms ease, border-color 200ms ease;
       }
       .ct-creature:hover {
-        background: #f7f7f0;
-        box-shadow: 0 10px 26px rgba(70, 70, 100, 0.12);
+        background: linear-gradient(160deg, rgba(255, 255, 255, 0.6), rgba(255, 255, 255, 0.26));
+        border-color: rgba(255, 255, 255, 0.9);
+        box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.9), 0 12px 30px -6px rgba(88, 88, 150, 0.25), 0 0 22px rgba(168, 160, 240, 0.3);
         transform: translateY(-3px);
       }
       .ct-creature-sprite {
@@ -1953,8 +2139,16 @@
         background-position-x: 0;
         background-position-y: calc(var(--csize) * var(--crow) * -1);
         image-rendering: pixelated;
-        filter: brightness(0) invert(0.88) drop-shadow(0 4px 12px rgba(150, 150, 175, 0.5));
-        animation: card-goblin-idle 1.6s steps(8) infinite;
+        filter: brightness(0) invert(0.84) drop-shadow(0 4px 12px rgba(162, 150, 230, 0.55));
+        animation:
+          card-goblin-idle 1.6s steps(8) infinite,
+          ct-creature-glow 3.4s ease-in-out infinite;
+      }
+      /* Gathering creatures sit a shade deeper than the big goblin so they
+         still read against the pale auroras; same breathing shimmer. */
+      @keyframes ct-creature-glow {
+        0%, 100% { filter: brightness(0) invert(0.83) drop-shadow(0 4px 12px rgba(168, 150, 235, 0.5)); }
+        50%      { filter: brightness(0) invert(0.86) drop-shadow(0 4px 20px rgba(130, 180, 240, 0.8)); }
       }
       .ct-creature-name { font-family: var(--font-display); font-size: 14px; color: #44444c; letter-spacing: 0.06em; }
       .ct-creature-line, .ct-creature-deck { font-family: var(--font-mono); font-size: 11px; color: #9a9aa2; }
@@ -1976,6 +2170,16 @@
       @media (pointer: coarse) {
         .wc-enter, .wc-ascend { padding: 11px 4px; }
         .ct-back, .ct-wait { padding: 12px 20px; }
+      }
+      /* Still the same dream, just a still one: park the ambient drift
+         (auroras, motes, levitation) for motion-sensitive players. The
+         functional one-shots (deals, trades, dives) keep moving. */
+      @media (prefers-reduced-motion: reduce) {
+        .cd-blob, .cd-halo, .cd-motes { animation: none; }
+        .world-card, .world-card.dealt, .world-card.ascended, .world-card.trade-arrived {
+          animation-name: none;
+        }
+        .world-card.dealt { animation: ct-dealt 480ms cubic-bezier(0.2, 0.9, 0.25, 1) backwards; }
       }
 
       /* ── Entering / leaving a card world: the finale's pull-back language.
@@ -2012,19 +2216,25 @@
          marks what is NOT of this world (cards.ts wires the button). */
       body.card-world::after {
         content: ""; position: fixed; inset: 0; pointer-events: none; z-index: 99990;
-        box-shadow: inset 0 0 0 5px #ffffff, inset 0 0 46px 8px rgba(255, 255, 255, 0.55);
+        box-shadow:
+          inset 0 0 0 5px rgba(255, 255, 255, 0.96),
+          inset 0 0 46px 8px rgba(255, 255, 255, 0.5),
+          inset 0 0 90px 24px rgba(178, 162, 250, 0.18);
       }
       #leave-world-btn {
         position: fixed; bottom: 14px; left: 50%; transform: translateX(-50%);
         z-index: 99991;
-        background: #ffffff; color: #3a3a42;
-        border: 1px solid #d0d0c8; border-radius: 8px;
+        background: rgba(255, 255, 255, 0.66); color: #3a3a46;
+        backdrop-filter: blur(10px) saturate(1.4);
+        -webkit-backdrop-filter: blur(10px) saturate(1.4);
+        border: 1px solid rgba(255, 255, 255, 0.9); border-radius: 12px;
         font-family: var(--font-display); font-size: 14px; letter-spacing: 0.22em;
         padding: 12px 26px; cursor: pointer;
-        box-shadow: 0 6px 22px rgba(255, 255, 255, 0.85), 0 4px 14px rgba(40, 40, 60, 0.3);
+        box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.95), 0 6px 22px rgba(255, 255, 255, 0.7), 0 4px 16px rgba(40, 40, 70, 0.3);
       }
       #leave-world-btn:hover {
-        box-shadow: 0 6px 26px rgba(255, 255, 255, 1), 0 5px 16px rgba(40, 40, 60, 0.38);
+        background: rgba(255, 255, 255, 0.85);
+        box-shadow: inset 0 1px 0 #fff, 0 6px 26px rgba(255, 255, 255, 0.95), 0 5px 18px rgba(40, 40, 70, 0.38);
       }
       #leave-world-btn:disabled { opacity: 0.6; cursor: default; }
       /* Stacked portrait layout: the bottom of the screen is the sidebar
@@ -2304,6 +2514,19 @@
          (intro card / table / gathering / trade); the goblin, speech, click
          wall and YES/NO row mirror the intro overlay's protocol. -->
     <div id="card-realm">
+      <!-- The dream behind the glass: drifting auroras, a turning halo,
+           rising light-motes. Pure decoration, sampled by the cards'
+           backdrop blur. -->
+      <div id="card-dream" aria-hidden="true">
+        <div class="cd-halo"></div>
+        <div class="cd-blob cd-b1"></div>
+        <div class="cd-blob cd-b2"></div>
+        <div class="cd-blob cd-b3"></div>
+        <div class="cd-blob cd-b4"></div>
+        <div class="cd-motes cd-m3"></div>
+        <div class="cd-motes cd-m1"></div>
+        <div class="cd-motes cd-m2"></div>
+      </div>
       <div id="card-stage"></div>
       <div id="card-goblin"></div>
       <div id="card-speech"></div>

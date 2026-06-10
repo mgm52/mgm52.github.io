@@ -18,7 +18,13 @@ mkdirSync(OUT, { recursive: true });
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 const browser = await launchChromium();
-const page = await browser.newPage({ viewport: { width: 1280, height: 800 } });
+// reducedMotion stills the realm's ambient drift (card levitation, auroras —
+// index.html's prefers-reduced-motion block) so clicks pass playwright's
+// stability check and the shots are deterministic.
+const page = await browser.newPage({
+  viewport: { width: 1280, height: 800 },
+  reducedMotion: 'reduce',
+});
 page.on('pageerror', (e) => console.log('PAGEERROR:', e.message));
 const shot = (name) => page.screenshot({ path: `${OUT}/${name}.png` });
 // Mid-transition frames race the page's own reload; a hung screenshot (it

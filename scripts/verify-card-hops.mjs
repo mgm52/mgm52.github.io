@@ -23,7 +23,13 @@ const check = (name, ok, detail = '') => {
 };
 
 const browser = await launchChromium();
-const page = await browser.newPage({ viewport: { width: 1280, height: 800 } });
+// reducedMotion stills the realm's ambient drift (card levitation, auroras —
+// index.html's prefers-reduced-motion block) so clicks pass playwright's
+// stability check.
+const page = await browser.newPage({
+  viewport: { width: 1280, height: 800 },
+  reducedMotion: 'reduce',
+});
 page.on('pageerror', (e) => console.log('PAGEERROR:', e.message));
 
 const appScale = () => page.evaluate(() => {
