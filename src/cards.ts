@@ -28,7 +28,7 @@ import { ALL_TASK_IDS } from './ui';
 import {
   APPETITE_LINE, CardMeta, CardResources, CardTier, Creature, FRAME_BASE, TIER_ABOVE,
   TIER_RANK, TradeEvent, UpgradeReq, WorldCard, appetiteAccepts, ascendCard,
-  cardPower, decodeWorld, encodeWorld, generateEvents,
+  cardIncome, cardPower, decodeWorld, encodeWorld, generateEvents,
   makeCard, mulberry32, regenerateEvent, reqMet, sceneStructureCounts,
 } from './cards-core';
 
@@ -161,7 +161,7 @@ export function captureOriginWorld(state: GameState): void {
       data: encodeWorld(state),
       resources: {
         money: state.money, blood: state.blood, dragonBone: state.dragonBone,
-        power: cardPower(state), goblins: state.goblins.size,
+        power: cardPower(state), goblins: state.goblins.size, income: cardIncome(state),
       },
     };
     localStorage.setItem(ORIGIN_KEY, JSON.stringify(payload));
@@ -319,7 +319,7 @@ async function leaveWorld(state: GameState): Promise<void> {
     card.data = encodeWorld(state);
     card.resources = {
       money: state.money, blood: state.blood, dragonBone: state.dragonBone,
-      power: cardPower(state), goblins: state.goblins.size,
+      power: cardPower(state), goblins: state.goblins.size, income: cardIncome(state),
     };
   }
   meta.activeCardId = null;
@@ -383,7 +383,9 @@ export function setupCardWorldChrome(state: GameState, arriving = false): void {
     if (goal && req) {
       goal.style.display = '';
       const update = () => {
-        const have = req.res === 'power' ? cardPower(state) : state[req.res];
+        const have = req.res === 'power' ? cardPower(state)
+          : req.res === 'goblins' ? state.goblins.size
+          : state[req.res];
         const met = have >= req.amount;
         goal.classList.toggle('met', met);
         goal.textContent = met
@@ -616,6 +618,12 @@ function drawEarthPreview(cv: HTMLCanvasElement, st: GameState): void {
     g.fillStyle = gob.robot ? '#c9d0d9' : gob.gold ? '#ffd96b' : '#8ee492';
     g.fillRect(px(gob.cell.cx), py(gob.cell.cy), Math.max(2.4, s * 0.7), Math.max(2.4, s * 0.7));
   }
+  // Minotaurs read bigger and redder — a rampage card shows its herd.
+  for (const m of st.minotaurs.values()) {
+    g.fillStyle = m.tiny ? '#e0895a' : '#c4524a';
+    const ms = Math.max(3, s * 1.1);
+    g.fillRect(px(m.cell.cx), py(m.cell.cy), ms, ms);
+  }
   // Built-up regions glow.
   drawDensityGlow(g, pts, 7 * s, '255, 236, 170');
   // Repaint once late sprites land ('error' counts too, so a missing file
@@ -702,7 +710,11 @@ function resourcesEl(r: CardResources): HTMLElement {
   };
   const power = r.power ?? 0;
   const goblins = r.goblins ?? 0;
+  const income = r.income ?? 0;
   if (r.money > 0) add('res-cash', `Ƶ ${fmt(r.money)}`, r.money >= 500_000);
+  // The standing buildings' earning potential — the basis of the "bank what
+  // your buildings can make" demands, so it belongs on the face of the card.
+  if (income > 0) add('res-cash', `Ƶ ${fmt(income)}/s`, income >= 1_000);
   if (r.blood > 0) add('res-blood', `${fmt(r.blood)} blood`, r.blood >= 128);
   if (power > 0) add('res-power', formatPower(power), power >= 1_000_000_000);
   if (r.dragonBone > 0) add('res-bones', `${fmt(r.dragonBone)} bones`, r.dragonBone >= 5);
@@ -714,7 +726,10 @@ function resourcesEl(r: CardResources): HTMLElement {
 function fmtResAmount(res: UpgradeReq['res'], n: number): string {
   if (res === 'power') return formatPower(n);
   const amt = Math.floor(n).toLocaleString('en-US');
-  return res === 'money' ? `Ƶ ${amt}` : res === 'blood' ? `${amt} blood` : `${amt} bones`;
+  return res === 'money' ? `Ƶ ${amt}`
+    : res === 'blood' ? `${amt} blood`
+    : res === 'goblins' ? `${amt} goblins`
+    : `${amt} bones`;
 }
 
 function fmtReqAmount(r: UpgradeReq): string {
@@ -1287,7 +1302,7 @@ function showTrade(meta: CardMeta, ev: TradeEvent, cr: Creature): void {
   stage.appendChild(theirsRow);
 
   // The verdict, floating just above your hand (between the two rows):
-  // invisible until any of the trader's cards are picked, "✗ no trade"
+  // invisible until any of the trader's cards are picked, "bad trade"
   // while the basket doesn't balance, and the green "✓ trade" button — the
   // actual executor — once it does. Mounted into the hand layer by
   // wireHand below.
@@ -1352,15 +1367,14 @@ function showTrade(meta: CardMeta, ev: TradeEvent, cr: Creature): void {
       }
       theirsRow.querySelector(`[data-card-id="${mine.id}"]`)?.classList.add('trade-arrived');
       // Winning your own world back is the realm's quiet climax; losing it
-      // again gets its own line too.
+      // again gets its own line too. Ordinary trades land without a chime —
+      // the card motion and the trader's line are the confirmation.
       if (theirs.some((t) => t.origin)) {
         realmSound('task_complete', 0.9, 1);
         sayLine('it remembers you.');
       } else if (mine.origin) {
-        realmSound('ritual', 1, 0.9);
         sayLine('kept warm. someone grew this one.');
       } else {
-        realmSound('ritual', 1, 0.9);
         sayLine(theirs.length === 2 ? "two for one. now it's a trade." : "now it's a trade.");
       }
     }, 680);
@@ -1477,8 +1491,8 @@ function showTrade(meta: CardMeta, ev: TradeEvent, cr: Creature): void {
     verdict.disabled = ready === null;
     verdict.textContent = !anyPicked ? ''
       : ready ? '✓ trade'
-      : allMineForNothing ? "✗ can't trade last card"
-      : '✗ bad trade';
+      : allMineForNothing ? 'this trade would give away all your cards'
+      : 'bad trade';
 
     // Only the view's first render deals in staggered — re-renders driven
     // by selection clicks would otherwise replay the deal on every pick.

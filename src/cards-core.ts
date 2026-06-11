@@ -11,7 +11,7 @@ import {
   BUILDING_DEFS, BuildingKind, CELL, SOUL_SIGIL, SPACE,
 } from './config';
 import {
-  Building, Cell, GameState, Goblin, SpaceBuilding,
+  Building, Cell, GameState, Goblin, Minotaur, SpaceBuilding,
   buildingAtCell, cellCenter, cellKey, computePlayBounds, createInitialState,
   digDirection, isInPlayCell, markBuildingsChanged, nextBuildingDisplayNum,
   occupyCell, recordGhost, removeGoblin, waterSourceAtCell,
@@ -24,14 +24,18 @@ export const TIER_ABOVE: Record<CardTier, CardTier | null> = { common: 'uncommon
 // What a card demands before it can ascend to the next tier: hold this much
 // of one resource inside its world. Different per card — part of a card's
 // identity, and the reason to trade sideways for one whose demand suits the
-// world you can actually grow. Null once the card is rare (top tier).
-export type UpgradeReq = { res: 'money' | 'blood' | 'dragonBone' | 'power'; amount: number };
+// world you can actually grow. `goblins` is a population goal (a standing
+// crowd, not a stockpile) — the least grindy demand, since growing a colony
+// is the game's most playful loop. Null once the card is rare (top tier).
+export type UpgradeReq = { res: 'money' | 'blood' | 'dragonBone' | 'power' | 'goblins'; amount: number };
 
 // The headline numbers written on a card. `power` is the world's last
 // measured production in watts (0 until its buildings have actually run);
-// `goblins` is the standing population. Both optional for metas saved
-// before they existed.
-export type CardResources = { money: number; blood: number; dragonBone: number; power?: number; goblins?: number };
+// `goblins` is the standing population; `income` is the Ƶ/sec the standing
+// buildings COULD earn if all woken — the basis for "bank what your
+// buildings can make" demands. All but the first three are optional for
+// metas saved before they existed.
+export type CardResources = { money: number; blood: number; dragonBone: number; power?: number; goblins?: number; income?: number };
 
 export type WorldCard = {
   id: number;
@@ -212,6 +216,32 @@ function tryPlaceGoblin(st: GameState, rng: () => number, opts: { gold?: boolean
   }
 }
 
+// A live minotaur, already loose in the world (the rampage flavor). Minotaurs
+// don't ride the goblin occupancy index — footprintFree just keeps them off
+// buildings, water and the hole's berth; the sim takes it from there.
+function tryPlaceMinotaur(st: GameState, rng: () => number, tiny = false): void {
+  const b = computePlayBounds(st);
+  for (let attempt = 0; attempt < 40; attempt++) {
+    const cx = b.x0 + Math.floor(rng() * (b.x1 - b.x0));
+    const cy = b.y0 + Math.floor(rng() * (b.y1 - b.y0));
+    if (!footprintFree(st, { cx, cy }, 1)) continue;
+    const cell: Cell = { cx, cy };
+    const m: Minotaur = {
+      id: st.nextId++,
+      pos: cellCenter(cell), cell, target: null,
+      facing: rng() * Math.PI * 2,
+      state: { kind: 'wander' },
+      nextWanderAt: 0,
+      selected: false,
+      stuckSampleCell: null, stuckSampleAt: 0, stuckStreak: 0,
+      detour: null,
+      tiny: tiny || undefined,
+    };
+    st.minotaurs.set(m.id, m);
+    return;
+  }
+}
+
 function addSpaceBuilding(st: GameState, kind: BuildingKind, rng: () => number): void {
   const b: Building = {
     id: st.nextId++,
@@ -251,10 +281,13 @@ const KIND_POOLS: Record<CardTier, BuildingKind[]> = {
 //  - mint:        swimming in cash, bloodless
 //  - boneyard:    keeps bones (even at common, where bones are unheard of)
 //  - monoculture: one building kind, everywhere
-//  - crowd:       goblins wall to wall, little else (units ARE the wealth)
 //  - flooded:     the land is mostly lake — water-hungry buildings thrive
 //                 in the gaps between the shores
-// Three flavors are CHALLENGES — the world is a small puzzle and its
+//  - haunted:     hell is full; the surface is thin
+//  - necropolis:  a world for the dead: the overworld is a graveyard of
+//                 standing stones and hell-portal beams, hell is PACKED with
+//                 ghosts, and the few living goblins are badly outnumbered
+// Several flavors are CHALLENGES — the world is a small puzzle and its
 // ascension demand (challengeReq) names the puzzle's goal:
 //  - seance:      a bad power source stands ready, the bank holds exactly a
 //                 five-candle séance; the demand is the power only a fully
@@ -264,9 +297,14 @@ const KIND_POOLS: Record<CardTier, BuildingKind[]> = {
 //                 track resets to the very start to match).
 //  - goldrush:    every goblin glitters; the demand is cash in clean Ƶ250
 //                 heads — an economy of killing your own citizens.
-//  - haunted:     hell is full; the surface is thin
-export type WorldFlavor = 'balanced' | 'bloodbath' | 'mint' | 'boneyard' | 'monoculture' | 'crowd' | 'flooded' | 'seance' | 'overcharged' | 'goldrush' | 'haunted';
-export const WORLD_FLAVORS: WorldFlavor[] = ['balanced', 'bloodbath', 'mint', 'boneyard', 'monoculture', 'crowd', 'flooded', 'seance', 'overcharged', 'goldrush', 'haunted'];
+//  - crowd:       goblins wall to wall, little else (units ARE the wealth);
+//                 the demand asks the crowd to keep growing — a population
+//                 goal, not a stockpile.
+//  - rampage:     live minotaurs roam the overworld, hunting the goblins.
+//                 The demand is blood in clean 128-blood beasts: cull the
+//                 herd, farm it, or feed it.
+export type WorldFlavor = 'balanced' | 'bloodbath' | 'mint' | 'boneyard' | 'monoculture' | 'crowd' | 'flooded' | 'seance' | 'overcharged' | 'goldrush' | 'haunted' | 'necropolis' | 'rampage';
+export const WORLD_FLAVORS: WorldFlavor[] = ['balanced', 'bloodbath', 'mint', 'boneyard', 'monoculture', 'crowd', 'flooded', 'seance', 'overcharged', 'goldrush', 'haunted', 'necropolis', 'rampage'];
 
 // The main game's task chain, in order (ui.ts TASKS). A generated world sits
 // partway along it — like an adopted save file — so entering a card can mean
@@ -318,6 +356,7 @@ export function generateWeirdWorld(seed: number, tier: CardTier, taskIds: string
   let pool = KIND_POOLS[tier];
   let forcePortal = false;
   let lakes = 0;
+  let minotaurCount = 0;
 
   if (flavor === 'bloodbath') {
     st.blood = [ri(15, 60), ri(1_200, 8_000), ri(240_000, 800_000)][T];
@@ -390,6 +429,26 @@ export function generateWeirdWorld(seed: number, tier: CardTier, taskIds: string
     st.blood = Math.floor(st.blood / 2);
     buildingCount = Math.max(1, Math.floor(buildingCount / 2));
     goblinCount = Math.max(1, Math.floor(goblinCount / 2));
+  } else if (flavor === 'necropolis') {
+    // A world for the dead. The overworld is a graveyard — standing stones
+    // (walls) between hell-portal beams — and hell is PACKED: the dead here
+    // outnumber the living many times over.
+    pool = ['hell_portal', 'hell_portal', 'wall'];
+    buildingCount = [ri(3, 6), ri(6, 12), ri(10, 18)][T];
+    ghostCount = [ri(30, 60), ri(80, 150), ri(150, 300)][T];
+    forcePortal = true;
+    dragonGhostBias = 0.3;
+    st.money = Math.floor(st.money / 4);
+    st.dragonBone = [ri(0, 2), ri(2, 6), ri(20, 60)][T];
+    goblinCount = Math.max(1, Math.floor(goblinCount / 2));
+  } else if (flavor === 'rampage') {
+    // Minotaurs loose on the overworld, hunting the goblins. The bank holds
+    // crumbs — the blood economy here is the carnage itself.
+    minotaurCount = [ri(2, 4), ri(4, 8), ri(7, 14)][T];
+    goblinCount += ri(3, 6 + T * 4);
+    st.money = Math.floor(st.money / 3);
+    st.blood = ri(0, 10);
+    st.dragonBone = 0;
   }
 
   st.moneyEarned = st.money;
@@ -416,6 +475,9 @@ export function generateWeirdWorld(seed: number, tier: CardTier, taskIds: string
   if (finished) for (const id of taskIds) done.add(id);
   // The optional minotaur side-task: some mid-track worlds did the Work.
   else if (done.has('build_gas_engine') && rng() < 0.6) done.add('summon_minotaurs');
+  // A rampage world has obviously summoned minotaurs already — its task is
+  // done, so the beasts already loose never replay a celebration.
+  if (flavor === 'rampage') done.add('summon_minotaurs');
 
   // Extra lakes (the flooded flavor): random pools dropped before any
   // structure, so buildings and goblins place around the water. The hole
@@ -454,6 +516,14 @@ export function generateWeirdWorld(seed: number, tier: CardTier, taskIds: string
     });
   }
   st.spawnsCompleted = goblinCount;
+
+  // The rampage's beasts, already mid-hunt (rare worlds may hide a tinytaur
+  // in the herd). The counters match so the summon task stays settled.
+  for (let i = 0; i < minotaurCount; i++) {
+    tryPlaceMinotaur(st, rng, tier === 'rare' && rng() < 0.2);
+  }
+  st.minotaursBought = st.minotaurs.size;
+  st.minotaursSummoned = st.minotaurs.size;
 
   // Ghosts already drifting in this world's hell — somebody lived here.
   const gb = computePlayBounds(st);
@@ -522,8 +592,8 @@ export function generateWeirdWorld(seed: number, tier: CardTier, taskIds: string
 }
 
 // The goblin's replacement for the player's stolen world: an obviously
-// pitiful one. A handful of scattered walls, two goblins, Ƶ3 — and no
-// spawn hole, so nothing can ever be summoned. Its pinned Ƶ10,000 demand
+// pitiful one. A handful of scattered walls, not a single goblin, Ƶ3 — and
+// no spawn hole, so nothing can ever be summoned. Its pinned Ƶ10,000 demand
 // is unreachable from the inside; the only way up is to TRADE it, which is
 // exactly the lesson the white goblin meant to teach.
 export function generateJunkWorld(seed: number, taskIds: string[]): GameState {
@@ -533,7 +603,8 @@ export function generateJunkWorld(seed: number, taskIds: string[]): GameState {
   markBuildingsChanged(st);
   const wallCount = 5 + Math.floor(rng() * 5);
   for (let i = 0; i < wallCount; i++) tryPlaceBuilding(st, 'wall', rng);
-  for (const g of [...st.goblins.values()].slice(2)) removeGoblin(st, g.id);
+  for (const g of [...st.goblins.values()]) removeGoblin(st, g.id);
+  st.spawnsCompleted = 0;
   st.money = 3;
   st.blood = 0;
   st.dragonBone = 0;
@@ -551,7 +622,7 @@ export function generateJunkWorld(seed: number, taskIds: string[]): GameState {
   st.unlocks!.everBuilt = new Set(['wall']);
   // The junk world starts at the very bottom of the work track — and with
   // the spawn hole caved in (and Goblin Holes locked behind a task it will
-  // never reach), no goblin can ever join the two already standing there.
+  // never reach), no goblin can ever set foot in it.
   st.unlocks!.completed = new Set();
   st.unlocks!.revealed = new Set();
   st.unlocks!.minotaurEverSummoned = false;
@@ -601,6 +672,22 @@ export function cardPower(st: GameState): number {
   return potential;
 }
 
+// The income number written on a card: what the standing buildings COULD
+// earn per second if every one of them were woken. Dormancy is ignored on
+// purpose — this measures the world's potential, and it's the basis for the
+// "bank what your buildings can make" ascension demands.
+export function cardIncome(st: GameState): number {
+  let inc = 0;
+  for (const b of st.buildings.values()) {
+    inc += BUILDING_DEFS[b.kind].income;
+  }
+  for (const sb of st.spaceBuildings.values()) {
+    if (st.buildings.has(sb.id)) continue;
+    inc += BUILDING_DEFS[sb.building.kind].income;
+  }
+  return inc;
+}
+
 // Per-scene structure counts, driving each preview pane's treatment on the
 // card: a pane with nothing built fades; one holding three or more
 // structures glows. Walls are scenery, not development; hell counts what
@@ -621,18 +708,11 @@ export function sceneStructureCounts(st: GameState): { space: number; earth: num
 
 // ─── Card construction ───────────────────────────────────────────────
 
-// Roll a card's ascension demand for its CURRENT tier, shaped by what the
-// world already holds. The demand leans INTO a world's spike — a blood farm
-// is asked for more blood, a mint for more cash — at 2–4× its current
-// holding, so a freshly-rolled card is never born already met and growing a
-// world means growing its identity. Spike-blind floors keep the climb a real
-// session even in a world that starts from nothing. Bones can only be
-// demanded of a world that already keeps bones; power only at uncommon
-// (reactors are mid-game toys).
-// Demands with personality: half the time the rolled amount snaps to a
+// Demands with personality: half the time a band-rolled amount snaps to a
 // "charismatic" figure inside the band — a power of two, a repdigit, a
 // clean single-digit round — so a card asks for Ƶ8,192 or 6,666 blood
-// instead of a beige 7,341.
+// instead of a beige 7,341. (Used by the from-nothing fallback below and
+// the challenge flavors' pinned demands.)
 export function spicyAmount(lo: number, hi: number, rng: () => number): number {
   const plain = lo + Math.floor(rng() * (hi - lo + 1));
   if (rng() < 0.5) return plain;
@@ -655,33 +735,72 @@ export function spicyAmount(lo: number, hi: number, rng: () => number): number {
   return cands.length > 0 ? cands[Math.floor(rng() * cands.length)] : plain;
 }
 
+// Round to a legible figure (two significant digits) so a world-derived
+// demand reads like a price tag, not a checksum: 3× Ƶ4,187 asks for
+// Ƶ13,000, not Ƶ12,561.
+export function roundNice(n: number): number {
+  if (n <= 10) return Math.ceil(n);
+  const mag = 10 ** (Math.floor(Math.log10(n)) - 1);
+  return Math.round(n / mag) * mag;
+}
+
+// Spike-blind floors: whatever the world expresses, an ascent never costs
+// less than a real session at its tier.
+const REQ_FLOORS: Record<'common' | 'uncommon', Record<UpgradeReq['res'], number>> = {
+  common: { money: 2_000, blood: 150, dragonBone: 2, power: 300, goblins: 10 },
+  uncommon: { money: 100_000, blood: 2_500, dragonBone: 4, power: 1_000_000_000, goblins: 30 },
+};
+
+// Roll a card's ascension demand for its CURRENT tier, read off the world
+// itself rather than an abstract band. Every goal asks the world to grow
+// what it already is:
+//  - a clean 2–4× multiple of a resource it actually holds (money / blood /
+//    bones — bones only at uncommon, where the dragon economy exists)
+//  - its standing crowd, doubled (a population, not a stockpile)
+//  - 5–10 minutes of its standing buildings' income, banked
+//  - its standing generators' output, doubled
+// Amounts round to legible two-digit figures and never sink below the tier
+// floor, so a world holding pennies still asks a real climb of you. Only a
+// world that expresses nothing at all falls back to a small tier-floor roll.
 export function rollUpgradeReq(tier: CardTier, rng: () => number, resources: CardResources): UpgradeReq | null {
-  const ri = (a: number, b: number) => a + Math.floor(rng() * (b - a + 1));
   if (tier === 'rare') return null;
-  const bands: Partial<Record<UpgradeReq['res'], [number, number]>> = tier === 'common'
-    ? { money: [5_000, 15_000], blood: [200, 800] }
-    : { money: [250_000, 1_000_000], blood: [5_000, 20_000], dragonBone: [3, 10], power: [1_000_000_000, 3_000_000_000] };
-  const candidates: UpgradeReq['res'][] = ['money', 'blood'];
-  if (tier === 'uncommon') {
-    if (resources.dragonBone > 0 && rng() < 0.5) candidates.push('dragonBone');
-    if (rng() < 0.25) candidates.push('power');
+  const floors = REQ_FLOORS[tier];
+  const power = resources.power ?? 0;
+  const goblins = resources.goblins ?? 0;
+  const income = resources.income ?? 0;
+  const mult = () => [2, 2, 3, 3, 4][Math.floor(rng() * 5)];
+  const goals: (() => UpgradeReq)[] = [];
+  if (resources.money >= 20) {
+    goals.push(() => ({ res: 'money', amount: roundNice(resources.money * mult()) }));
   }
-  // Bias toward the world's dominant holding (relative to its band ceiling).
-  let dominant: UpgradeReq['res'] = 'money';
-  let dominance = -1;
-  for (const res of candidates) {
-    if (res === 'power') continue; // production is measured later, not held
-    const [, hi] = bands[res]!;
-    const score = (resources[res] ?? 0) / hi;
-    if (score > dominance) { dominance = score; dominant = res; }
+  if (income > 0) {
+    goals.push(() => ({ res: 'money', amount: roundNice(income * (300 + Math.floor(rng() * 301))) }));
   }
-  const res = dominance > 0 && rng() < 0.65 ? dominant : candidates[Math.floor(rng() * candidates.length)];
-  const [lo, hi] = bands[res]!;
-  let amount = spicyAmount(lo, hi, rng);
-  // Lean past the spike: never born met, always 2–4× the current holding.
-  const have = resources[res] ?? 0;
-  if (have * 2 > amount) amount = Math.ceil(have * (2 + rng() * 2));
-  return { res, amount };
+  if (resources.blood >= 5) {
+    goals.push(() => ({ res: 'blood', amount: roundNice(resources.blood * mult()) }));
+  }
+  if (tier === 'uncommon' && resources.dragonBone >= 1) {
+    goals.push(() => ({ res: 'dragonBone', amount: resources.dragonBone * 2 }));
+  }
+  if (goblins >= 2) {
+    goals.push(() => ({ res: 'goblins', amount: goblins * 2 }));
+  }
+  if (power > 0) {
+    goals.push(() => ({ res: 'power', amount: roundNice(power * 2) }));
+  }
+  const req: UpgradeReq = goals.length > 0
+    ? goals[Math.floor(rng() * goals.length)]()
+    : (() => {
+        // Nothing to read off the world: a small roll off the tier floor.
+        const res = (['money', 'blood', 'goblins'] as const)[Math.floor(rng() * 3)];
+        return { res, amount: spicyAmount(floors[res], floors[res] * 3, rng) };
+      })();
+  // Floor it, then make sure it isn't already (nearly) met — a derived goal
+  // like banked income can land under a fat existing holding.
+  req.amount = Math.max(req.amount, floors[req.res]);
+  const have = resources[req.res] ?? 0;
+  if (have * 1.5 > req.amount) req.amount = roundNice(have * 2);
+  return req;
 }
 
 export function reqMet(card: WorldCard): boolean {
@@ -708,7 +827,7 @@ export function challengeReq(flavor: WorldFlavor, tier: CardTier, rng: () => num
   if (tier === 'rare') return null;
   if (flavor === 'seance') return { res: 'power', amount: 1_000_000_000 };
   if (flavor === 'overcharged') {
-    const [lo, hi] = tier === 'common' ? [5_000, 15_000] : [250_000, 1_000_000];
+    const [lo, hi] = tier === 'common' ? [3_000, 9_000] : [120_000, 500_000];
     return { res: 'money', amount: spicyAmount(lo, hi, rng) };
   }
   if (flavor === 'goldrush') {
@@ -716,6 +835,18 @@ export function challengeReq(flavor: WorldFlavor, tier: CardTier, rng: () => num
     // on a clean multiple of 250 — the card openly asks for a body count.
     const heads = tier === 'common' ? 10 + Math.floor(rng() * 21) : 80 + Math.floor(rng() * 121);
     return { res: 'money', amount: heads * 250 };
+  }
+  if (flavor === 'crowd') {
+    // The crowd asks to keep growing: a standing-population goal, well above
+    // what the world starts with.
+    const heads = tier === 'common' ? 20 + Math.floor(rng() * 21) : 60 + Math.floor(rng() * 61);
+    return { res: 'goblins', amount: heads };
+  }
+  if (flavor === 'rampage') {
+    // Priced in beasts: a slain minotaur returns 128 blood, so the demand
+    // lands on a clean multiple of 128 — cull the herd (or farm it).
+    const beasts = tier === 'common' ? 2 + Math.floor(rng() * 4) : 25 + Math.floor(rng() * 36);
+    return { res: 'blood', amount: beasts * 128 };
   }
   return null;
 }
@@ -728,7 +859,7 @@ export function makeCard(meta: CardMeta, tier: CardTier, rng: () => number, task
   const st = junk ? generateJunkWorld(seed, taskIds) : generateWeirdWorld(seed, tier, taskIds, flavor);
   const resources: CardResources = {
     money: st.money, blood: st.blood, dragonBone: st.dragonBone,
-    power: cardPower(st), goblins: st.goblins.size,
+    power: cardPower(st), goblins: st.goblins.size, income: cardIncome(st),
   };
   return {
     id: meta.nextId++,
@@ -754,13 +885,13 @@ export function makeCard(meta: CardMeta, tier: CardTier, rng: () => number, task
 // everything else there's the "wait for the next gathering" reshuffle.
 
 export const EVENT_NAMES: Record<CardTier, string> = {
-  common: 'gathering at the soft border',
+  common: 'the common market',
   uncommon: 'the uncommon salon',
   rare: 'the rare exchange',
 };
 
 let creatureSeq = 1;
-// The tables grow with the tiers — one creature at the soft border, two at
+// The tables grow with the tiers — one creature at the common market, two at
 // the salon, three at the rare exchange — and stay small-handed so no view
 // ever overwhelms. The first creature anywhere considers anything; the rest
 // are picky. The common gathering's lone creature holds TWO cards, making it
