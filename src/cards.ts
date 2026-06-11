@@ -383,7 +383,9 @@ export function setupCardWorldChrome(state: GameState, arriving = false): void {
     if (goal && req) {
       goal.style.display = '';
       const update = () => {
-        const have = req.res === 'power' ? cardPower(state) : state[req.res];
+        const have = req.res === 'power' ? cardPower(state)
+          : req.res === 'goblins' ? state.goblins.size
+          : state[req.res];
         const met = have >= req.amount;
         goal.classList.toggle('met', met);
         goal.textContent = met
@@ -616,6 +618,12 @@ function drawEarthPreview(cv: HTMLCanvasElement, st: GameState): void {
     g.fillStyle = gob.robot ? '#c9d0d9' : gob.gold ? '#ffd96b' : '#8ee492';
     g.fillRect(px(gob.cell.cx), py(gob.cell.cy), Math.max(2.4, s * 0.7), Math.max(2.4, s * 0.7));
   }
+  // Minotaurs read bigger and redder — a rampage card shows its herd.
+  for (const m of st.minotaurs.values()) {
+    g.fillStyle = m.tiny ? '#e0895a' : '#c4524a';
+    const ms = Math.max(3, s * 1.1);
+    g.fillRect(px(m.cell.cx), py(m.cell.cy), ms, ms);
+  }
   // Built-up regions glow.
   drawDensityGlow(g, pts, 7 * s, '255, 236, 170');
   // Repaint once late sprites land ('error' counts too, so a missing file
@@ -714,7 +722,10 @@ function resourcesEl(r: CardResources): HTMLElement {
 function fmtResAmount(res: UpgradeReq['res'], n: number): string {
   if (res === 'power') return formatPower(n);
   const amt = Math.floor(n).toLocaleString('en-US');
-  return res === 'money' ? `Ƶ ${amt}` : res === 'blood' ? `${amt} blood` : `${amt} bones`;
+  return res === 'money' ? `Ƶ ${amt}`
+    : res === 'blood' ? `${amt} blood`
+    : res === 'goblins' ? `${amt} goblins`
+    : `${amt} bones`;
 }
 
 function fmtReqAmount(r: UpgradeReq): string {
@@ -1287,7 +1298,7 @@ function showTrade(meta: CardMeta, ev: TradeEvent, cr: Creature): void {
   stage.appendChild(theirsRow);
 
   // The verdict, floating just above your hand (between the two rows):
-  // invisible until any of the trader's cards are picked, "✗ no trade"
+  // invisible until any of the trader's cards are picked, "bad trade"
   // while the basket doesn't balance, and the green "✓ trade" button — the
   // actual executor — once it does. Mounted into the hand layer by
   // wireHand below.
@@ -1352,15 +1363,14 @@ function showTrade(meta: CardMeta, ev: TradeEvent, cr: Creature): void {
       }
       theirsRow.querySelector(`[data-card-id="${mine.id}"]`)?.classList.add('trade-arrived');
       // Winning your own world back is the realm's quiet climax; losing it
-      // again gets its own line too.
+      // again gets its own line too. Ordinary trades land without a chime —
+      // the card motion and the trader's line are the confirmation.
       if (theirs.some((t) => t.origin)) {
         realmSound('task_complete', 0.9, 1);
         sayLine('it remembers you.');
       } else if (mine.origin) {
-        realmSound('ritual', 1, 0.9);
         sayLine('kept warm. someone grew this one.');
       } else {
-        realmSound('ritual', 1, 0.9);
         sayLine(theirs.length === 2 ? "two for one. now it's a trade." : "now it's a trade.");
       }
     }, 680);
@@ -1477,8 +1487,8 @@ function showTrade(meta: CardMeta, ev: TradeEvent, cr: Creature): void {
     verdict.disabled = ready === null;
     verdict.textContent = !anyPicked ? ''
       : ready ? '✓ trade'
-      : allMineForNothing ? "✗ can't trade last card"
-      : '✗ bad trade';
+      : allMineForNothing ? 'this trade would give away all your cards'
+      : 'bad trade';
 
     // Only the view's first render deals in staggered — re-renders driven
     // by selection clicks would otherwise replay the deal on every pick.

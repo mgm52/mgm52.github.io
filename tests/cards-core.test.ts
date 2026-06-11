@@ -7,7 +7,7 @@ import { describe, expect, it } from 'vitest';
 import {
   APPETITE_LINE, CardMeta, CardResources, CardTier, MAIN_TRACK, TIER_ABOVE, TIER_RANK,
   WORLD_FLAVORS, WorldCard, appetiteAccepts, ascendCard, breakdownGives, cardPower,
-  creatureOpenTo, creatureTakesFor, decodeWorld, encodeWorld, generateEvents,
+  challengeReq, creatureOpenTo, creatureTakesFor, decodeWorld, encodeWorld, generateEvents,
   generateJunkWorld, generateWeirdWorld, makeCard, mulberry32, regenerateEvent,
   reqMet, rollUpgradeReq, sameTierGives, sceneStructureCounts, spicyAmount, worldName,
 } from '../src/cards-core';
@@ -145,13 +145,13 @@ describe('generateWeirdWorld', () => {
 });
 
 describe('generateJunkWorld', () => {
-  it('is pitiful: Ƶ3, at most two goblins, walls only, nothing unlocked', () => {
+  it('is pitiful: Ƶ3, not a single goblin, walls only, nothing unlocked', () => {
     for (let seed = 1; seed <= 5; seed++) {
       const st = generateJunkWorld(seed * 17, TASK_IDS);
       expect(st.money).toBe(3);
       expect(st.blood).toBe(0);
       expect(st.dragonBone).toBe(0);
-      expect(st.goblins.size).toBeLessThanOrEqual(2);
+      expect(st.goblins.size).toBe(0);
       expect([...st.buildings.values()].every((b) => b.kind === 'wall')).toBe(true);
       expect(st.ghosts).toEqual([]);
       expect(st.hellUnlocked).toBe(false);
@@ -223,6 +223,20 @@ describe('world flavors (the spikes)', () => {
       // Flooded: extra lakes beyond whatever the dug arms brought.
       const fl = generateWeirdWorld(seed * 43, 'common', TASK_IDS, 'flooded');
       expect(fl.waterSources.size).toBeGreaterThanOrEqual(3);
+
+      // Necropolis: portal beams on the surface, hell packed with the dead.
+      const nec = generateWeirdWorld(seed * 47, 'common', TASK_IDS, 'necropolis');
+      expect(nec.ghosts.length).toBeGreaterThanOrEqual(30);
+      expect(nec.hellUnlocked).toBe(true);
+      expect([...nec.buildings.values()].some((b) => b.kind === 'hell_portal')).toBe(true);
+
+      // Rampage: live minotaurs already loose among the goblins, with the
+      // summon task settled so the herd never replays a celebration.
+      const ram = generateWeirdWorld(seed * 53, 'common', TASK_IDS, 'rampage');
+      expect(ram.minotaurs.size).toBeGreaterThanOrEqual(2);
+      expect(ram.goblins.size).toBeGreaterThan(0);
+      expect(ram.unlocks!.completed.has('summon_minotaurs')).toBe(true);
+      expect(ram.minotaursSummoned).toBe(ram.minotaurs.size);
     }
   });
 
@@ -256,6 +270,23 @@ describe('world flavors (the spikes)', () => {
     }
     expect(seance).toBeGreaterThan(0);
     expect(overcharged).toBeGreaterThan(0);
+  });
+
+  it('crowd and rampage demands name their puzzle (and vanish at rare)', () => {
+    for (let seed = 0; seed < 50; seed++) {
+      const rng = mulberry32(seed);
+      // A population goal, not a stockpile.
+      const crowd = challengeReq('crowd', 'common', rng)!;
+      expect(crowd.res).toBe('goblins');
+      expect(crowd.amount).toBeGreaterThanOrEqual(20);
+      expect(crowd.amount).toBeLessThanOrEqual(40);
+      // Blood priced in clean 128-blood beasts.
+      const ram = challengeReq('rampage', 'uncommon', rng)!;
+      expect(ram.res).toBe('blood');
+      expect(ram.amount % 128).toBe(0);
+      expect(challengeReq('crowd', 'rare', rng)).toBeNull();
+      expect(challengeReq('rampage', 'rare', rng)).toBeNull();
+    }
   });
 
   it('unforced generation actually varies across seeds', () => {
@@ -336,44 +367,44 @@ describe('world serialization', () => {
 
 describe('rollUpgradeReq', () => {
   it('rolls demands inside the tier bands for a from-nothing world, and none at rare', () => {
+    const bands: Record<string, Record<string, [number, number]>> = {
+      common: { money: [3_000, 9_000], blood: [150, 500], goblins: [10, 25] },
+      uncommon: {
+        money: [120_000, 500_000], blood: [3_000, 12_000],
+        power: [1_000_000_000, 2_000_000_000], goblins: [30, 80],
+      },
+    };
     for (let seed = 0; seed < 200; seed++) {
       const rng = mulberry32(seed);
-      const common = rollUpgradeReq('common', rng, NO_RES);
-      expect(common).not.toBeNull();
-      if (common!.res === 'money') {
-        expect(common!.amount).toBeGreaterThanOrEqual(5_000);
-        expect(common!.amount).toBeLessThanOrEqual(15_000);
-      } else {
-        expect(common!.res).toBe('blood');
-        expect(common!.amount).toBeGreaterThanOrEqual(200);
-        expect(common!.amount).toBeLessThanOrEqual(800);
-      }
-      const un = rollUpgradeReq('uncommon', rng, NO_RES);
-      expect(un).not.toBeNull();
-      if (un!.res === 'money') {
-        expect(un!.amount).toBeGreaterThanOrEqual(250_000);
-        expect(un!.amount).toBeLessThanOrEqual(1_000_000);
-      } else if (un!.res === 'blood') {
-        expect(un!.amount).toBeGreaterThanOrEqual(5_000);
-        expect(un!.amount).toBeLessThanOrEqual(20_000);
-      } else {
-        // Bones can't be demanded of a boneless world; power can.
-        expect(un!.res).toBe('power');
-        expect(un!.amount).toBeGreaterThanOrEqual(1_000_000_000);
-        expect(un!.amount).toBeLessThanOrEqual(3_000_000_000);
+      for (const tier of ['common', 'uncommon'] as const) {
+        const req = rollUpgradeReq(tier, rng, NO_RES);
+        expect(req).not.toBeNull();
+        // Bones can't be demanded of a boneless world; everything else can.
+        const band = bands[tier][req!.res];
+        expect(band).toBeDefined();
+        expect(req!.amount).toBeGreaterThanOrEqual(band[0]);
+        expect(req!.amount).toBeLessThanOrEqual(band[1]);
       }
       expect(rollUpgradeReq('rare', rng, NO_RES)).toBeNull();
     }
   });
 
-  it('is never born already met: amounts lean 2–4× past a spiked holding', () => {
+  it('can demand a standing goblin population', () => {
+    let goblinDemands = 0;
+    for (let seed = 0; seed < 200; seed++) {
+      if (rollUpgradeReq('common', mulberry32(seed), NO_RES)!.res === 'goblins') goblinDemands++;
+    }
+    expect(goblinDemands).toBeGreaterThan(0);
+  });
+
+  it('is never born already met: amounts lean 1.5–2.5× past a spiked holding', () => {
     const spiked: CardResources = { money: 12, blood: 6_000, dragonBone: 0, power: 0 };
     for (let seed = 0; seed < 200; seed++) {
       const req = rollUpgradeReq('common', mulberry32(seed), spiked)!;
       expect((spiked as Record<string, number>)[req.res] ?? 0).toBeLessThan(req.amount);
       if (req.res === 'blood') {
-        expect(req.amount).toBeGreaterThanOrEqual(12_000); // ≥ 2× the spike
-        expect(req.amount).toBeLessThanOrEqual(24_000);    // ≤ 4× the spike
+        expect(req.amount).toBeGreaterThanOrEqual(9_000);  // ≥ 1.5× the spike
+        expect(req.amount).toBeLessThanOrEqual(15_000);    // ≤ 2.5× the spike
       }
     }
   });
@@ -525,7 +556,7 @@ describe('generateEvents', () => {
     const events = generateEvents(meta, null, TASK_IDS);
     expect(events.map((e) => e.tier)).toEqual(['common', 'uncommon', 'rare']);
     expect(events.map((e) => e.creatures.length)).toEqual([1, 2, 3]);
-    // The soft border's lone creature holds two commons — the first arc's
+    // The common market's lone creature holds two commons — the first arc's
     // two-for-one partner.
     expect(events[0].creatures[0].deck.length).toBe(2);
     for (const ev of events) {
@@ -600,7 +631,7 @@ describe('progression sanity', () => {
     expect(reqMet(junk)).toBe(true);
     ascendCard(meta, junk);
     expect(junk.tier).toBe('uncommon');
-    junk.resources = { money: 10_000_000, blood: 100_000, dragonBone: 200 };
+    junk.resources = { money: 10_000_000, blood: 100_000, dragonBone: 200, power: 9_999_999_999, goblins: 999 };
     expect(reqMet(junk)).toBe(true);
     ascendCard(meta, junk);
     expect(junk.tier).toBe('rare');
@@ -639,7 +670,7 @@ describe('progression sanity', () => {
 
     // 3. Ascend both halves: two uncommons — the uncommon salon's currency.
     for (const half of halves) {
-      half.resources = { money: 99_999_999, blood: 999_999, dragonBone: 999, power: 0 };
+      half.resources = { money: 99_999_999, blood: 999_999, dragonBone: 999, power: 9_999_999_999, goblins: 999 };
       expect(reqMet(half)).toBe(true);
       ascendCard(meta, half);
       expect(half.tier).toBe('uncommon');
