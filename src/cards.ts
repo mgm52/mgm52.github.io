@@ -1145,7 +1145,7 @@ function showTable(meta: CardMeta): void {
       c.tier === ev.tier || TIER_RANK[c.tier] === TIER_RANK[ev.tier] + 1);
     const btn = document.createElement('button');
     btn.type = 'button';
-    btn.className = `ct-event${locked ? ' locked' : ''}`;
+    btn.className = `ct-event t-${ev.tier}${locked ? ' locked' : ''}`;
     const n = ev.creatures.length;
     const sub = locked
       ? 'you hold nothing to trade here'
@@ -1192,7 +1192,7 @@ function showEvent(meta: CardMeta, ev: TradeEvent): void {
   stage.innerHTML = '';
   stage.className = 'event-view';
   stage.appendChild(backButton('← leave gathering', () => swapView(() => showTable(meta))));
-  stage.appendChild(div('ct-caption ct-event-title', ev.name));
+  stage.appendChild(div(`ct-caption ct-event-title t-${ev.tier}`, ev.name));
   const row = div('ct-creatures');
   ev.creatures.forEach((cr, i) => {
     const cel = div('ct-creature');

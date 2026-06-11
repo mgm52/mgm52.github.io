@@ -1869,21 +1869,6 @@
          a glance. Player-minted cards keep the plain 2px frame above.
          Patterns: 0 one thick · 1 one thin · 2 two thin · 3 two thick ·
          4 three thin · 5 one thin + one dotted. */
-      /* The creature's mark: a blank mini-card beside its name, in the same
-         frame pattern its dealt cards wear. (Declared before the .wcf rules
-         so their border-widths win the cascade.) */
-      .ct-creature-namerow { display: flex; align-items: center; justify-content: center; gap: 7px; }
-      .ct-frame-chip {
-        width: 22px; height: 30px; flex-shrink: 0;
-        position: relative;
-        background: linear-gradient(160deg, rgba(255, 255, 255, 0.9), rgba(255, 255, 255, 0.45));
-        box-shadow: 0 2px 8px rgba(88, 88, 150, 0.18);
-        border: 2px solid var(--tier-c);
-        border-radius: 6px;
-        --tier-c: #b0b0b8;
-        --fr-thick: 3px; --fr-inset: 2px; --fr-inset2: 5px;
-        --fr-r1: 3px; --fr-r2: 2px;
-      }
       .wcf-0, .wcf-3 { border-width: var(--fr-thick); }
       .wcf-1, .wcf-2, .wcf-4, .wcf-5 { border-width: 1px; }
       .wcf-2::before, .wcf-3::before, .wcf-4::before, .wcf-4::after, .wcf-5::before {
@@ -2066,18 +2051,27 @@
         max-width: 1100px;
       }
       .ct-events { display: flex; flex-wrap: wrap; gap: 14px; justify-content: center; }
-      /* Gathering doors: long panes of the same frosted glass. */
+      /* Gathering doors: long panes of the same frosted glass, each wearing
+         its tier's color as a top edge-light so the three tables read at a
+         glance (white / blue / gold — the cards' own language). */
       .ct-event {
+        --tier-c: #b6b8c6;
         min-width: 240px; padding: 14px 18px;
         display: flex; flex-direction: column; gap: 4px; align-items: center;
         background: linear-gradient(135deg, rgba(255, 255, 255, 0.6), rgba(255, 255, 255, 0.24));
         backdrop-filter: blur(12px) saturate(1.4);
         -webkit-backdrop-filter: blur(12px) saturate(1.4);
         border: 1px solid rgba(255, 255, 255, 0.8); border-radius: 14px;
+        border-top: 3px solid var(--tier-c);
         box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.9), 0 14px 34px -8px rgba(88, 88, 150, 0.25);
         cursor: pointer; color: #44444c;
         font-family: var(--font-body);
       }
+      .ct-event.t-uncommon { --tier-c: #7aa8e2; }
+      .ct-event.t-rare { --tier-c: #e2c064; }
+      /* The gathering's title carries its tier color too. */
+      .ct-event-title.t-uncommon { color: #6f9fd8; }
+      .ct-event-title.t-rare { color: #c9a43e; }
       .ct-event { transition: box-shadow 200ms ease, transform 200ms ease; }
       .ct-event:hover:not(.locked) {
         box-shadow: inset 0 1px 0 #fff, 0 18px 40px -8px rgba(88, 88, 150, 0.33), 0 0 26px rgba(168, 160, 240, 0.35);
@@ -2215,6 +2209,14 @@
       #card-stage.trade-view .ct-theirs .world-card { width: 170px; }
       #card-stage.trade-view .ct-trade-header { margin-top: auto; }
       #card-stage.trade-view .ct-theirs { margin-bottom: 18px; }
+      /* The table and gathering views get the same treatment as the trade
+         view: their content floats down to sit just above the hand, rather
+         than hugging the top with a dead zone in the middle. (Auto margins
+         collapse once the stage scrolls, so small screens are unaffected.) */
+      #card-stage.table-view > .ct-caption:first-child { margin-top: auto; }
+      #card-stage.table-view .ct-events { margin-bottom: 26px; }
+      #card-stage.event-view .ct-event-title { margin-top: auto; }
+      #card-stage.event-view .ct-wait { margin-bottom: 26px; }
       /* In the trade view the hand needs no caption (whose else would the
          bottom row be?), and its gap widens into a clean lane where the
          picked card's up-arrow lives without touching the verdict. */
