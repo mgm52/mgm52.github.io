@@ -851,7 +851,7 @@ export function challengeReq(flavor: WorldFlavor, tier: CardTier, rng: () => num
   return null;
 }
 
-export function makeCard(meta: CardMeta, tier: CardTier, rng: () => number, taskIds: string[], junk = false): WorldCard {
+export function makeCard(meta: CardMeta, tier: CardTier, rng: () => number, taskIds: string[], junk = false, usedNames?: Set<string>): WorldCard {
   const seed = Math.floor(rng() * 0xffffffff);
   // The flavor is picked here (not left to the world generator's internal
   // roll) so the challenge flavors can pin their demand below.
@@ -861,9 +861,18 @@ export function makeCard(meta: CardMeta, tier: CardTier, rng: () => number, task
     money: st.money, blood: st.blood, dragonBone: st.dragonBone,
     power: cardPower(st), goblins: st.goblins.size, income: cardIncome(st),
   };
+  // Two cards with one name at the same table read as a bug ("the molten
+  // engine" twice in one hand) — when the caller tracks names in play,
+  // reroll collisions away. Bounded: the 256-name space can't run dry at
+  // table scale, but a fallback beats a spin.
+  let name = worldName(rng);
+  if (usedNames) {
+    for (let i = 0; i < 24 && usedNames.has(name); i++) name = worldName(rng);
+    usedNames.add(name);
+  }
   return {
     id: meta.nextId++,
-    name: worldName(rng),
+    name,
     tier,
     data: encodeWorld(st),
     resources,
@@ -903,8 +912,14 @@ const CREATURE_SPECS: Record<CardTier, number[]> = {
   uncommon: [1, 2],
   rare: [1, 2, 2],
 };
-export function rollCreatures(meta: CardMeta, tier: CardTier, rng: () => number, taskIds: string[]): Creature[] {
-  const names = [...CREATURE_NAMES];
+// `namePool` lets the caller share one creature-name supply across several
+// rolls (so the three concurrent gatherings can't seat the same "old
+// neighbour" at two tables at once); `usedNames` does the same for the
+// freshly minted cards' world names. Both optional — a lone roll without
+// them keeps the old behavior.
+export type RollNames = { namePool?: string[]; usedNames?: Set<string> };
+export function rollCreatures(meta: CardMeta, tier: CardTier, rng: () => number, taskIds: string[], names_?: RollNames): Creature[] {
+  const names = names_?.namePool ?? [...CREATURE_NAMES];
   const appetites: Appetite[] = ['blood', 'rich', 'bones'];
   for (const arr of [names, appetites] as unknown[][]) {
     for (let i = arr.length - 1; i > 0; i--) {
@@ -916,7 +931,7 @@ export function rollCreatures(meta: CardMeta, tier: CardTier, rng: () => number,
     const frame = FRAME_BASE[tier] + i;
     const deck: WorldCard[] = [];
     for (let k = 0; k < deckSize; k++) {
-      const card = makeCard(meta, tier, rng, taskIds);
+      const card = makeCard(meta, tier, rng, taskIds, false, names_?.usedNames);
       card.frame = frame;
       deck.push(card);
     }
@@ -932,11 +947,16 @@ export function rollCreatures(meta: CardMeta, tier: CardTier, rng: () => number,
 
 export function generateEvents(meta: CardMeta, stolen: WorldCard | null, taskIds: string[]): TradeEvent[] {
   const rng = mulberry32((((meta.seed ?? 0) ^ (meta.nextId * 2654435761)) >>> 0));
+  // One name supply across all three tables: no creature attends two
+  // gatherings at once, and no two cards in play (the player's included)
+  // share a world name.
+  const namePool = [...CREATURE_NAMES];
+  const usedNames = new Set(meta.cards.map((c) => c.name));
   const events: TradeEvent[] = (['common', 'uncommon', 'rare'] as CardTier[]).map((tier, i) => ({
     id: i + 1,
     name: EVENT_NAMES[tier],
     tier,
-    creatures: rollCreatures(meta, tier, rng, taskIds),
+    creatures: rollCreatures(meta, tier, rng, taskIds, { namePool, usedNames }),
   }));
   // The stolen origin card waits at the rare exchange, with the creature who
   // will consider anything for it.
@@ -951,7 +971,17 @@ export function generateEvents(meta: CardMeta, stolen: WorldCard | null, taskIds
 export function regenerateEvent(meta: CardMeta, ev: TradeEvent, taskIds: string[]): void {
   const origin = ev.creatures.flatMap((c) => c.deck).find((c) => c.origin) ?? null;
   const rng = mulberry32((((meta.seed ?? 0) ^ (meta.nextId * 48271 + ev.id)) >>> 0));
-  ev.creatures = rollCreatures(meta, ev.tier, rng, taskIds);
+  // The arriving creatures avoid clashing with the rest of the realm: no
+  // name already seated at another gathering, no world name already in play
+  // there or in the player's hand.
+  const others = (meta.events ?? []).filter((e) => e.id !== ev.id);
+  const takenCreatureNames = new Set(others.flatMap((e) => e.creatures.map((c) => c.name)));
+  const namePool = CREATURE_NAMES.filter((n) => !takenCreatureNames.has(n));
+  const usedNames = new Set([
+    ...meta.cards.map((c) => c.name),
+    ...others.flatMap((e) => e.creatures.flatMap((c) => c.deck.map((d) => d.name))),
+  ]);
+  ev.creatures = rollCreatures(meta, ev.tier, rng, taskIds, { namePool, usedNames });
   if (origin) ev.creatures[0].deck.unshift(origin);
 }
 

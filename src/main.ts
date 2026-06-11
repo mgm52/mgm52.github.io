@@ -373,7 +373,11 @@ async function main() {
   // without playing the finale first. Flush the just-booted world into the
   // save slot first — entering a card stashes the slot as the outer world,
   // and on a fresh dev boot the slot is empty (see onSkipToCardRealm).
-  if (!import.meta.env.PROD && new URLSearchParams(window.location.search).has('cardrealm')) {
+  // Not while a card world is booting: the query string survives the
+  // enter-world reload, and mounting the realm here would cover the world
+  // just dived into (and re-stash it as its own outer save).
+  if (!import.meta.env.PROD && !inCardWorld
+    && new URLSearchParams(window.location.search).has('cardrealm')) {
     saveGame(state);
     maybeStartCardRealm();
   }

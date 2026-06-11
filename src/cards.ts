@@ -824,8 +824,15 @@ function buildCardEl(card: WorldCard, opts: CardElOpts = {}): HTMLElement {
     const btn = document.createElement('button');
     btn.type = 'button';
     btn.className = 'wc-enter';
-    btn.textContent = opts.enterLabel;
-    btn.addEventListener('click', (e) => { e.stopPropagation(); opts.onEnter?.(root); });
+    // A card whose world no longer decodes (corrupted storage) must say so:
+    // a live ENTER that silently does nothing reads as a dead game.
+    if (st) {
+      btn.textContent = opts.enterLabel;
+      btn.addEventListener('click', (e) => { e.stopPropagation(); opts.onEnter?.(root); });
+    } else {
+      btn.textContent = 'UNREADABLE';
+      btn.disabled = true;
+    }
     root.appendChild(btn);
   }
   if (opts.onClick) {
@@ -1236,7 +1243,9 @@ function showEvent(meta: CardMeta, ev: TradeEvent): void {
   stage.appendChild(row);
 
   // The reshuffle: let this gathering end and meet the next one — fresh
-  // creatures, fresh decks, in case nothing on this table suits.
+  // creatures, fresh decks, in case nothing on this table suits. It rides
+  // the hand layer (renderHand's topEl) rather than the stage flow, so the
+  // held cards can never stack over it on a short screen.
   const wait = document.createElement('button');
   wait.type = 'button';
   wait.className = 'ct-wait';
@@ -1250,10 +1259,9 @@ function showEvent(meta: CardMeta, ev: TradeEvent): void {
     saveMeta(meta);
     showEvent(meta, ev);
   });
-  stage.appendChild(wait);
 
   // The hand persists at the bottom, untouched by the view swap.
-  renderHand(meta, { onAscended: () => showEvent(meta, ev) });
+  renderHand(meta, { topEl: wait, onAscended: () => showEvent(meta, ev) });
 }
 
 function showTrade(meta: CardMeta, ev: TradeEvent, cr: Creature): void {
