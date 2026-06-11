@@ -24,6 +24,9 @@ export type OptionsUICallbacks = {
   // Jump straight to the start of the trading-card realm (the held white
   // screen where the first card is dealt), skipping the finale cinematic.
   onSkipToCardRealm: () => void;
+  // Wipe only the trading-realm metagame (cards, gatherings, origin
+  // snapshot) and reload — the main save survives.
+  onResetCardRealm: () => void;
 };
 
 export function setupOptionsUI(root: HTMLElement, callbacks: OptionsUICallbacks): void {
@@ -470,6 +473,7 @@ function rebuildPanel(panel: HTMLElement, callbacks: OptionsUICallbacks, refresh
     cheatButton('Cheat: trigger finale now', callbacks.onTriggerFinale),
     cheatButton('Cheat: skip to moon confrontation', callbacks.onSkipToConfront),
     cheatButton('Cheat: skip to trading realm', callbacks.onSkipToCardRealm),
+    cheatButton('Cheat: reset trading realm data', callbacks.onResetCardRealm),
   ]));
 
   // Cheats + debug shortcuts, folded into their own section like everything

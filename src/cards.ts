@@ -22,7 +22,7 @@
 
 import { playSound, type SoundName } from './audio';
 import { BUILDING_DEFS, BuildingKind, CELL, HELL, SPACE, WORLD, formatPower } from './config';
-import { getRawSave, saveGame, setRawSave } from './save';
+import { clearSave, getRawSave, saveGame, setRawSave } from './save';
 import { GameState, computePlayBounds, isInPlayCell } from './state';
 import { ALL_TASK_IDS } from './ui';
 import {
@@ -127,6 +127,17 @@ export function cardWorldActive(): boolean {
 // True while the save slot holds a world the player is only WATCHING.
 export function spectateActive(): boolean {
   try { return localStorage.getItem(SPECTATE_KEY) === '1'; } catch { return false; }
+}
+
+// Dev cheat (options cog): wipe ONLY the trading-section metagame and
+// reload. If the player is currently inside (or spectating) a card world,
+// the stashed outer save is put back first, so the main game survives the
+// wipe — the next visit to the realm starts from the goblin intro again.
+export function devResetCardRealm(): void {
+  const outer = localStorage.getItem(OUTER_KEY);
+  if (outer) setRawSave(outer);
+  clearCardData();
+  location.reload();
 }
 
 // Wipe the whole metagame — wired into the title screen's Erase Data.
@@ -282,6 +293,9 @@ async function leaveSpectate(): Promise<void> {
   if (outer) {
     setRawSave(outer);
     try { localStorage.removeItem(OUTER_KEY); } catch { /* no-op */ }
+  } else {
+    // Same guard as leaveWorld: never let a visited world become the save.
+    clearSave();
   }
   location.reload();
 }
@@ -314,6 +328,11 @@ async function leaveWorld(state: GameState): Promise<void> {
   if (outer) {
     setRawSave(outer);
     try { localStorage.removeItem(OUTER_KEY); } catch { /* no-op */ }
+  } else {
+    // No stashed outer world (a dev hop into the realm before any autosave
+    // landed). The world was serialized onto its card above — clear the
+    // slot so the card world can't masquerade as the main game.
+    clearSave();
   }
   location.reload();
 }

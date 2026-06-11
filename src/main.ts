@@ -15,8 +15,8 @@ import { ensureHellPortal, executeSkipToPreFinale, executeTaskSkip, refreshUI, s
 import { clearSave, formatRelativeTime, getLastSaveStats, loadGame, saveGame, saveGameInBackground } from './save';
 import {
   abandonCardWorldBoot, captureOriginWorld, cardWorldActive, clearCardData, consumeCardHop,
-  hasCardMeta, isCardHopInProgress, maybeStartCardRealm, resetCardRealm, setupCardWorldChrome,
-  spectateActive,
+  devResetCardRealm, hasCardMeta, isCardHopInProgress, maybeStartCardRealm, resetCardRealm,
+  setupCardWorldChrome, spectateActive,
 } from './cards';
 
 const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
@@ -370,8 +370,11 @@ async function main() {
   // the white the player just dove into.
   if (inCardWorld) setupCardWorldChrome(state, cardHop);
   // Dev shortcut: ?cardrealm mounts the trading-card realm immediately,
-  // without playing the finale first.
+  // without playing the finale first. Flush the just-booted world into the
+  // save slot first — entering a card stashes the slot as the outer world,
+  // and on a fresh dev boot the slot is empty (see onSkipToCardRealm).
   if (!import.meta.env.PROD && new URLSearchParams(window.location.search).has('cardrealm')) {
+    saveGame(state);
     maybeStartCardRealm();
   }
   // Dev cheat flag: set by the options menu's "skip to hell" button,
@@ -499,12 +502,19 @@ async function main() {
     onSkipToCardRealm: () => {
       skipIntro();
       // The realm's first card is the world the finale would have stolen —
-      // snapshot the live state to stand in for the missing ritual, then
-      // mount the realm directly over everything (it brings its own white).
+      // snapshot the live state to stand in for the missing ritual. Then
+      // flush the live world into the save slot: entering a card stashes
+      // the SLOT as the outer world, and unlike the real post-finale flow
+      // the slot here may be empty (fresh run) or a stale autosave — and an
+      // empty stash would let the card world replace the main game on the
+      // way back out. Then mount the realm over everything (it brings its
+      // own white).
       captureOriginWorld(state);
+      saveGame(state);
       resetCardRealm();
       maybeStartCardRealm();
     },
+    onResetCardRealm: () => { devResetCardRealm(); },
   });
   // "Restart in hell": this run started fresh (choice forced to 'new'), so
   // ride straight down. The flag just queues requestSkipToHell — the frame
