@@ -7,9 +7,10 @@ import { describe, expect, it } from 'vitest';
 import {
   APPETITE_LINE, CardMeta, CardResources, CardTier, MAIN_TRACK, TIER_ABOVE, TIER_RANK,
   WORLD_FLAVORS, WorldCard, appetiteAccepts, ascendCard, breakdownGives, cardPower,
-  challengeReq, creatureOpenTo, creatureTakesFor, decodeWorld, encodeWorld, generateEvents,
-  generateJunkWorld, generateWeirdWorld, makeCard, mulberry32, regenerateEvent,
-  reqMet, rollUpgradeReq, sameTierGives, sceneStructureCounts, spicyAmount, worldName,
+  cardIncome, challengeReq, creatureOpenTo, creatureTakesFor, decodeWorld, encodeWorld,
+  generateEvents, generateJunkWorld, generateWeirdWorld, makeCard, mulberry32,
+  regenerateEvent, reqMet, rollUpgradeReq, roundNice, sameTierGives,
+  sceneStructureCounts, spicyAmount, worldName,
 } from '../src/cards-core';
 import { BUILDING_DEFS, SOUL_SIGIL } from '../src/config';
 import { GameState, cellKey, isInPlayCell } from '../src/state';
@@ -365,70 +366,95 @@ describe('world serialization', () => {
 
 // ─── Cards, tiers, ascension ─────────────────────────────────────────
 
-describe('rollUpgradeReq', () => {
-  it('rolls demands inside the tier bands for a from-nothing world, and none at rare', () => {
-    const bands: Record<string, Record<string, [number, number]>> = {
-      common: { money: [3_000, 9_000], blood: [150, 500], goblins: [10, 25] },
-      uncommon: {
-        money: [120_000, 500_000], blood: [3_000, 12_000],
-        power: [1_000_000_000, 2_000_000_000], goblins: [30, 80],
-      },
+describe('rollUpgradeReq (world-derived demands)', () => {
+  it('falls back to a small tier-floor roll for a world that expresses nothing, and none at rare', () => {
+    const floors: Record<string, Record<string, number>> = {
+      common: { money: 2_000, blood: 150, goblins: 10 },
+      uncommon: { money: 100_000, blood: 2_500, goblins: 30 },
     };
     for (let seed = 0; seed < 200; seed++) {
       const rng = mulberry32(seed);
       for (const tier of ['common', 'uncommon'] as const) {
-        const req = rollUpgradeReq(tier, rng, NO_RES);
-        expect(req).not.toBeNull();
-        // Bones can't be demanded of a boneless world; everything else can.
-        const band = bands[tier][req!.res];
-        expect(band).toBeDefined();
-        expect(req!.amount).toBeGreaterThanOrEqual(band[0]);
-        expect(req!.amount).toBeLessThanOrEqual(band[1]);
+        const req = rollUpgradeReq(tier, rng, NO_RES)!;
+        // Bones can't be demanded of a boneless world; power not of an
+        // unpowered one — the fallback sticks to the universal three.
+        const floor = floors[tier][req.res];
+        expect(floor).toBeDefined();
+        expect(req.amount).toBeGreaterThanOrEqual(floor);
+        expect(req.amount).toBeLessThanOrEqual(floor * 3);
       }
       expect(rollUpgradeReq('rare', rng, NO_RES)).toBeNull();
     }
   });
 
-  it('can demand a standing goblin population', () => {
-    let goblinDemands = 0;
-    for (let seed = 0; seed < 200; seed++) {
-      if (rollUpgradeReq('common', mulberry32(seed), NO_RES)!.res === 'goblins') goblinDemands++;
-    }
-    expect(goblinDemands).toBeGreaterThan(0);
-  });
-
-  it('is never born already met: amounts lean 1.5–2.5× past a spiked holding', () => {
-    const spiked: CardResources = { money: 12, blood: 6_000, dragonBone: 0, power: 0 };
-    for (let seed = 0; seed < 200; seed++) {
-      const req = rollUpgradeReq('common', mulberry32(seed), spiked)!;
-      expect((spiked as Record<string, number>)[req.res] ?? 0).toBeLessThan(req.amount);
-      if (req.res === 'blood') {
-        expect(req.amount).toBeGreaterThanOrEqual(9_000);  // ≥ 1.5× the spike
-        expect(req.amount).toBeLessThanOrEqual(15_000);    // ≤ 2.5× the spike
-      }
+  it('demands a clean 2–4× multiple of the one thing a world expresses', () => {
+    const bloodFarm: CardResources = { money: 10, blood: 6_000, dragonBone: 0, power: 0 };
+    for (let seed = 0; seed < 100; seed++) {
+      const req = rollUpgradeReq('common', mulberry32(seed), bloodFarm)!;
+      // Blood is all this world has (Ƶ10 is beneath notice) — the demand
+      // grows it, and lands on a legible two-digit figure.
+      expect(req.res).toBe('blood');
+      expect(req.amount).toBeGreaterThanOrEqual(12_000); // ≥ 2× the holding
+      expect(req.amount).toBeLessThanOrEqual(24_000);    // ≤ 4× the holding
+      expect(req.amount).toBe(roundNice(req.amount));
     }
   });
 
-  it('leans into the spike more often than not', () => {
-    const bloodFarm: CardResources = { money: 10, blood: 700, dragonBone: 0, power: 0 };
-    let bloodDemands = 0;
-    for (let seed = 0; seed < 200; seed++) {
-      if (rollUpgradeReq('common', mulberry32(seed), bloodFarm)!.res === 'blood') bloodDemands++;
+  it("prices a money goal off the standing buildings' income (5–10 minutes, banked)", () => {
+    const farm: CardResources = { money: 0, blood: 0, dragonBone: 0, power: 0, income: 1_000 };
+    for (let seed = 0; seed < 100; seed++) {
+      const req = rollUpgradeReq('uncommon', mulberry32(seed), farm)!;
+      expect(req.res).toBe('money');
+      expect(req.amount).toBeGreaterThanOrEqual(290_000); // ~300s of income
+      expect(req.amount).toBeLessThanOrEqual(610_000);    // ~600s of income
     }
-    expect(bloodDemands).toBeGreaterThan(100);
+  });
+
+  it('asks a powered world to double its generation', () => {
+    const reactor: CardResources = { money: 0, blood: 0, dragonBone: 0, power: 1_000_000_000 };
+    for (let seed = 0; seed < 50; seed++) {
+      const req = rollUpgradeReq('uncommon', mulberry32(seed), reactor)!;
+      expect(req).toEqual({ res: 'power', amount: 2_000_000_000 });
+    }
+  });
+
+  it('asks a crowded world to double its crowd', () => {
+    const crowded: CardResources = { money: 0, blood: 0, dragonBone: 0, power: 0, goblins: 26 };
+    for (let seed = 0; seed < 50; seed++) {
+      const req = rollUpgradeReq('common', mulberry32(seed), crowded)!;
+      expect(req).toEqual({ res: 'goblins', amount: 52 });
+    }
   });
 
   it('only demands bones of a world that keeps bones', () => {
-    for (let seed = 0; seed < 200; seed++) {
-      const req = rollUpgradeReq('uncommon', mulberry32(seed), NO_RES)!;
-      expect(req.res).not.toBe('dragonBone');
-    }
-    let boneDemands = 0;
     const bony: CardResources = { money: 0, blood: 0, dragonBone: 8, power: 0 };
-    for (let seed = 0; seed < 200; seed++) {
-      if (rollUpgradeReq('uncommon', mulberry32(seed), bony)!.res === 'dragonBone') boneDemands++;
+    for (let seed = 0; seed < 50; seed++) {
+      // Bones are all this world keeps — the demand doubles them.
+      expect(rollUpgradeReq('uncommon', mulberry32(seed), bony)).toEqual({ res: 'dragonBone', amount: 16 });
+      expect(rollUpgradeReq('common', mulberry32(seed), bony)!.res).not.toBe('dragonBone');
     }
-    expect(boneDemands).toBeGreaterThan(0);
+  });
+
+  it('is never born already met, whatever mix the world holds', () => {
+    for (let seed = 0; seed < 300; seed++) {
+      const r = mulberry32(seed * 31 + 1);
+      const resources: CardResources = {
+        money: Math.floor(r() * 1_000_000),
+        blood: Math.floor(r() * 50_000),
+        dragonBone: Math.floor(r() * 20),
+        power: Math.floor(r() * 3_000_000_000),
+        goblins: Math.floor(r() * 100),
+        income: Math.floor(r() * 5_000),
+      };
+      const tier = seed % 2 === 0 ? 'common' as const : 'uncommon' as const;
+      const req = rollUpgradeReq(tier, mulberry32(seed), resources)!;
+      expect(req.amount).toBeGreaterThan((resources as Record<string, number>)[req.res] ?? 0);
+      // And never beneath the tier floor — pennies still cost a session.
+      const floor = tier === 'common'
+        ? { money: 2_000, blood: 150, dragonBone: 2, power: 300, goblins: 10 }[req.res]
+        : { money: 100_000, blood: 2_500, dragonBone: 4, power: 1_000_000_000, goblins: 30 }[req.res];
+      expect(req.amount).toBeGreaterThanOrEqual(floor!);
+    }
   });
 });
 
@@ -486,6 +512,21 @@ describe('makeCard', () => {
         if (out > 0) potential += out;
       }
       expect(c.resources.power).toBe(potential);
+    }
+  });
+
+  it("records the standing buildings' income potential on the card", () => {
+    const meta = freshMeta();
+    for (let seed = 0; seed < 8; seed++) {
+      const c = makeCard(meta, 'uncommon', mulberry32(seed), TASK_IDS);
+      const st = decodeWorld(c.data)!;
+      expect(c.resources.income).toBe(cardIncome(st));
+      let potential = 0;
+      for (const b of st.buildings.values()) potential += BUILDING_DEFS[b.kind].income;
+      for (const sb of st.spaceBuildings.values()) {
+        if (!st.buildings.has(sb.id)) potential += BUILDING_DEFS[sb.building.kind].income;
+      }
+      expect(c.resources.income).toBe(potential);
     }
   });
 

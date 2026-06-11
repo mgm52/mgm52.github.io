@@ -28,7 +28,7 @@ import { ALL_TASK_IDS } from './ui';
 import {
   APPETITE_LINE, CardMeta, CardResources, CardTier, Creature, FRAME_BASE, TIER_ABOVE,
   TIER_RANK, TradeEvent, UpgradeReq, WorldCard, appetiteAccepts, ascendCard,
-  cardPower, decodeWorld, encodeWorld, generateEvents,
+  cardIncome, cardPower, decodeWorld, encodeWorld, generateEvents,
   makeCard, mulberry32, regenerateEvent, reqMet, sceneStructureCounts,
 } from './cards-core';
 
@@ -161,7 +161,7 @@ export function captureOriginWorld(state: GameState): void {
       data: encodeWorld(state),
       resources: {
         money: state.money, blood: state.blood, dragonBone: state.dragonBone,
-        power: cardPower(state), goblins: state.goblins.size,
+        power: cardPower(state), goblins: state.goblins.size, income: cardIncome(state),
       },
     };
     localStorage.setItem(ORIGIN_KEY, JSON.stringify(payload));
@@ -319,7 +319,7 @@ async function leaveWorld(state: GameState): Promise<void> {
     card.data = encodeWorld(state);
     card.resources = {
       money: state.money, blood: state.blood, dragonBone: state.dragonBone,
-      power: cardPower(state), goblins: state.goblins.size,
+      power: cardPower(state), goblins: state.goblins.size, income: cardIncome(state),
     };
   }
   meta.activeCardId = null;
@@ -710,7 +710,11 @@ function resourcesEl(r: CardResources): HTMLElement {
   };
   const power = r.power ?? 0;
   const goblins = r.goblins ?? 0;
+  const income = r.income ?? 0;
   if (r.money > 0) add('res-cash', `Ƶ ${fmt(r.money)}`, r.money >= 500_000);
+  // The standing buildings' earning potential — the basis of the "bank what
+  // your buildings can make" demands, so it belongs on the face of the card.
+  if (income > 0) add('res-cash', `Ƶ ${fmt(income)}/s`, income >= 1_000);
   if (r.blood > 0) add('res-blood', `${fmt(r.blood)} blood`, r.blood >= 128);
   if (power > 0) add('res-power', formatPower(power), power >= 1_000_000_000);
   if (r.dragonBone > 0) add('res-bones', `${fmt(r.dragonBone)} bones`, r.dragonBone >= 5);

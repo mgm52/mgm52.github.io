@@ -31,9 +31,11 @@ export type UpgradeReq = { res: 'money' | 'blood' | 'dragonBone' | 'power' | 'go
 
 // The headline numbers written on a card. `power` is the world's last
 // measured production in watts (0 until its buildings have actually run);
-// `goblins` is the standing population. Both optional for metas saved
-// before they existed.
-export type CardResources = { money: number; blood: number; dragonBone: number; power?: number; goblins?: number };
+// `goblins` is the standing population; `income` is the Ƶ/sec the standing
+// buildings COULD earn if all woken — the basis for "bank what your
+// buildings can make" demands. All but the first three are optional for
+// metas saved before they existed.
+export type CardResources = { money: number; blood: number; dragonBone: number; power?: number; goblins?: number; income?: number };
 
 export type WorldCard = {
   id: number;
@@ -670,6 +672,22 @@ export function cardPower(st: GameState): number {
   return potential;
 }
 
+// The income number written on a card: what the standing buildings COULD
+// earn per second if every one of them were woken. Dormancy is ignored on
+// purpose — this measures the world's potential, and it's the basis for the
+// "bank what your buildings can make" ascension demands.
+export function cardIncome(st: GameState): number {
+  let inc = 0;
+  for (const b of st.buildings.values()) {
+    inc += BUILDING_DEFS[b.kind].income;
+  }
+  for (const sb of st.spaceBuildings.values()) {
+    if (st.buildings.has(sb.id)) continue;
+    inc += BUILDING_DEFS[sb.building.kind].income;
+  }
+  return inc;
+}
+
 // Per-scene structure counts, driving each preview pane's treatment on the
 // card: a pane with nothing built fades; one holding three or more
 // structures glows. Walls are scenery, not development; hell counts what
@@ -690,18 +708,11 @@ export function sceneStructureCounts(st: GameState): { space: number; earth: num
 
 // ─── Card construction ───────────────────────────────────────────────
 
-// Roll a card's ascension demand for its CURRENT tier, shaped by what the
-// world already holds. The demand leans INTO a world's spike — a blood farm
-// is asked for more blood, a mint for more cash — at 2–4× its current
-// holding, so a freshly-rolled card is never born already met and growing a
-// world means growing its identity. Spike-blind floors keep the climb a real
-// session even in a world that starts from nothing. Bones can only be
-// demanded of a world that already keeps bones; power only at uncommon
-// (reactors are mid-game toys).
-// Demands with personality: half the time the rolled amount snaps to a
+// Demands with personality: half the time a band-rolled amount snaps to a
 // "charismatic" figure inside the band — a power of two, a repdigit, a
 // clean single-digit round — so a card asks for Ƶ8,192 or 6,666 blood
-// instead of a beige 7,341.
+// instead of a beige 7,341. (Used by the from-nothing fallback below and
+// the challenge flavors' pinned demands.)
 export function spicyAmount(lo: number, hi: number, rng: () => number): number {
   const plain = lo + Math.floor(rng() * (hi - lo + 1));
   if (rng() < 0.5) return plain;
@@ -724,36 +735,72 @@ export function spicyAmount(lo: number, hi: number, rng: () => number): number {
   return cands.length > 0 ? cands[Math.floor(rng() * cands.length)] : plain;
 }
 
+// Round to a legible figure (two significant digits) so a world-derived
+// demand reads like a price tag, not a checksum: 3× Ƶ4,187 asks for
+// Ƶ13,000, not Ƶ12,561.
+export function roundNice(n: number): number {
+  if (n <= 10) return Math.ceil(n);
+  const mag = 10 ** (Math.floor(Math.log10(n)) - 1);
+  return Math.round(n / mag) * mag;
+}
+
+// Spike-blind floors: whatever the world expresses, an ascent never costs
+// less than a real session at its tier.
+const REQ_FLOORS: Record<'common' | 'uncommon', Record<UpgradeReq['res'], number>> = {
+  common: { money: 2_000, blood: 150, dragonBone: 2, power: 300, goblins: 10 },
+  uncommon: { money: 100_000, blood: 2_500, dragonBone: 4, power: 1_000_000_000, goblins: 30 },
+};
+
+// Roll a card's ascension demand for its CURRENT tier, read off the world
+// itself rather than an abstract band. Every goal asks the world to grow
+// what it already is:
+//  - a clean 2–4× multiple of a resource it actually holds (money / blood /
+//    bones — bones only at uncommon, where the dragon economy exists)
+//  - its standing crowd, doubled (a population, not a stockpile)
+//  - 5–10 minutes of its standing buildings' income, banked
+//  - its standing generators' output, doubled
+// Amounts round to legible two-digit figures and never sink below the tier
+// floor, so a world holding pennies still asks a real climb of you. Only a
+// world that expresses nothing at all falls back to a small tier-floor roll.
 export function rollUpgradeReq(tier: CardTier, rng: () => number, resources: CardResources): UpgradeReq | null {
-  const ri = (a: number, b: number) => a + Math.floor(rng() * (b - a + 1));
   if (tier === 'rare') return null;
-  // The bands sit low enough that a demand reads as a session's goal, not a
-  // grind: roughly "one good idea, played out" per tier.
-  const bands: Partial<Record<UpgradeReq['res'], [number, number]>> = tier === 'common'
-    ? { money: [3_000, 9_000], blood: [150, 500], goblins: [10, 25] }
-    : { money: [120_000, 500_000], blood: [3_000, 12_000], dragonBone: [3, 8], power: [1_000_000_000, 2_000_000_000], goblins: [30, 80] };
-  const candidates: UpgradeReq['res'][] = ['money', 'blood', 'goblins'];
-  if (tier === 'uncommon') {
-    if (resources.dragonBone > 0 && rng() < 0.5) candidates.push('dragonBone');
-    if (rng() < 0.25) candidates.push('power');
+  const floors = REQ_FLOORS[tier];
+  const power = resources.power ?? 0;
+  const goblins = resources.goblins ?? 0;
+  const income = resources.income ?? 0;
+  const mult = () => [2, 2, 3, 3, 4][Math.floor(rng() * 5)];
+  const goals: (() => UpgradeReq)[] = [];
+  if (resources.money >= 20) {
+    goals.push(() => ({ res: 'money', amount: roundNice(resources.money * mult()) }));
   }
-  // Bias toward the world's dominant holding (relative to its band ceiling).
-  let dominant: UpgradeReq['res'] = 'money';
-  let dominance = -1;
-  for (const res of candidates) {
-    if (res === 'power') continue; // production is measured later, not held
-    const [, hi] = bands[res]!;
-    const score = (resources[res] ?? 0) / hi;
-    if (score > dominance) { dominance = score; dominant = res; }
+  if (income > 0) {
+    goals.push(() => ({ res: 'money', amount: roundNice(income * (300 + Math.floor(rng() * 301))) }));
   }
-  const res = dominance > 0 && rng() < 0.65 ? dominant : candidates[Math.floor(rng() * candidates.length)];
-  const [lo, hi] = bands[res]!;
-  let amount = spicyAmount(lo, hi, rng);
-  // Lean past the spike: never born met, but only 1.5–2.5× the current
-  // holding — the last stretch of a climb, not a whole second climb.
-  const have = resources[res] ?? 0;
-  if (have * 1.5 > amount) amount = Math.ceil(have * (1.5 + rng()));
-  return { res, amount };
+  if (resources.blood >= 5) {
+    goals.push(() => ({ res: 'blood', amount: roundNice(resources.blood * mult()) }));
+  }
+  if (tier === 'uncommon' && resources.dragonBone >= 1) {
+    goals.push(() => ({ res: 'dragonBone', amount: resources.dragonBone * 2 }));
+  }
+  if (goblins >= 2) {
+    goals.push(() => ({ res: 'goblins', amount: goblins * 2 }));
+  }
+  if (power > 0) {
+    goals.push(() => ({ res: 'power', amount: roundNice(power * 2) }));
+  }
+  const req: UpgradeReq = goals.length > 0
+    ? goals[Math.floor(rng() * goals.length)]()
+    : (() => {
+        // Nothing to read off the world: a small roll off the tier floor.
+        const res = (['money', 'blood', 'goblins'] as const)[Math.floor(rng() * 3)];
+        return { res, amount: spicyAmount(floors[res], floors[res] * 3, rng) };
+      })();
+  // Floor it, then make sure it isn't already (nearly) met — a derived goal
+  // like banked income can land under a fat existing holding.
+  req.amount = Math.max(req.amount, floors[req.res]);
+  const have = resources[req.res] ?? 0;
+  if (have * 1.5 > req.amount) req.amount = roundNice(have * 2);
+  return req;
 }
 
 export function reqMet(card: WorldCard): boolean {
@@ -812,7 +859,7 @@ export function makeCard(meta: CardMeta, tier: CardTier, rng: () => number, task
   const st = junk ? generateJunkWorld(seed, taskIds) : generateWeirdWorld(seed, tier, taskIds, flavor);
   const resources: CardResources = {
     money: st.money, blood: st.blood, dragonBone: st.dragonBone,
-    power: cardPower(st), goblins: st.goblins.size,
+    power: cardPower(st), goblins: st.goblins.size, income: cardIncome(st),
   };
   return {
     id: meta.nextId++,
