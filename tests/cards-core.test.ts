@@ -638,6 +638,35 @@ describe('generateEvents', () => {
     expect(events[2].creatures.map((c) => c.frame)).toEqual([3, 4, 5]);
   });
 
+  it('deals no duplicate names: world names unique across the tables (and clear of the hand), creatures seated once', () => {
+    for (let seed = 1; seed <= 12; seed++) {
+      const meta = { ...freshMeta(), seed };
+      meta.cards = [card('common', { name: 'the damp shelf' })];
+      const events = generateEvents(meta, null, TASK_IDS);
+      const worldNames = events.flatMap((e) => e.creatures.flatMap((c) => c.deck.map((d) => d.name)));
+      expect(new Set(worldNames).size).toBe(worldNames.length);
+      expect(worldNames).not.toContain('the damp shelf');
+      const creatureNames = events.flatMap((e) => e.creatures.map((c) => c.name));
+      expect(new Set(creatureNames).size).toBe(creatureNames.length);
+    }
+  });
+
+  it('reshuffles keep clear of the names still seated at the other gatherings', () => {
+    for (let seed = 1; seed <= 12; seed++) {
+      const meta = { ...freshMeta(), seed };
+      meta.events = generateEvents(meta, null, TASK_IDS);
+      const ev = meta.events[1];
+      regenerateEvent(meta, ev, TASK_IDS);
+      const others = meta.events.filter((e) => e.id !== ev.id);
+      const otherCreatures = new Set(others.flatMap((e) => e.creatures.map((c) => c.name)));
+      const otherWorlds = new Set(others.flatMap((e) => e.creatures.flatMap((c) => c.deck.map((d) => d.name))));
+      for (const cr of ev.creatures) {
+        expect(otherCreatures.has(cr.name)).toBe(false);
+        for (const d of cr.deck) expect(otherWorlds.has(d.name)).toBe(false);
+      }
+    }
+  });
+
   it('keeps the origin card through reshuffles and discards the rest', () => {
     const meta = freshMeta();
     const stolen = card('rare', { id: 1, origin: true });

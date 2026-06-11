@@ -1674,14 +1674,17 @@
       #card-stage.intro-view > .world-card { margin: auto; }
       /* While the goblin holds court, the dealt card dips toward the bottom
          of the screen so the dialogue line never sits on top of it — and
-         dips further (dimmed) while the YES/NO choice is up. The :not()
-         guards keep the deal-in and taken fly-out transforms in charge of
-         their own moments (this ID-weighted rule would beat them). */
+         dips further (dimmed) while the YES/NO choice is up. The dips are
+         sized for the worst case: a tall three-pane card on a ~720px-high
+         viewport, with the speech line settled at 36vh (and the choice row
+         at 47vh) — the card's head must clear both. The :not() guards keep
+         the deal-in and taken fly-out transforms in charge of their own
+         moments (this ID-weighted rule would beat them). */
       #card-realm.goblin-in #card-stage.intro-view > .world-card:not(.taken):not(.deal-from-top) {
-        transform: translateY(16vh);
+        transform: translateY(26vh);
       }
       #card-realm.goblin-in.show-choice #card-stage.intro-view > .world-card:not(.taken):not(.deal-from-top) {
-        transform: translateY(30vh) scale(0.95);
+        transform: translateY(36vh) scale(0.95);
         opacity: 0.85;
       }
       /* The between-gatherings blink (cards.ts holds it for ~700ms). */
@@ -2008,10 +2011,13 @@
         box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.9), 0 3px 12px rgba(88, 88, 150, 0.16);
         transition: box-shadow 150ms ease, border-color 150ms ease, background 150ms ease;
       }
-      .wc-enter:hover, .wc-ascend:hover {
+      .wc-enter:hover:not(:disabled), .wc-ascend:hover:not(:disabled) {
         background: rgba(255, 255, 255, 0.78);
         box-shadow: inset 0 1px 0 #fff, 0 4px 16px rgba(88, 88, 150, 0.24), 0 0 16px rgba(168, 160, 240, 0.35);
       }
+      /* A card whose world no longer decodes: panes already render blank,
+         and its dead button says why instead of swallowing clicks. */
+      .wc-enter:disabled { opacity: 0.45; cursor: default; }
       /* The progression affordance — a soft pulse draws the eye when a card
          is ready to rise. */
       .wc-ascend {
@@ -2082,6 +2088,10 @@
       .ct-event-sub { font-family: var(--font-mono); font-size: 13px; color: #9a9aa2; }
       .ct-back {
         align-self: flex-start;
+        /* Sticky within the scrolling stage: a gathering or trade that
+           overflows a short screen scrolls, and the way back shouldn't
+           scroll away with it. */
+        position: sticky; top: 0; z-index: 5;
         background: none; border: none; cursor: pointer;
         color: #8a8aa0; font-family: var(--font-display); font-size: 13px;
         letter-spacing: 0.1em; padding: 6px 8px;
@@ -2189,6 +2199,11 @@
       }
       #card-hand .ct-caption { margin-top: 0; }
       #card-hand .ct-cards { pointer-events: auto; }
+      /* The gathering's reshuffle button rides the hand layer (cards.ts
+         mounts it as the hand's topEl): in the stage flow the hand's own
+         cards could cover it — two held cards were enough to wall it off
+         entirely on a 720px-high screen. */
+      #card-hand .ct-wait { pointer-events: auto; margin-top: 0; }
       /* The hand runs a size down from the stage's cards, so the bottom
          strip stays shallow and the trader's row keeps the limelight. */
       #card-hand .world-card { width: 150px; }
@@ -2210,7 +2225,7 @@
       #card-stage.table-view > .ct-caption:first-child { margin-top: auto; }
       #card-stage.table-view .ct-events { margin-bottom: 26px; }
       #card-stage.event-view .ct-event-title { margin-top: auto; }
-      #card-stage.event-view .ct-wait { margin-bottom: 26px; }
+      #card-stage.event-view .ct-creatures { margin-bottom: 26px; }
       /* In the trade view the hand needs no caption (whose else would the
          bottom row be?), and its gap widens into a clean lane where the
          picked card's up-arrow lives without touching the verdict. */
@@ -2229,7 +2244,16 @@
         transition: opacity 200ms ease, background 200ms ease, border-color 200ms ease;
       }
       .ct-trade-verdict.show { opacity: 1; }
-      .ct-trade-verdict.show:not(.ok) { color: #b85055; cursor: default; }
+      /* The refusals get the same frosted pill as the green verdict — the
+         button floats over the trader's card row on short screens, and bare
+         red text over a busy card face is unreadable. */
+      .ct-trade-verdict.show:not(.ok) {
+        color: #b85055; cursor: default;
+        background: rgba(255, 255, 255, 0.55);
+        backdrop-filter: blur(10px) saturate(1.4);
+        -webkit-backdrop-filter: blur(10px) saturate(1.4);
+        border-color: rgba(184, 80, 85, 0.35);
+      }
       .ct-trade-verdict.show.ok {
         pointer-events: auto; cursor: pointer;
         color: #2e7a40;
@@ -2324,8 +2348,11 @@
 
       /* ───────── Inside a card world ─────────
          White border vignette + the big white LEAVE WORLD button — the white
-         marks what is NOT of this world (cards.ts wires the button). */
-      body.card-world::after {
+         marks what is NOT of this world (cards.ts wires the button). On
+         ::before, NOT ::after: body::after is the film-grain overlay (whose
+         opacity: 0.06 + mix-blend-mode: overlay would render the border
+         invisible if the box-shadow merely piggybacked on it). */
+      body.card-world::before {
         content: ""; position: fixed; inset: 0; pointer-events: none; z-index: 99990;
         box-shadow:
           inset 0 0 0 5px rgba(255, 255, 255, 0.96),
