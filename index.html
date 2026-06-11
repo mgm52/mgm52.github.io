@@ -1966,9 +1966,9 @@
         transition: transform 900ms cubic-bezier(0.5, 0, 0.8, 0.4), opacity 800ms ease;
       }
       .wc-head { display: flex; justify-content: space-between; align-items: baseline; gap: 8px; margin-bottom: 6px; }
-      .wc-name { font-family: var(--font-display); font-size: 14px; letter-spacing: 0.04em; }
+      .wc-name { font-family: var(--font-display); font-size: 16px; letter-spacing: 0.04em; }
       .wc-tier {
-        font-family: var(--font-mono); font-size: 11px; color: var(--tier-c);
+        font-family: var(--font-mono); font-size: 12px; color: var(--tier-c);
         text-transform: uppercase; letter-spacing: 0.12em;
       }
       .wc-prevs { display: flex; flex-direction: column; gap: 3px; }
@@ -1998,8 +1998,8 @@
         50% { box-shadow: 0 0 13px 2px rgba(var(--pane-glow), 0.6); }
       }
       .wc-res {
-        margin-top: 7px; font-family: var(--font-mono); font-size: 11px;
-        display: flex; flex-wrap: wrap; gap: 3px 9px;
+        margin-top: 7px; font-family: var(--font-mono); font-size: 13.5px;
+        display: flex; flex-wrap: wrap; gap: 3px 10px;
         justify-content: center;
       }
       .wc-res .strong { font-weight: 700; }
@@ -2009,7 +2009,7 @@
       .wc-res .res-bones { color: #84848c; }
       .wc-res .res-nothing { color: #b6b6bc; font-style: italic; }
       .wc-req {
-        margin-top: 3px; font-family: var(--font-mono); font-size: 11px;
+        margin-top: 3px; font-family: var(--font-mono); font-size: 13px;
         color: #9a9aa2; text-align: center;
       }
       .wc-req.met { color: #3f8f4f; font-weight: bold; }
@@ -2017,7 +2017,7 @@
         width: 100%; margin-top: 8px;
         background: rgba(255, 255, 255, 0.45); color: #45455a;
         border: 1px solid rgba(255, 255, 255, 0.85); border-radius: 12px;
-        font-family: var(--font-display); font-size: 12px; letter-spacing: 0.14em;
+        font-family: var(--font-display); font-size: 13.5px; letter-spacing: 0.14em;
         padding: 7px 4px; cursor: pointer;
         box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.9), 0 3px 12px rgba(88, 88, 150, 0.16);
         transition: box-shadow 150ms ease, border-color 150ms ease, background 150ms ease;
@@ -2089,8 +2089,8 @@
         25% { transform: translateX(-6px); }
         75% { transform: translateX(6px); }
       }
-      .ct-event-name { font-family: var(--font-display); font-size: 14px; letter-spacing: 0.08em; }
-      .ct-event-sub { font-family: var(--font-mono); font-size: 11px; color: #9a9aa2; }
+      .ct-event-name { font-family: var(--font-display); font-size: 18px; letter-spacing: 0.08em; }
+      .ct-event-sub { font-family: var(--font-mono); font-size: 13px; color: #9a9aa2; }
       .ct-back {
         align-self: flex-start;
         background: none; border: none; cursor: pointer;
@@ -2150,16 +2150,117 @@
         0%, 100% { filter: brightness(0) invert(0.83) drop-shadow(0 4px 12px rgba(168, 150, 235, 0.5)); }
         50%      { filter: brightness(0) invert(0.86) drop-shadow(0 4px 20px rgba(130, 180, 240, 0.8)); }
       }
-      .ct-creature-name { font-family: var(--font-display); font-size: 14px; color: #44444c; letter-spacing: 0.06em; }
-      .ct-creature-line, .ct-creature-deck { font-family: var(--font-mono); font-size: 11px; color: #9a9aa2; }
+      .ct-creature-name { font-family: var(--font-display); font-size: 16px; color: #44444c; letter-spacing: 0.06em; }
+      .ct-creature-line, .ct-creature-deck { font-family: var(--font-mono); font-size: 13px; color: #9a9aa2; }
+      /* The creature's hand at a glance: one blank mini-card per held world,
+         tier-colored (white common / blue uncommon / gold rare); the stolen
+         origin world keeps its gold star. */
+      .ct-creature-hand { display: flex; gap: 5px; margin-top: 4px; min-height: 22px; align-items: center; }
+      .ct-hand-mini {
+        width: 15px; height: 21px; border-radius: 3px;
+        background: linear-gradient(160deg, rgba(255, 255, 255, 0.95), rgba(255, 255, 255, 0.55));
+        border: 1.5px solid #c9cbd6;
+        box-shadow: 0 1px 4px rgba(88, 88, 150, 0.22);
+        font-size: 9px; line-height: 19px; text-align: center; color: #a8842a;
+      }
+      .ct-hand-mini.t-uncommon { border-color: #7aa8e2; box-shadow: 0 1px 4px rgba(122, 168, 226, 0.45); }
+      .ct-hand-mini.t-rare { border-color: #e2c064; box-shadow: 0 1px 5px rgba(226, 192, 100, 0.55); }
+      .ct-hand-mini.origin { border-color: #e2b85a; }
       .ct-trade-header { display: flex; align-items: center; gap: 14px; margin-top: 4px; }
       .ct-trade-header .ct-creature-sprite { --csize: 84px; }
       .ct-trade-headtext { display: flex; flex-direction: column; gap: 3px; text-align: left; }
       .ct-trade-line {
         font-family: var(--font-dialogue, var(--font-display));
-        font-size: 15px; color: #6a6a72; min-height: 1.3em;
+        font-size: 17px; color: #6a6a72; min-height: 1.3em;
+      }
+      /* The typing caret, while a trader line is still arriving. */
+      .ct-trade-line.typing::after {
+        content: "▍"; display: inline-block; margin-left: 3px;
+        color: #8a8a94; opacity: 0.8;
+        animation: intro-caret 0.9s steps(2, end) infinite;
       }
       .ct-theirs, .ct-yours { min-height: 40px; }
+      /* The player's hand: its own layer pinned to the realm's bottom edge,
+         outside #card-stage, so view swaps never fade or re-deal it. Empty
+         space passes clicks through to the stage beneath. */
+      #card-hand {
+        position: absolute; left: 0; right: 0; bottom: 0;
+        display: flex; flex-direction: column; align-items: center; gap: 8px;
+        padding: 8px 16px 14px;
+        pointer-events: none;
+        z-index: 3;
+      }
+      #card-hand .ct-caption { margin-top: 0; }
+      #card-hand .ct-cards { pointer-events: auto; }
+      /* The hand runs a size down from the stage's cards, so the bottom
+         strip stays shallow and the trader's row keeps the limelight. */
+      #card-hand .world-card { width: 150px; }
+      #card-hand .ct-trade-verdict { margin-top: 0; min-height: 38px; padding: 6px 22px; }
+      /* The trade view packs two card rows on one screen — trim the air,
+         run the trader's cards a size down too, and keep the header tight,
+         so the exchange arrows get a clear channel between the rows. */
+      #card-stage.trade-view { padding-top: 2vh; gap: 6px; }
+      #card-stage.trade-view .ct-theirs .world-card { width: 170px; }
+      #card-stage.trade-view .ct-trade-header .ct-creature-sprite { --csize: 60px; }
+      /* The trade verdict: blank until any of the trader's cards are picked,
+         then a red "✗ no trade" while the basket doesn't balance — flipping
+         to a green, clickable "✓ trade" once it does. */
+      .ct-trade-verdict {
+        margin-top: 10px;
+        min-height: 44px; padding: 9px 26px;
+        border-radius: 12px; border: 1px solid transparent;
+        background: none;
+        font-family: var(--font-display); font-size: 16px; letter-spacing: 0.14em;
+        opacity: 0; pointer-events: none;
+        transition: opacity 200ms ease, background 200ms ease, border-color 200ms ease;
+      }
+      .ct-trade-verdict.show { opacity: 1; }
+      .ct-trade-verdict.show:not(.ok) { color: #b85055; cursor: default; }
+      .ct-trade-verdict.show.ok {
+        pointer-events: auto; cursor: pointer;
+        color: #2e7a40;
+        background: rgba(255, 255, 255, 0.55);
+        backdrop-filter: blur(10px) saturate(1.4);
+        -webkit-backdrop-filter: blur(10px) saturate(1.4);
+        border-color: rgba(110, 190, 130, 0.8);
+        animation: ctv-pulse 1.6s ease-in-out infinite;
+      }
+      .ct-trade-verdict.show.ok:hover { background: rgba(255, 255, 255, 0.8); }
+      @keyframes ctv-pulse {
+        0%, 100% { box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.9), 0 0 14px rgba(80, 190, 110, 0.25); }
+        50% { box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.9), 0 0 26px 4px rgba(80, 190, 110, 0.5); }
+      }
+      /* ── The exchange arrows (cards.ts showTrade) ──
+         An SVG sheet over the whole trade stage. Each arrow is a glow line +
+         a gradient core line + two triangular heads, re-aimed every frame so
+         it rides the cards' levitation. Grey while merely hovered; a picked
+         card turns its half of every arrow white. */
+      .ct-arrows {
+        position: absolute; top: 0; left: 0;
+        pointer-events: none; overflow: visible;
+        z-index: 2;
+      }
+      .ct-arrow { animation: cta-fade 240ms ease backwards; }
+      @keyframes cta-fade { from { opacity: 0; } }
+      .ct-arrow .cta-core {
+        stroke-width: 4; fill: none;
+        stroke-dasharray: 1; stroke-dashoffset: 0;
+        animation: cta-draw 420ms cubic-bezier(0.3, 0.8, 0.3, 1) backwards;
+      }
+      @keyframes cta-draw { from { stroke-dashoffset: 1; } }
+      .ct-arrow .cta-glow {
+        stroke: rgba(255, 255, 255, 0.55); stroke-width: 11; fill: none;
+        stroke-linecap: round;
+      }
+      .ct-arrow .cta-head { animation: cta-fade 200ms ease 180ms backwards; }
+      .ct-arrow.lit .cta-core { stroke-width: 5; }
+      .ct-arrow.lit .cta-glow { animation: cta-pulse 1.6s ease-in-out infinite; }
+      @keyframes cta-pulse {
+        0%, 100% { stroke: rgba(255, 255, 255, 0.4); }
+        50% { stroke: rgba(255, 255, 255, 0.85); }
+      }
+      .ct-arrow.hot .cta-core { stroke-width: 6; }
+      .ct-arrow.hot .cta-glow { stroke: rgba(255, 255, 255, 0.95); }
       /* Short viewports: the intro card is px-sized while the goblin/speech
          are vh-sized, so shrink the card before they can meet. */
       @media (max-height: 700px) {
@@ -2237,6 +2338,36 @@
         box-shadow: inset 0 1px 0 #fff, 0 6px 26px rgba(255, 255, 255, 0.95), 0 5px 18px rgba(40, 40, 70, 0.38);
       }
       #leave-world-btn:disabled { opacity: 0.6; cursor: default; }
+      /* The card's ascension goal, floating just above the LEAVE WORLD
+         button — what this world is being grown toward, live. Green once
+         the demand is met (ascension happens back on the table). */
+      #world-goal {
+        position: fixed; bottom: 64px; left: 50%; transform: translateX(-50%);
+        z-index: 99991;
+        font-family: var(--font-mono); font-size: 13px; color: #4a4a56;
+        background: rgba(255, 255, 255, 0.6);
+        backdrop-filter: blur(8px) saturate(1.3);
+        -webkit-backdrop-filter: blur(8px) saturate(1.3);
+        border: 1px solid rgba(255, 255, 255, 0.85); border-radius: 9px;
+        padding: 5px 12px;
+        white-space: nowrap;
+        pointer-events: none;
+      }
+      #world-goal.met {
+        color: #2e7a40; font-weight: bold;
+        border-color: rgba(110, 190, 130, 0.8);
+        box-shadow: 0 0 16px rgba(80, 190, 110, 0.35);
+      }
+      /* ── Spectating a trader's card world ──
+         Look, don't touch: time is frozen (main.ts skips ticks on this
+         class) and everything that could mutate the world disappears —
+         summon/build/ritual panels, the task line, and the info panel's
+         destroy/kill/unseat buttons. Selection and camera stay live, so the
+         world can still be inspected; input.ts drops right-click orders. */
+      body.spectate-hold #panel-summon,
+      body.spectate-hold #panel-build,
+      body.spectate-hold #task-text,
+      body.spectate-hold .info-destroy { display: none !important; }
       /* Stacked portrait layout: the bottom of the screen is the sidebar
          tray, so the white exit sits just above it (the tray caps at 44dvh —
          see the portrait media block below). */
@@ -2244,6 +2375,10 @@
         #leave-world-btn {
           bottom: calc(44dvh + 12px);
           font-size: 12px; padding: 9px 18px;
+        }
+        #world-goal {
+          bottom: calc(44dvh + 56px);
+          font-size: 11px;
         }
       }
 
@@ -2528,6 +2663,10 @@
         <div class="cd-motes cd-m2"></div>
       </div>
       <div id="card-stage"></div>
+      <!-- The player's hand: pinned to the bottom of the realm, OUTSIDE the
+           stage, so view swaps (table ↔ gathering ↔ trade) never re-deal or
+           fade the cards the player is holding. cards.ts renderHand owns it. -->
+      <div id="card-hand"></div>
       <div id="card-goblin"></div>
       <div id="card-speech"></div>
       <div id="card-clickwall"></div>
@@ -2544,7 +2683,9 @@
         </button>
       </div>
     </div>
-    <!-- Inside a card world: the white way back out (shown by cards.ts). -->
+    <!-- Inside a card world: the white way back out (shown by cards.ts),
+         with the card's ascension goal floating just above it. -->
+    <div id="world-goal" style="display:none"></div>
     <button id="leave-world-btn" type="button" style="display:none">LEAVE WORLD</button>
     <script type="module" src="/src/main.ts"></script>
   </body>

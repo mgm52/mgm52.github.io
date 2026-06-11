@@ -38,6 +38,9 @@ function demonManifest(): Plugin {
 
 export default defineConfig({
   base: './',
-  server: { port: 5173, strictPort: false },
+  // VITE_NO_HMR=1 turns off hot-module reload entirely — the page never
+  // auto-refreshes while files change underneath it; reload by hand to pick
+  // up new code. Handy while testing live alongside an editing session.
+  server: { port: 5173, strictPort: false, hmr: process.env.VITE_NO_HMR ? false : undefined },
   plugins: [demonManifest()],
 });

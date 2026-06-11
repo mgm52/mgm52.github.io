@@ -1,4 +1,4 @@
-// Screenshot tour of the trading-card realm, driven through the real app on
+﻿// Screenshot tour of the trading-card realm, driven through the real app on
 // the vite dev server (npm run dev -- --port 5179). Walks the goblin intro
 // (clicking through typed lines), the table, a gathering, a trade view, and
 // the enter/leave-world transitions, saving PNGs to screenshots/card-realm.
@@ -67,7 +67,7 @@ for (let i = 0; i < 40; i++) {
   if (await page.$('#card-realm.click-armed')) await page.click('#card-clickwall');
   await sleep(600);
 }
-await page.waitForSelector('#card-stage.table-view .world-card', { timeout: 60000 });
+await page.waitForSelector('#card-hand .world-card', { timeout: 60000 });
 await sleep(900);
 await shot('4-table');
 
@@ -77,25 +77,29 @@ await page.waitForSelector('.ct-creature', { timeout: 10000 });
 await sleep(900);
 await shot('5-gathering');
 
-// 6. Talk to the first creature, then offer our card (highlights theirs).
+// 6. Talk to the first creature, pick one of ITS cards first (the new flow),
+// then one of ours from the hand — verdict flips to "✓ trade", arrow lights.
 await page.click('.ct-creature');
 await page.waitForSelector('#card-stage.trade-view', { timeout: 10000 });
 await sleep(800);
-const mine = await page.$('.ct-yours .world-card:not(.grayed)');
-if (mine) { await mine.click(); await sleep(800); }
-await shot('6-trade-offer');
+const theirs = await page.$('.ct-theirs .world-card');
+if (theirs) { await theirs.click(); await sleep(700); }
+await shot('6a-trade-their-pick');
+const mine = await page.$('#card-hand .world-card:not(.grayed)');
+if (mine) { await mine.click(); await sleep(700); }
+await shot('6b-trade-balanced');
 
 // 7. Phone-portrait table for the responsive pass.
 await page.setViewportSize({ width: 390, height: 844 });
 await page.goto(REALM, { waitUntil: 'networkidle' });
-await page.waitForSelector('#card-stage.table-view .world-card', { timeout: 20000 });
+await page.waitForSelector('#card-hand .world-card', { timeout: 20000 });
 await sleep(900);
 await shot('7-table-phone');
 
 // 8. The dive: REENTER WORLD — the card swells as the white takes over.
 await page.setViewportSize({ width: 1280, height: 800 });
 await page.goto(REALM, { waitUntil: 'networkidle' });
-await page.waitForSelector('#card-stage.table-view .world-card', { timeout: 20000 });
+await page.waitForSelector('#card-hand .world-card', { timeout: 20000 });
 await page.click('.wc-enter');
 await sleep(450); // mid-dive
 await shotQuick('8-dive-into-card');
@@ -118,7 +122,7 @@ await sleep(1500); // reload to the outer world
 
 // 11. Back on the table: the card remembers the visit.
 await page.goto(REALM, { waitUntil: 'networkidle' });
-await page.waitForSelector('#card-stage.table-view .world-card', { timeout: 20000 });
+await page.waitForSelector('#card-hand .world-card', { timeout: 20000 });
 await sleep(900);
 await shot('12-table-after-visit');
 

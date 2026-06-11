@@ -8,7 +8,7 @@
 import * as devalue from 'devalue';
 import { compressToUTF16, decompressFromUTF16 } from 'lz-string';
 import {
-  BUILDING_DEFS, BuildingKind, CELL, SPACE,
+  BUILDING_DEFS, BuildingKind, CELL, SOUL_SIGIL, SPACE,
 } from './config';
 import {
   Building, Cell, GameState, Goblin, SpaceBuilding,
@@ -88,6 +88,12 @@ export type CardMeta = {
   v: 1;
   // 'intro' until the white goblin has run the forced first trade.
   phase: 'intro' | 'free';
+  // Per-playthrough entropy mixed into every gathering roll. Without it the
+  // event RNG keyed on nextId alone, and nextId is identical for every
+  // player at the moment the tables are first dealt — so everyone met the
+  // same first trader. Optional only for metas saved before it existed
+  // (loadMeta stamps those).
+  seed?: number;
   nextId: number;
   cards: WorldCard[];
   // Generated once, after the intro (so the stolen origin card can be seeded
@@ -244,10 +250,27 @@ const KIND_POOLS: Record<CardTier, BuildingKind[]> = {
 //  - mint:        swimming in cash, bloodless
 //  - boneyard:    keeps bones (even at common, where bones are unheard of)
 //  - monoculture: one building kind, everywhere
-//  - crowd:       goblins wall to wall, little else
+//  - crowd:       goblins wall to wall, little else (units ARE the wealth)
+// Two flavors are CHALLENGES — the world is a small puzzle and its
+// ascension demand (challengeReq) names the puzzle's goal:
+//  - seance:      a bad power source stands ready, the bank holds exactly a
+//                 five-candle séance; the demand is the power only a fully
+//                 soul-fed sigil can produce. Spawn them, kill them, seat them.
+//  - overcharged: reactors everywhere, no cash — the opening money grind
+//                 replayed without ever worrying about generators (its work
+//                 track resets to the very start to match).
 //  - haunted:     hell is full; the surface is thin
-export type WorldFlavor = 'balanced' | 'bloodbath' | 'mint' | 'boneyard' | 'monoculture' | 'crowd' | 'haunted';
-export const WORLD_FLAVORS: WorldFlavor[] = ['balanced', 'bloodbath', 'mint', 'boneyard', 'monoculture', 'crowd', 'haunted'];
+export type WorldFlavor = 'balanced' | 'bloodbath' | 'mint' | 'boneyard' | 'monoculture' | 'crowd' | 'seance' | 'overcharged' | 'haunted';
+export const WORLD_FLAVORS: WorldFlavor[] = ['balanced', 'bloodbath', 'mint', 'boneyard', 'monoculture', 'crowd', 'seance', 'overcharged', 'haunted'];
+
+// The main game's task chain, in order (ui.ts TASKS). A generated world sits
+// partway along it — like an adopted save file — so entering a card can mean
+// finding a colony still grinding "Run a Phone Farm". Filtered against the
+// caller's task id list, so a trimmed list (tests) still works.
+export const MAIN_TRACK = [
+  'earn_100', 'run_phone_farm', 'build_gas_engine', 'run_datacentre',
+  'build_nuclear_reactor', 'build_hypercentre', 'collect_blood',
+];
 
 export function generateWeirdWorld(seed: number, tier: CardTier, taskIds: string[], flavorOverride?: WorldFlavor): GameState {
   const rng = mulberry32(seed);
@@ -316,6 +339,30 @@ export function generateWeirdWorld(seed: number, tier: CardTier, taskIds: string
     goblinCount = [ri(6, 12), ri(15, 30), ri(30, 60)][T];
     goldChance = 0.25;
     buildingCount = Math.max(1, Math.floor(buildingCount / 2));
+    // The crowd IS the wealth — the bank holds next to nothing.
+    st.money = ri(0, 12);
+    st.blood = ri(0, 10);
+    st.dragonBone = 0;
+  } else if (flavor === 'seance') {
+    // The candle challenge: hell stands open behind a "bad power source",
+    // and the bank holds exactly five candles' worth of blood (plus crumbs).
+    // Spawning is free — the souls for the chairs are made, not found.
+    st.blood = SOUL_SIGIL.count * SOUL_SIGIL.candleBloodCost + ri(0, 6);
+    st.money = ri(0, 40);
+    st.dragonBone = 0;
+    forcePortal = true;
+    buildingCount = ri(0, 1);
+    goblinCount = ri(1, 2);
+    ghostCount = ri(0, 2); // a head start on souls, never the full five
+  } else if (flavor === 'overcharged') {
+    // Standing power, empty pockets: the early game replayed with the
+    // generator problem already solved (by somebody with dubious taste).
+    st.money = ri(0, 10);
+    st.blood = 0;
+    st.dragonBone = 0;
+    pool = ['nuclear_reactor', 'nuclear_reactor', 'gas_engine'];
+    buildingCount = [ri(2, 3), ri(3, 5), ri(4, 8)][T];
+    goblinCount = Math.max(goblinCount, 4 + T * 4);
   } else if (flavor === 'haunted') {
     ghostCount = [ri(10, 25), ri(25, 60), ri(60, 120)][T];
     forcePortal = true;
@@ -330,6 +377,25 @@ export function generateWeirdWorld(seed: number, tier: CardTier, taskIds: string
   st.dragonBoneEarned = st.dragonBone;
   st.bloodUnlocked = st.blood > 0;
   st.dragonBoneUnlocked = st.dragonBone > 0;
+
+  // Where this world sits on the work track — like an adopted save file.
+  // Commons are still grinding the early tasks, uncommons sit mid-game,
+  // rares are late or finished (a finished world has seen everything,
+  // optional Work included). Overcharged worlds reset to the very start:
+  // their whole point is replaying the opening grind. The buildings already
+  // standing don't have to agree with the phase — some of these saves are
+  // a bit hacked.
+  const track = MAIN_TRACK.filter((id) => taskIds.includes(id));
+  const phaseRoll = flavor === 'overcharged' ? ri(0, 1)
+    : tier === 'common' ? ri(1, 3)
+    : tier === 'uncommon' ? ri(3, 5)
+    : ri(5, 7);
+  const phase = Math.min(phaseRoll, track.length);
+  const finished = phase >= track.length && flavor !== 'overcharged';
+  const done = new Set<string>(track.slice(0, phase));
+  if (finished) for (const id of taskIds) done.add(id);
+  // The optional minotaur side-task: some mid-track worlds did the Work.
+  else if (done.has('build_gas_engine') && rng() < 0.6) done.add('summon_minotaurs');
 
   // Scattered, unstaffed buildings — they wake (or stay dormant) under the
   // normal sim rules once the player starts assigning goblins.
@@ -370,16 +436,19 @@ export function generateWeirdWorld(seed: number, tier: CardTier, taskIds: string
     }
   }
 
-  // Ritual flags loosen with tier, so richer worlds resume mid-automation.
+  // Ritual flags loosen with tier — but never ahead of the work track: an
+  // ability's flag only sticks if the task that grants it is already done
+  // in this world (autobuild rides run_phone_farm, Goldblins rides the
+  // minotaur side-task, Lightning rides run_datacentre).
   if (tier !== 'common') {
-    st.autoAssignEnabled = rng() < 0.7;
+    st.autoAssignEnabled = done.has('run_phone_farm') && rng() < 0.7;
     st.autoWaterEnabled = st.autoAssignEnabled && rng() < 0.5;
-    st.goldgoblinsEnabled = rng() < 0.5;
-    st.lightningUnlocked = rng() < 0.6;
+    st.goldgoblinsEnabled = done.has('summon_minotaurs') && rng() < 0.5;
+    st.lightningUnlocked = done.has('run_datacentre') && rng() < 0.6;
   }
   if (tier === 'rare') {
-    st.autoAssignEnabled = true;
-    st.lightningUnlocked = true;
+    st.autoAssignEnabled = done.has('run_phone_farm');
+    st.lightningUnlocked = done.has('run_datacentre');
     st.goldgoblinMultiplier = rng() < 0.3 ? 10 : 1;
     st.tinytaurUnlocked = rng() < 0.4;
     if (rng() < 0.7) {
@@ -390,15 +459,18 @@ export function generateWeirdWorld(seed: number, tier: CardTier, taskIds: string
     }
   }
 
-  // Everything is unlocked in the card worlds: all tasks pre-completed (no
-  // celebration replays), all onboarding hints pre-seen.
+  // The work track, stamped: tasks up to the phase are completed AND
+  // revealed (no celebration replays for them), everything beyond is still
+  // to be played inside the card. Onboarding hints stay pre-seen — these
+  // are somebody's mid-game saves, not fresh ground.
   st.unlocks = {
-    completed: new Set(taskIds),
-    revealed: new Set(taskIds),
+    completed: new Set(done),
+    revealed: new Set(done),
     obsoleted: new Set(),
     everBuilt: new Set([...st.buildings.values()].map((b) => b.kind)),
-    minotaurEverSummoned: tier !== 'common',
+    minotaurEverSummoned: done.has('summon_minotaurs') || finished,
   };
+  if (finished) st.lillyTasksGiven = true;
   st.waterSeen = true;
   st.cameraPanSeen = true;
   st.multiSelectSeen = true;
@@ -410,10 +482,13 @@ export function generateWeirdWorld(seed: number, tier: CardTier, taskIds: string
 }
 
 // The goblin's replacement for the player's stolen world: an obviously
-// pitiful one. A handful of scattered walls, two goblins, Ƶ3.
+// pitiful one. A handful of scattered walls, two goblins, Ƶ3 — and no
+// spawn hole, so nothing can ever be summoned. Its pinned Ƶ10,000 demand
+// is unreachable from the inside; the only way up is to TRADE it, which is
+// exactly the lesson the white goblin meant to teach.
 export function generateJunkWorld(seed: number, taskIds: string[]): GameState {
   const rng = mulberry32(seed);
-  const st = generateWeirdWorld(seed, 'common', taskIds);
+  const st = generateWeirdWorld(seed, 'common', taskIds, 'balanced');
   st.buildings.clear();
   markBuildingsChanged(st);
   const wallCount = 5 + Math.floor(rng() * 5);
@@ -434,6 +509,14 @@ export function generateJunkWorld(seed: number, taskIds: string[]): GameState {
   st.hellUnlocked = false;
   st.spaceUnlocked = false;
   st.unlocks!.everBuilt = new Set(['wall']);
+  // The junk world starts at the very bottom of the work track — and with
+  // the spawn hole caved in (and Goblin Holes locked behind a task it will
+  // never reach), no goblin can ever join the two already standing there.
+  st.unlocks!.completed = new Set();
+  st.unlocks!.revealed = new Set();
+  st.unlocks!.minotaurEverSummoned = false;
+  st.lillyTasksGiven = false;
+  st.holeDestroyed = true;
   return st;
 }
 
@@ -457,6 +540,25 @@ export function sanitizeCardWorld(st: GameState): void {
   st.bobCheatPending = false;
   st.bobLollyDeparted = true;
   st.view = 'ground';
+}
+
+// The power number written on a card. What the world's generators last
+// actually produced — but a world that has never run (or ran with every
+// generator dormant) shouldn't read "nothing" while a reactor sits on its
+// lawn, so fall back to what the placed generators COULD produce.
+export function cardPower(st: GameState): number {
+  if (st.lastPowerProduced > 0) return st.lastPowerProduced;
+  let potential = 0;
+  for (const b of st.buildings.values()) {
+    const out = BUILDING_DEFS[b.kind].powerOutput;
+    if (out > 0) potential += out;
+  }
+  for (const sb of st.spaceBuildings.values()) {
+    if (st.buildings.has(sb.id)) continue;
+    const out = BUILDING_DEFS[sb.building.kind].powerOutput;
+    if (out > 0) potential += out;
+  }
+  return potential;
 }
 
 // Per-scene structure counts, driving each preview pane's treatment on the
@@ -531,12 +633,30 @@ export function ascendCard(meta: CardMeta, card: WorldCard): void {
   card.upgradeReq = rollUpgradeReq(next, rng, card.resources);
 }
 
+// The challenge flavors write their own ascension demand — the world IS a
+// puzzle, and the demand names its goal instead of rolling a resource band:
+// a séance asks for the power only a full, soul-fed sigil reaches (1 W base
+// × 66⁵ from five weak souls ≈ 1.25 GW, so 1 GW means all five chairs); an
+// overcharged world asks for plain cash, the only thing it lacks.
+export function challengeReq(flavor: WorldFlavor, tier: CardTier, rng: () => number): UpgradeReq | null {
+  if (tier === 'rare') return null;
+  if (flavor === 'seance') return { res: 'power', amount: 1_000_000_000 };
+  if (flavor === 'overcharged') {
+    const [lo, hi] = tier === 'common' ? [5_000, 15_000] : [250_000, 1_000_000];
+    return { res: 'money', amount: lo + Math.floor(rng() * (hi - lo + 1)) };
+  }
+  return null;
+}
+
 export function makeCard(meta: CardMeta, tier: CardTier, rng: () => number, taskIds: string[], junk = false): WorldCard {
   const seed = Math.floor(rng() * 0xffffffff);
-  const st = junk ? generateJunkWorld(seed, taskIds) : generateWeirdWorld(seed, tier, taskIds);
+  // The flavor is picked here (not left to the world generator's internal
+  // roll) so the challenge flavors can pin their demand below.
+  const flavor = WORLD_FLAVORS[Math.floor(rng() * WORLD_FLAVORS.length)];
+  const st = junk ? generateJunkWorld(seed, taskIds) : generateWeirdWorld(seed, tier, taskIds, flavor);
   const resources: CardResources = {
     money: st.money, blood: st.blood, dragonBone: st.dragonBone,
-    power: st.lastPowerProduced,
+    power: cardPower(st),
   };
   return {
     id: meta.nextId++,
@@ -545,8 +665,11 @@ export function makeCard(meta: CardMeta, tier: CardTier, rng: () => number, task
     data: encodeWorld(st),
     resources,
     // The junk card's ascension demand is pinned to plain cash so the
-    // player's first climb out of the dirt has a legible goal.
-    upgradeReq: junk ? { res: 'money', amount: 10_000 } : rollUpgradeReq(tier, rng, resources),
+    // player's first climb out of the dirt has a legible goal; challenge
+    // flavors pin theirs to the puzzle's own finish line.
+    upgradeReq: junk
+      ? { res: 'money', amount: 10_000 }
+      : challengeReq(flavor, tier, rng) ?? rollUpgradeReq(tier, rng, resources),
   };
 }
 
@@ -605,7 +728,7 @@ export function rollCreatures(meta: CardMeta, tier: CardTier, rng: () => number,
 }
 
 export function generateEvents(meta: CardMeta, stolen: WorldCard | null, taskIds: string[]): TradeEvent[] {
-  const rng = mulberry32((meta.nextId * 2654435761) >>> 0);
+  const rng = mulberry32((((meta.seed ?? 0) ^ (meta.nextId * 2654435761)) >>> 0));
   const events: TradeEvent[] = (['common', 'uncommon', 'rare'] as CardTier[]).map((tier, i) => ({
     id: i + 1,
     name: EVENT_NAMES[tier],
@@ -624,7 +747,7 @@ export function generateEvents(meta: CardMeta, stolen: WorldCard | null, taskIds
 // origin card, which always finds its way to the next table.
 export function regenerateEvent(meta: CardMeta, ev: TradeEvent, taskIds: string[]): void {
   const origin = ev.creatures.flatMap((c) => c.deck).find((c) => c.origin) ?? null;
-  const rng = mulberry32((meta.nextId * 48271 + ev.id) >>> 0);
+  const rng = mulberry32((((meta.seed ?? 0) ^ (meta.nextId * 48271 + ev.id)) >>> 0));
   ev.creatures = rollCreatures(meta, ev.tier, rng, taskIds);
   if (origin) ev.creatures[0].deck.unshift(origin);
 }

@@ -26,6 +26,12 @@ function finaleRefusalLine(): string {
   return FINALE_REFUSAL_LINES[Math.floor(Math.random() * FINALE_REFUSAL_LINES.length)];
 }
 
+// Spectating a trader's card world (cards.ts sets the class for the whole
+// visit): looking and selecting are fine, but the world takes no orders.
+function spectatingNow(): boolean {
+  return document.body.classList.contains('spectate-hold');
+}
+
 type ActivePointer = {
   startX: number; startY: number;
   x: number; y: number;
@@ -1100,6 +1106,7 @@ function tryPlaceSpaceCentre(state: GameState, x: number, y: number) {
 // Non-robot castaways can't be steered (they're busy suffocating); a selection
 // with no robots in it just error-beeps.
 function handleSpaceRightClick(state: GameState, x: number, y: number) {
+  if (spectatingNow()) return; // a spectated world takes no orders
   const robots = [...state.spaceUnits.values()].filter((su) => su.selected && su.robot);
   if (robots.length === 0) { playSound('error'); return; }
   const m = SPACE_UNIT.margin;
@@ -1134,6 +1141,7 @@ function playGhostCommandBurst(ghosts: Ghost[]) {
 // Multiple ghosts get a small per-ghost offset so they don't pile up exactly on
 // the same point. No-op (with an error beep) if nothing is selected.
 function handleHellRightClick(state: GameState, hx: number, hy: number) {
+  if (spectatingNow()) return; // a spectated world takes no orders
   // Commanding a bound chair away from its candle frees the soul: any
   // selected occupied chair unseats its occupant on the spot, and the freed
   // ghost inherits the selection so it takes the walk order (and the info
@@ -1363,6 +1371,7 @@ function minotaurAt(state: GameState, x: number, y: number): Minotaur | null {
 
 function handleRightClick(state: GameState, x: number, y: number) {
   if (state.view !== 'ground') return; // no commanding from orbit
+  if (spectatingNow()) return; // a spectated world takes no orders
   const selectedGoblins = [...state.goblins.values()].filter((g) => g.selected);
   const selectedMinotaurs = [...state.minotaurs.values()].filter((m) => m.selected);
   const selectedDragons = [...state.dragons.values()].filter((d) => d.selected);

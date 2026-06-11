@@ -16,6 +16,7 @@ import { clearSave, formatRelativeTime, getLastSaveStats, loadGame, saveGame, sa
 import {
   abandonCardWorldBoot, captureOriginWorld, cardWorldActive, clearCardData, consumeCardHop,
   hasCardMeta, isCardHopInProgress, maybeStartCardRealm, resetCardRealm, setupCardWorldChrome,
+  spectateActive,
 } from './cards';
 
 const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
@@ -233,7 +234,10 @@ async function main() {
   // Once the metagame has begun, dev sessions also resume the save rather
   // than starting fresh, so the realm loop survives its reloads.
   const cardHop = consumeCardHop();
-  let inCardWorld = cardWorldActive();
+  // Spectated worlds ride the same boot path as entered cards — the slot
+  // holds the visited world either way; cards.ts's chrome setup tells the
+  // two apart and freezes/locks the spectated one.
+  let inCardWorld = cardWorldActive() || spectateActive();
   const metagameBegun = hasCardMeta();
 
   // Production-only title gate. Click here also satisfies the browser's
@@ -491,6 +495,15 @@ async function main() {
       resetFinaleGuards();
       devSkipFinaleToConfront(state);
       appendLog(state, 'Cheat: skipped to the moon confrontation.');
+    },
+    onSkipToCardRealm: () => {
+      skipIntro();
+      // The realm's first card is the world the finale would have stolen —
+      // snapshot the live state to stand in for the missing ritual, then
+      // mount the realm directly over everything (it brings its own white).
+      captureOriginWorld(state);
+      resetCardRealm();
+      maybeStartCardRealm();
     },
   });
   // "Restart in hell": this run started fresh (choice forced to 'new'), so
@@ -1338,6 +1351,9 @@ async function main() {
       // The finale's closing confrontation + shatter freezes the world like a
       // cutscene; the autonomous beats before it (Lolly's flight) run live.
       || document.body.classList.contains('finale-hold')
+      // Spectating a trader's card world: time stands still for the whole
+      // visit (set by setupCardWorldChrome, cleared by the leave reload).
+      || document.body.classList.contains('spectate-hold')
       || state.bobPickingHole;
     if (!paused && !introActive) {
       acc += dt;

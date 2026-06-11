@@ -791,7 +791,7 @@ export async function runFinaleConfrontation(state: GameState): Promise<void> {
 
     // The turn. He has nothing left to lose — he is already dead.
     await fSay('bob', '. . .', { autoMs: 1100 });
-    await fSay('bob', "i've taken orders my whole life, lolly.");
+    await fSay('bob', "i've taken orders my whole life.");
     await fSay('bob', '. . . ⏸ and my whole death, too.');
     await fSay('bob', 'no more.');
 

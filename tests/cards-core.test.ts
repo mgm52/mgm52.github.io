@@ -5,13 +5,13 @@
 
 import { describe, expect, it } from 'vitest';
 import {
-  APPETITE_LINE, CardMeta, CardResources, CardTier, TIER_ABOVE, TIER_RANK,
-  WORLD_FLAVORS, WorldCard, appetiteAccepts, ascendCard, breakdownGives,
+  APPETITE_LINE, CardMeta, CardResources, CardTier, MAIN_TRACK, TIER_ABOVE, TIER_RANK,
+  WORLD_FLAVORS, WorldCard, appetiteAccepts, ascendCard, breakdownGives, cardPower,
   creatureOpenTo, creatureTakesFor, decodeWorld, encodeWorld, generateEvents,
   generateJunkWorld, generateWeirdWorld, makeCard, mulberry32, regenerateEvent,
   reqMet, rollUpgradeReq, sameTierGives, sceneStructureCounts, worldName,
 } from '../src/cards-core';
-import { BUILDING_DEFS } from '../src/config';
+import { BUILDING_DEFS, SOUL_SIGIL } from '../src/config';
 import { GameState, cellKey, isInPlayCell } from '../src/state';
 
 const TASK_IDS = ['earn_100', 'run_phone_farm', 'collect_blood'];
@@ -69,9 +69,29 @@ describe('generateWeirdWorld', () => {
       expect([...st.goblins.values()].some((g) => g.bob)).toBe(false);
       expect(st.ghosts.some((g) => g.bob)).toBe(false);
       expect(st.view).toBe('ground');
-      // All tasks pre-completed so card worlds never replay celebrations.
-      expect([...st.unlocks!.completed]).toEqual(TASK_IDS);
-      expect([...st.unlocks!.revealed]).toEqual(TASK_IDS);
+      // The world sits partway along the work track: completed is a prefix
+      // of the track (never out-of-order), and revealed mirrors it exactly
+      // so the stamped tasks never replay their celebrations.
+      const completed = st.unlocks!.completed;
+      expect([...st.unlocks!.revealed].sort()).toEqual([...completed].sort());
+      const track = MAIN_TRACK.filter((id) => TASK_IDS.includes(id));
+      const onTrack = track.filter((id) => completed.has(id));
+      expect(track.slice(0, onTrack.length)).toEqual(onTrack);
+    }
+  });
+
+  it('deals worlds at tier-appropriate phases of the work track', () => {
+    // The real game's full track — commons stay early, rares land late.
+    const fullTrack = [...MAIN_TRACK];
+    for (let seed = 1; seed <= 20; seed++) {
+      const common = generateWeirdWorld(seed * 7, 'common', fullTrack, 'balanced');
+      const doneCommon = fullTrack.filter((id) => common.unlocks!.completed.has(id));
+      expect(doneCommon.length).toBeGreaterThanOrEqual(1);
+      expect(doneCommon.length).toBeLessThanOrEqual(3);
+
+      const rare = generateWeirdWorld(seed * 13, 'rare', fullTrack, 'balanced');
+      const doneRare = fullTrack.filter((id) => rare.unlocks!.completed.has(id));
+      expect(doneRare.length).toBeGreaterThanOrEqual(5);
     }
   });
 
@@ -103,8 +123,10 @@ describe('generateWeirdWorld', () => {
   });
 
   it('scales resources with tier and keeps the sticky unlock flags consistent', () => {
-    const common = generateWeirdWorld(5, 'common', TASK_IDS);
-    const rare = generateWeirdWorld(5, 'rare', TASK_IDS);
+    // Pinned to the balanced flavor — the spiked flavors deliberately break
+    // the tier baselines this test checks.
+    const common = generateWeirdWorld(5, 'common', TASK_IDS, 'balanced');
+    const rare = generateWeirdWorld(5, 'rare', TASK_IDS, 'balanced');
     expect(common.money).toBeLessThanOrEqual(60);
     expect(rare.money).toBeGreaterThanOrEqual(100_000);
     expect(rare.blood).toBeGreaterThanOrEqual(1_000);
@@ -135,6 +157,12 @@ describe('generateJunkWorld', () => {
       expect(st.hellUnlocked).toBe(false);
       expect(st.spaceUnlocked).toBe(false);
       expect(st.spaceBuildings.size).toBe(0);
+      // The junk world replays the game's opening: nothing on the work
+      // track is done. And with the spawn hole caved in, no income source
+      // exists — its Ƶ10,000 demand is only reachable by trading it away.
+      expect(st.unlocks!.completed.size).toBe(0);
+      expect(st.unlocks!.revealed.size).toBe(0);
+      expect(st.holeDestroyed).toBe(true);
     }
   });
 });
@@ -167,7 +195,45 @@ describe('world flavors (the spikes)', () => {
       expect(haunted.ghosts.length).toBeGreaterThanOrEqual(10);
       expect(haunted.hellUnlocked).toBe(true);
       expect([...haunted.buildings.values()].some((b) => b.kind === 'hell_portal')).toBe(true);
+
+      // The séance: hell open behind a portal, the bank holding a
+      // five-candle budget (plus crumbs), souls in short supply.
+      const seance = generateWeirdWorld(seed * 31, 'common', TASK_IDS, 'seance');
+      expect(seance.hellUnlocked).toBe(true);
+      expect([...seance.buildings.values()].some((b) => b.kind === 'hell_portal')).toBe(true);
+      const budget = SOUL_SIGIL.count * SOUL_SIGIL.candleBloodCost;
+      expect(seance.blood).toBeGreaterThanOrEqual(budget);
+      expect(seance.blood).toBeLessThanOrEqual(budget + 6);
+      expect(seance.ghosts.length).toBeLessThan(SOUL_SIGIL.count);
+
+      // Overcharged: reactors standing, pockets empty, track reset to the
+      // opening grind.
+      const oc = generateWeirdWorld(seed * 37, 'uncommon', TASK_IDS, 'overcharged');
+      expect(oc.money).toBeLessThanOrEqual(10);
+      expect([...oc.buildings.values()].some((b) => b.kind === 'nuclear_reactor' || b.kind === 'gas_engine')).toBe(true);
+      expect(oc.unlocks!.completed.size).toBeLessThanOrEqual(1);
     }
+  });
+
+  it('challenge flavors pin their ascension demand to the puzzle goal', () => {
+    const meta = freshMeta();
+    let seance = 0, overcharged = 0;
+    for (let seed = 0; seed < 80 && (!seance || !overcharged); seed++) {
+      const c = makeCard(meta, 'common', mulberry32(seed), TASK_IDS);
+      const st = decodeWorld(c.data)!;
+      const isSeance = st.hellUnlocked
+        && st.blood >= SOUL_SIGIL.count * SOUL_SIGIL.candleBloodCost
+        && st.blood <= SOUL_SIGIL.count * SOUL_SIGIL.candleBloodCost + 6;
+      if (isSeance && c.upgradeReq?.res === 'power') {
+        expect(c.upgradeReq.amount).toBe(1_000_000_000);
+        seance++;
+      }
+      const isOvercharged = st.money <= 10
+        && [...st.buildings.values()].some((b) => b.kind === 'nuclear_reactor');
+      if (isOvercharged && c.upgradeReq?.res === 'money') overcharged++;
+    }
+    expect(seance).toBeGreaterThan(0);
+    expect(overcharged).toBeGreaterThan(0);
   });
 
   it('unforced generation actually varies across seeds', () => {
@@ -353,10 +419,21 @@ describe('makeCard', () => {
     expect(junk.resources.money).toBe(3);
   });
 
-  it('records the world power on the card (zero until the world has run)', () => {
+  it('records the standing generators\' potential power on a never-run card', () => {
     const meta = freshMeta();
-    const c = makeCard(meta, 'common', mulberry32(4), TASK_IDS);
-    expect(c.resources.power).toBe(0);
+    for (let seed = 0; seed < 8; seed++) {
+      const c = makeCard(meta, 'common', mulberry32(seed), TASK_IDS);
+      const st = decodeWorld(c.data)!;
+      // A never-run world reports what its placed generators COULD make —
+      // a card with a lone "bad power source" reads 1 W, not "nothing".
+      expect(c.resources.power).toBe(cardPower(st));
+      let potential = 0;
+      for (const b of st.buildings.values()) {
+        const out = BUILDING_DEFS[b.kind].powerOutput;
+        if (out > 0) potential += out;
+      }
+      expect(c.resources.power).toBe(potential);
+    }
   });
 
   it('assigns unique ids from the meta counter', () => {

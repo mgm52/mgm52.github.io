@@ -2,7 +2,7 @@
 // The game's final section, picking up after the finale's screen has torn
 // itself white. Every game world is now a trading card: stacked preview
 // panes (space / earth / hell — only the scenes that world has opened),
-// the world's resources, and a REENTER WORLD button. The player's own pre-Gabbonsaw save is dealt onto
+// the world's resources, and an ENTER button. The player's own pre-Gabbonsaw save is dealt onto
 // the table first — and promptly swindled away by an ethereal white goblin,
 // who leaves a pitiful replacement ("now it's a trade."). From there the
 // player can re-enter any card they hold (the world boots demonless, Bob-
@@ -21,15 +21,15 @@
 // reach them; this file is the presentation + persistence half.
 
 import { playSound, type SoundName } from './audio';
-import { BUILDING_DEFS, CELL, HELL, SPACE, WORLD, formatPower } from './config';
+import { BUILDING_DEFS, BuildingKind, CELL, HELL, SPACE, WORLD, formatPower } from './config';
 import { getRawSave, saveGame, setRawSave } from './save';
 import { GameState, computePlayBounds, isInPlayCell } from './state';
 import { ALL_TASK_IDS } from './ui';
 import {
   APPETITE_LINE, CardMeta, CardResources, CardTier, Creature, FRAME_BASE, TIER_ABOVE,
   TIER_RANK, TradeEvent, UpgradeReq, WorldCard, appetiteAccepts, ascendCard, breakdownGives,
-  creatureOpenTo, creatureTakesFor, decodeWorld, encodeWorld, generateEvents, makeCard,
-  mulberry32, regenerateEvent, reqMet, sameTierGives, sceneStructureCounts,
+  cardPower, creatureOpenTo, decodeWorld, encodeWorld, generateEvents,
+  makeCard, mulberry32, regenerateEvent, reqMet, sameTierGives, sceneStructureCounts,
 } from './cards-core';
 
 const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
@@ -56,6 +56,11 @@ const newCard = (meta: CardMeta, tier: CardTier, rng: () => number, junk = false
 const META_KEY = 'rts.cards.v1';
 const ORIGIN_KEY = 'rts.cardorigin.v1';
 const OUTER_KEY = 'rts.cardouter.v1';
+// Set while the player is SPECTATING a trader's card world: the world sits
+// in the regular save slot like an entered card, but time is frozen, the
+// build/summon chrome is hidden, and leaving never serializes back — the
+// trader's card is untouched by the visit.
+const SPECTATE_KEY = 'rts.cardspectate.v1';
 
 function loadMeta(): CardMeta | null {
   try {
@@ -77,6 +82,12 @@ function loadMeta(): CardMeta | null {
           }
         });
       }
+    }
+    // Metas saved before the per-playthrough seed existed: stamp one now so
+    // future gathering rolls stop being identical across playthroughs.
+    if (m.seed === undefined) {
+      m.seed = (Date.now() ^ Math.floor(Math.random() * 0xffffffff)) >>> 0;
+      saveMeta(m);
     }
     return m;
   } catch { return null; }
@@ -113,12 +124,18 @@ export function cardWorldActive(): boolean {
   return m !== null && m.activeCardId !== null;
 }
 
+// True while the save slot holds a world the player is only WATCHING.
+export function spectateActive(): boolean {
+  try { return localStorage.getItem(SPECTATE_KEY) === '1'; } catch { return false; }
+}
+
 // Wipe the whole metagame — wired into the title screen's Erase Data.
 export function clearCardData(): void {
   try {
     localStorage.removeItem(META_KEY);
     localStorage.removeItem(ORIGIN_KEY);
     localStorage.removeItem(OUTER_KEY);
+    localStorage.removeItem(SPECTATE_KEY);
   } catch { /* no-op */ }
 }
 
@@ -133,7 +150,7 @@ export function captureOriginWorld(state: GameState): void {
       data: encodeWorld(state),
       resources: {
         money: state.money, blood: state.blood, dragonBone: state.dragonBone,
-        power: state.lastPowerProduced,
+        power: cardPower(state),
       },
     };
     localStorage.setItem(ORIGIN_KEY, JSON.stringify(payload));
@@ -212,6 +229,63 @@ async function enterWorld(meta: CardMeta, card: WorldCard, cardEl?: HTMLElement)
   location.reload();
 }
 
+// Spectating: dive into a TRADER'S card without owning it. Same hop as
+// enterWorld — the world goes into the save slot and the page reloads — but
+// the spectate flag (not meta.activeCardId) marks the visit, so boot freezes
+// time, hides the build chrome, and leaveSpectate restores the outer save
+// without ever writing the visit back onto the trader's card.
+async function spectateWorld(card: WorldCard, cardEl?: HTMLElement): Promise<void> {
+  const st = decodeWorld(card.data);
+  if (!st) { realmSound('error'); return; }
+  const outer = getRawSave();
+  if (outer) {
+    try { localStorage.setItem(OUTER_KEY, outer); } catch { /* skip */ }
+  }
+  saveGame(st);
+  const written = getRawSave();
+  if (written === null || written === outer) { realmSound('error'); return; }
+  // The flag is what makes the next boot a spectate; if it can't be stored
+  // the hop must not happen — booting the trader's world unflagged would
+  // adopt it as the player's own. Put the outer save back and bail.
+  let flagged = false;
+  try {
+    localStorage.setItem(SPECTATE_KEY, '1');
+    flagged = localStorage.getItem(SPECTATE_KEY) === '1';
+  } catch { /* flagged stays false */ }
+  if (!flagged) {
+    if (outer) setRawSave(outer);
+    realmSound('error');
+    return;
+  }
+  realmSound('ritual', 1, 0.7);
+  markCardHop();
+  const white = hopWhite();
+  white.style.transition = 'opacity 900ms ease-in';
+  cardEl?.classList.add('dived');
+  requestAnimationFrame(() => { white.style.opacity = '1'; });
+  await sleep(1200);
+  location.reload();
+}
+
+async function leaveSpectate(): Promise<void> {
+  markCardHop();
+  // The same pull-back as leaveWorld — but nothing is serialized: the visit
+  // leaves no mark on the trader's card.
+  const app = document.getElementById('app');
+  const white = hopWhite();
+  white.style.transition = 'opacity 1150ms ease-in';
+  app?.classList.add('card-exit-zoom');
+  requestAnimationFrame(() => { white.style.opacity = '1'; });
+  await sleep(1250);
+  try { localStorage.removeItem(SPECTATE_KEY); } catch { /* no-op */ }
+  const outer = localStorage.getItem(OUTER_KEY);
+  if (outer) {
+    setRawSave(outer);
+    try { localStorage.removeItem(OUTER_KEY); } catch { /* no-op */ }
+  }
+  location.reload();
+}
+
 async function leaveWorld(state: GameState): Promise<void> {
   const meta = loadMeta();
   if (!meta || meta.activeCardId === null) return;
@@ -231,7 +305,7 @@ async function leaveWorld(state: GameState): Promise<void> {
     card.data = encodeWorld(state);
     card.resources = {
       money: state.money, blood: state.blood, dragonBone: state.dragonBone,
-      power: state.lastPowerProduced,
+      power: cardPower(state),
     };
   }
   meta.activeCardId = null;
@@ -250,6 +324,7 @@ async function leaveWorld(state: GameState): Promise<void> {
 export function abandonCardWorldBoot(): void {
   const meta = loadMeta();
   if (meta) { meta.activeCardId = null; saveMeta(meta); }
+  try { localStorage.removeItem(SPECTATE_KEY); } catch { /* no-op */ }
   const outer = localStorage.getItem(OUTER_KEY);
   if (outer) {
     setRawSave(outer);
@@ -259,18 +334,46 @@ export function abandonCardWorldBoot(): void {
 
 // Inside a card world: the white screen border (body.card-world) and the big
 // white LEAVE WORLD button pinned to the bottom of the screen. When the boot
-// was an explicit hop (REENTER WORLD → reload), the world arrives by zooming
+// was an explicit hop (ENTER → reload), the world arrives by zooming
 // out of the white — the finale's pull-back, run in reverse.
 export function setupCardWorldChrome(state: GameState, arriving = false): void {
   document.body.classList.add('card-world');
+  // Spectating a trader's world: time stands still (main.ts's tick freeze
+  // keys on the body class) and the mutating chrome — summon/build panels,
+  // destroy buttons, right-click commands — is walled off in CSS/input.ts.
+  const spectating = spectateActive();
+  if (spectating) document.body.classList.add('spectate-hold');
   const btn = document.getElementById('leave-world-btn') as HTMLButtonElement | null;
   if (btn) {
     btn.style.display = '';
+    if (spectating) btn.textContent = 'STOP SPECTATING';
     btn.addEventListener('click', () => {
       btn.disabled = true;
       realmSound('ritual', 1, 0.7);
-      void leaveWorld(state);
+      void (spectating ? leaveSpectate() : leaveWorld(state));
     }, { once: true });
+  }
+  // The card's ascension goal, pinned above the leave button and ticking
+  // along live — so the reason to be in here is never out of sight. Only
+  // for OWNED worlds with a demand left (spectates and rares go without).
+  if (!spectating) {
+    const meta = loadMeta();
+    const card = meta?.cards.find((c) => c.id === meta.activeCardId) ?? null;
+    const req = card?.upgradeReq ?? null;
+    const goal = document.getElementById('world-goal');
+    if (goal && req) {
+      goal.style.display = '';
+      const update = () => {
+        const have = req.res === 'power' ? cardPower(state) : state[req.res];
+        const met = have >= req.amount;
+        goal.classList.toggle('met', met);
+        goal.textContent = met
+          ? `✓ ascension ready — leave world to ascend`
+          : `ascends at ${fmtReqAmount(req)} · ${fmtResAmount(req.res, have)} held`;
+      };
+      update();
+      window.setInterval(update, 500);
+    }
   }
   if (arriving) {
     const app = document.getElementById('app');
@@ -309,6 +412,28 @@ function decodedWorld(card: WorldCard): GameState | null {
 
 function hexColor(n: number): string { return `#${n.toString(16).padStart(6, '0')}`; }
 
+// ── Building sprites for the earth pane ──
+// The same PNGs the game renders, scaled down onto the card minimap so a
+// world's skyline is recognizable at a glance. Loaded lazily and cached; a
+// pane drawn before its sprites arrive paints the old colored blocks and
+// repaints itself once they land. Kinds without a sheet (the hell portal,
+// the space structures) keep their procedural look.
+const SPRITE_KINDS = new Set<BuildingKind>([
+  'datacentre', 'dragon_beacon', 'gas_engine', 'goblin_hole', 'goblin_wheel',
+  'hypercentre', 'nuclear_reactor', 'phone_farm', 'wall',
+]);
+const spriteCache = new Map<BuildingKind, HTMLImageElement>();
+function buildingSprite(kind: BuildingKind): HTMLImageElement | null {
+  if (!SPRITE_KINDS.has(kind)) return null;
+  let img = spriteCache.get(kind);
+  if (!img) {
+    img = new Image();
+    img.src = `assets/buildings/${kind}.png`;
+    spriteCache.set(kind, img);
+  }
+  return img;
+}
+
 // Any region holding more than two structures brightens — an additive glow
 // blob over the cluster, so a built-up corner of a world reads as alive from
 // the card alone.
@@ -344,7 +469,10 @@ function drawDensityGlow(
 function drawSpacePreview(cv: HTMLCanvasElement, st: GameState, seed: number): void {
   const g = cv.getContext('2d');
   if (!g) return;
-  const w = cv.width, h = cv.height;
+  // The pane renders at 2× (see mkCanvas); paint in logical pixels so the
+  // hand-tuned star/beam sizes below keep their look.
+  g.setTransform(2, 0, 0, 2, 0, 0);
+  const w = cv.width / 2, h = cv.height / 2;
   g.fillStyle = '#05040f';
   g.fillRect(0, 0, w, h);
   const rng = mulberry32(seed);
@@ -433,20 +561,32 @@ function drawEarthPreview(cv: HTMLCanvasElement, st: GameState): void {
     g.lineWidth = 1;
     g.stroke();
   }
-  // Buildings in their in-game colors, edged with their border colors so
-  // each block reads as a structure rather than a paint splat.
+  // Buildings as their real in-game sprites, bottom-anchored on their
+  // footprints so taller structures rise above their plots like a skyline;
+  // dormant ones sit dimmed. Kinds without a sheet (and sprites that
+  // haven't finished loading) fall back to the old colored blocks.
   const pts: { x: number; y: number }[] = [];
+  const pending = new Set<HTMLImageElement>();
   for (const bd of st.buildings.values()) {
     const def = BUILDING_DEFS[bd.kind];
     const x = px(bd.cell.cx), y = py(bd.cell.cy);
     const size = Math.max(1.5, def.cellSize * s);
     const active = bd.state === 'active';
-    g.fillStyle = hexColor(active ? def.colors.active : def.colors.dormant);
-    g.fillRect(x, y, size, size);
-    if (bd.kind !== 'wall' && size >= 3) {
-      g.strokeStyle = hexColor(active ? def.colors.activeBorder : def.colors.dormantBorder);
-      g.lineWidth = 1;
-      g.strokeRect(x + 0.5, y + 0.5, size - 1, size - 1);
+    const img = buildingSprite(bd.kind);
+    if (img && img.complete && img.naturalWidth > 0) {
+      const hgt = Math.min(size * 2, size * (img.naturalHeight / img.naturalWidth));
+      if (!active) g.globalAlpha = 0.55;
+      g.drawImage(img, x, y + size - hgt, size, hgt);
+      g.globalAlpha = 1;
+    } else {
+      if (img && !img.complete) pending.add(img);
+      g.fillStyle = hexColor(active ? def.colors.active : def.colors.dormant);
+      g.fillRect(x, y, size, size);
+      if (bd.kind !== 'wall' && size >= 3) {
+        g.strokeStyle = hexColor(active ? def.colors.activeBorder : def.colors.dormantBorder);
+        g.lineWidth = 1;
+        g.strokeRect(x + 0.5, y + 0.5, size - 1, size - 1);
+      }
     }
     if (bd.kind !== 'wall') {
       pts.push({ x: x + size / 2, y: y + size / 2 });
@@ -455,16 +595,28 @@ function drawEarthPreview(cv: HTMLCanvasElement, st: GameState): void {
   // Units as bright dots.
   for (const gob of st.goblins.values()) {
     g.fillStyle = gob.robot ? '#c9d0d9' : gob.gold ? '#ffd96b' : '#8ee492';
-    g.fillRect(px(gob.cell.cx), py(gob.cell.cy), Math.max(1.2, s * 0.7), Math.max(1.2, s * 0.7));
+    g.fillRect(px(gob.cell.cx), py(gob.cell.cy), Math.max(2.4, s * 0.7), Math.max(2.4, s * 0.7));
   }
   // Built-up regions glow.
   drawDensityGlow(g, pts, 7 * s, '255, 236, 170');
+  // Repaint once late sprites land ('error' counts too, so a missing file
+  // can never strand the pane).
+  if (pending.size > 0) {
+    let waiting = pending.size;
+    const arrived = () => { if (--waiting === 0) drawEarthPreview(cv, st); };
+    for (const img of pending) {
+      img.addEventListener('load', arrived, { once: true });
+      img.addEventListener('error', arrived, { once: true });
+    }
+  }
 }
 
 function drawHellPreview(cv: HTMLCanvasElement, st: GameState, seed: number): void {
   const g = cv.getContext('2d');
   if (!g) return;
-  const w = cv.width, h = cv.height;
+  // 2× pane, logical-pixel painting — same treatment as the space pane.
+  g.setTransform(2, 0, 0, 2, 0, 0);
+  const w = cv.width / 2, h = cv.height / 2;
   g.fillStyle = hexColor(HELL.bgColor);
   g.fillRect(0, 0, w, h);
   // Layers of fog rising from the floor of the pit.
@@ -538,10 +690,14 @@ function resourcesEl(r: CardResources): HTMLElement {
   return wrap;
 }
 
+function fmtResAmount(res: UpgradeReq['res'], n: number): string {
+  if (res === 'power') return formatPower(n);
+  const amt = Math.floor(n).toLocaleString('en-US');
+  return res === 'money' ? `Ƶ ${amt}` : res === 'blood' ? `${amt} blood` : `${amt} bones`;
+}
+
 function fmtReqAmount(r: UpgradeReq): string {
-  if (r.res === 'power') return formatPower(r.amount);
-  const amt = r.amount.toLocaleString('en-US');
-  return r.res === 'money' ? `Ƶ ${amt}` : r.res === 'blood' ? `${amt} blood` : `${amt} bones`;
+  return fmtResAmount(r.res, r.amount);
 }
 
 type CardElOpts = {
@@ -571,8 +727,11 @@ function buildCardEl(card: WorldCard, opts: CardElOpts = {}): HTMLElement {
   const mkCanvas = (cls: string, hgt: number): HTMLCanvasElement => {
     const cv = document.createElement('canvas');
     cv.className = `wc-prev ${cls}`;
-    cv.width = 168;
-    cv.height = hgt;
+    // 2× the on-screen size (the CSS width is 100%, so the height scales
+    // with it and the displayed box is unchanged) — the building sprites
+    // stay crisp instead of dissolving at minimap scale.
+    cv.width = 336;
+    cv.height = hgt * 2;
     panes.appendChild(cv);
     return cv;
   };
@@ -758,6 +917,8 @@ export function resetCardRealm(): void {
     realm.classList.remove('visible', 'goblin-in', 'speaking', 'click-armed', 'show-choice');
     const stage = document.getElementById('card-stage');
     if (stage) stage.innerHTML = '';
+    const hand = document.getElementById('card-hand');
+    if (hand) hand.innerHTML = '';
   }
 }
 
@@ -770,7 +931,15 @@ async function runRealm(): Promise<void> {
   await sleep(meta && meta.phase === 'free' ? 1200 : 2600);
   realm.classList.add('visible');
   if (!meta) {
-    meta = { v: 1, phase: 'intro', nextId: 1, cards: [], events: null, activeCardId: null };
+    meta = {
+      v: 1,
+      phase: 'intro',
+      seed: (Date.now() ^ Math.floor(Math.random() * 0xffffffff)) >>> 0,
+      nextId: 1,
+      cards: [],
+      events: null,
+      activeCardId: null,
+    };
     const rng = mulberry32(Date.now() >>> 0);
     meta.cards = [buildOriginCard(meta, rng)];
     saveMeta(meta);
@@ -782,7 +951,7 @@ async function runRealm(): Promise<void> {
 }
 
 // The forced first trade: the origin card is dealt, the player reaches for
-// REENTER WORLD, and the white goblin descends to take it.
+// ENTER, and the white goblin descends to take it.
 async function runTradeIntro(meta: CardMeta): Promise<void> {
   const stage = realmEl('card-stage');
   stage.innerHTML = '';
@@ -793,7 +962,7 @@ async function runTradeIntro(meta: CardMeta): Promise<void> {
   const reentered = new Promise<void>((resolve) => {
     const cardEl = buildCardEl(origin, {
       big: true,
-      enterLabel: 'REENTER WORLD',
+      enterLabel: 'ENTER',
       onEnter: () => resolve(),
     });
     // The opening deal: the origin card slides in slowly from off-table,
@@ -874,40 +1043,78 @@ function div(cls: string, text?: string): HTMLElement {
   return d;
 }
 
+// ─── The player's hand ───────────────────────────────────────────────
+// Lives in #card-hand, pinned to the bottom of the realm OUTSIDE the
+// swapped stage, so moving between table / gathering / trade never fades
+// or re-deals the cards the player is holding. Each view re-wires it (the
+// handlers differ) but the DOM it builds is identical, so nothing visibly
+// changes across a swap.
+type HandOpts = {
+  // Trade view: whole-card clicks feed the selection basket.
+  onCardClick?: (card: WorldCard) => void;
+  onCardHover?: (card: WorldCard, over: boolean) => void;
+  // Fired after an ascension. The view MUST refresh anything that depends
+  // on tiers (gathering locks, trade eligibility) AND re-render the hand;
+  // when absent the hand re-renders itself.
+  onAscended?: () => void;
+  // Mounted above the hand's caption — the trade view parks its verdict
+  // button here so it reads as sitting between the two rows.
+  topEl?: HTMLElement;
+};
+
+function handRowEl(): HTMLElement | null {
+  return document.querySelector('#card-hand .ct-cards');
+}
+
+function renderHand(meta: CardMeta, opts: HandOpts = {}): void {
+  const hand = document.getElementById('card-hand');
+  if (!hand) return;
+  hand.innerHTML = '';
+  if (opts.topEl) hand.appendChild(opts.topEl);
+  if (meta.cards.length > 0) {
+    hand.appendChild(div('ct-caption', meta.cards.length === 1 ? 'your world' : 'your worlds'));
+    const row = div('ct-cards');
+    for (const c of meta.cards) {
+      const el = buildCardEl(c, {
+        enterLabel: 'ENTER',
+        onEnter: (cardEl) => { void enterWorld(meta, c, cardEl); },
+        onClick: opts.onCardClick ? () => opts.onCardClick!(c) : undefined,
+        onAscend: () => {
+          ascendCard(meta, c);
+          saveMeta(meta);
+          realmSound('task_complete', 0.8, 1.1);
+          if (opts.onAscended) opts.onAscended();
+          else renderHand(meta, opts);
+          // The rebuilt card flashes in its new tier's colors.
+          handRowEl()?.querySelector(`[data-card-id="${c.id}"]`)?.classList.add('ascended');
+        },
+      });
+      if (opts.onCardHover) {
+        el.addEventListener('mouseenter', () => opts.onCardHover!(c, true));
+        el.addEventListener('mouseleave', () => opts.onCardHover!(c, false));
+      }
+      row.appendChild(el);
+    }
+    hand.appendChild(row);
+  }
+  // Scrolled stage content must be able to clear the hand.
+  const stage = document.getElementById('card-stage');
+  if (stage) stage.style.paddingBottom = hand.offsetHeight > 0 ? `${hand.offsetHeight + 8}px` : '';
+}
+
 function showTable(meta: CardMeta): void {
   const stage = realmEl('card-stage');
   clearSpeech();
   stage.innerHTML = '';
   stage.className = 'table-view';
 
-  stage.appendChild(div('ct-caption', meta.cards.length === 1 ? 'your world' : 'your worlds'));
   // Everything on the table deals in with a small stagger (--deal-i drives
-  // the per-item delay; the gathering doors below continue the count).
+  // the per-item delay; the player's hand below continues the count).
   let dealI = 0;
   const dealIn = (el: HTMLElement) => {
     el.classList.add('dealt');
     el.style.setProperty('--deal-i', String(dealI++));
   };
-  const row = div('ct-cards');
-  for (const c of meta.cards) {
-    const cardEl = buildCardEl(c, {
-      enterLabel: 'REENTER WORLD',
-      onEnter: (el) => { void enterWorld(meta, c, el); },
-      onAscend: () => {
-        ascendCard(meta, c);
-        saveMeta(meta);
-        realmSound('task_complete', 0.8, 1.1);
-        showTable(meta);
-        // Re-rendered fresh — flash the ascended card in its new colors.
-        const cards = [...stage.querySelectorAll('.ct-cards .world-card')];
-        const idx = meta.cards.indexOf(c);
-        cards[idx]?.classList.add('ascended');
-      },
-    });
-    dealIn(cardEl);
-    row.appendChild(cardEl);
-  }
-  stage.appendChild(row);
 
   if (!meta.events) {
     meta.events = generateEvents(meta, null, ALL_TASK_IDS);
@@ -944,6 +1151,10 @@ function showTable(meta: CardMeta): void {
     evRow.appendChild(btn);
   }
   stage.appendChild(evRow);
+
+  // The hand (bottom of the screen, its own persistent layer): ascending a
+  // card can unlock gathering doors, so the table re-renders behind it.
+  renderHand(meta, { onAscended: () => showTable(meta) });
 }
 
 function backButton(label: string, onBack: () => void): HTMLElement {
@@ -970,14 +1181,22 @@ function showEvent(meta: CardMeta, ev: TradeEvent): void {
   ev.creatures.forEach((cr, i) => {
     const cel = div('ct-creature');
     cel.appendChild(creatureAvatar());
-    // Name + the creature's frame chip — a blank mini-card in the border
-    // pattern its dealt cards wear, so the mark is learnable at the table.
-    const nameRow = div('ct-creature-namerow');
-    nameRow.appendChild(div('ct-creature-name', cr.name));
-    nameRow.appendChild(div(`ct-frame-chip wcf-${cr.frame ?? FRAME_BASE[ev.tier] + i}`));
-    cel.appendChild(nameRow);
+    // (The trader's frame-pattern chip used to sit beside the name; the
+    // hand minis below carry the at-a-glance info now, so the name stands
+    // alone and the pattern stays learnable from the dealt cards themselves.)
+    cel.appendChild(div('ct-creature-name', cr.name));
     cel.appendChild(div('ct-creature-line', APPETITE_LINE[cr.appetite]));
-    cel.appendChild(div('ct-creature-deck', `${cr.deck.length} worlds in hand`));
+    // The hand at a glance: one blank mini-card per held world, in its
+    // tier's color (white for common, blue uncommon, gold rare); the stolen
+    // origin card wears its star.
+    const hand = div('ct-creature-hand');
+    hand.title = `${cr.deck.length} world${cr.deck.length === 1 ? '' : 's'} in hand`;
+    for (const wc of cr.deck) {
+      const mini = div(`ct-hand-mini t-${wc.tier}${wc.origin ? ' origin' : ''}`);
+      if (wc.origin) mini.textContent = '★';
+      hand.appendChild(mini);
+    }
+    cel.appendChild(hand);
     cel.addEventListener('click', () => { realmSound('click', 0.8, 1); swapView(() => showTrade(meta, ev, cr)); });
     cel.classList.add('dealt');
     cel.style.setProperty('--deal-i', String(i));
@@ -1001,6 +1220,9 @@ function showEvent(meta: CardMeta, ev: TradeEvent): void {
     showEvent(meta, ev);
   });
   stage.appendChild(wait);
+
+  // The hand persists at the bottom, untouched by the view swap.
+  renderHand(meta, { onAscended: () => showEvent(meta, ev) });
 }
 
 function showTrade(meta: CardMeta, ev: TradeEvent, cr: Creature): void {
@@ -1022,36 +1244,71 @@ function showTrade(meta: CardMeta, ev: TradeEvent, cr: Creature): void {
   header.appendChild(headText);
   stage.appendChild(header);
 
+  // Trader lines type out letter-at-a-time, like every other talking
+  // creature in the game. A newer line cancels whatever an older one was
+  // still typing (the token check), so rapid clicking never interleaves.
+  const TRADE_TYPE_MS = 24;
+  let typeToken = 0;
+  const sayLine = (text: string): void => {
+    const tok = ++typeToken;
+    speech.classList.add('typing');
+    speech.textContent = '';
+    void (async () => {
+      let rendered = '';
+      for (const ch of text) {
+        if (tok !== typeToken) return;
+        rendered += ch;
+        speech.textContent = rendered;
+        await sleep(TRADE_TYPE_MS);
+      }
+      if (tok === typeToken) speech.classList.remove('typing');
+    })();
+  };
+
   const theirsCap = div('ct-caption', 'their worlds');
   const theirsRow = div('ct-cards ct-theirs');
-  const yoursCap = div('ct-caption', 'your worlds');
-  const yoursRow = div('ct-cards ct-yours');
   stage.appendChild(theirsCap);
   stage.appendChild(theirsRow);
-  stage.appendChild(yoursCap);
-  stage.appendChild(yoursRow);
 
-  // Selection state: 'idle' (nothing picked), 'offer' (one of YOUR eligible
-  // cards picked — they show what they'd give), or 'request' (one of THEIR
-  // cards picked — they show what they'd take). In offer mode, `staged`
-  // holds the first pick of a two-for-one breakdown (the second pick seals
-  // it; a same-tier pick seals immediately).
-  let mode: 'idle' | 'offer' | 'request' = 'idle';
-  let selectedId: number | null = null;
-  let staged: number[] = [];
+  // The verdict, floating just above your hand (between the two rows):
+  // invisible until any of the trader's cards are picked, "✗ no trade"
+  // while the basket doesn't balance, and the green "✓ trade" button — the
+  // actual executor — once it does. Mounted into the hand layer by
+  // wireHand below.
+  const verdict = document.createElement('button');
+  verdict.type = 'button';
+  verdict.className = 'ct-trade-verdict';
+  verdict.disabled = true;
+
+  // ── Selection ──
+  // The TRADER's cards come first: pick one for a same-tier swap, or two
+  // for a two-for-one breakdown. Then one of yours that balances the ask —
+  // same tier (appetite willing) against one of theirs, one tier above
+  // against two. The verdict button seals it.
+  let pickedTheirs: number[] = [];
+  let pickedMine: number | null = null;
+  let hoverId: number | null = null;
+
+  const theirPicked = (): WorldCard[] =>
+    pickedTheirs.map((id) => cr.deck.find((c) => c.id === id)).filter((c): c is WorldCard => !!c);
+
+  const mineBalances = (mc: WorldCard): boolean => {
+    const picked = theirPicked();
+    if (picked.length === 1) return mc.tier === picked[0].tier && appetiteAccepts(cr.appetite, mc);
+    if (picked.length === 2) return TIER_RANK[mc.tier] === TIER_RANK[picked[0].tier] + 1;
+    return false;
+  };
+
+  const tradeReady = (): { mine: WorldCard; theirs: WorldCard[] } | null => {
+    const theirs = theirPicked();
+    const mine = meta.cards.find((c) => c.id === pickedMine) ?? null;
+    if (!mine || theirs.length === 0 || !mineBalances(mine)) return null;
+    return { mine, theirs };
+  };
 
   // Same-tier swaps need the appetite to match; breakdowns don't.
   const sameGivesFor = (mine: WorldCard): WorldCard[] =>
     appetiteAccepts(cr.appetite, mine) ? sameTierGives(cr, mine) : [];
-
-  const offerSpeech = (mine: WorldCard): string => {
-    const same = sameGivesFor(mine).length > 0;
-    const down = breakdownGives(cr, mine).length > 0;
-    if (same && down) return 'for that: one of its kind, or two of the lesser.';
-    if (same) return 'for that, i would give one of these.';
-    if (down) return 'for that, i would give two of these.';
-    return 'i hold nothing to give for that. wait for the next gathering.';
-  };
 
   // The handover, in motion: your card lifts away toward the creature while
   // theirs drop toward your row; only once both are gone does the swap
@@ -1061,7 +1318,7 @@ function showTrade(meta: CardMeta, ev: TradeEvent, cr: Creature): void {
   const executeTrade = (mine: WorldCard, theirs: WorldCard[]) => {
     if (tradeAnimating) return;
     tradeAnimating = true;
-    yoursRow.querySelector(`[data-card-id="${mine.id}"]`)?.classList.add('trade-given');
+    handRowEl()?.querySelector(`[data-card-id="${mine.id}"]`)?.classList.add('trade-given');
     for (const t of theirs) {
       theirsRow.querySelector(`[data-card-id="${t.id}"]`)?.classList.add('trade-received');
     }
@@ -1073,149 +1330,344 @@ function showTrade(meta: CardMeta, ev: TradeEvent, cr: Creature): void {
       meta.cards.push(...theirs);
       cr.deck.push(mine);
       saveMeta(meta);
-      mode = 'idle';
-      selectedId = null;
-      staged = [];
+      pickedTheirs = [];
+      pickedMine = null;
+      wireHand();
       render();
       for (const t of theirs) {
-        yoursRow.querySelector(`[data-card-id="${t.id}"]`)?.classList.add('trade-arrived');
+        handRowEl()?.querySelector(`[data-card-id="${t.id}"]`)?.classList.add('trade-arrived');
       }
       theirsRow.querySelector(`[data-card-id="${mine.id}"]`)?.classList.add('trade-arrived');
       // Winning your own world back is the realm's quiet climax; losing it
       // again gets its own line too.
       if (theirs.some((t) => t.origin)) {
         realmSound('task_complete', 0.9, 1);
-        speech.textContent = 'it remembers you.';
+        sayLine('it remembers you.');
       } else if (mine.origin) {
         realmSound('ritual', 1, 0.9);
-        speech.textContent = 'kept warm. someone grew this one.';
+        sayLine('kept warm. someone grew this one.');
       } else {
         realmSound('ritual', 1, 0.9);
-        speech.textContent = theirs.length === 2 ? "two for one. now it's a trade." : "now it's a trade.";
+        sayLine(theirs.length === 2 ? "two for one. now it's a trade." : "now it's a trade.");
       }
     }, 680);
   };
 
+  // ── The exchange arrows ──────────────────────────────────────────────
+  // Hovering a card draws a two-headed arrow to every card it could be
+  // exchanged for — one end on your card, the other on the trader's. Picking
+  // one side keeps its arrows up and turns the picked half white; clicking
+  // the card at the far end of an arrow completes the trade. The overlay is
+  // an SVG sheet over the whole stage, re-aimed every frame so the arrows
+  // ride the cards' levitation bob (which doubles as the idle animation).
+  const SVG_NS = 'http://www.w3.org/2000/svg';
+  const arrowLayer = document.createElementNS(SVG_NS, 'svg');
+  arrowLayer.setAttribute('class', 'ct-arrows');
+  const arrowDefs = document.createElementNS(SVG_NS, 'defs');
+  arrowLayer.appendChild(arrowDefs);
+
+  const ARROW_GREY = 'rgba(124, 124, 154, 0.6)';
+  const ARROW_WHITE = 'rgba(255, 255, 255, 0.97)';
+
+  type ArrowSpec = { mine: WorldCard; theirs: WorldCard; lit: 'none' | 'theirs' | 'both'; hot: boolean };
+  // Every (yours, theirs) pair the creature would actually exchange:
+  // appetite-matched same-tier swaps plus two-for-one breakdown halves.
+  const allPairs = (): { mine: WorldCard; theirs: WorldCard }[] => {
+    const out: { mine: WorldCard; theirs: WorldCard }[] = [];
+    for (const mine of meta.cards) {
+      const partners = new Set<WorldCard>([...sameGivesFor(mine), ...breakdownGives(cr, mine)]);
+      for (const theirs of partners) out.push({ mine, theirs });
+    }
+    return out;
+  };
+  // Which arrows are up: a hovered card's full pair fan while nothing is
+  // picked; once the trader's cards are picked, arrows from each pick to
+  // every card of yours that balances the ask (their half white) — and
+  // once yours is chosen too, only its arrows remain, white end to end.
+  const arrowSpecs = (): ArrowSpec[] => {
+    if (tradeAnimating) return [];
+    const specs: ArrowSpec[] = [];
+    if (pickedTheirs.length === 0) {
+      if (hoverId === null) return specs;
+      for (const { mine, theirs } of allPairs()) {
+        if (hoverId === mine.id || hoverId === theirs.id) specs.push({ mine, theirs, lit: 'none', hot: false });
+      }
+      return specs;
+    }
+    const ready = tradeReady() !== null;
+    for (const t of theirPicked()) {
+      for (const mc of meta.cards) {
+        if (!mineBalances(mc)) continue;
+        const isPicked = pickedMine === mc.id;
+        if (pickedMine !== null && !isPicked) continue;
+        specs.push({ mine: mc, theirs: t, lit: ready && isPicked ? 'both' : 'theirs', hot: isPicked || hoverId === mc.id });
+      }
+    }
+    return specs;
+  };
+
+  type ArrowEl = {
+    g: SVGGElement; glow: SVGLineElement; core: SVGLineElement;
+    headMine: SVGPathElement; headTheirs: SVGPathElement;
+    grad: SVGLinearGradientElement; stops: SVGStopElement[];
+  };
+  const liveArrows = new Map<string, ArrowEl>();
+  let gradSeq = 0;
+  const makeArrow = (): ArrowEl => {
+    const g = document.createElementNS(SVG_NS, 'g');
+    g.setAttribute('class', 'ct-arrow');
+    const grad = document.createElementNS(SVG_NS, 'linearGradient');
+    grad.setAttribute('id', `ct-agrad-${gradSeq++}`);
+    grad.setAttribute('gradientUnits', 'userSpaceOnUse');
+    // Three stops: theirs end / midpoint / mine end. The picked half blends
+    // to white from the middle out; unpicked arrows sit all-grey.
+    const stops = [0, 0.5, 1].map((off) => {
+      const s = document.createElementNS(SVG_NS, 'stop');
+      s.setAttribute('offset', String(off));
+      s.setAttribute('stop-color', ARROW_GREY);
+      grad.appendChild(s);
+      return s;
+    });
+    arrowDefs.appendChild(grad);
+    const mkLine = (cls: string): SVGLineElement => {
+      const l = document.createElementNS(SVG_NS, 'line');
+      l.setAttribute('class', cls);
+      l.setAttribute('pathLength', '1');
+      g.appendChild(l);
+      return l;
+    };
+    const glow = mkLine('cta-glow');
+    const core = mkLine('cta-core');
+    core.setAttribute('stroke', `url(#${grad.getAttribute('id')})`);
+    const mkHead = (): SVGPathElement => {
+      const p = document.createElementNS(SVG_NS, 'path');
+      p.setAttribute('class', 'cta-head');
+      g.appendChild(p);
+      return p;
+    };
+    const headTheirs = mkHead();
+    const headMine = mkHead();
+    arrowLayer.appendChild(g);
+    return { g, glow, core, headMine, headTheirs, grad, stops };
+  };
+
+  // Re-aim one arrow at the two cards' current on-screen edges. Your side
+  // lives in the persistent hand layer; client-rect math doesn't care.
+  const aimArrow = (a: ArrowEl, spec: ArrowSpec, sr: DOMRect): void => {
+    const theirsEl = theirsRow.querySelector(`[data-card-id="${spec.theirs.id}"]`);
+    const myEl = handRowEl()?.querySelector(`[data-card-id="${spec.mine.id}"]`);
+    if (!theirsEl || !myEl) { a.g.setAttribute('visibility', 'hidden'); return; }
+    a.g.removeAttribute('visibility');
+    const tr = theirsEl.getBoundingClientRect();
+    const mr = myEl.getBoundingClientRect();
+    // Theirs end hangs off the card's bottom edge, yours off the top.
+    const ax = tr.left + tr.width / 2 - sr.left + stage.scrollLeft;
+    const ay = tr.bottom - 4 - sr.top + stage.scrollTop;
+    const bx = mr.left + mr.width / 2 - sr.left + stage.scrollLeft;
+    const by = mr.top + 4 - sr.top + stage.scrollTop;
+    const dx = bx - ax, dy = by - ay;
+    const len = Math.hypot(dx, dy) || 1;
+    const ux = dx / len, uy = dy / len;
+    const head = spec.hot ? 15 : 12;
+    // The line stops short of each tip so the heads cap it cleanly.
+    const x1 = ax + ux * (head - 2), y1 = ay + uy * (head - 2);
+    const x2 = bx - ux * (head - 2), y2 = by - uy * (head - 2);
+    for (const l of [a.glow, a.core]) {
+      l.setAttribute('x1', String(x1)); l.setAttribute('y1', String(y1));
+      l.setAttribute('x2', String(x2)); l.setAttribute('y2', String(y2));
+    }
+    a.grad.setAttribute('x1', String(ax)); a.grad.setAttribute('y1', String(ay));
+    a.grad.setAttribute('x2', String(bx)); a.grad.setAttribute('y2', String(by));
+    // Heads: small triangles pointing out of each end (a two-headed arrow).
+    const tri = (tipX: number, tipY: number, dirX: number, dirY: number): string => {
+      const px = -dirY, py = dirX;
+      const baseX = tipX - dirX * head, baseY = tipY - dirY * head;
+      const w = head * 0.55;
+      return `M ${tipX} ${tipY} L ${baseX + px * w} ${baseY + py * w} L ${baseX - px * w} ${baseY - py * w} Z`;
+    };
+    a.headTheirs.setAttribute('d', tri(ax, ay, -ux, -uy));
+    a.headMine.setAttribute('d', tri(bx, by, ux, uy));
+    const theirsLit = spec.lit === 'theirs' || spec.lit === 'both';
+    const mineLit = spec.lit === 'both';
+    a.headTheirs.setAttribute('fill', theirsLit ? ARROW_WHITE : ARROW_GREY);
+    a.headMine.setAttribute('fill', mineLit ? ARROW_WHITE : ARROW_GREY);
+    a.stops[0].setAttribute('stop-color', theirsLit ? ARROW_WHITE : ARROW_GREY);
+    a.stops[1].setAttribute('stop-color', spec.lit === 'both' ? ARROW_WHITE : ARROW_GREY);
+    a.stops[2].setAttribute('stop-color', mineLit ? ARROW_WHITE : ARROW_GREY);
+    a.g.classList.toggle('lit', spec.lit !== 'none');
+    a.g.classList.toggle('hot', spec.hot);
+  };
+
+  // The per-frame loop: reconcile which arrows exist, then re-aim them all.
+  // Dies with the view — once the stage swaps and the SVG leaves the DOM,
+  // isConnected goes false and the loop simply stops.
+  const syncArrows = (): void => {
+    if (!arrowLayer.isConnected) return;
+    const specs = arrowSpecs();
+    const seen = new Set<string>();
+    const sr = stage.getBoundingClientRect();
+    arrowLayer.style.width = `${stage.scrollWidth}px`;
+    arrowLayer.style.height = `${stage.scrollHeight}px`;
+    for (const spec of specs) {
+      const key = `${spec.mine.id}:${spec.theirs.id}`;
+      seen.add(key);
+      let a = liveArrows.get(key);
+      if (!a) { a = makeArrow(); liveArrows.set(key, a); }
+      aimArrow(a, spec, sr);
+    }
+    for (const [key, a] of [...liveArrows]) {
+      if (seen.has(key)) continue;
+      a.g.remove();
+      a.grad.remove();
+      liveArrows.delete(key);
+    }
+    requestAnimationFrame(syncArrows);
+  };
+
+  // What the trader says, recomputed after every selection change.
+  const speak = () => {
+    const picked = theirPicked();
+    if (picked.length === 0) {
+      sayLine(APPETITE_LINE[cr.appetite]);
+      return;
+    }
+    if (tradeReady()) { sayLine('a fair trade. seal it.'); return; }
+    const anyBalance = meta.cards.some((c) => mineBalances(c));
+    if (picked.length === 1) {
+      if (anyBalance) sayLine('for this, i would take one of those.');
+      else if (cr.deck.length >= 2 && meta.cards.some((c) => TIER_RANK[c.tier] === TIER_RANK[picked[0].tier] + 1)) {
+        sayLine('alone, nothing of yours matches. take two of mine for one of the greater.');
+      } else sayLine('you hold nothing i would take for this.');
+    } else {
+      sayLine(anyBalance ? 'two of mine for one of the greater. choose it.' : 'you hold nothing worth two of mine.');
+    }
+  };
+
+  // Clicks on YOUR cards arrive from the persistent hand layer.
+  const onMineClick = (mc: WorldCard) => {
+    if (tradeAnimating) return;
+    if (pickedMine === mc.id) {
+      pickedMine = null;
+      render(); speak();
+      return;
+    }
+    if (pickedTheirs.length === 0) {
+      realmSound('error', 0.5);
+      sayLine('choose from my hand first.');
+      return;
+    }
+    if (!mineBalances(mc)) {
+      realmSound('error', 0.5);
+      sayLine('that one does not balance it.');
+      return;
+    }
+    pickedMine = mc.id;
+    realmSound('select', 0.7, 1.1);
+    render(); speak();
+  };
+
+  const wireHand = () => {
+    renderHand(meta, {
+      topEl: verdict,
+      onCardClick: onMineClick,
+      onCardHover: (c, over) => { hoverId = over ? c.id : hoverId === c.id ? null : hoverId; },
+      onAscended: () => {
+        // Tiers moved under the picks — drop any that no longer balance.
+        if (pickedMine !== null) {
+          const mc = meta.cards.find((c) => c.id === pickedMine);
+          if (!mc || !mineBalances(mc)) pickedMine = null;
+        }
+        wireHand();
+        render();
+        speak();
+      },
+    });
+  };
+
   const render = () => {
     theirsRow.innerHTML = '';
-    yoursRow.innerHTML = '';
-    // Cards of yours the creature is open to trading for: appetite-matched
-    // same-tier swaps, or a tier-above card it can break down two-for-one
-    // (appetite-free — greed beats taste).
-    const wanted = meta.cards.filter((c) => creatureOpenTo(cr, c));
-    const selMine = meta.cards.find((c) => c.id === selectedId) ?? null;
-    const selTheirs = cr.deck.find((c) => c.id === selectedId) ?? null;
-
     for (const tc of cr.deck) {
-      const isStaged = staged.includes(tc.id);
-      let eligible: boolean;
-      if (mode === 'idle') {
-        eligible = true;
-      } else if (mode === 'request') {
-        eligible = tc.id === selectedId;
-      } else if (selMine === null) {
-        eligible = false;
-      } else if (staged.length > 0) {
-        // Mid-breakdown: only the staged card (to unpick) and its remaining
-        // lesser-tier companions are live.
-        eligible = isStaged || breakdownGives(cr, selMine).includes(tc);
-      } else {
-        eligible = sameGivesFor(selMine).includes(tc) || breakdownGives(cr, selMine).includes(tc);
-      }
+      const isPicked = pickedTheirs.includes(tc.id);
       const el = buildCardEl(tc, {
+        // Any trader card can be visited without owning it: a time-frozen,
+        // look-don't-touch boot of their world.
+        enterLabel: 'SPECTATE',
+        onEnter: (cardEl) => { if (!tradeAnimating) void spectateWorld(tc, cardEl); },
         onClick: () => {
           if (tradeAnimating) return;
-          if (mode === 'offer' && selMine) {
-            if (isStaged) {
-              // Unpick the first half of a breakdown.
-              staged = [];
-              render();
-              speech.textContent = offerSpeech(selMine);
-              return;
-            }
-            if (staged.length === 0 && sameGivesFor(selMine).includes(tc)) {
-              executeTrade(selMine, [tc]);
-              return;
-            }
-            if (breakdownGives(cr, selMine).includes(tc)) {
-              const first = cr.deck.find((c) => c.id === staged[0]);
-              if (first) {
-                executeTrade(selMine, [first, tc]);
-              } else {
-                staged = [tc.id];
-                render();
-                speech.textContent = 'and one more.';
-                realmSound('select', 0.7, 1.2);
-              }
-              return;
-            }
+          if (isPicked) {
+            pickedTheirs = pickedTheirs.filter((id) => id !== tc.id);
+          } else if (pickedTheirs.length >= 2) {
+            realmSound('error', 0.5);
+            sayLine('two of mine at most.');
             return;
-          }
-          if (mode === 'request' && tc.id === selectedId) {
-            mode = 'idle'; selectedId = null; render();
-            speech.textContent = APPETITE_LINE[cr.appetite];
-            return;
-          }
-          if (mode !== 'offer') {
-            const takers = creatureTakesFor(cr, tc, meta.cards);
-            mode = 'request'; selectedId = tc.id; render();
-            speech.textContent = takers.length > 0
-              ? 'for this, i would take one of those.'
-              : 'you hold nothing i would take for this.';
+          } else {
+            pickedTheirs.push(tc.id);
             realmSound('select', 0.7, 1.1);
           }
+          // Your pick must still balance the new ask.
+          if (pickedMine !== null) {
+            const mc = meta.cards.find((c) => c.id === pickedMine);
+            if (!mc || !mineBalances(mc)) pickedMine = null;
+          }
+          render();
+          speak();
         },
       });
-      el.classList.toggle('grayed', !eligible);
-      el.classList.toggle('selected', (mode === 'request' && tc.id === selectedId) || isStaged);
+      el.classList.toggle('grayed', pickedTheirs.length >= 2 && !isPicked);
+      el.classList.toggle('selected', isPicked);
+      el.addEventListener('mouseenter', () => { hoverId = tc.id; });
+      el.addEventListener('mouseleave', () => { if (hoverId === tc.id) hoverId = null; });
       theirsRow.appendChild(el);
     }
 
-    for (const mc of meta.cards) {
-      const matches = wanted.includes(mc);
-      const eligible = (mode === 'idle' && matches)
-        || (mode === 'offer' && mc.id === selectedId)
-        || (mode === 'request' && selTheirs !== null && creatureTakesFor(cr, selTheirs, meta.cards).includes(mc));
-      const el = buildCardEl(mc, {
-        onClick: () => {
-          if (tradeAnimating) return;
-          if (mode === 'request' && selTheirs && creatureTakesFor(cr, selTheirs, meta.cards).includes(mc)) {
-            executeTrade(mc, [selTheirs]);
-            return;
-          }
-          if (mode === 'offer' && mc.id === selectedId) {
-            mode = 'idle'; selectedId = null; staged = []; render();
-            speech.textContent = APPETITE_LINE[cr.appetite];
-            return;
-          }
-          if (mode !== 'request' && matches) {
-            mode = 'offer'; selectedId = mc.id; staged = []; render();
-            speech.textContent = offerSpeech(mc);
-            realmSound('select', 0.7, 1.1);
-          } else if (mode === 'idle' && !matches) {
-            realmSound('error', 0.5);
-            speech.textContent = 'that one does not interest me.';
-          }
-        },
-      });
-      el.classList.toggle('grayed', !eligible);
-      el.classList.toggle('selected', mode === 'offer' && mc.id === selectedId);
-      yoursRow.appendChild(el);
+    // The hand persists across renders — the trade state rides on it as
+    // classes only. Before any pick, grey the cards the creature would
+    // never take (appetite-matched same tier, or breakable tier-above);
+    // mid-pick, grey whatever doesn't balance the current ask.
+    const row = handRowEl();
+    if (row) {
+      for (const el of [...row.children] as HTMLElement[]) {
+        const mc = meta.cards.find((c) => c.id === Number(el.dataset.cardId));
+        if (!mc) continue;
+        const eligible = pickedTheirs.length > 0 ? mineBalances(mc) : creatureOpenTo(cr, mc);
+        el.classList.toggle('grayed', !eligible);
+        el.classList.toggle('selected', pickedMine === mc.id);
+      }
     }
 
-    // Only the view's first render deals in staggered — re-renders driven by
-    // selection clicks would otherwise replay the deal on every pick.
+    // The verdict.
+    const ready = tradeReady();
+    verdict.classList.toggle('show', pickedTheirs.length > 0);
+    verdict.classList.toggle('ok', ready !== null);
+    verdict.disabled = ready === null;
+    verdict.textContent = pickedTheirs.length === 0 ? '' : ready ? '✓ trade' : '✗ no trade';
+
+    // Only the view's first render deals in staggered — re-renders driven
+    // by selection clicks would otherwise replay the deal on every pick.
     if (firstDeal) {
       firstDeal = false;
-      [...theirsRow.children, ...yoursRow.children].forEach((el, i) => {
+      [...theirsRow.children].forEach((el, i) => {
         (el as HTMLElement).classList.add('dealt');
         (el as HTMLElement).style.setProperty('--deal-i', String(i));
       });
     }
   };
 
+  verdict.addEventListener('click', () => {
+    const ready = tradeReady();
+    if (!ready || tradeAnimating) return;
+    realmSound('click', 0.8, 1);
+    executeTrade(ready.mine, ready.theirs);
+  });
+
   let firstDeal = true;
+  wireHand();
   render();
+  // The arrow sheet mounts last so it paints above the row; its rAF loop
+  // self-terminates when the stage swaps this view out.
+  stage.appendChild(arrowLayer);
+  requestAnimationFrame(syncArrows);
   const anyWanted = meta.cards.some((c) => appetiteAccepts(cr.appetite, c));
-  speech.textContent = anyWanted ? APPETITE_LINE[cr.appetite] : 'you hold nothing i want. yet.';
+  sayLine(anyWanted ? APPETITE_LINE[cr.appetite] : 'you hold nothing i want. yet.');
 }

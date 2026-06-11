@@ -1872,6 +1872,12 @@ export function refreshUI(state: GameState) {
     qtStripWasVisible = qtVisible;
     (document.getElementById('qt-space') as HTMLButtonElement).style.display =
       state.spaceUnlocked ? '' : 'none';
+    // Hell mirrors space: no jump button to a scene this world hasn't
+    // opened. Outside card worlds the strip only exists post-feed_hell_core
+    // (hell long since open), but generated card worlds stamp every task —
+    // some of them have never dug a portal.
+    (document.getElementById('qt-hell') as HTMLButtonElement).style.display =
+      state.hellUnlocked ? '' : 'none';
     const qtViews: [string, GameState['view']][] = [
       ['qt-ground', 'ground'], ['qt-hell', 'hell'], ['qt-space', 'space'],
     ];
