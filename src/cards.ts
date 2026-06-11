@@ -1248,13 +1248,13 @@ function showTrade(meta: CardMeta, ev: TradeEvent, cr: Creature): void {
   stage.className = 'trade-view';
   stage.appendChild(backButton('← step away', () => swapView(() => showEvent(meta, ev))));
 
+  // The trader presides over the table from the top middle: sprite, name,
+  // speech line, stacked and centered (the frame chip is gone — the cards
+  // themselves wear the pattern).
   const header = div('ct-trade-header');
   header.appendChild(creatureAvatar());
   const headText = div('ct-trade-headtext');
-  const nameRow = div('ct-creature-namerow');
-  nameRow.appendChild(div('ct-creature-name', cr.name));
-  nameRow.appendChild(div(`ct-frame-chip wcf-${cr.frame ?? 0}`));
-  headText.appendChild(nameRow);
+  headText.appendChild(div('ct-creature-name', cr.name));
   const speech = div('ct-trade-line', '');
   headText.appendChild(speech);
   header.appendChild(headText);
@@ -1466,13 +1466,19 @@ function showTrade(meta: CardMeta, ev: TradeEvent, cr: Creature): void {
       }
     }
 
-    // The verdict.
+    // The verdict. Offering your whole hand for nothing gets its own line —
+    // the realm never lets you walk away from the table empty-handed.
     const ready = tradeReady();
     const anyPicked = pickedTheirs.size > 0 || pickedMine.size > 0;
+    const allMineForNothing = pickedTheirs.size === 0
+      && pickedMine.size > 0 && pickedMine.size === meta.cards.length;
     verdict.classList.toggle('show', anyPicked);
     verdict.classList.toggle('ok', ready !== null);
     verdict.disabled = ready === null;
-    verdict.textContent = !anyPicked ? '' : ready ? '✓ trade' : '✗ no trade';
+    verdict.textContent = !anyPicked ? ''
+      : ready ? '✓ trade'
+      : allMineForNothing ? "✗ can't trade last card"
+      : '✗ bad trade';
 
     // Only the view's first render deals in staggered — re-renders driven
     // by selection clicks would otherwise replay the deal on every pick.

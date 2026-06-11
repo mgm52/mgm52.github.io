@@ -2167,9 +2167,17 @@
       .ct-hand-mini.t-uncommon { border-color: #7aa8e2; box-shadow: 0 1px 4px rgba(122, 168, 226, 0.45); }
       .ct-hand-mini.t-rare { border-color: #e2c064; box-shadow: 0 1px 5px rgba(226, 192, 100, 0.55); }
       .ct-hand-mini.origin { border-color: #e2b85a; }
-      .ct-trade-header { display: flex; align-items: center; gap: 14px; margin-top: 4px; }
-      .ct-trade-header .ct-creature-sprite { --csize: 84px; }
-      .ct-trade-headtext { display: flex; flex-direction: column; gap: 3px; text-align: left; }
+      /* The trader presides from the top middle: sprite over name over the
+         speech line, all centered. */
+      .ct-trade-header {
+        display: flex; flex-direction: column; align-items: center;
+        gap: 2px; margin-top: 4px;
+      }
+      .ct-trade-header .ct-creature-sprite { --csize: 72px; }
+      .ct-trade-headtext {
+        display: flex; flex-direction: column; align-items: center;
+        gap: 3px; text-align: center;
+      }
       .ct-trade-line {
         font-family: var(--font-dialogue, var(--font-display));
         font-size: 17px; color: #6a6a72; min-height: 1.3em;
@@ -2197,12 +2205,21 @@
          strip stays shallow and the trader's row keeps the limelight. */
       #card-hand .world-card { width: 150px; }
       #card-hand .ct-trade-verdict { margin-top: 0; min-height: 38px; padding: 6px 22px; }
-      /* The trade view packs two card rows on one screen — trim the air,
-         run the trader's cards a size down too, and keep the header tight,
-         so the exchange arrows get a clear channel between the rows. */
+      /* The trade view packs two card rows on one screen — trim the air and
+         run the trader's cards a size down. The auto margins float the
+         whole header + row block toward the hand: it centers in whatever
+         space the screen has, instead of hugging the top and leaving a
+         dead zone in the middle. (Auto margins collapse to 0 once the
+         content has to scroll, so short screens degrade gracefully.) */
       #card-stage.trade-view { padding-top: 2vh; gap: 6px; }
       #card-stage.trade-view .ct-theirs .world-card { width: 170px; }
-      #card-stage.trade-view .ct-trade-header .ct-creature-sprite { --csize: 60px; }
+      #card-stage.trade-view .ct-trade-header { margin-top: auto; }
+      #card-stage.trade-view .ct-theirs { margin-bottom: 18px; }
+      /* In the trade view the hand needs no caption (whose else would the
+         bottom row be?), and its gap widens into a clean lane where the
+         picked card's up-arrow lives without touching the verdict. */
+      #card-stage.trade-view + #card-hand { gap: 46px; }
+      #card-stage.trade-view + #card-hand .ct-caption { display: none; }
       /* The trade verdict: blank until any of the trader's cards are picked,
          then a red "✗ no trade" while the basket doesn't balance — flipping
          to a green, clickable "✓ trade" once it does. */
