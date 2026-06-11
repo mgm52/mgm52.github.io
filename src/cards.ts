@@ -27,9 +27,9 @@ import { GameState, computePlayBounds, isInPlayCell } from './state';
 import { ALL_TASK_IDS } from './ui';
 import {
   APPETITE_LINE, CardMeta, CardResources, CardTier, Creature, FRAME_BASE, TIER_ABOVE,
-  TIER_RANK, TradeEvent, UpgradeReq, WorldCard, appetiteAccepts, ascendCard, breakdownGives,
-  cardPower, creatureOpenTo, decodeWorld, encodeWorld, generateEvents,
-  makeCard, mulberry32, regenerateEvent, reqMet, sameTierGives, sceneStructureCounts,
+  TIER_RANK, TradeEvent, UpgradeReq, WorldCard, appetiteAccepts, ascendCard,
+  cardPower, decodeWorld, encodeWorld, generateEvents,
+  makeCard, mulberry32, regenerateEvent, reqMet, sceneStructureCounts,
 } from './cards-core';
 
 const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
@@ -161,7 +161,7 @@ export function captureOriginWorld(state: GameState): void {
       data: encodeWorld(state),
       resources: {
         money: state.money, blood: state.blood, dragonBone: state.dragonBone,
-        power: cardPower(state),
+        power: cardPower(state), goblins: state.goblins.size,
       },
     };
     localStorage.setItem(ORIGIN_KEY, JSON.stringify(payload));
@@ -319,7 +319,7 @@ async function leaveWorld(state: GameState): Promise<void> {
     card.data = encodeWorld(state);
     card.resources = {
       money: state.money, blood: state.blood, dragonBone: state.dragonBone,
-      power: cardPower(state),
+      power: cardPower(state), goblins: state.goblins.size,
     };
   }
   meta.activeCardId = null;
@@ -701,10 +701,12 @@ function resourcesEl(r: CardResources): HTMLElement {
     wrap.appendChild(span);
   };
   const power = r.power ?? 0;
+  const goblins = r.goblins ?? 0;
   if (r.money > 0) add('res-cash', `Ƶ ${fmt(r.money)}`, r.money >= 500_000);
   if (r.blood > 0) add('res-blood', `${fmt(r.blood)} blood`, r.blood >= 128);
   if (power > 0) add('res-power', formatPower(power), power >= 1_000_000_000);
   if (r.dragonBone > 0) add('res-bones', `${fmt(r.dragonBone)} bones`, r.dragonBone >= 5);
+  if (goblins > 0) add('res-goblins', `${fmt(goblins)} goblins`, goblins >= 25);
   if (!wrap.firstChild) add('res-nothing', 'nothing', false);
   return wrap;
 }
@@ -1071,7 +1073,6 @@ function div(cls: string, text?: string): HTMLElement {
 type HandOpts = {
   // Trade view: whole-card clicks feed the selection basket.
   onCardClick?: (card: WorldCard) => void;
-  onCardHover?: (card: WorldCard, over: boolean) => void;
   // Fired after an ascension. The view MUST refresh anything that depends
   // on tiers (gathering locks, trade eligibility) AND re-render the hand;
   // when absent the hand re-renders itself.
@@ -1108,10 +1109,6 @@ function renderHand(meta: CardMeta, opts: HandOpts = {}): void {
           handRowEl()?.querySelector(`[data-card-id="${c.id}"]`)?.classList.add('ascended');
         },
       });
-      if (opts.onCardHover) {
-        el.addEventListener('mouseenter', () => opts.onCardHover!(c, true));
-        el.addEventListener('mouseleave', () => opts.onCardHover!(c, false));
-      }
       row.appendChild(el);
     }
     hand.appendChild(row);
@@ -1300,34 +1297,31 @@ function showTrade(meta: CardMeta, ev: TradeEvent, cr: Creature): void {
   verdict.disabled = true;
 
   // ── Selection ──
-  // The TRADER's cards come first: pick one for a same-tier swap, or two
-  // for a two-for-one breakdown. Then one of yours that balances the ask —
-  // same tier (appetite willing) against one of theirs, one tier above
-  // against two. The verdict button seals it.
-  let pickedTheirs: number[] = [];
-  let pickedMine: number | null = null;
-  let hoverId: number | null = null;
+  // Every card — theirs or yours — is a free toggle: clicking it moves it
+  // in or out of the trade, no order and no eligibility gate. A picked card
+  // wears a short thick arrow pointing where it would go (theirs: down
+  // toward your hand; yours: up toward the trader). The verdict button is
+  // the only judge of whether the basket balances: one of theirs for one
+  // of yours of the same tier (appetite willing), or two of theirs of a
+  // kind for one of yours a tier above.
+  const pickedTheirs = new Set<number>();
+  const pickedMine = new Set<number>();
 
-  const theirPicked = (): WorldCard[] =>
-    pickedTheirs.map((id) => cr.deck.find((c) => c.id === id)).filter((c): c is WorldCard => !!c);
-
-  const mineBalances = (mc: WorldCard): boolean => {
-    const picked = theirPicked();
-    if (picked.length === 1) return mc.tier === picked[0].tier && appetiteAccepts(cr.appetite, mc);
-    if (picked.length === 2) return TIER_RANK[mc.tier] === TIER_RANK[picked[0].tier] + 1;
-    return false;
-  };
+  const theirPicked = (): WorldCard[] => cr.deck.filter((c) => pickedTheirs.has(c.id));
+  const minePicked = (): WorldCard[] => meta.cards.filter((c) => pickedMine.has(c.id));
 
   const tradeReady = (): { mine: WorldCard; theirs: WorldCard[] } | null => {
+    const mines = minePicked();
     const theirs = theirPicked();
-    const mine = meta.cards.find((c) => c.id === pickedMine) ?? null;
-    if (!mine || theirs.length === 0 || !mineBalances(mine)) return null;
-    return { mine, theirs };
+    if (mines.length !== 1 || theirs.length === 0 || theirs.length > 2) return null;
+    const mine = mines[0];
+    if (theirs.length === 1) {
+      return mine.tier === theirs[0].tier && appetiteAccepts(cr.appetite, mine)
+        ? { mine, theirs } : null;
+    }
+    if (theirs[0].tier !== theirs[1].tier) return null;
+    return TIER_RANK[mine.tier] === TIER_RANK[theirs[0].tier] + 1 ? { mine, theirs } : null;
   };
-
-  // Same-tier swaps need the appetite to match; breakdowns don't.
-  const sameGivesFor = (mine: WorldCard): WorldCard[] =>
-    appetiteAccepts(cr.appetite, mine) ? sameTierGives(cr, mine) : [];
 
   // The handover, in motion: your card lifts away toward the creature while
   // theirs drop toward your row; only once both are gone does the swap
@@ -1349,8 +1343,8 @@ function showTrade(meta: CardMeta, ev: TradeEvent, cr: Creature): void {
       meta.cards.push(...theirs);
       cr.deck.push(mine);
       saveMeta(meta);
-      pickedTheirs = [];
-      pickedMine = null;
+      pickedTheirs.clear();
+      pickedMine.clear();
       wireHand();
       render();
       for (const t of theirs) {
@@ -1372,230 +1366,64 @@ function showTrade(meta: CardMeta, ev: TradeEvent, cr: Creature): void {
     }, 680);
   };
 
-  // ── The exchange arrows ──────────────────────────────────────────────
-  // Hovering a card draws a two-headed arrow to every card it could be
-  // exchanged for — one end on your card, the other on the trader's. Picking
-  // one side keeps its arrows up and turns the picked half white; clicking
-  // the card at the far end of an arrow completes the trade. The overlay is
-  // an SVG sheet over the whole stage, re-aimed every frame so the arrows
-  // ride the cards' levitation bob (which doubles as the idle animation).
-  const SVG_NS = 'http://www.w3.org/2000/svg';
-  const arrowLayer = document.createElementNS(SVG_NS, 'svg');
-  arrowLayer.setAttribute('class', 'ct-arrows');
-  const arrowDefs = document.createElementNS(SVG_NS, 'defs');
-  arrowLayer.appendChild(arrowDefs);
-
-  const ARROW_GREY = 'rgba(124, 124, 154, 0.6)';
-  const ARROW_WHITE = 'rgba(255, 255, 255, 0.97)';
-
-  type ArrowSpec = { mine: WorldCard; theirs: WorldCard; lit: 'none' | 'theirs' | 'both'; hot: boolean };
-  // Every (yours, theirs) pair the creature would actually exchange:
-  // appetite-matched same-tier swaps plus two-for-one breakdown halves.
-  const allPairs = (): { mine: WorldCard; theirs: WorldCard }[] => {
-    const out: { mine: WorldCard; theirs: WorldCard }[] = [];
-    for (const mine of meta.cards) {
-      const partners = new Set<WorldCard>([...sameGivesFor(mine), ...breakdownGives(cr, mine)]);
-      for (const theirs of partners) out.push({ mine, theirs });
-    }
-    return out;
-  };
-  // Which arrows are up: a hovered card's full pair fan while nothing is
-  // picked; once the trader's cards are picked, arrows from each pick to
-  // every card of yours that balances the ask (their half white) — and
-  // once yours is chosen too, only its arrows remain, white end to end.
-  const arrowSpecs = (): ArrowSpec[] => {
-    if (tradeAnimating) return [];
-    const specs: ArrowSpec[] = [];
-    if (pickedTheirs.length === 0) {
-      if (hoverId === null) return specs;
-      for (const { mine, theirs } of allPairs()) {
-        if (hoverId === mine.id || hoverId === theirs.id) specs.push({ mine, theirs, lit: 'none', hot: false });
-      }
-      return specs;
-    }
-    const ready = tradeReady() !== null;
-    for (const t of theirPicked()) {
-      for (const mc of meta.cards) {
-        if (!mineBalances(mc)) continue;
-        const isPicked = pickedMine === mc.id;
-        if (pickedMine !== null && !isPicked) continue;
-        specs.push({ mine: mc, theirs: t, lit: ready && isPicked ? 'both' : 'theirs', hot: isPicked || hoverId === mc.id });
-      }
-    }
-    return specs;
+  // A picked card wears a short, super-thick arrow pointing where it would
+  // go if the trade seals: theirs point down toward your hand, yours point
+  // up toward the trader. Pure indication — it shows whether or not the
+  // basket currently balances (the verdict button judges that).
+  const markPicked = (el: HTMLElement, picked: boolean, dir: 'down' | 'up'): void => {
+    el.classList.toggle('selected', picked);
+    const existing = el.querySelector(':scope > .ct-move-arrow');
+    if (picked && !existing) el.appendChild(div(`ct-move-arrow ${dir}`));
+    else if (!picked && existing) existing.remove();
   };
 
-  type ArrowEl = {
-    g: SVGGElement; glow: SVGLineElement; core: SVGLineElement;
-    headMine: SVGPathElement; headTheirs: SVGPathElement;
-    grad: SVGLinearGradientElement; stops: SVGStopElement[];
-  };
-  const liveArrows = new Map<string, ArrowEl>();
-  let gradSeq = 0;
-  const makeArrow = (): ArrowEl => {
-    const g = document.createElementNS(SVG_NS, 'g');
-    g.setAttribute('class', 'ct-arrow');
-    const grad = document.createElementNS(SVG_NS, 'linearGradient');
-    grad.setAttribute('id', `ct-agrad-${gradSeq++}`);
-    grad.setAttribute('gradientUnits', 'userSpaceOnUse');
-    // Three stops: theirs end / midpoint / mine end. The picked half blends
-    // to white from the middle out; unpicked arrows sit all-grey.
-    const stops = [0, 0.5, 1].map((off) => {
-      const s = document.createElementNS(SVG_NS, 'stop');
-      s.setAttribute('offset', String(off));
-      s.setAttribute('stop-color', ARROW_GREY);
-      grad.appendChild(s);
-      return s;
-    });
-    arrowDefs.appendChild(grad);
-    const mkLine = (cls: string): SVGLineElement => {
-      const l = document.createElementNS(SVG_NS, 'line');
-      l.setAttribute('class', cls);
-      l.setAttribute('pathLength', '1');
-      g.appendChild(l);
-      return l;
-    };
-    const glow = mkLine('cta-glow');
-    const core = mkLine('cta-core');
-    core.setAttribute('stroke', `url(#${grad.getAttribute('id')})`);
-    const mkHead = (): SVGPathElement => {
-      const p = document.createElementNS(SVG_NS, 'path');
-      p.setAttribute('class', 'cta-head');
-      g.appendChild(p);
-      return p;
-    };
-    const headTheirs = mkHead();
-    const headMine = mkHead();
-    arrowLayer.appendChild(g);
-    return { g, glow, core, headMine, headTheirs, grad, stops };
-  };
-
-  // Re-aim one arrow at the two cards' current on-screen edges. Your side
-  // lives in the persistent hand layer; client-rect math doesn't care.
-  const aimArrow = (a: ArrowEl, spec: ArrowSpec, sr: DOMRect): void => {
-    const theirsEl = theirsRow.querySelector(`[data-card-id="${spec.theirs.id}"]`);
-    const myEl = handRowEl()?.querySelector(`[data-card-id="${spec.mine.id}"]`);
-    if (!theirsEl || !myEl) { a.g.setAttribute('visibility', 'hidden'); return; }
-    a.g.removeAttribute('visibility');
-    const tr = theirsEl.getBoundingClientRect();
-    const mr = myEl.getBoundingClientRect();
-    // Theirs end hangs off the card's bottom edge, yours off the top.
-    const ax = tr.left + tr.width / 2 - sr.left + stage.scrollLeft;
-    const ay = tr.bottom - 4 - sr.top + stage.scrollTop;
-    const bx = mr.left + mr.width / 2 - sr.left + stage.scrollLeft;
-    const by = mr.top + 4 - sr.top + stage.scrollTop;
-    const dx = bx - ax, dy = by - ay;
-    const len = Math.hypot(dx, dy) || 1;
-    const ux = dx / len, uy = dy / len;
-    const head = spec.hot ? 15 : 12;
-    // The line stops short of each tip so the heads cap it cleanly.
-    const x1 = ax + ux * (head - 2), y1 = ay + uy * (head - 2);
-    const x2 = bx - ux * (head - 2), y2 = by - uy * (head - 2);
-    for (const l of [a.glow, a.core]) {
-      l.setAttribute('x1', String(x1)); l.setAttribute('y1', String(y1));
-      l.setAttribute('x2', String(x2)); l.setAttribute('y2', String(y2));
-    }
-    a.grad.setAttribute('x1', String(ax)); a.grad.setAttribute('y1', String(ay));
-    a.grad.setAttribute('x2', String(bx)); a.grad.setAttribute('y2', String(by));
-    // Heads: small triangles pointing out of each end (a two-headed arrow).
-    const tri = (tipX: number, tipY: number, dirX: number, dirY: number): string => {
-      const px = -dirY, py = dirX;
-      const baseX = tipX - dirX * head, baseY = tipY - dirY * head;
-      const w = head * 0.55;
-      return `M ${tipX} ${tipY} L ${baseX + px * w} ${baseY + py * w} L ${baseX - px * w} ${baseY - py * w} Z`;
-    };
-    a.headTheirs.setAttribute('d', tri(ax, ay, -ux, -uy));
-    a.headMine.setAttribute('d', tri(bx, by, ux, uy));
-    const theirsLit = spec.lit === 'theirs' || spec.lit === 'both';
-    const mineLit = spec.lit === 'both';
-    a.headTheirs.setAttribute('fill', theirsLit ? ARROW_WHITE : ARROW_GREY);
-    a.headMine.setAttribute('fill', mineLit ? ARROW_WHITE : ARROW_GREY);
-    a.stops[0].setAttribute('stop-color', theirsLit ? ARROW_WHITE : ARROW_GREY);
-    a.stops[1].setAttribute('stop-color', spec.lit === 'both' ? ARROW_WHITE : ARROW_GREY);
-    a.stops[2].setAttribute('stop-color', mineLit ? ARROW_WHITE : ARROW_GREY);
-    a.g.classList.toggle('lit', spec.lit !== 'none');
-    a.g.classList.toggle('hot', spec.hot);
-  };
-
-  // The per-frame loop: reconcile which arrows exist, then re-aim them all.
-  // Dies with the view — once the stage swaps and the SVG leaves the DOM,
-  // isConnected goes false and the loop simply stops.
-  const syncArrows = (): void => {
-    if (!arrowLayer.isConnected) return;
-    const specs = arrowSpecs();
-    const seen = new Set<string>();
-    const sr = stage.getBoundingClientRect();
-    arrowLayer.style.width = `${stage.scrollWidth}px`;
-    arrowLayer.style.height = `${stage.scrollHeight}px`;
-    for (const spec of specs) {
-      const key = `${spec.mine.id}:${spec.theirs.id}`;
-      seen.add(key);
-      let a = liveArrows.get(key);
-      if (!a) { a = makeArrow(); liveArrows.set(key, a); }
-      aimArrow(a, spec, sr);
-    }
-    for (const [key, a] of [...liveArrows]) {
-      if (seen.has(key)) continue;
-      a.g.remove();
-      a.grad.remove();
-      liveArrows.delete(key);
-    }
-    requestAnimationFrame(syncArrows);
-  };
-
-  // What the trader says, recomputed after every selection change.
+  // What the trader says, recomputed after every toggle.
   const speak = () => {
-    const picked = theirPicked();
-    if (picked.length === 0) {
+    const theirs = theirPicked();
+    const mines = minePicked();
+    if (theirs.length === 0 && mines.length === 0) {
       sayLine(APPETITE_LINE[cr.appetite]);
       return;
     }
     if (tradeReady()) { sayLine('a fair trade. seal it.'); return; }
-    const anyBalance = meta.cards.some((c) => mineBalances(c));
-    if (picked.length === 1) {
-      if (anyBalance) sayLine('for this, i would take one of those.');
-      else if (cr.deck.length >= 2 && meta.cards.some((c) => TIER_RANK[c.tier] === TIER_RANK[picked[0].tier] + 1)) {
-        sayLine('alone, nothing of yours matches. take two of mine for one of the greater.');
-      } else sayLine('you hold nothing i would take for this.');
-    } else {
-      sayLine(anyBalance ? 'two of mine for one of the greater. choose it.' : 'you hold nothing worth two of mine.');
+    if (mines.length === 0) {
+      sayLine(theirs.length === 1 ? 'and what will you give for it?'
+        : theirs.length === 2 ? 'two of mine — show me one of the greater kind.'
+        : 'i give two at most.');
+      return;
     }
+    if (theirs.length === 0) { sayLine('and which of mine would you have for that?'); return; }
+    if (mines.length > 1) { sayLine('one of yours at a time.'); return; }
+    if (theirs.length > 2) { sayLine('i give two at most.'); return; }
+    if (theirs.length === 2) {
+      sayLine(theirs[0].tier !== theirs[1].tier
+        ? 'two of mine must be of a kind.'
+        : 'two of mine are worth one of the greater kind.');
+      return;
+    }
+    if (mines[0].tier !== theirs[0].tier) { sayLine('those are not of a kind. it does not balance.'); return; }
+    sayLine('that one does not feed me. ' + APPETITE_LINE[cr.appetite]);
   };
 
-  // Clicks on YOUR cards arrive from the persistent hand layer.
+  // Clicks on YOUR cards arrive from the persistent hand layer — the same
+  // free in/out toggle as the trader's side.
   const onMineClick = (mc: WorldCard) => {
     if (tradeAnimating) return;
-    if (pickedMine === mc.id) {
-      pickedMine = null;
-      render(); speak();
-      return;
+    if (pickedMine.has(mc.id)) {
+      pickedMine.delete(mc.id);
+    } else {
+      pickedMine.add(mc.id);
+      realmSound('select', 0.7, 1.1);
     }
-    if (pickedTheirs.length === 0) {
-      realmSound('error', 0.5);
-      sayLine('choose from my hand first.');
-      return;
-    }
-    if (!mineBalances(mc)) {
-      realmSound('error', 0.5);
-      sayLine('that one does not balance it.');
-      return;
-    }
-    pickedMine = mc.id;
-    realmSound('select', 0.7, 1.1);
-    render(); speak();
+    render();
+    speak();
   };
 
   const wireHand = () => {
     renderHand(meta, {
       topEl: verdict,
       onCardClick: onMineClick,
-      onCardHover: (c, over) => { hoverId = over ? c.id : hoverId === c.id ? null : hoverId; },
       onAscended: () => {
-        // Tiers moved under the picks — drop any that no longer balance.
-        if (pickedMine !== null) {
-          const mc = meta.cards.find((c) => c.id === pickedMine);
-          if (!mc || !mineBalances(mc)) pickedMine = null;
-        }
         wireHand();
         render();
         speak();
@@ -1606,7 +1434,6 @@ function showTrade(meta: CardMeta, ev: TradeEvent, cr: Creature): void {
   const render = () => {
     theirsRow.innerHTML = '';
     for (const tc of cr.deck) {
-      const isPicked = pickedTheirs.includes(tc.id);
       const el = buildCardEl(tc, {
         // Any trader card can be visited without owning it: a time-frozen,
         // look-don't-touch boot of their world.
@@ -1614,53 +1441,38 @@ function showTrade(meta: CardMeta, ev: TradeEvent, cr: Creature): void {
         onEnter: (cardEl) => { if (!tradeAnimating) void spectateWorld(tc, cardEl); },
         onClick: () => {
           if (tradeAnimating) return;
-          if (isPicked) {
-            pickedTheirs = pickedTheirs.filter((id) => id !== tc.id);
-          } else if (pickedTheirs.length >= 2) {
-            realmSound('error', 0.5);
-            sayLine('two of mine at most.');
-            return;
+          if (pickedTheirs.has(tc.id)) {
+            pickedTheirs.delete(tc.id);
           } else {
-            pickedTheirs.push(tc.id);
+            pickedTheirs.add(tc.id);
             realmSound('select', 0.7, 1.1);
-          }
-          // Your pick must still balance the new ask.
-          if (pickedMine !== null) {
-            const mc = meta.cards.find((c) => c.id === pickedMine);
-            if (!mc || !mineBalances(mc)) pickedMine = null;
           }
           render();
           speak();
         },
       });
-      el.classList.toggle('grayed', pickedTheirs.length >= 2 && !isPicked);
-      el.classList.toggle('selected', isPicked);
-      el.addEventListener('mouseenter', () => { hoverId = tc.id; });
-      el.addEventListener('mouseleave', () => { if (hoverId === tc.id) hoverId = null; });
+      markPicked(el, pickedTheirs.has(tc.id), 'down');
       theirsRow.appendChild(el);
     }
 
     // The hand persists across renders — the trade state rides on it as
-    // classes only. Before any pick, grey the cards the creature would
-    // never take (appetite-matched same tier, or breakable tier-above);
-    // mid-pick, grey whatever doesn't balance the current ask.
+    // the selected outline + the move arrow, nothing else.
     const row = handRowEl();
     if (row) {
       for (const el of [...row.children] as HTMLElement[]) {
         const mc = meta.cards.find((c) => c.id === Number(el.dataset.cardId));
         if (!mc) continue;
-        const eligible = pickedTheirs.length > 0 ? mineBalances(mc) : creatureOpenTo(cr, mc);
-        el.classList.toggle('grayed', !eligible);
-        el.classList.toggle('selected', pickedMine === mc.id);
+        markPicked(el, pickedMine.has(mc.id), 'up');
       }
     }
 
     // The verdict.
     const ready = tradeReady();
-    verdict.classList.toggle('show', pickedTheirs.length > 0);
+    const anyPicked = pickedTheirs.size > 0 || pickedMine.size > 0;
+    verdict.classList.toggle('show', anyPicked);
     verdict.classList.toggle('ok', ready !== null);
     verdict.disabled = ready === null;
-    verdict.textContent = pickedTheirs.length === 0 ? '' : ready ? '✓ trade' : '✗ no trade';
+    verdict.textContent = !anyPicked ? '' : ready ? '✓ trade' : '✗ no trade';
 
     // Only the view's first render deals in staggered — re-renders driven
     // by selection clicks would otherwise replay the deal on every pick.
@@ -1683,10 +1495,6 @@ function showTrade(meta: CardMeta, ev: TradeEvent, cr: Creature): void {
   let firstDeal = true;
   wireHand();
   render();
-  // The arrow sheet mounts last so it paints above the row; its rAF loop
-  // self-terminates when the stage swaps this view out.
-  stage.appendChild(arrowLayer);
-  requestAnimationFrame(syncArrows);
   const anyWanted = meta.cards.some((c) => appetiteAccepts(cr.appetite, c));
   sayLine(anyWanted ? APPETITE_LINE[cr.appetite] : 'you hold nothing i want. yet.');
 }

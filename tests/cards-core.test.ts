@@ -9,7 +9,7 @@ import {
   WORLD_FLAVORS, WorldCard, appetiteAccepts, ascendCard, breakdownGives, cardPower,
   creatureOpenTo, creatureTakesFor, decodeWorld, encodeWorld, generateEvents,
   generateJunkWorld, generateWeirdWorld, makeCard, mulberry32, regenerateEvent,
-  reqMet, rollUpgradeReq, sameTierGives, sceneStructureCounts, worldName,
+  reqMet, rollUpgradeReq, sameTierGives, sceneStructureCounts, spicyAmount, worldName,
 } from '../src/cards-core';
 import { BUILDING_DEFS, SOUL_SIGIL } from '../src/config';
 import { GameState, cellKey, isInPlayCell } from '../src/state';
@@ -212,7 +212,29 @@ describe('world flavors (the spikes)', () => {
       expect(oc.money).toBeLessThanOrEqual(10);
       expect([...oc.buildings.values()].some((b) => b.kind === 'nuclear_reactor' || b.kind === 'gas_engine')).toBe(true);
       expect(oc.unlocks!.completed.size).toBeLessThanOrEqual(1);
+
+      // Goldrush: every standing goblin glitters, and fresh spawns can too.
+      const gr = generateWeirdWorld(seed * 41, 'common', TASK_IDS, 'goldrush');
+      expect(gr.goblins.size).toBeGreaterThan(0);
+      expect([...gr.goblins.values()].every((g) => g.gold)).toBe(true);
+      expect(gr.goldgoblinsEnabled).toBe(true);
+      expect(gr.money).toBeLessThanOrEqual(30);
+
+      // Flooded: extra lakes beyond whatever the dug arms brought.
+      const fl = generateWeirdWorld(seed * 43, 'common', TASK_IDS, 'flooded');
+      expect(fl.waterSources.size).toBeGreaterThanOrEqual(3);
     }
+  });
+
+  it('spicyAmount stays inside the band and sometimes lands charismatic figures', () => {
+    let charismatic = 0;
+    for (let seed = 0; seed < 300; seed++) {
+      const v = spicyAmount(5_000, 15_000, mulberry32(seed));
+      expect(v).toBeGreaterThanOrEqual(5_000);
+      expect(v).toBeLessThanOrEqual(15_000);
+      if (v === 8_192 || v === 6_666 || v === 7_777 || v === 8_888 || v === 9_999 || v % 1_000 === 0) charismatic++;
+    }
+    expect(charismatic).toBeGreaterThan(30);
   });
 
   it('challenge flavors pin their ascension demand to the puzzle goal', () => {

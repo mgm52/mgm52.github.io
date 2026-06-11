@@ -29,8 +29,9 @@ export type UpgradeReq = { res: 'money' | 'blood' | 'dragonBone' | 'power'; amou
 
 // The headline numbers written on a card. `power` is the world's last
 // measured production in watts (0 until its buildings have actually run);
-// optional for metas saved before it existed.
-export type CardResources = { money: number; blood: number; dragonBone: number; power?: number };
+// `goblins` is the standing population. Both optional for metas saved
+// before they existed.
+export type CardResources = { money: number; blood: number; dragonBone: number; power?: number; goblins?: number };
 
 export type WorldCard = {
   id: number;
@@ -251,7 +252,9 @@ const KIND_POOLS: Record<CardTier, BuildingKind[]> = {
 //  - boneyard:    keeps bones (even at common, where bones are unheard of)
 //  - monoculture: one building kind, everywhere
 //  - crowd:       goblins wall to wall, little else (units ARE the wealth)
-// Two flavors are CHALLENGES — the world is a small puzzle and its
+//  - flooded:     the land is mostly lake — water-hungry buildings thrive
+//                 in the gaps between the shores
+// Three flavors are CHALLENGES — the world is a small puzzle and its
 // ascension demand (challengeReq) names the puzzle's goal:
 //  - seance:      a bad power source stands ready, the bank holds exactly a
 //                 five-candle séance; the demand is the power only a fully
@@ -259,9 +262,11 @@ const KIND_POOLS: Record<CardTier, BuildingKind[]> = {
 //  - overcharged: reactors everywhere, no cash — the opening money grind
 //                 replayed without ever worrying about generators (its work
 //                 track resets to the very start to match).
+//  - goldrush:    every goblin glitters; the demand is cash in clean Ƶ250
+//                 heads — an economy of killing your own citizens.
 //  - haunted:     hell is full; the surface is thin
-export type WorldFlavor = 'balanced' | 'bloodbath' | 'mint' | 'boneyard' | 'monoculture' | 'crowd' | 'seance' | 'overcharged' | 'haunted';
-export const WORLD_FLAVORS: WorldFlavor[] = ['balanced', 'bloodbath', 'mint', 'boneyard', 'monoculture', 'crowd', 'seance', 'overcharged', 'haunted'];
+export type WorldFlavor = 'balanced' | 'bloodbath' | 'mint' | 'boneyard' | 'monoculture' | 'crowd' | 'flooded' | 'seance' | 'overcharged' | 'goldrush' | 'haunted';
+export const WORLD_FLAVORS: WorldFlavor[] = ['balanced', 'bloodbath', 'mint', 'boneyard', 'monoculture', 'crowd', 'flooded', 'seance', 'overcharged', 'goldrush', 'haunted'];
 
 // The main game's task chain, in order (ui.ts TASKS). A generated world sits
 // partway along it — like an adopted save file — so entering a card can mean
@@ -312,6 +317,7 @@ export function generateWeirdWorld(seed: number, tier: CardTier, taskIds: string
   let dragonGhostBias = 0.1;
   let pool = KIND_POOLS[tier];
   let forcePortal = false;
+  let lakes = 0;
 
   if (flavor === 'bloodbath') {
     st.blood = [ri(15, 60), ri(1_200, 8_000), ri(240_000, 800_000)][T];
@@ -342,6 +348,20 @@ export function generateWeirdWorld(seed: number, tier: CardTier, taskIds: string
     // The crowd IS the wealth — the bank holds next to nothing.
     st.money = ri(0, 12);
     st.blood = ri(0, 10);
+    st.dragonBone = 0;
+  } else if (flavor === 'flooded') {
+    // The land is mostly lake. Water everywhere makes this the promised
+    // ground for the thirsty buildings — if you can find dry cells to
+    // build them on.
+    lakes = ri(3, 5 + T);
+    if (tier !== 'common') pool = [...pool, 'datacentre', 'datacentre'];
+    st.blood = Math.floor(st.blood / 2);
+  } else if (flavor === 'goldrush') {
+    // Every goblin glitters. The bank is empty; the citizens ARE the bank.
+    goldChance = 1;
+    goblinCount += ri(3, 6 + T * 3);
+    st.money = ri(0, 30);
+    st.blood = Math.floor(st.blood / 2);
     st.dragonBone = 0;
   } else if (flavor === 'seance') {
     // The candle challenge: hell stands open behind a "bad power source",
@@ -396,6 +416,23 @@ export function generateWeirdWorld(seed: number, tier: CardTier, taskIds: string
   if (finished) for (const id of taskIds) done.add(id);
   // The optional minotaur side-task: some mid-track worlds did the Work.
   else if (done.has('build_gas_engine') && rng() < 0.6) done.add('summon_minotaurs');
+
+  // Extra lakes (the flooded flavor): random pools dropped before any
+  // structure, so buildings and goblins place around the water. The hole
+  // keeps a dry berth.
+  for (let i = 0; i < lakes; i++) {
+    const b = computePlayBounds(st);
+    const w = ri(2, 4 + T), h = ri(2, 4);
+    for (let attempt = 0; attempt < 20; attempt++) {
+      const x0 = b.x0 + Math.floor(rng() * Math.max(1, b.x1 - b.x0 - w));
+      const y0 = b.y0 + Math.floor(rng() * Math.max(1, b.y1 - b.y0 - h));
+      if (Math.abs(x0 + w / 2 - st.hole.cell.cx) <= w / 2 + 2
+        && Math.abs(y0 + h / 2 - st.hole.cell.cy) <= h / 2 + 2) continue;
+      const id = st.nextId++;
+      st.waterSources.set(id, { id, x0, y0, x1: x0 + w, y1: y0 + h, selected: false });
+      break;
+    }
+  }
 
   // Scattered, unstaffed buildings — they wake (or stay dormant) under the
   // normal sim rules once the player starts assigning goblins.
@@ -458,6 +495,9 @@ export function generateWeirdWorld(seed: number, tier: CardTier, taskIds: string
       st.autoSpawnLevel = m;
     }
   }
+  // A goldrush keeps minting gold: fresh spawns can glitter too, whatever
+  // the work track says — this world was hacked that way.
+  if (flavor === 'goldrush') st.goldgoblinsEnabled = true;
 
   // The work track, stamped: tasks up to the phase are completed AND
   // revealed (no celebration replays for them), everything beyond is still
@@ -589,6 +629,32 @@ export function sceneStructureCounts(st: GameState): { space: number; earth: num
 // session even in a world that starts from nothing. Bones can only be
 // demanded of a world that already keeps bones; power only at uncommon
 // (reactors are mid-game toys).
+// Demands with personality: half the time the rolled amount snaps to a
+// "charismatic" figure inside the band — a power of two, a repdigit, a
+// clean single-digit round — so a card asks for Ƶ8,192 or 6,666 blood
+// instead of a beige 7,341.
+export function spicyAmount(lo: number, hi: number, rng: () => number): number {
+  const plain = lo + Math.floor(rng() * (hi - lo + 1));
+  if (rng() < 0.5) return plain;
+  const cands: number[] = [];
+  for (let p = 1; p <= 40; p++) {
+    const v = 2 ** p;
+    if (v >= lo && v <= hi) cands.push(v);
+  }
+  for (let d = 1; d <= 9; d++) {
+    for (let n = 2; n <= 12; n++) {
+      const v = d * Math.floor((10 ** n - 1) / 9); // d repeated n times
+      if (v >= lo && v <= hi) cands.push(v);
+    }
+  }
+  const mag = 10 ** Math.floor(Math.log10(hi));
+  for (let k = 1; k <= 9; k++) {
+    const v = k * mag;
+    if (v >= lo && v <= hi) cands.push(v);
+  }
+  return cands.length > 0 ? cands[Math.floor(rng() * cands.length)] : plain;
+}
+
 export function rollUpgradeReq(tier: CardTier, rng: () => number, resources: CardResources): UpgradeReq | null {
   const ri = (a: number, b: number) => a + Math.floor(rng() * (b - a + 1));
   if (tier === 'rare') return null;
@@ -611,7 +677,7 @@ export function rollUpgradeReq(tier: CardTier, rng: () => number, resources: Car
   }
   const res = dominance > 0 && rng() < 0.65 ? dominant : candidates[Math.floor(rng() * candidates.length)];
   const [lo, hi] = bands[res]!;
-  let amount = ri(lo, hi);
+  let amount = spicyAmount(lo, hi, rng);
   // Lean past the spike: never born met, always 2–4× the current holding.
   const have = resources[res] ?? 0;
   if (have * 2 > amount) amount = Math.ceil(have * (2 + rng() * 2));
@@ -643,7 +709,13 @@ export function challengeReq(flavor: WorldFlavor, tier: CardTier, rng: () => num
   if (flavor === 'seance') return { res: 'power', amount: 1_000_000_000 };
   if (flavor === 'overcharged') {
     const [lo, hi] = tier === 'common' ? [5_000, 15_000] : [250_000, 1_000_000];
-    return { res: 'money', amount: lo + Math.floor(rng() * (hi - lo + 1)) };
+    return { res: 'money', amount: spicyAmount(lo, hi, rng) };
+  }
+  if (flavor === 'goldrush') {
+    // Priced in heads: gold goblins drop Ƶ250 apiece, so the demand lands
+    // on a clean multiple of 250 — the card openly asks for a body count.
+    const heads = tier === 'common' ? 10 + Math.floor(rng() * 21) : 80 + Math.floor(rng() * 121);
+    return { res: 'money', amount: heads * 250 };
   }
   return null;
 }
@@ -656,7 +728,7 @@ export function makeCard(meta: CardMeta, tier: CardTier, rng: () => number, task
   const st = junk ? generateJunkWorld(seed, taskIds) : generateWeirdWorld(seed, tier, taskIds, flavor);
   const resources: CardResources = {
     money: st.money, blood: st.blood, dragonBone: st.dragonBone,
-    power: cardPower(st),
+    power: cardPower(st), goblins: st.goblins.size,
   };
   return {
     id: meta.nextId++,
