@@ -1998,7 +1998,13 @@
         opacity: 0;
         transition: transform 900ms cubic-bezier(0.5, 0, 0.8, 0.4), opacity 800ms ease;
       }
-      .wc-head { display: flex; justify-content: space-between; align-items: baseline; gap: 8px; margin-bottom: 6px; }
+      /* The title presides over the centre of the card, with the tier label
+         settled beneath it — both centred (name first in the DOM, so the
+         column stacks title over tier). */
+      .wc-head {
+        display: flex; flex-direction: column; align-items: center;
+        gap: 1px; margin-bottom: 6px; text-align: center;
+      }
       .wc-name { font-family: var(--font-display); font-size: 16px; letter-spacing: 0.04em; }
       .wc-tier {
         font-family: var(--font-mono); font-size: 12px; color: var(--tier-c);
