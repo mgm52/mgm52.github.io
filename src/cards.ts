@@ -839,6 +839,15 @@ function buildCardEl(card: WorldCard, opts: CardElOpts = {}): HTMLElement {
     root.classList.add('clickable');
     root.addEventListener('click', () => opts.onClick?.());
   }
+  // The iridescent glaze: a slow gloss band sweeps the glass while a faint
+  // rainbow film drifts beneath it (CSS .wc-shine). Sits under the card's
+  // content (z-index in index.html) so titles and the live world panes stay
+  // crisp — only the surrounding glass catches the shine. Pointer-transparent,
+  // so the ENTER/ASCEND buttons beneath it stay live.
+  const shine = document.createElement('i');
+  shine.className = 'wc-shine';
+  shine.setAttribute('aria-hidden', 'true');
+  root.insertBefore(shine, root.firstChild);
   return root;
 }
 

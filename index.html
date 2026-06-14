@@ -1856,6 +1856,51 @@
         0%, 100% { translate: 0 2px; }
         50% { translate: 0 -4px; }
       }
+      /* ── The iridescent glaze (cards.ts appends .wc-shine as the card's
+         first child) ──
+         A slow specular gloss band sweeps across the glass while a faint
+         rainbow film drifts under it — the "shiny jellyfish glass" the realm
+         is going for. It rides UNDER the card's real content (see the z-index
+         lift below), so it catches the glass border, the head row and the
+         gaps around the live world panes without ever washing the titles or
+         the renders themselves. `screen` blend means it only lightens; the
+         per-card delay (shared with the float) keeps the fleet shimmering out
+         of phase. */
+      .wc-shine {
+        position: absolute; inset: 0; z-index: 0;
+        border-radius: inherit; pointer-events: none;
+        background:
+          linear-gradient(115deg,
+            transparent 30%,
+            rgba(255, 255, 255, 0.85) 45%, rgba(255, 255, 255, 0.22) 55%,
+            transparent 68%),
+          linear-gradient(125deg,
+            rgba(186, 150, 255, 0.34) 0%, rgba(118, 204, 248, 0.24) 34%,
+            rgba(252, 166, 214, 0.32) 64%, rgba(252, 228, 150, 0.24) 100%);
+        background-size: 250% 100%, 220% 220%;
+        background-position: 135% 0, 0% 50%;
+        mix-blend-mode: screen;
+        opacity: 0.85;
+        animation: wc-shine-sweep 8.5s ease-in-out infinite;
+        animation-delay: calc(var(--deal-i, 0) * -1.3s);
+      }
+      /* Picking the card up (hover / selection) makes the glass catch more
+         light — the glaze brightens and the gloss band parks mid-face. */
+      .world-card.clickable:hover > .wc-shine,
+      .world-card.selected > .wc-shine { opacity: 1; }
+      @keyframes wc-shine-sweep {
+        0%, 100% { background-position: 135% 0, 0% 50%; }
+        50%      { background-position: -55% 0, 100% 50%; }
+      }
+      /* Lift the card's real content above the glaze so text and the live
+         world panes stay crisp; the shine only ever shows through the glass
+         around them. (The move-arrow at z-index 2 still rides on top.) */
+      .world-card > .wc-head,
+      .world-card > .wc-prevs,
+      .world-card > .wc-res,
+      .world-card > .wc-req,
+      .world-card > .wc-enter,
+      .world-card > .wc-ascend { position: relative; z-index: 1; }
       .world-card.t-common { --tier-c: #b6b8c6; }
       .world-card.t-uncommon {
         --tier-c: #6f9fd8; --tier-b: rgba(122, 168, 226, 0.8); --tier-glow: 122, 168, 226;
@@ -1964,8 +2009,15 @@
          softly sunken, the world glowing through. */
       .wc-prev {
         display: block; width: 100%;
-        border-radius: 9px; border: 1px solid rgba(255, 255, 255, 0.6);
-        box-shadow: 0 1px 6px rgba(88, 88, 150, 0.25), inset 0 0 0 1px rgba(110, 110, 150, 0.12);
+        border-radius: 10px; border: 1px solid rgba(255, 255, 255, 0.7);
+        /* A window into water: a glossy sheen along the top edge, a soft dark
+           vignette pooling at the bottom, over the existing drop + hairline.
+           Reads as glass set into the card, the render glowing through. */
+        box-shadow:
+          0 2px 8px rgba(88, 88, 150, 0.22),
+          inset 0 0 0 1px rgba(110, 110, 150, 0.12),
+          inset 0 3px 8px -4px rgba(255, 255, 255, 0.9),
+          inset 0 -13px 22px -14px rgba(58, 54, 104, 0.4);
         image-rendering: pixelated;
         --pane-glow: 255, 226, 150;
       }
@@ -2311,10 +2363,79 @@
          functional one-shots (deals, trades, dives) keep moving. */
       @media (prefers-reduced-motion: reduce) {
         .cd-blob, .cd-halo, .cd-motes { animation: none; }
+        /* The glaze holds on a still, soft diagonal gloss rather than sweeping. */
+        .wc-shine { animation: none; background-position: 60% 0, 50% 50%; }
         .world-card, .world-card.dealt, .world-card.ascended, .world-card.trade-arrived {
           animation-name: none;
         }
         .world-card.dealt { animation: ct-dealt 480ms cubic-bezier(0.2, 0.9, 0.25, 1) backwards; }
+      }
+
+      /* ───────── The trading realm on phones ─────────
+         The realm was built landscape-first: 200px cards in wrapping rows, a
+         170/150px two-row trade, 240px gathering doors. On a phone-width
+         screen those force one-card-per-row scrolls and pile the trade's two
+         rows onto each other. Here the cards size to the viewport so a row
+         holds two, the trade's rows get clear air between them, and every
+         door/creature is a full, finger-sized target. Width-keyed (not
+         orientation) so it also tidies a narrow landscape phone; placed after
+         the base realm rules so its equal-specificity overrides win. */
+      @media (max-width: 600px) {
+        #card-stage { padding: 3vh 10px 7vh; gap: 8px; }
+        .ct-caption { font-size: 11px; letter-spacing: 0.2em; margin-top: 8px; }
+        .ct-cards { gap: 10px; }
+
+        /* Worlds size to the viewport — two share a row instead of forcing a
+           scroll; the held hand runs a touch smaller still. */
+        .world-card { width: 43vw; max-width: 200px; padding: 8px 8px 10px; }
+        .world-card.big { width: min(72vw, 240px); }
+        .wc-name { font-size: 15px; }
+        .wc-res { font-size: 12.5px; gap: 2px 8px; }
+        #card-hand { padding: 6px 10px 12px; }
+        #card-hand .world-card { width: 37vw; max-width: 150px; }
+
+        /* Gathering doors stretch to the column — bigger targets, less waste. */
+        .ct-events { gap: 10px; width: 100%; }
+        .ct-event { min-width: 0; width: 100%; max-width: 380px; padding: 13px 16px; }
+        .ct-event-name { font-size: 16px; }
+
+        /* Creatures: two tidy columns. */
+        .ct-creatures { gap: 12px; margin-top: 4px; }
+        .ct-creature { width: 43vw; max-width: 200px; padding: 12px 8px; }
+        .ct-creature-sprite { --csize: 88px; }
+
+        /* The trade view's two card rows + verdict must share one short
+           screen: smaller cards, and clear air between the trader's row, the
+           verdict pill and your hand so nothing piles up. */
+        #card-stage.trade-view { padding-top: 1vh; gap: 4px; }
+        #card-stage.trade-view .ct-theirs .world-card { width: 37vw; max-width: 160px; }
+        /* Your hand runs smaller still in the trade view — both rows have to
+           share the screen with the header and verdict. */
+        #card-stage.trade-view ~ #card-hand .world-card { width: 35vw; max-width: 140px; }
+        #card-stage.trade-view .ct-theirs { margin-bottom: 6px; }
+        #card-stage.trade-view + #card-hand { gap: 12px; }
+        /* The landscape build floats each view's content downward (margin-top:
+           auto) to nestle against the pinned hand. On a short phone that float
+           shoves the trader's tall card straight into the verdict + hand,
+           which overlap. Cancel it: the realm's views stack from the top and
+           scroll under the hand's reserved padding instead. */
+        #card-stage.trade-view .ct-trade-header,
+        #card-stage.table-view > .ct-caption:first-child,
+        #card-stage.event-view .ct-event-title { margin-top: 0; }
+        .ct-trade-header { gap: 0; }
+        .ct-trade-header .ct-creature-sprite { --csize: 50px; }
+        .ct-trade-line { font-size: 13.5px; }
+        .ct-trade-verdict { min-height: 38px; padding: 8px 18px; font-size: 14px; }
+
+        /* The descending intro goblin's speech + YES/NO, sized for a narrow
+           column so they never run off the edges. */
+        #card-speech {
+          font-size: calc(clamp(15px, 4.4vw, 22px) * var(--font-dialogue-scale, 1));
+          max-width: 88vw;
+        }
+        #card-choice { gap: 12px; }
+        #card-choice .build-button { width: 110px; }
+        #card-choice .build-name { font-size: 19px; }
       }
 
       /* ── Entering / leaving a card world: the finale's pull-back language.
