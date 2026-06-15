@@ -400,7 +400,7 @@ export function setupCardWorldChrome(state: GameState, arriving = false): void {
   const btn = document.getElementById('leave-world-btn') as HTMLButtonElement | null;
   if (btn) {
     btn.style.display = '';
-    if (spectating) btn.textContent = 'STOP SPECTATING';
+    if (spectating) btn.textContent = 'STOP INSPECTING';
     btn.addEventListener('click', () => {
       btn.disabled = true;
       realmSound('ritual', 1, 0.7);
@@ -1374,7 +1374,7 @@ function showGathering(meta: CardMeta, ev: TradeEvent): void {
       const cards = div('ct-stall-cards');
       for (const tc of cr.deck) {
         const el = buildCardEl(tc, {
-          enterLabel: 'SPECTATE',
+          enterLabel: 'INSPECT',
           onEnter: (cardEl) => { if (!tradeAnimating) void spectateWorld(tc, cardEl); },
         });
         cards.appendChild(el);
