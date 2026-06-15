@@ -1223,7 +1223,7 @@ function showGathering(meta: CardMeta, ev: TradeEvent): void {
 
   // Per-stall handles, so a selection change re-states every want and
   // re-evaluates every give-button without rebuilding the (canvas-heavy) cards.
-  type StallRef = { lineEl: HTMLElement; giveBtn: HTMLButtonElement | null; token: { v: number } };
+  type StallRef = { lineEl: HTMLElement; giveBtn: HTMLButtonElement | null; token: { v: number }; last: string };
   const stalls = new Map<number, StallRef>();
 
   let tradeAnimating = false;
@@ -1231,6 +1231,7 @@ function showGathering(meta: CardMeta, ev: TradeEvent): void {
   // Type a trader's line out letter-at-a-time (the requirement bolded); a
   // newer line cancels an older one still typing.
   const typeLine = (ref: StallRef, segs: WantSeg[]): void => {
+    ref.last = segs.reduce((s, x) => s + x.t, '');
     const tok = ++ref.token.v;
     const total = segs.reduce((n, s) => n + s.t.length, 0);
     ref.lineEl.classList.add('typing');
@@ -1282,11 +1283,16 @@ function showGathering(meta: CardMeta, ev: TradeEvent): void {
     }
   };
 
-  // Re-state every trader's line for the current selection.
+  // Re-state every trader's line for the current selection — but only retype a
+  // line that actually changed (a spent "traded out", or an unchanged want,
+  // never re-animates).
   const restateAll = (): void => {
     for (const cr of ev.creatures) {
       const ref = stalls.get(cr.id);
-      if (ref) typeLine(ref, lineFor(cr));
+      if (!ref) continue;
+      const segs = lineFor(cr);
+      if (segs.reduce((s, x) => s + x.t, '') === ref.last) continue;
+      typeLine(ref, segs);
     }
   };
 
@@ -1340,12 +1346,15 @@ function showGathering(meta: CardMeta, ev: TradeEvent): void {
         const box = stallEl.querySelector('.ct-stall-cards');
         if (box) box.innerHTML = '';
         ref?.giveBtn?.remove();
-        if (ref) { ref.giveBtn = null; typeLine(ref, [{ t: 'traded out. it is content.' }]); }
+        if (ref) ref.giveBtn = null;
       }
       wireHand();
       for (const t of received) {
         handRowEl()?.querySelector(`[data-card-id="${t.id}"]`)?.classList.add('trade-arrived');
       }
+      // Selection is cleared — every stall re-states (the traded one now reads
+      // "traded out", the rest revert to their want, dropping any "yes!"/"no.").
+      restateAll();
       refreshButtons();
       realmSound(wonOrigin ? 'task_complete' : 'ritual', wonOrigin ? 0.9 : 1, wonOrigin ? 1 : 0.9);
     }, 680);
@@ -1408,7 +1417,7 @@ function showGathering(meta: CardMeta, ev: TradeEvent): void {
         stall.appendChild(giveBtn);
       }
 
-      const ref: StallRef = { lineEl, giveBtn, token: { v: 0 } };
+      const ref: StallRef = { lineEl, giveBtn, token: { v: 0 }, last: '' };
       stalls.set(cr.id, ref);
       typeLine(ref, lineFor(cr));
 
