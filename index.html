@@ -2163,6 +2163,28 @@
         animation: ctv-pulse 1.6s ease-in-out infinite;
       }
       .ct-give.ok:hover { background: rgba(255, 255, 255, 0.85); }
+      /* The requirement inside a trader's typed line — the rarity, count, or
+         resource threshold — reads bold and a shade darker. */
+      .ct-stall .ct-creature-line b { color: #3a3a48; font-weight: 700; }
+      /* Typed-dialogue caret while a line is still printing. */
+      .ct-stall .ct-creature-line.typing::after {
+        content: "▍"; margin-left: 2px; color: #8a8a94; opacity: 0.8;
+        animation: intro-caret 0.9s steps(2, end) infinite;
+      }
+      /* "choose cards to trade" — floats above the hand whenever nothing is
+         picked, fading gently to draw the eye downward. */
+      .ct-choose-prompt {
+        font-family: var(--font-display); font-size: 19px; letter-spacing: 0.14em;
+        color: #6a6a86; text-shadow: 0 0 14px rgba(255, 255, 255, 0.95);
+        margin-bottom: 2px; pointer-events: none;
+        animation: ct-choose-pulse 2.4s ease-in-out infinite;
+      }
+      @keyframes ct-choose-pulse { 0%, 100% { opacity: 0.55; } 50% { opacity: 1; } }
+      /* The reshuffle button, pinned to the gathering's top-right corner
+         (the stage is the positioned ancestor). */
+      .ct-wait-corner {
+        position: absolute; top: 12px; right: 16px; margin: 0; z-index: 5;
+      }
       /* The player's hand: its own layer pinned to the realm's bottom edge,
          outside #card-stage, so view swaps never fade or re-deal it. Empty
          space passes clicks through to the stage beneath. */

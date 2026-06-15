@@ -86,21 +86,31 @@ export function wantSatisfiedBy(w: Want, offered: WorldCard[]): boolean {
   return offered.length === w.count && offered.every((c) => cardQualifies(w, c));
 }
 
-// The trader's advertised line.
-export function wantLine(w: Want): string {
+// The trader's advertised line, split into segments — the `b` (bold) ones are
+// the actual requirement (the rarity, the count, the resource threshold).
+export type WantSeg = { t: string; b?: boolean };
+export function wantSegments(w: Want): WantSeg[] {
   if (w.kind === 'any') {
-    return w.count === 1 ? 'i will take any one world.' : `i want any ${countWord(w.count)} ${worldsWord(w.count)}.`;
+    return w.count === 1
+      ? [{ t: 'i will take ' }, { t: 'any one', b: true }, { t: ' world.' }]
+      : [{ t: 'i want ' }, { t: `any ${countWord(w.count)}`, b: true }, { t: ` ${worldsWord(w.count)}.` }];
   }
   if (w.kind === 'tier') {
-    return w.count === 1 ? `i want a ${w.tier} world.` : `i want ${countWord(w.count)} ${w.tier} ${worldsWord(w.count)}.`;
+    return w.count === 1
+      ? [{ t: 'i want any ' }, { t: w.tier, b: true }, { t: ' world.' }]
+      : [{ t: 'i want ' }, { t: `${countWord(w.count)} ${w.tier}`, b: true }, { t: ` ${worldsWord(w.count)}.` }];
   }
   const amt = Math.floor(w.amount).toLocaleString('en-US');
   const desc = w.res === 'money' ? `worth Ƶ${amt}+`
     : w.res === 'blood' ? `with ${amt}+ blood`
     : w.res === 'dragonBone' ? `keeping ${amt}+ bones`
     : `making ${formatPower(w.amount)}+`;
-  const head = w.count === 1 ? 'a world' : `${countWord(w.count)} worlds`;
-  return `i want ${head} ${desc}.`;
+  return w.count === 1
+    ? [{ t: 'i want a world ' }, { t: desc, b: true }, { t: '.' }]
+    : [{ t: 'i want ' }, { t: `${countWord(w.count)} worlds`, b: true }, { t: ` ${desc}.` }];
+}
+export function wantLine(w: Want): string {
+  return wantSegments(w).map((s) => s.t).join('');
 }
 
 // Resource bands a non-"any" want draws its threshold from, by gathering tier.

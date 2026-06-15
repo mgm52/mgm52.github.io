@@ -335,7 +335,7 @@ describe('wantLine', () => {
   it('reads naturally for each kind of want', () => {
     expect(wantLine({ kind: 'any', count: 1 })).toBe('i will take any one world.');
     expect(wantLine({ kind: 'any', count: 2 })).toBe('i want any two worlds.');
-    expect(wantLine({ kind: 'tier', tier: 'common', count: 1 })).toBe('i want a common world.');
+    expect(wantLine({ kind: 'tier', tier: 'common', count: 1 })).toBe('i want any common world.');
     expect(wantLine({ kind: 'tier', tier: 'uncommon', count: 3 })).toBe('i want three uncommon worlds.');
     expect(wantLine({ kind: 'resource', res: 'money', amount: 10_000, count: 1 })).toBe('i want a world worth Ƶ10,000+.');
     expect(wantLine({ kind: 'resource', res: 'blood', amount: 800, count: 1 })).toContain('800+ blood');
