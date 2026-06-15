@@ -2098,13 +2098,6 @@
          give-button. A spent stall (deck handed over) dims and goes inert. */
       .ct-stall {
         display: flex; flex-direction: column; align-items: center; gap: 5px;
-        padding: 14px 12px;
-        background: linear-gradient(160deg, rgba(255, 255, 255, 0.32), rgba(255, 255, 255, 0.1));
-        backdrop-filter: blur(10px) saturate(1.3);
-        -webkit-backdrop-filter: blur(10px) saturate(1.3);
-        border: 1px solid rgba(255, 255, 255, 0.55);
-        border-radius: 16px;
-        box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.7), 0 10px 28px -10px rgba(88, 88, 150, 0.22);
       }
       .ct-stall.spent { opacity: 0.42; filter: saturate(0.6); pointer-events: none; }
       /* The want line is the trader's whole pitch — give it a touch more
@@ -2119,7 +2112,13 @@
          one screen. Wraps for the rare exchange's deeper hands. */
       .ct-stall-cards {
         display: flex; flex-wrap: wrap; gap: 10px; justify-content: center;
-        margin-top: 2px;
+        margin-top: 2px; padding: 14px 12px;
+        background: linear-gradient(160deg, rgba(255, 255, 255, 0.32), rgba(255, 255, 255, 0.1));
+        backdrop-filter: blur(10px) saturate(1.3);
+        -webkit-backdrop-filter: blur(10px) saturate(1.3);
+        border: 1px solid rgba(255, 255, 255, 0.55);
+        border-radius: 16px;
+        box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.7), 0 10px 28px -10px rgba(88, 88, 150, 0.22);
       }
       .ct-stall-cards .world-card { width: 132px; }
       .ct-creature-sprite {
