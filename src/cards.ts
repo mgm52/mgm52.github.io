@@ -1263,7 +1263,9 @@ function showGathering(meta: CardMeta, ev: TradeEvent): void {
       const ready = cr.deck.length > 0 && !tradeAnimating && wantSatisfiedBy(cr.want, picked);
       ref.giveBtn.classList.toggle('ok', ready);
       ref.giveBtn.disabled = !ready;
-      ref.giveBtn.style.display = ready ? '' : 'none';
+      // Hidden (not removed) so its row of space stays reserved — the cards
+      // box never jumps as the button comes and goes.
+      ref.giveBtn.style.visibility = ready ? 'visible' : 'hidden';
     }
     choosePrompt.style.display = picked.length === 0 ? '' : 'none';
     const handRow = handRowEl();
@@ -1363,7 +1365,7 @@ function showGathering(meta: CardMeta, ev: TradeEvent): void {
         giveBtn.type = 'button';
         giveBtn.className = 'ct-give';
         giveBtn.textContent = '✓ give & take all';
-        giveBtn.style.display = 'none';
+        giveBtn.style.visibility = 'hidden';
         const c = cr;
         giveBtn.addEventListener('click', () => {
           if (giveBtn!.disabled || tradeAnimating) return;

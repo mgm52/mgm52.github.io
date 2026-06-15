@@ -2090,9 +2090,9 @@
       }
       .ct-gathering-head .ct-back { align-self: center; }
       .ct-stalls {
-        display: flex; flex-wrap: wrap; gap: 22px; justify-content: center;
+        display: flex; flex-wrap: wrap; gap: 56px; justify-content: center;
         align-items: flex-start; margin: 14px 0 26px;
-        max-width: 1160px;
+        max-width: 1240px;
       }
       /* One trader: avatar, name, the want line, its deck face-up, and a
          give-button. A spent stall (deck handed over) dims and goes inert. */
@@ -2105,7 +2105,9 @@
       .ct-stall .ct-creature-line {
         font-family: var(--font-dialogue, var(--font-display));
         font-size: 15px; color: #5e5e6a; text-align: center;
-        min-height: 1.3em; max-width: 22ch;
+        /* Reserve two lines so the cards below never shift as the want is
+           re-typed or swaps to the shorter "too many cards". */
+        height: 2.6em; max-width: 22ch; overflow: hidden;
       }
       .ct-stall .ct-creature-sprite { --csize: 76px; }
       /* The trader's deck, face-up and a size down so a few stalls read on
