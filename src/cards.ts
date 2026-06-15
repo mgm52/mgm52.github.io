@@ -26,10 +26,10 @@ import { clearSave, getRawSave, saveGame, setRawSave } from './save';
 import { GameState, computePlayBounds, isInPlayCell } from './state';
 import { ALL_TASK_IDS } from './ui';
 import {
-  APPETITE_LINE, CardMeta, CardResources, CardTier, Creature, FRAME_BASE, ManualWorld,
-  TIER_ABOVE, TIER_RANK, TradeEvent, UpgradeReq, Want, WorldCard, appetiteAccepts, ascendCard,
-  cardPower, decodeWorld, encodeWorld, generateEvents,
-  makeCard, mulberry32, regenerateEvent, reqMet, sceneStructureCounts,
+  CardMeta, CardResources, CardTier, Creature, FRAME_BASE, ManualWorld,
+  TradeEvent, Want, WorldCard, cardPower, decodeWorld, encodeWorld, generateEvents,
+  makeCard, mulberry32, regenerateEvent, sceneStructureCounts,
+  wantLine, wantSatisfiableBy, wantSatisfiedBy,
 } from './cards-core';
 
 const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
@@ -70,7 +70,7 @@ const SPECTATE_KEY = 'rts.cardspectate.v1';
 // Map a legacy creature appetite onto a want, for metas saved before wants
 // existed. The opener at each gathering stays the easy rung (any one world at
 // the border, a single lesser-tier card at the richer tables).
-function appetiteToWant(a: Creature['appetite'], tier: CardTier, firstSlot: boolean): Want {
+function appetiteToWant(a: string | undefined, tier: CardTier, firstSlot: boolean): Want {
   if (firstSlot) {
     if (tier === 'common') return { kind: 'any', count: 1 };
     return { kind: 'tier', tier: tier === 'uncommon' ? 'common' : 'uncommon', count: 1 };
@@ -102,7 +102,7 @@ function loadMeta(): CardMeta | null {
           // Metas saved before trader wants existed: synthesize one from the
           // legacy appetite (the first creature, the open one, becomes an
           // any-want).
-          if (c.want === undefined) c.want = appetiteToWant(c.appetite, ev.tier, i === 0);
+          if (c.want === undefined) c.want = appetiteToWant((c as { appetite?: string }).appetite, ev.tier, i === 0);
         });
       }
     }
@@ -219,7 +219,6 @@ function buildOriginCard(meta: CardMeta, rng: () => number): WorldCard {
           tier: 'rare',
           data: payload.data,
           resources: payload.resources,
-          upgradeReq: null,
           origin: true,
         };
       }
@@ -228,7 +227,6 @@ function buildOriginCard(meta: CardMeta, rng: () => number): WorldCard {
   const card = newCard(meta, 'rare', rng);
   card.name = 'your world';
   card.origin = true;
-  card.upgradeReq = null;
   return card;
 }
 
@@ -409,28 +407,9 @@ export function setupCardWorldChrome(state: GameState, arriving = false): void {
       void (spectating ? leaveSpectate() : leaveWorld(state));
     }, { once: true });
   }
-  // The card's ascension goal, pinned above the leave button and ticking
-  // along live — so the reason to be in here is never out of sight. Only
-  // for OWNED worlds with a demand left (spectates and rares go without).
-  if (!spectating) {
-    const meta = loadMeta();
-    const card = meta?.cards.find((c) => c.id === meta.activeCardId) ?? null;
-    const req = card?.upgradeReq ?? null;
-    const goal = document.getElementById('world-goal');
-    if (goal && req) {
-      goal.style.display = '';
-      const update = () => {
-        const have = req.res === 'power' ? cardPower(state) : state[req.res];
-        const met = have >= req.amount;
-        goal.classList.toggle('met', met);
-        goal.textContent = met
-          ? `✓ ascension ready — leave world to ascend`
-          : `ascends at ${fmtReqAmount(req)} · ${fmtResAmount(req.res, have)} held`;
-      };
-      update();
-      window.setInterval(update, 500);
-    }
-  }
+  // Cards no longer ascend on their own — growing a world matters only
+  // because a trader's want can read its resources — so there's no in-world
+  // ascension goal ticker any more.
   if (arriving) {
     const app = document.getElementById('app');
     const white = hopWhite();
@@ -748,22 +727,11 @@ function resourcesEl(r: CardResources): HTMLElement {
   return wrap;
 }
 
-function fmtResAmount(res: UpgradeReq['res'], n: number): string {
-  if (res === 'power') return formatPower(n);
-  const amt = Math.floor(n).toLocaleString('en-US');
-  return res === 'money' ? `Ƶ ${amt}` : res === 'blood' ? `${amt} blood` : `${amt} bones`;
-}
-
-function fmtReqAmount(r: UpgradeReq): string {
-  return fmtResAmount(r.res, r.amount);
-}
-
 type CardElOpts = {
   big?: boolean;
   enterLabel?: string;       // when set, the card carries an enter button
   onEnter?: (cardEl: HTMLElement) => void;
-  onClick?: () => void;      // whole-card click (trade views)
-  onAscend?: () => void;     // table view: shown once the ascension demand is met
+  onClick?: () => void;      // whole-card click (gathering selection)
 };
 
 function buildCardEl(card: WorldCard, opts: CardElOpts = {}): HTMLElement {
@@ -824,23 +792,6 @@ function buildCardEl(card: WorldCard, opts: CardElOpts = {}): HTMLElement {
   root.appendChild(panes);
 
   root.appendChild(resourcesEl(card.resources));
-
-  // Ascension demand, printed on every card that still has a tier above it.
-  if (card.upgradeReq) {
-    const met = reqMet(card);
-    const req = document.createElement('div');
-    req.className = `wc-req${met ? ' met' : ''}`;
-    req.textContent = `ascends at ${fmtReqAmount(card.upgradeReq)}`;
-    root.appendChild(req);
-    if (met && opts.onAscend) {
-      const up = document.createElement('button');
-      up.type = 'button';
-      up.className = 'wc-ascend';
-      up.textContent = `ASCEND — ${TIER_ABOVE[card.tier] ?? ''}`;
-      up.addEventListener('click', (e) => { e.stopPropagation(); opts.onAscend?.(); });
-      root.appendChild(up);
-    }
-  }
 
   if (opts.enterLabel) {
     const btn = document.createElement('button');
@@ -1108,14 +1059,9 @@ function div(cls: string, text?: string): HTMLElement {
 // handlers differ) but the DOM it builds is identical, so nothing visibly
 // changes across a swap.
 type HandOpts = {
-  // Trade view: whole-card clicks feed the selection basket.
+  // Gathering view: whole-card clicks toggle the shared selection.
   onCardClick?: (card: WorldCard) => void;
-  // Fired after an ascension. The view MUST refresh anything that depends
-  // on tiers (gathering locks, trade eligibility) AND re-render the hand;
-  // when absent the hand re-renders itself.
-  onAscended?: () => void;
-  // Mounted above the hand's caption — the trade view parks its verdict
-  // button here so it reads as sitting between the two rows.
+  // Mounted above the hand's caption.
   topEl?: HTMLElement;
 };
 
@@ -1136,15 +1082,6 @@ function renderHand(meta: CardMeta, opts: HandOpts = {}): void {
         enterLabel: 'ENTER',
         onEnter: (cardEl) => { void enterWorld(meta, c, cardEl); },
         onClick: opts.onCardClick ? () => opts.onCardClick!(c) : undefined,
-        onAscend: () => {
-          ascendCard(meta, c);
-          saveMeta(meta);
-          realmSound('task_complete', 0.8, 1.1);
-          if (opts.onAscended) opts.onAscended();
-          else renderHand(meta, opts);
-          // The rebuilt card flashes in its new tier's colors.
-          handRowEl()?.querySelector(`[data-card-id="${c.id}"]`)?.classList.add('ascended');
-        },
       });
       row.appendChild(el);
     }
@@ -1176,17 +1113,18 @@ function showTable(meta: CardMeta): void {
   stage.appendChild(div('ct-caption', 'gatherings'));
   const evRow = div('ct-events');
   for (const ev of meta.events) {
-    // A gathering opens its doors to someone holding a card of its tier
-    // (1:1 trades) — or one tier above it (breakable into two of the tier).
-    const locked = !meta.cards.some((c) =>
-      c.tier === ev.tier || TIER_RANK[c.tier] === TIER_RANK[ev.tier] + 1);
+    // A gathering opens its doors when the player holds at least one card AND
+    // at least one trader there advertises a want the current hand can satisfy
+    // — otherwise there's nothing to do but wait for it to reshuffle.
+    const locked = meta.cards.length === 0
+      || !ev.creatures.some((cr) => wantSatisfiableBy(cr.want, meta.cards));
     const btn = document.createElement('button');
     btn.type = 'button';
     btn.className = `ct-event t-${ev.tier}${locked ? ' locked' : ''}`;
     const n = ev.creatures.length;
     const sub = locked
-      ? 'you hold nothing to trade here'
-      : `trades ${ev.tier} worlds · ${n} creature${n === 1 ? '' : 's'} attending`;
+      ? `${n} ${ev.tier} trader${n === 1 ? '' : 's'} · none want what you hold`
+      : `${n} ${ev.tier} trader${n === 1 ? '' : 's'} · a want you can meet`;
     btn.innerHTML = `<span class="ct-event-name"></span><span class="ct-event-sub">${sub}</span>`;
     (btn.querySelector('.ct-event-name') as HTMLElement).textContent = ev.name;
     btn.addEventListener('click', () => {
@@ -1198,16 +1136,15 @@ function showTable(meta: CardMeta): void {
         return;
       }
       realmSound('click', 0.8, 1);
-      swapView(() => showEvent(meta, ev));
+      swapView(() => showGathering(meta, ev));
     });
     dealIn(btn);
     evRow.appendChild(btn);
   }
   stage.appendChild(evRow);
 
-  // The hand (bottom of the screen, its own persistent layer): ascending a
-  // card can unlock gathering doors, so the table re-renders behind it.
-  renderHand(meta, { onAscended: () => showTable(meta) });
+  // The hand (bottom of the screen, its own persistent layer).
+  renderHand(meta);
 }
 
 function backButton(label: string, onBack: () => void): HTMLElement {
@@ -1223,228 +1160,97 @@ function creatureAvatar(): HTMLElement {
   return div('ct-creature-sprite');
 }
 
-function showEvent(meta: CardMeta, ev: TradeEvent): void {
+
+// ─── The gathering: all traders at once ──────────────────────────────
+// One gathering, every trader on screen together. Each is a "stall": its
+// avatar, name, advertised want, its whole deck face-up (each card a
+// SPECTATE entry), and a give-button that lights only when the player's
+// current hand selection exactly satisfies that stall's want. One shared
+// selection — driven by clicks on the persistent hand below — feeds every
+// stall at once. Give & take: surrender the picked card(s), receive the
+// trader's ENTIRE deck; the trader is then spent.
+function showGathering(meta: CardMeta, ev: TradeEvent): void {
   const stage = realmEl('card-stage');
   clearSpeech();
   stage.innerHTML = '';
-  stage.className = 'event-view';
-  stage.appendChild(backButton('← leave gathering', () => swapView(() => showTable(meta))));
-  stage.appendChild(div(`ct-caption ct-event-title t-${ev.tier}`, ev.name));
-  const row = div('ct-creatures');
-  ev.creatures.forEach((cr, i) => {
-    const cel = div('ct-creature');
-    cel.appendChild(creatureAvatar());
-    // (The trader's frame-pattern chip used to sit beside the name; the
-    // hand minis below carry the at-a-glance info now, so the name stands
-    // alone and the pattern stays learnable from the dealt cards themselves.)
-    cel.appendChild(div('ct-creature-name', cr.name));
-    cel.appendChild(div('ct-creature-line', APPETITE_LINE[cr.appetite]));
-    // The hand at a glance: one blank mini-card per held world, in its
-    // tier's color (white for common, blue uncommon, gold rare); the stolen
-    // origin card wears its star.
-    const hand = div('ct-creature-hand');
-    hand.title = `${cr.deck.length} world${cr.deck.length === 1 ? '' : 's'} in hand`;
-    for (const wc of cr.deck) {
-      const mini = div(`ct-hand-mini t-${wc.tier}${wc.origin ? ' origin' : ''}`);
-      if (wc.origin) mini.textContent = '★';
-      hand.appendChild(mini);
-    }
-    cel.appendChild(hand);
-    cel.addEventListener('click', () => { realmSound('click', 0.8, 1); swapView(() => showTrade(meta, ev, cr)); });
-    cel.classList.add('dealt');
-    cel.style.setProperty('--deal-i', String(i));
-    row.appendChild(cel);
-  });
+  stage.className = 'gathering-view';
+
+  const head = div('ct-gathering-head');
+  head.appendChild(backButton('← leave gathering', () => swapView(() => showTable(meta))));
+  head.appendChild(div(`ct-caption ct-event-title t-${ev.tier}`, ev.name));
+  stage.appendChild(head);
+
+  const row = div('ct-stalls');
   stage.appendChild(row);
 
-  // The reshuffle: let this gathering end and meet the next one — fresh
-  // creatures, fresh decks, in case nothing on this table suits.
-  const wait = document.createElement('button');
-  wait.type = 'button';
-  wait.className = 'ct-wait';
-  wait.textContent = 'wait for the next gathering';
-  wait.addEventListener('click', async () => {
-    wait.disabled = true;
-    realmSound('online', 0.4, 0.7);
-    stage.classList.add('waiting');
-    await sleep(700);
-    regenerateEvent(meta, ev, ALL_TASK_IDS, loadManualWorlds());
-    saveMeta(meta);
-    showEvent(meta, ev);
-  });
-  stage.appendChild(wait);
-
-  // The hand persists at the bottom, untouched by the view swap.
-  renderHand(meta, { onAscended: () => showEvent(meta, ev) });
-}
-
-function showTrade(meta: CardMeta, ev: TradeEvent, cr: Creature): void {
-  const stage = realmEl('card-stage');
-  clearSpeech();
-  stage.innerHTML = '';
-  stage.className = 'trade-view';
-  stage.appendChild(backButton('← step away', () => swapView(() => showEvent(meta, ev))));
-
-  // The trader presides over the table from the top middle: sprite, name,
-  // speech line, stacked and centered (the frame chip is gone — the cards
-  // themselves wear the pattern).
-  const header = div('ct-trade-header');
-  header.appendChild(creatureAvatar());
-  const headText = div('ct-trade-headtext');
-  headText.appendChild(div('ct-creature-name', cr.name));
-  const speech = div('ct-trade-line', '');
-  headText.appendChild(speech);
-  header.appendChild(headText);
-  stage.appendChild(header);
-
-  // Trader lines type out letter-at-a-time, like every other talking
-  // creature in the game. A newer line cancels whatever an older one was
-  // still typing (the token check), so rapid clicking never interleaves.
-  const TRADE_TYPE_MS = 24;
-  let typeToken = 0;
-  const sayLine = (text: string): void => {
-    const tok = ++typeToken;
-    speech.classList.add('typing');
-    speech.textContent = '';
-    void (async () => {
-      let rendered = '';
-      for (const ch of text) {
-        if (tok !== typeToken) return;
-        rendered += ch;
-        speech.textContent = rendered;
-        await sleep(TRADE_TYPE_MS);
-      }
-      if (tok === typeToken) speech.classList.remove('typing');
-    })();
-  };
-
-  const theirsCap = div('ct-caption', 'their worlds');
-  const theirsRow = div('ct-cards ct-theirs');
-  stage.appendChild(theirsCap);
-  stage.appendChild(theirsRow);
-
-  // The verdict, floating just above your hand (between the two rows):
-  // invisible until any of the trader's cards are picked, "✗ no trade"
-  // while the basket doesn't balance, and the green "✓ trade" button — the
-  // actual executor — once it does. Mounted into the hand layer by
-  // wireHand below.
-  const verdict = document.createElement('button');
-  verdict.type = 'button';
-  verdict.className = 'ct-trade-verdict';
-  verdict.disabled = true;
-
-  // ── Selection ──
-  // Every card — theirs or yours — is a free toggle: clicking it moves it
-  // in or out of the trade, no order and no eligibility gate. A picked card
-  // wears a short thick arrow pointing where it would go (theirs: down
-  // toward your hand; yours: up toward the trader). The verdict button is
-  // the only judge of whether the basket balances: one of theirs for one
-  // of yours of the same tier (appetite willing), or two of theirs of a
-  // kind for one of yours a tier above.
-  const pickedTheirs = new Set<number>();
+  // The one selection shared across every stall, toggled from the hand.
   const pickedMine = new Set<number>();
-
-  const theirPicked = (): WorldCard[] => cr.deck.filter((c) => pickedTheirs.has(c.id));
   const minePicked = (): WorldCard[] => meta.cards.filter((c) => pickedMine.has(c.id));
 
-  const tradeReady = (): { mine: WorldCard; theirs: WorldCard[] } | null => {
-    const mines = minePicked();
-    const theirs = theirPicked();
-    if (mines.length !== 1 || theirs.length === 0 || theirs.length > 2) return null;
-    const mine = mines[0];
-    if (theirs.length === 1) {
-      return mine.tier === theirs[0].tier && appetiteAccepts(cr.appetite, mine)
-        ? { mine, theirs } : null;
+  // Per-stall give buttons, kept so a hand-selection change can re-evaluate
+  // every want at once.
+  const giveButtons = new Map<number, HTMLButtonElement>();
+
+  let tradeAnimating = false;
+
+  // A stall's give-button lights only when the current pick EXACTLY satisfies
+  // its want (the right count of qualifying cards, nothing extra).
+  const refreshGiveButtons = (): void => {
+    const picked = minePicked();
+    for (const cr of ev.creatures) {
+      const btn = giveButtons.get(cr.id);
+      if (!btn) continue;
+      const spent = cr.deck.length === 0;
+      const ready = !spent && wantSatisfiedBy(cr.want, picked);
+      btn.classList.toggle('ok', ready);
+      btn.disabled = !ready || tradeAnimating;
     }
-    if (theirs[0].tier !== theirs[1].tier) return null;
-    return TIER_RANK[mine.tier] === TIER_RANK[theirs[0].tier] + 1 ? { mine, theirs } : null;
   };
 
-  // The handover, in motion: your card lifts away toward the creature while
-  // theirs drop toward your row; only once both are gone does the swap
-  // re-render, and the arrivals pop into their new hands (.trade-arrived).
-  // The flag walls off every card click until the exchange lands.
-  let tradeAnimating = false;
-  const executeTrade = (mine: WorldCard, theirs: WorldCard[]) => {
+  // The exchange, in motion: the picked cards lift toward the stall while its
+  // whole deck drops into the hand. Once both halves land the swap re-renders.
+  const executeTrade = (cr: Creature): void => {
     if (tradeAnimating) return;
+    const picked = minePicked();
+    if (!wantSatisfiedBy(cr.want, picked)) return;
     tradeAnimating = true;
-    handRowEl()?.querySelector(`[data-card-id="${mine.id}"]`)?.classList.add('trade-given');
-    for (const t of theirs) {
-      theirsRow.querySelector(`[data-card-id="${t.id}"]`)?.classList.add('trade-received');
+    refreshGiveButtons();
+    const received = cr.deck;
+    for (const m of picked) {
+      handRowEl()?.querySelector(`[data-card-id="${m.id}"]`)?.classList.add('trade-given');
+    }
+    const stallEl = row.querySelector(`[data-creature-id="${cr.id}"]`);
+    for (const t of received) {
+      stallEl?.querySelector(`[data-card-id="${t.id}"]`)?.classList.add('trade-received');
     }
     realmSound('select', 0.9, 0.8);
+    const wonOrigin = received.some((t) => t.origin);
     window.setTimeout(() => {
       tradeAnimating = false;
-      meta.cards = meta.cards.filter((c) => c.id !== mine.id);
-      cr.deck = cr.deck.filter((c) => !theirs.some((t) => t.id === c.id));
-      meta.cards.push(...theirs);
-      cr.deck.push(mine);
-      saveMeta(meta);
-      pickedTheirs.clear();
+      // Surrender exactly the picked qualifying cards; gain the whole deck.
+      meta.cards = meta.cards.filter((c) => !pickedMine.has(c.id));
+      meta.cards.push(...received);
+      cr.deck = [];
       pickedMine.clear();
+      saveMeta(meta);
+      // The hand changed (cards gone, the deck arrived) — rebuild it, then
+      // re-render the stalls and pop the arrivals into the hand.
       wireHand();
       render();
-      for (const t of theirs) {
+      for (const t of received) {
         handRowEl()?.querySelector(`[data-card-id="${t.id}"]`)?.classList.add('trade-arrived');
       }
-      theirsRow.querySelector(`[data-card-id="${mine.id}"]`)?.classList.add('trade-arrived');
-      // Winning your own world back is the realm's quiet climax; losing it
-      // again gets its own line too.
-      if (theirs.some((t) => t.origin)) {
+      // Winning the player's own world back is the realm's quiet climax.
+      if (wonOrigin) {
         realmSound('task_complete', 0.9, 1);
-        sayLine('it remembers you.');
-      } else if (mine.origin) {
-        realmSound('ritual', 1, 0.9);
-        sayLine('kept warm. someone grew this one.');
       } else {
         realmSound('ritual', 1, 0.9);
-        sayLine(theirs.length === 2 ? "two for one. now it's a trade." : "now it's a trade.");
       }
     }, 680);
   };
 
-  // A picked card wears a short, super-thick arrow pointing where it would
-  // go if the trade seals: theirs point down toward your hand, yours point
-  // up toward the trader. Pure indication — it shows whether or not the
-  // basket currently balances (the verdict button judges that).
-  const markPicked = (el: HTMLElement, picked: boolean, dir: 'down' | 'up'): void => {
-    el.classList.toggle('selected', picked);
-    const existing = el.querySelector(':scope > .ct-move-arrow');
-    if (picked && !existing) el.appendChild(div(`ct-move-arrow ${dir}`));
-    else if (!picked && existing) existing.remove();
-  };
-
-  // What the trader says, recomputed after every toggle.
-  const speak = () => {
-    const theirs = theirPicked();
-    const mines = minePicked();
-    if (theirs.length === 0 && mines.length === 0) {
-      sayLine(APPETITE_LINE[cr.appetite]);
-      return;
-    }
-    if (tradeReady()) { sayLine('a fair trade. seal it.'); return; }
-    if (mines.length === 0) {
-      sayLine(theirs.length === 1 ? 'and what will you give for it?'
-        : theirs.length === 2 ? 'two of mine — show me one of the greater kind.'
-        : 'i give two at most.');
-      return;
-    }
-    if (theirs.length === 0) { sayLine('and which of mine would you have for that?'); return; }
-    if (mines.length > 1) { sayLine('one of yours at a time.'); return; }
-    if (theirs.length > 2) { sayLine('i give two at most.'); return; }
-    if (theirs.length === 2) {
-      sayLine(theirs[0].tier !== theirs[1].tier
-        ? 'two of mine must be of a kind.'
-        : 'two of mine are worth one of the greater kind.');
-      return;
-    }
-    if (mines[0].tier !== theirs[0].tier) { sayLine('those are not of a kind. it does not balance.'); return; }
-    sayLine('that one does not feed me. ' + APPETITE_LINE[cr.appetite]);
-  };
-
-  // Clicks on YOUR cards arrive from the persistent hand layer — the same
-  // free in/out toggle as the trader's side.
-  const onMineClick = (mc: WorldCard) => {
+  // Clicks on the player's hand toggle the shared selection.
+  const onMineClick = (mc: WorldCard): void => {
     if (tradeAnimating) return;
     if (pickedMine.has(mc.id)) {
       pickedMine.delete(mc.id);
@@ -1453,91 +1259,86 @@ function showTrade(meta: CardMeta, ev: TradeEvent, cr: Creature): void {
       realmSound('select', 0.7, 1.1);
     }
     render();
-    speak();
   };
 
-  const wireHand = () => {
-    renderHand(meta, {
-      topEl: verdict,
-      onCardClick: onMineClick,
-      onAscended: () => {
-        wireHand();
-        render();
-        speak();
-      },
-    });
+  const wireHand = (): void => {
+    renderHand(meta, { onCardClick: onMineClick });
   };
-
-  const render = () => {
-    theirsRow.innerHTML = '';
-    for (const tc of cr.deck) {
-      const el = buildCardEl(tc, {
-        // Any trader card can be visited without owning it: a time-frozen,
-        // look-don't-touch boot of their world.
-        enterLabel: 'SPECTATE',
-        onEnter: (cardEl) => { if (!tradeAnimating) void spectateWorld(tc, cardEl); },
-        onClick: () => {
-          if (tradeAnimating) return;
-          if (pickedTheirs.has(tc.id)) {
-            pickedTheirs.delete(tc.id);
-          } else {
-            pickedTheirs.add(tc.id);
-            realmSound('select', 0.7, 1.1);
-          }
-          render();
-          speak();
-        },
-      });
-      markPicked(el, pickedTheirs.has(tc.id), 'down');
-      theirsRow.appendChild(el);
-    }
-
-    // The hand persists across renders — the trade state rides on it as
-    // the selected outline + the move arrow, nothing else.
-    const row = handRowEl();
-    if (row) {
-      for (const el of [...row.children] as HTMLElement[]) {
-        const mc = meta.cards.find((c) => c.id === Number(el.dataset.cardId));
-        if (!mc) continue;
-        markPicked(el, pickedMine.has(mc.id), 'up');
-      }
-    }
-
-    // The verdict. Offering your whole hand for nothing gets its own line —
-    // the realm never lets you walk away from the table empty-handed.
-    const ready = tradeReady();
-    const anyPicked = pickedTheirs.size > 0 || pickedMine.size > 0;
-    const allMineForNothing = pickedTheirs.size === 0
-      && pickedMine.size > 0 && pickedMine.size === meta.cards.length;
-    verdict.classList.toggle('show', anyPicked);
-    verdict.classList.toggle('ok', ready !== null);
-    verdict.disabled = ready === null;
-    verdict.textContent = !anyPicked ? ''
-      : ready ? '✓ trade'
-      : allMineForNothing ? "✗ can't trade last card"
-      : '✗ bad trade';
-
-    // Only the view's first render deals in staggered — re-renders driven
-    // by selection clicks would otherwise replay the deal on every pick.
-    if (firstDeal) {
-      firstDeal = false;
-      [...theirsRow.children].forEach((el, i) => {
-        (el as HTMLElement).classList.add('dealt');
-        (el as HTMLElement).style.setProperty('--deal-i', String(i));
-      });
-    }
-  };
-
-  verdict.addEventListener('click', () => {
-    const ready = tradeReady();
-    if (!ready || tradeAnimating) return;
-    realmSound('click', 0.8, 1);
-    executeTrade(ready.mine, ready.theirs);
-  });
 
   let firstDeal = true;
+  const render = (): void => {
+    row.innerHTML = '';
+    giveButtons.clear();
+    ev.creatures.forEach((cr, i) => {
+      const spent = cr.deck.length === 0;
+      const stall = div(`ct-stall${spent ? ' spent' : ''}`);
+      stall.dataset.creatureId = String(cr.id);
+      stall.appendChild(creatureAvatar());
+      stall.appendChild(div('ct-creature-name', cr.name));
+      stall.appendChild(div('ct-creature-line', spent ? 'traded out. it is content.' : wantLine(cr.want)));
+
+      const cards = div('ct-stall-cards');
+      for (const tc of cr.deck) {
+        const el = buildCardEl(tc, {
+          enterLabel: 'SPECTATE',
+          onEnter: (cardEl) => { if (!tradeAnimating) void spectateWorld(tc, cardEl); },
+        });
+        cards.appendChild(el);
+      }
+      stall.appendChild(cards);
+
+      if (!spent) {
+        const give = document.createElement('button');
+        give.type = 'button';
+        give.className = 'ct-give';
+        give.textContent = '✓ give & take all';
+        give.disabled = true;
+        give.addEventListener('click', () => {
+          if (give.disabled || tradeAnimating) return;
+          realmSound('click', 0.8, 1);
+          executeTrade(cr);
+        });
+        giveButtons.set(cr.id, give);
+        stall.appendChild(give);
+      }
+
+      if (firstDeal) {
+        stall.classList.add('dealt');
+        stall.style.setProperty('--deal-i', String(i));
+      }
+      row.appendChild(stall);
+    });
+    firstDeal = false;
+
+    // Reflect the shared selection on the hand minis.
+    const handRow = handRowEl();
+    if (handRow) {
+      for (const el of [...handRow.children] as HTMLElement[]) {
+        const mc = meta.cards.find((c) => c.id === Number(el.dataset.cardId));
+        el.classList.toggle('selected', !!mc && pickedMine.has(mc.id));
+      }
+    }
+    refreshGiveButtons();
+  };
+
+  // The reshuffle: let this gathering end and meet the next one — fresh
+  // traders, fresh decks, in case nothing on this table suits.
+  const wait = document.createElement('button');
+  wait.type = 'button';
+  wait.className = 'ct-wait';
+  wait.textContent = 'wait for the next gathering';
+  wait.addEventListener('click', async () => {
+    if (tradeAnimating) return;
+    wait.disabled = true;
+    realmSound('online', 0.4, 0.7);
+    stage.classList.add('waiting');
+    await sleep(700);
+    regenerateEvent(meta, ev, ALL_TASK_IDS, loadManualWorlds());
+    saveMeta(meta);
+    showGathering(meta, ev);
+  });
+  stage.appendChild(wait);
+
   wireHand();
   render();
-  const anyWanted = meta.cards.some((c) => appetiteAccepts(cr.appetite, c));
-  sayLine(anyWanted ? APPETITE_LINE[cr.appetite] : 'you hold nothing i want. yet.');
 }

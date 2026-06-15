@@ -21,12 +21,6 @@ export type CardTier = 'common' | 'uncommon' | 'rare';
 export const TIER_RANK: Record<CardTier, number> = { common: 0, uncommon: 1, rare: 2 };
 export const TIER_ABOVE: Record<CardTier, CardTier | null> = { common: 'uncommon', uncommon: 'rare', rare: null };
 
-// What a card demands before it can ascend to the next tier: hold this much
-// of one resource inside its world. Different per card — part of a card's
-// identity, and the reason to trade sideways for one whose demand suits the
-// world you can actually grow. Null once the card is rare (top tier).
-export type UpgradeReq = { res: 'money' | 'blood' | 'dragonBone' | 'power'; amount: number };
-
 // The headline numbers written on a card. `power` is the world's last
 // measured production in watts (0 until its buildings have actually run);
 // `goblins` is the standing population. Both optional for metas saved
@@ -42,8 +36,6 @@ export type WorldCard = {
   data: string;
   // Headline numbers written on the card; refreshed alongside `data`.
   resources: CardResources;
-  // Ascension demand for the next tier (see UpgradeReq). Null at rare.
-  upgradeReq?: UpgradeReq | null;
   // The player's own stolen pre-finale world — winnable back at gathering III.
   origin?: boolean;
   // Border-pattern index (index.html's .wcf-N rules) of the trader whose
@@ -52,22 +44,6 @@ export type WorldCard = {
   // origin, the junk replacement) carry none and keep the plain frame.
   frame?: number;
 };
-
-// What a creature looks for in a card. Cards that match are the ones it's
-// "open to trading for"; everything else greys out.
-export type Appetite = 'any' | 'blood' | 'rich' | 'bones';
-export const APPETITE_LINE: Record<Appetite, string> = {
-  any: 'i will consider any world.',
-  blood: 'i want worlds with blood in them.',
-  rich: 'i want wealthy worlds.',
-  bones: 'i want worlds that keep bones.',
-};
-export function appetiteAccepts(a: Appetite, card: WorldCard): boolean {
-  if (a === 'any') return true;
-  if (a === 'blood') return card.resources.blood >= 1;
-  if (a === 'rich') return card.resources.money >= 1000;
-  return card.resources.dragonBone >= 1;
-}
 
 // ─── Trader wants ────────────────────────────────────────────────────
 // A creature advertises ONE want — the worlds it will take. Hand it the
@@ -159,19 +135,9 @@ export function rollWant(tier: CardTier, rng: () => number, firstSlot: boolean):
 
 // `frame` is the creature's own card-border pattern (see WorldCard.frame);
 // optional only because metas saved before frames existed lack it (cards.ts
-// stamps the missing values on load). `appetite` is the legacy field — kept so
-// pre-want saves and the not-yet-migrated views still read it; the trading
-// realm now drives off `want`.
-export type Creature = { id: number; name: string; appetite: Appetite; want: Want; deck: WorldCard[]; frame?: number };
-
-// A legacy appetite that roughly mirrors a want, so the old views keep
-// rendering coherently until they're replaced by the want-driven gathering.
-export function legacyAppetiteFor(w: Want): Appetite {
-  if (w.kind === 'resource') {
-    return w.res === 'blood' ? 'blood' : w.res === 'dragonBone' ? 'bones' : 'rich';
-  }
-  return 'any';
-}
+// stamps the missing values on load). Each creature advertises ONE `want` —
+// hand it the card(s) that satisfy the want and it gives you its entire deck.
+export type Creature = { id: number; name: string; want: Want; deck: WorldCard[]; frame?: number };
 
 // The six creature slots across the three gatherings map onto the six frame
 // patterns — common's lone creature takes 0, the salon pair 1–2, the rare
@@ -353,16 +319,15 @@ const KIND_POOLS: Record<CardTier, BuildingKind[]> = {
 //  - crowd:       goblins wall to wall, little else (units ARE the wealth)
 //  - flooded:     the land is mostly lake — water-hungry buildings thrive
 //                 in the gaps between the shores
-// Three flavors are CHALLENGES — the world is a small puzzle and its
-// ascension demand (challengeReq) names the puzzle's goal:
+// Three flavors are CHALLENGES — the world is a small puzzle:
 //  - seance:      a bad power source stands ready, the bank holds exactly a
-//                 five-candle séance; the demand is the power only a fully
-//                 soul-fed sigil can produce. Spawn them, kill them, seat them.
+//                 five-candle séance's worth of blood. Spawn them, kill them,
+//                 seat them — a fully soul-fed sigil makes serious power.
 //  - overcharged: reactors everywhere, no cash — the opening money grind
 //                 replayed without ever worrying about generators (its work
 //                 track resets to the very start to match).
-//  - goldrush:    every goblin glitters; the demand is cash in clean Ƶ250
-//                 heads — an economy of killing your own citizens.
+//  - goldrush:    every goblin glitters — an economy of killing your own
+//                 citizens for clean Ƶ250 heads.
 //  - haunted:     hell is full; the surface is thin
 export type WorldFlavor = 'balanced' | 'bloodbath' | 'mint' | 'boneyard' | 'monoculture' | 'crowd' | 'flooded' | 'seance' | 'overcharged' | 'goldrush' | 'haunted';
 export const WORLD_FLAVORS: WorldFlavor[] = ['balanced', 'bloodbath', 'mint', 'boneyard', 'monoculture', 'crowd', 'flooded', 'seance', 'overcharged', 'goldrush', 'haunted'];
@@ -720,18 +685,10 @@ export function sceneStructureCounts(st: GameState): { space: number; earth: num
 
 // ─── Card construction ───────────────────────────────────────────────
 
-// Roll a card's ascension demand for its CURRENT tier, shaped by what the
-// world already holds. The demand leans INTO a world's spike — a blood farm
-// is asked for more blood, a mint for more cash — at 2–4× its current
-// holding, so a freshly-rolled card is never born already met and growing a
-// world means growing its identity. Spike-blind floors keep the climb a real
-// session even in a world that starts from nothing. Bones can only be
-// demanded of a world that already keeps bones; power only at uncommon
-// (reactors are mid-game toys).
-// Demands with personality: half the time the rolled amount snaps to a
-// "charismatic" figure inside the band — a power of two, a repdigit, a
-// clean single-digit round — so a card asks for Ƶ8,192 or 6,666 blood
-// instead of a beige 7,341.
+// A "charismatic" amount inside a band: half the time the rolled figure
+// snaps to a power of two, a repdigit, or a clean single-digit round — so a
+// trader's resource want asks for Ƶ8,192 or 6,666 blood instead of a beige
+// 7,341 (rollWant uses this for its resource thresholds).
 export function spicyAmount(lo: number, hi: number, rng: () => number): number {
   const plain = lo + Math.floor(rng() * (hi - lo + 1));
   if (rng() < 0.5) return plain;
@@ -754,77 +711,9 @@ export function spicyAmount(lo: number, hi: number, rng: () => number): number {
   return cands.length > 0 ? cands[Math.floor(rng() * cands.length)] : plain;
 }
 
-export function rollUpgradeReq(tier: CardTier, rng: () => number, resources: CardResources): UpgradeReq | null {
-  const ri = (a: number, b: number) => a + Math.floor(rng() * (b - a + 1));
-  if (tier === 'rare') return null;
-  const bands: Partial<Record<UpgradeReq['res'], [number, number]>> = tier === 'common'
-    ? { money: [5_000, 15_000], blood: [200, 800] }
-    : { money: [250_000, 1_000_000], blood: [5_000, 20_000], dragonBone: [3, 10], power: [1_000_000_000, 3_000_000_000] };
-  const candidates: UpgradeReq['res'][] = ['money', 'blood'];
-  if (tier === 'uncommon') {
-    if (resources.dragonBone > 0 && rng() < 0.5) candidates.push('dragonBone');
-    if (rng() < 0.25) candidates.push('power');
-  }
-  // Bias toward the world's dominant holding (relative to its band ceiling).
-  let dominant: UpgradeReq['res'] = 'money';
-  let dominance = -1;
-  for (const res of candidates) {
-    if (res === 'power') continue; // production is measured later, not held
-    const [, hi] = bands[res]!;
-    const score = (resources[res] ?? 0) / hi;
-    if (score > dominance) { dominance = score; dominant = res; }
-  }
-  const res = dominance > 0 && rng() < 0.65 ? dominant : candidates[Math.floor(rng() * candidates.length)];
-  const [lo, hi] = bands[res]!;
-  let amount = spicyAmount(lo, hi, rng);
-  // Lean past the spike: never born met, always 2–4× the current holding.
-  const have = resources[res] ?? 0;
-  if (have * 2 > amount) amount = Math.ceil(have * (2 + rng() * 2));
-  return { res, amount };
-}
-
-export function reqMet(card: WorldCard): boolean {
-  const r = card.upgradeReq;
-  return !!r && (card.resources[r.res] ?? 0) >= r.amount;
-}
-
-// Ascend a card one tier (caller checks reqMet and persists the meta) and
-// roll its next demand against the world's current holdings.
-export function ascendCard(meta: CardMeta, card: WorldCard): void {
-  const next = TIER_ABOVE[card.tier];
-  if (!next) return;
-  card.tier = next;
-  const rng = mulberry32((card.id * 1103515245 + meta.nextId) >>> 0);
-  card.upgradeReq = rollUpgradeReq(next, rng, card.resources);
-}
-
-// The challenge flavors write their own ascension demand — the world IS a
-// puzzle, and the demand names its goal instead of rolling a resource band:
-// a séance asks for the power only a full, soul-fed sigil reaches (1 W base
-// × 66⁵ from five weak souls ≈ 1.25 GW, so 1 GW means all five chairs); an
-// overcharged world asks for plain cash, the only thing it lacks.
-export function challengeReq(flavor: WorldFlavor, tier: CardTier, rng: () => number): UpgradeReq | null {
-  if (tier === 'rare') return null;
-  if (flavor === 'seance') return { res: 'power', amount: 1_000_000_000 };
-  if (flavor === 'overcharged') {
-    const [lo, hi] = tier === 'common' ? [5_000, 15_000] : [250_000, 1_000_000];
-    return { res: 'money', amount: spicyAmount(lo, hi, rng) };
-  }
-  if (flavor === 'goldrush') {
-    // Priced in heads: gold goblins drop Ƶ250 apiece, so the demand lands
-    // on a clean multiple of 250 — the card openly asks for a body count.
-    const heads = tier === 'common' ? 10 + Math.floor(rng() * 21) : 80 + Math.floor(rng() * 121);
-    return { res: 'money', amount: heads * 250 };
-  }
-  return null;
-}
-
 export function makeCard(meta: CardMeta, tier: CardTier, rng: () => number, taskIds: string[], junk = false): WorldCard {
   const seed = Math.floor(rng() * 0xffffffff);
-  // The flavor is picked here (not left to the world generator's internal
-  // roll) so the challenge flavors can pin their demand below.
-  const flavor = WORLD_FLAVORS[Math.floor(rng() * WORLD_FLAVORS.length)];
-  const st = junk ? generateJunkWorld(seed, taskIds) : generateWeirdWorld(seed, tier, taskIds, flavor);
+  const st = junk ? generateJunkWorld(seed, taskIds) : generateWeirdWorld(seed, tier, taskIds);
   const resources: CardResources = {
     money: st.money, blood: st.blood, dragonBone: st.dragonBone,
     power: cardPower(st), goblins: st.goblins.size,
@@ -835,12 +724,6 @@ export function makeCard(meta: CardMeta, tier: CardTier, rng: () => number, task
     tier,
     data: encodeWorld(st),
     resources,
-    // The junk card's ascension demand is pinned to plain cash so the
-    // player's first climb out of the dirt has a legible goal; challenge
-    // flavors pin theirs to the puzzle's own finish line.
-    upgradeReq: junk
-      ? { res: 'money', amount: 10_000 }
-      : challengeReq(flavor, tier, rng) ?? rollUpgradeReq(tier, rng, resources),
   };
 }
 
@@ -888,12 +771,13 @@ export function makeSandboxWorld(taskIds: string[]): GameState {
 }
 
 // ─── The gatherings ──────────────────────────────────────────────────
-// One per tier. Trades are same-tier 1:1 (or one-above broken down into
-// two), so the way UP is always a card's own ascension demand — gatherings
-// are where you swap a world whose demand doesn't suit you for one that
-// does (or, at the rare exchange, win your own world back). Every gathering
-// keeps one any-appetite creature so the player is never hard-locked; for
-// everything else there's the "wait for the next gathering" reshuffle.
+// One per tier. Each gathering seats a few traders, all on screen at once;
+// every trader advertises ONE want and, satisfied, gives its WHOLE deck for
+// the card(s) the want names. The way the collection grows is finding a want
+// you can meet — gatherings are where you spend a world (or a few) to gain a
+// trader's hand, or, at the rare exchange, win your own world back. Every
+// gathering's opener keeps an easy want so the player is never hard-locked;
+// for everything else there's the "wait for the next gathering" reshuffle.
 
 export const EVENT_NAMES: Record<CardTier, string> = {
   common: 'gathering at the soft border',
@@ -902,13 +786,12 @@ export const EVENT_NAMES: Record<CardTier, string> = {
 };
 
 let creatureSeq = 1;
-// The tables grow with the tiers — one creature at the soft border, two at
-// the salon, three at the rare exchange — and stay small-handed so no view
-// ever overwhelms. The first creature anywhere considers anything; the rest
-// are picky. The common gathering's lone creature holds TWO cards, making it
-// the first arc's two-for-one partner (ascend the junk common, break the
-// uncommon down into its two cards, ascend both halves); at richer tables
-// the first creature holds one card and the picky ones hold two.
+// The tables grow with the tiers — one trader at the soft border, two at the
+// salon, three at the rare exchange — and stay small-handed so no view ever
+// overwhelms. The first trader anywhere wants the easy rung (any one world at
+// the border, a single lesser card at the richer tables); the rest are picky.
+// The common gathering's lone trader holds TWO cards, so satisfying its open
+// want with a single world doubles the player's hand on the first trade.
 const CREATURE_SPECS: Record<CardTier, number[]> = {
   common: [2],
   uncommon: [1, 2],
@@ -933,7 +816,6 @@ export function rollCreatures(meta: CardMeta, tier: CardTier, rng: () => number,
       id: creatureSeq++,
       name: names.pop() ?? 'the other one',
       want,
-      appetite: legacyAppetiteFor(want),
       deck,
       frame,
     };
@@ -963,32 +845,4 @@ export function regenerateEvent(meta: CardMeta, ev: TradeEvent, taskIds: string[
   const rng = mulberry32((((meta.seed ?? 0) ^ (meta.nextId * 48271 + ev.id)) >>> 0));
   ev.creatures = rollCreatures(meta, ev.tier, rng, taskIds, manualPool);
   if (origin) ev.creatures[0].deck.unshift(origin);
-}
-
-// ─── Trade rules ─────────────────────────────────────────────────────
-// Same tier in, same tier out — 1:1. The one exception is breaking DOWN:
-// offer a card exactly one tier above what a creature holds and it will
-// give TWO of the lesser tier for it (1 uncommon → 2 commons, 1 rare →
-// 2 uncommons). A creature is open to trading for your card at all only
-// when it matches its appetite.
-export function sameTierGives(c: Creature, yours: WorldCard): WorldCard[] {
-  return c.deck.filter((d) => d.tier === yours.tier);
-}
-export function breakdownGives(c: Creature, yours: WorldCard): WorldCard[] {
-  const below = TIER_RANK[yours.tier] - 1;
-  const cards = c.deck.filter((d) => TIER_RANK[d.tier] === below);
-  // A two-for-one needs two to give.
-  return cards.length >= 2 ? cards : [];
-}
-export function creatureTakesFor(c: Creature, theirs: WorldCard, mine: WorldCard[]): WorldCard[] {
-  return mine.filter((m) => appetiteAccepts(c.appetite, m) && m.tier === theirs.tier);
-}
-// Is the creature open to trading for this card at all? Appetite gates
-// same-tier swaps (preference between equals); a card one tier above its
-// stock is universally coveted — every creature with two lesser cards will
-// break it down, whatever its tastes. This keeps the ascend → break down →
-// ascend-both arc open at every table.
-export function creatureOpenTo(c: Creature, card: WorldCard): boolean {
-  return (appetiteAccepts(c.appetite, card) && sameTierGives(c, card).length > 0)
-    || breakdownGives(c, card).length > 0;
 }
