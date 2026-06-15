@@ -131,16 +131,14 @@ export function rollWant(tier: CardTier, rng: () => number, firstSlot: boolean):
     const below = tier === 'uncommon' ? 'common' : 'uncommon';
     return { kind: 'tier', tier: below, count: 1 };
   }
-  const roll = rng();
-  if (roll < 0.5) {
-    const count = rng() < 0.55 ? 1 : rng() < 0.7 ? 2 : 3;
-    return { kind: 'tier', tier, count };
-  }
+  // Some traders want more than one card, all meeting the same condition.
+  const count = rng() < 0.55 ? 1 : rng() < 0.7 ? 2 : 3;
+  if (rng() < 0.5) return { kind: 'tier', tier, count };
   const band = WANT_BANDS[tier];
   const resOptions = (Object.keys(band) as ('money' | 'blood' | 'dragonBone' | 'power')[]);
   const res = resOptions[Math.floor(rng() * resOptions.length)];
   const [lo, hi] = band[res]!;
-  return { kind: 'resource', res, amount: spicyAmount(lo, hi, rng), count: 1 };
+  return { kind: 'resource', res, amount: spicyAmount(lo, hi, rng), count };
 }
 
 // `frame` is the creature's own card-border pattern (see WorldCard.frame);
