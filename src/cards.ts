@@ -144,7 +144,7 @@ export function saveManualWorlds(list: ManualWorld[]): void {
 const HOP_KEY = 'rts.cardhop';
 let hopInProgress = false;
 export function isCardHopInProgress(): boolean { return hopInProgress; }
-function markCardHop(): void {
+export function markCardHop(): void {
   hopInProgress = true;
   try { sessionStorage.setItem(HOP_KEY, '1'); } catch { /* no-op */ }
 }
