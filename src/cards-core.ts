@@ -394,7 +394,7 @@ export function generateWeirdWorld(seed: number, tier: CardTier, taskIds: string
   let lakes = 0;
 
   if (flavor === 'bloodbath') {
-    st.blood = [ri(15, 60), ri(1_200, 8_000), ri(240_000, 800_000)][T];
+    st.blood = [ri(16, 60), ri(1_200, 8_000), ri(240_000, 800_000)][T];
     st.money = ri(0, [8, 90, 900][T]);
     st.dragonBone = 0;
     ghostCount *= 2;
@@ -465,6 +465,11 @@ export function generateWeirdWorld(seed: number, tier: CardTier, taskIds: string
     buildingCount = Math.max(1, Math.floor(buildingCount / 2));
     goblinCount = Math.max(1, Math.floor(goblinCount / 2));
   }
+
+  // Never deal a world with a meaningless trickle of a resource: cash is
+  // either none or a real Ƶ100+, blood either none or a real 16+.
+  if (st.money > 0 && st.money < 100) st.money = 0;
+  if (st.blood > 0 && st.blood < 16) st.blood = 0;
 
   st.moneyEarned = st.money;
   st.bloodEarned = st.blood;
