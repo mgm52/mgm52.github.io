@@ -18,6 +18,7 @@ import {
   devResetCardRealm, hasCardMeta, isCardHopInProgress, maybeStartCardRealm, resetCardRealm,
   setupCardWorldChrome, spectateActive,
 } from './cards';
+import { designerActive, openDesignerList, setupDesignerChrome } from './designer';
 
 const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
 
@@ -238,13 +239,18 @@ async function main() {
   // holds the visited world either way; cards.ts's chrome setup tells the
   // two apart and freezes/locks the spectated one.
   let inCardWorld = cardWorldActive() || spectateActive();
+  // The dev World Designer rides the same boot shape as a card world: the
+  // sandbox world it's editing sits in the save slot, so it must resume that
+  // slot and skip the title — but it mounts its own chrome (setupDesignerChrome)
+  // rather than the card-world chrome below.
+  const inDesigner = designerActive();
   const metagameBegun = hasCardMeta();
 
   // Production-only title gate. Click here also satisfies the browser's
   // user-gesture requirement so audio can play immediately afterwards.
   // Saved-game lookup happens up-front so the title screen can show the
   // resume button (with relative-time meta) when one exists.
-  let saved = (import.meta.env.PROD || inCardWorld || metagameBegun) ? loadGame() : null;
+  let saved = (import.meta.env.PROD || inCardWorld || inDesigner || metagameBegun) ? loadGame() : null;
   if (inCardWorld && !saved) {
     // The card's save is unreadable — restore the outer realm and fall
     // back to a normal boot instead of a broken world.
@@ -253,7 +259,7 @@ async function main() {
     saved = import.meta.env.PROD ? loadGame() : null;
   }
   const skipTitle = (cardHop || !import.meta.env.PROD)
-    && (inCardWorld || metagameBegun) && saved !== null;
+    && (inCardWorld || inDesigner || metagameBegun) && saved !== null;
   // A skipped title must still be DISMISSED: #title-screen defaults to an
   // opaque black cover and only showTitleScreen's click path hides it, so
   // without this a prod card-world hop boots the world fine — behind black.
@@ -369,6 +375,10 @@ async function main() {
   // An explicit hop also plays the arrival zoom — the world swelling out of
   // the white the player just dove into.
   if (inCardWorld) setupCardWorldChrome(state, cardHop);
+  // In the dev World Designer: mount the top authoring bar instead. The
+  // sandbox world resumed above is already task-free + fully unlocked
+  // (makeSandboxWorld), so the standard sidebar places everything.
+  else if (inDesigner) setupDesignerChrome(state);
   // Dev shortcut: ?cardrealm mounts the trading-card realm immediately,
   // without playing the finale first. Flush the just-booted world into the
   // save slot first — entering a card stashes the slot as the outer world,
@@ -515,6 +525,7 @@ async function main() {
       maybeStartCardRealm();
     },
     onResetCardRealm: () => { devResetCardRealm(); },
+    onLaunchWorldDesigner: () => openDesignerList(),
   });
   // "Restart in hell": this run started fresh (choice forced to 'new'), so
   // ride straight down. The flag just queues requestSkipToHell — the frame

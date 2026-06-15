@@ -2389,6 +2389,128 @@
         #intro-overlay.faced #intro-goblin { bottom: -8vh; }
         #intro-speech { bottom: 66%; max-width: 86vw; }
       }
+
+      /* ───────── Dev World Designer ─────────
+         A fixed authoring bar across the top while inside a designed sandbox
+         world, and a list/edit overlay launched from the dev options menu.
+         All dev-only, so the styling stays utilitarian (dark glass, mono
+         labels) and deliberately distinct from the white card-world chrome. */
+      #wd-bar {
+        position: fixed; top: 0; left: 0; right: 0; z-index: 99995;
+        display: flex; align-items: center; gap: 14px; flex-wrap: wrap;
+        padding: 8px 14px;
+        background: rgba(18, 16, 26, 0.92);
+        backdrop-filter: blur(8px) saturate(1.2);
+        -webkit-backdrop-filter: blur(8px) saturate(1.2);
+        border-bottom: 1px solid rgba(170, 150, 250, 0.5);
+        font-family: var(--font-mono); color: #e6e2f4; font-size: 12px;
+        box-shadow: 0 4px 18px rgba(0, 0, 0, 0.5);
+      }
+      .wd-bar-title {
+        font-family: var(--font-display); letter-spacing: 0.16em;
+        font-size: 12px; color: #c9b9ff; white-space: nowrap;
+      }
+      .wd-field, .wd-res {
+        display: inline-flex; align-items: center; gap: 6px;
+      }
+      .wd-field-label { color: #9a92b8; font-size: 11px; letter-spacing: 0.04em; }
+      .wd-name, .wd-tier, .wd-res-input {
+        background: rgba(0, 0, 0, 0.4); color: #f0edff;
+        border: 1px solid rgba(150, 130, 220, 0.55); border-radius: 5px;
+        font-family: var(--font-mono); font-size: 12px; padding: 4px 7px;
+      }
+      .wd-name { width: 150px; }
+      .wd-res-input { width: 110px; }
+      .wd-actions {
+        display: inline-flex; align-items: center; gap: 10px;
+        margin-left: auto;
+      }
+      .wd-save, .wd-exit {
+        font-family: var(--font-display); letter-spacing: 0.12em;
+        font-size: 12px; padding: 6px 16px; cursor: pointer;
+        border-radius: 6px; border: 1px solid transparent;
+      }
+      .wd-save {
+        background: rgba(110, 190, 130, 0.22); color: #b9f0c7;
+        border-color: rgba(110, 190, 130, 0.7);
+      }
+      .wd-save:hover { background: rgba(110, 190, 130, 0.4); }
+      .wd-exit {
+        background: rgba(0, 0, 0, 0.35); color: #d8d2ea;
+        border-color: rgba(150, 130, 220, 0.5);
+      }
+      .wd-exit:hover { background: rgba(0, 0, 0, 0.6); }
+      .wd-exit:disabled { opacity: 0.6; cursor: default; }
+      .wd-toast {
+        color: #9af0b4; font-size: 11px; opacity: 0;
+        white-space: nowrap;
+      }
+      .wd-toast.show { animation: wd-toast-fade 2.4s ease forwards; }
+      @keyframes wd-toast-fade {
+        0% { opacity: 0; } 12% { opacity: 1; } 75% { opacity: 1; } 100% { opacity: 0; }
+      }
+
+      /* The list/edit overlay (opened from dev options in the normal game). */
+      #wd-overlay {
+        position: fixed; inset: 0; z-index: 100003;
+        display: flex; align-items: center; justify-content: center;
+        background: rgba(8, 6, 14, 0.72);
+        backdrop-filter: blur(4px); -webkit-backdrop-filter: blur(4px);
+      }
+      .wd-panel {
+        width: min(560px, 92vw); max-height: 82vh; overflow: auto;
+        background: rgba(22, 19, 32, 0.98);
+        border: 1px solid rgba(170, 150, 250, 0.55); border-radius: 12px;
+        padding: 16px 18px;
+        font-family: var(--font-mono); color: #e6e2f4;
+        box-shadow: 0 14px 50px rgba(0, 0, 0, 0.6);
+      }
+      .wd-panel-head {
+        display: flex; align-items: center; justify-content: space-between;
+        margin-bottom: 12px;
+      }
+      .wd-panel-title {
+        font-family: var(--font-display); letter-spacing: 0.16em;
+        font-size: 15px; color: #c9b9ff;
+      }
+      .wd-close {
+        background: none; border: none; color: #b6aed0; cursor: pointer;
+        font-size: 22px; line-height: 1; padding: 0 4px;
+      }
+      .wd-close:hover { color: #fff; }
+      .wd-newworld {
+        width: 100%; margin-bottom: 12px; cursor: pointer;
+        font-family: var(--font-display); letter-spacing: 0.12em; font-size: 12px;
+        padding: 9px; border-radius: 7px;
+        background: rgba(150, 130, 220, 0.22); color: #d8ccff;
+        border: 1px dashed rgba(170, 150, 250, 0.7);
+      }
+      .wd-newworld:hover { background: rgba(150, 130, 220, 0.4); }
+      .wd-list { display: flex; flex-direction: column; gap: 8px; }
+      .wd-empty { color: #9a92b8; font-size: 12px; text-align: center; padding: 18px 0; }
+      .wd-row {
+        display: flex; align-items: center; gap: 10px;
+        padding: 9px 11px; border-radius: 8px;
+        background: rgba(0, 0, 0, 0.3);
+        border-left: 3px solid rgba(150, 150, 150, 0.6);
+      }
+      .wd-row.t-common   { border-left-color: #9aa0ac; }
+      .wd-row.t-uncommon { border-left-color: #6fc27a; }
+      .wd-row.t-rare     { border-left-color: #d9a441; }
+      .wd-row-info { flex: 1; min-width: 0; }
+      .wd-row-name { font-size: 13px; color: #f0edff; }
+      .wd-row-meta { font-size: 11px; color: #9a92b8; margin-top: 2px; }
+      .wd-row-edit, .wd-row-del {
+        font-family: var(--font-mono); font-size: 11px; letter-spacing: 0.06em;
+        padding: 5px 11px; cursor: pointer; border-radius: 5px;
+        border: 1px solid rgba(150, 130, 220, 0.5);
+        background: rgba(0, 0, 0, 0.35); color: #d8d2ea;
+      }
+      .wd-row-edit:hover { background: rgba(150, 130, 220, 0.35); }
+      .wd-row-del {
+        border-color: rgba(220, 120, 120, 0.55); color: #f0c0c0;
+      }
+      .wd-row-del:hover { background: rgba(220, 120, 120, 0.3); }
     </style>
   </head>
   <body>

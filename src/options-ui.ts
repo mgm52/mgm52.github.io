@@ -27,6 +27,9 @@ export type OptionsUICallbacks = {
   // Wipe only the trading-realm metagame (cards, gatherings, origin
   // snapshot) and reload — the main save survives.
   onResetCardRealm: () => void;
+  // Open the dev World Designer's list/edit overlay (hand-author the manual
+  // worlds that feed the trading realm).
+  onLaunchWorldDesigner: () => void;
 };
 
 export function setupOptionsUI(root: HTMLElement, callbacks: OptionsUICallbacks): void {
@@ -474,6 +477,7 @@ function rebuildPanel(panel: HTMLElement, callbacks: OptionsUICallbacks, refresh
     cheatButton('Cheat: skip to moon confrontation', callbacks.onSkipToConfront),
     cheatButton('Cheat: skip to trading realm', callbacks.onSkipToCardRealm),
     cheatButton('Cheat: reset trading realm data', callbacks.onResetCardRealm),
+    cheatButton('World Designer', callbacks.onLaunchWorldDesigner),
   ]));
 
   // Cheats + debug shortcuts, folded into their own section like everything
