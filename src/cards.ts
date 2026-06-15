@@ -1299,12 +1299,28 @@ function showGathering(meta: CardMeta, ev: TradeEvent): void {
     tradeAnimating = true;
     refreshButtons();
     const received = cr.deck;
+    // Fly a card toward a target rect's centre — the given cards rise into the
+    // trader's stall, the received cards fall toward the hand, each tracking
+    // the actual on-screen direction of where it's headed.
+    const flyTo = (el: HTMLElement | null | undefined, target: DOMRect | undefined, scale: number): void => {
+      if (!el || !target) return;
+      const r = el.getBoundingClientRect();
+      const dx = (target.left + target.width / 2) - (r.left + r.width / 2);
+      const dy = (target.top + target.height / 2) - (r.top + r.height / 2);
+      el.style.transition = 'transform 640ms cubic-bezier(0.5, 0, 0.75, 0.4), opacity 560ms ease';
+      el.style.transform = `translate(${dx}px, ${dy}px) scale(${scale})`;
+      el.style.opacity = '0';
+      el.style.pointerEvents = 'none';
+    };
+    const stallEl = row.querySelector(`[data-creature-id="${cr.id}"]`) as HTMLElement | null;
+    const stallRect = stallEl?.querySelector('.ct-stall-cards')?.getBoundingClientRect()
+      ?? stallEl?.getBoundingClientRect();
+    const handRect = document.getElementById('card-hand')?.getBoundingClientRect();
     for (const m of picked) {
-      handRowEl()?.querySelector(`[data-card-id="${m.id}"]`)?.classList.add('trade-given');
+      flyTo(handRowEl()?.querySelector(`[data-card-id="${m.id}"]`) as HTMLElement | null, stallRect, 0.6);
     }
-    const stallEl = row.querySelector(`[data-creature-id="${cr.id}"]`);
     for (const t of received) {
-      stallEl?.querySelector(`[data-card-id="${t.id}"]`)?.classList.add('trade-received');
+      flyTo(stallEl?.querySelector(`[data-card-id="${t.id}"]`) as HTMLElement | null, handRect, 0.85);
     }
     realmSound('select', 0.9, 0.8);
     const wonOrigin = received.some((t) => t.origin);
