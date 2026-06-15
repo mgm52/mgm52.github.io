@@ -387,6 +387,11 @@ async function main() {
     saveGame(state);
     maybeStartCardRealm();
   }
+  // Dev shortcut: ?designer opens the World Designer list straight away (unless
+  // we already booted into a designer session, which mounts its own chrome).
+  if (new URLSearchParams(window.location.search).has('designer') && !inDesigner) {
+    openDesignerList();
+  }
   // Dev cheat flag: set by the options menu's "skip to hell" button,
   // consumed at the top of the frame loop (where the transition state lives).
   let requestSkipToHell = false;
