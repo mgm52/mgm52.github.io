@@ -1331,11 +1331,22 @@ function showGathering(meta: CardMeta, ev: TradeEvent): void {
       cr.deck = [];
       pickedMine.clear();
       saveMeta(meta);
+      // Update only the traded stall in place — mark it spent and empty its
+      // card box — so the other traders never flash or re-deal. Then rebuild
+      // just the hand and pop the arrivals in.
+      const ref = stalls.get(cr.id);
+      if (stallEl) {
+        stallEl.classList.add('spent');
+        const box = stallEl.querySelector('.ct-stall-cards');
+        if (box) box.innerHTML = '';
+        ref?.giveBtn?.remove();
+        if (ref) { ref.giveBtn = null; typeLine(ref, [{ t: 'traded out. it is content.' }]); }
+      }
       wireHand();
-      buildStalls();
       for (const t of received) {
         handRowEl()?.querySelector(`[data-card-id="${t.id}"]`)?.classList.add('trade-arrived');
       }
+      refreshButtons();
       realmSound(wonOrigin ? 'task_complete' : 'ritual', wonOrigin ? 0.9 : 1, wonOrigin ? 1 : 0.9);
     }, 680);
   };
