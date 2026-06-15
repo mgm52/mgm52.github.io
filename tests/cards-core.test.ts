@@ -535,9 +535,10 @@ describe('generateEvents', () => {
         expect(APPETITE_LINE[cr.appetite]).toBeTruthy();
       }
     }
-    // Picky creatures at the same table don't share an appetite.
-    const rareAppetites = events[2].creatures.slice(1).map((c) => c.appetite);
-    expect(new Set(rareAppetites).size).toBe(rareAppetites.length);
+    // Every creature now advertises a want; the opener's is the easy rung.
+    for (const ev of events) {
+      for (const cr of ev.creatures) expect(cr.want).toBeTruthy();
+    }
   });
 
   it('seats the stolen origin card with the rare exchange\'s any-appetite creature', () => {

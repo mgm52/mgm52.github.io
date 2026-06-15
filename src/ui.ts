@@ -1911,17 +1911,23 @@ export function refreshUI(state: GameState) {
     }
   }
   // Fire the celebration animation for any task that crossed the threshold
-  // since the last frame.
-  for (const id of completedTaskIds) {
-    if (!previouslyCompletedTaskIds.has(id)) {
-      previouslyCompletedTaskIds.add(id);
-      playTaskCompleteAnimation(id);
+  // since the last frame. A tasks-disabled world (the World Designer sandbox)
+  // never celebrates — its track is suppressed entirely.
+  if (!state.tasksDisabled) {
+    for (const id of completedTaskIds) {
+      if (!previouslyCompletedTaskIds.has(id)) {
+        previouslyCompletedTaskIds.add(id);
+        playTaskCompleteAnimation(id);
+      }
     }
   }
   const activeTasks: Task[] = [];
-  for (const t of TASKS) {
-    if (completedTaskIds.has(t.id)) continue;
-    if (taskReady(t, state)) activeTasks.push(t);
+  // The designer sandbox shows no Work/Optional task lines at all.
+  if (!state.tasksDisabled) {
+    for (const t of TASKS) {
+      if (completedTaskIds.has(t.id)) continue;
+      if (taskReady(t, state)) activeTasks.push(t);
+    }
   }
   // Mandatory tasks first, optional side-tasks after (stable within each group).
   activeTasks.sort((a, b) => Number(a.optional ?? false) - Number(b.optional ?? false));

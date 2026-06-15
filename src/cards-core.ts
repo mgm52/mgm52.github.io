@@ -8,13 +8,13 @@
 import * as devalue from 'devalue';
 import { compressToUTF16, decompressFromUTF16 } from 'lz-string';
 import {
-  BUILDING_DEFS, BuildingKind, CELL, SOUL_SIGIL, SPACE,
+  BUILDING_DEFS, BuildingKind, CELL, SOUL_SIGIL, SPACE, formatPower,
 } from './config';
 import {
   Building, Cell, GameState, Goblin, SpaceBuilding,
   buildingAtCell, cellCenter, cellKey, computePlayBounds, createInitialState,
   digDirection, isInPlayCell, markBuildingsChanged, nextBuildingDisplayNum,
-  occupyCell, recordGhost, removeGoblin, waterSourceAtCell,
+  occupyCell, recordGhost, removeGoblin, unlockEverything, waterSourceAtCell,
 } from './state';
 
 export type CardTier = 'common' | 'uncommon' | 'rare';
@@ -69,10 +69,109 @@ export function appetiteAccepts(a: Appetite, card: WorldCard): boolean {
   return card.resources.dragonBone >= 1;
 }
 
+// ─── Trader wants ────────────────────────────────────────────────────
+// A creature advertises ONE want — the worlds it will take. Hand it the
+// card(s) that satisfy the want and it gives you its ENTIRE deck in return
+// (the only way the collection grows now that cards no longer ascend on their
+// own). Wants vary per trader: an open "any one world", a tier ask ("three
+// common worlds"), or a resource threshold ("a world worth Ƶ10,000+").
+export type Want =
+  | { kind: 'any'; count: number }
+  | { kind: 'tier'; tier: CardTier; count: number }
+  | { kind: 'resource'; res: 'money' | 'blood' | 'dragonBone' | 'power'; amount: number; count: number };
+
+const COUNT_WORDS = ['zero', 'one', 'two', 'three', 'four', 'five', 'six', 'seven', 'eight', 'nine', 'ten'];
+function countWord(n: number): string { return COUNT_WORDS[n] ?? String(n); }
+function worldsWord(n: number): string { return n === 1 ? 'world' : 'worlds'; }
+
+// The card resource a want reads (power is the card's measured production).
+export function wantResAmount(res: 'money' | 'blood' | 'dragonBone' | 'power', card: WorldCard): number {
+  return res === 'power' ? (card.resources.power ?? 0) : (card.resources[res] ?? 0);
+}
+
+// Does a single card qualify toward a want?
+export function cardQualifies(w: Want, card: WorldCard): boolean {
+  if (w.kind === 'any') return true;
+  if (w.kind === 'tier') return card.tier === w.tier;
+  return wantResAmount(w.res, card) >= w.amount;
+}
+
+// How many cards in a hand qualify, and whether the hand can satisfy the want
+// at all (enough qualifying cards to hand over).
+export function countQualifying(w: Want, hand: WorldCard[]): number {
+  return hand.reduce((n, c) => n + (cardQualifies(w, c) ? 1 : 0), 0);
+}
+export function wantSatisfiableBy(w: Want, hand: WorldCard[]): boolean {
+  return countQualifying(w, hand) >= w.count;
+}
+// Is THIS exact offer the trade? Every offered card must qualify and the count
+// must match — you hand over precisely the cards the want names, no more.
+export function wantSatisfiedBy(w: Want, offered: WorldCard[]): boolean {
+  return offered.length === w.count && offered.every((c) => cardQualifies(w, c));
+}
+
+// The trader's advertised line.
+export function wantLine(w: Want): string {
+  if (w.kind === 'any') {
+    return w.count === 1 ? 'i will take any one world.' : `i want any ${countWord(w.count)} ${worldsWord(w.count)}.`;
+  }
+  if (w.kind === 'tier') {
+    return w.count === 1 ? `i want a ${w.tier} world.` : `i want ${countWord(w.count)} ${w.tier} ${worldsWord(w.count)}.`;
+  }
+  const amt = Math.floor(w.amount).toLocaleString('en-US');
+  const desc = w.res === 'money' ? `worth Ƶ${amt}+`
+    : w.res === 'blood' ? `with ${amt}+ blood`
+    : w.res === 'dragonBone' ? `keeping ${amt}+ bones`
+    : `making ${formatPower(w.amount)}+`;
+  const head = w.count === 1 ? 'a world' : `${countWord(w.count)} worlds`;
+  return `i want ${head} ${desc}.`;
+}
+
+// Resource bands a non-"any" want draws its threshold from, by gathering tier.
+const WANT_BANDS: Record<CardTier, Partial<Record<'money' | 'blood' | 'dragonBone' | 'power', [number, number]>>> = {
+  common: { money: [1_000, 15_000], blood: [50, 800] },
+  uncommon: { money: [50_000, 1_000_000], blood: [2_000, 20_000], dragonBone: [2, 12], power: [1_000_000_000, 3_000_000_000] },
+  rare: { money: [1_000_000, 200_000_000], blood: [50_000, 500_000], dragonBone: [50, 500], power: [1_000_000_000, 5_000_000_000] },
+};
+
+// Roll a creature's want. The first creature at every gathering keeps an easy
+// ask so the player is never hard-locked — at the common border it takes any
+// one world, and each richer table's opener takes a single card of the tier
+// just below it (the rung you climb up by). The rest are pickier: more of the
+// table's own tier, or a resource threshold.
+export function rollWant(tier: CardTier, rng: () => number, firstSlot: boolean): Want {
+  if (firstSlot) {
+    if (tier === 'common') return { kind: 'any', count: 1 };
+    const below = tier === 'uncommon' ? 'common' : 'uncommon';
+    return { kind: 'tier', tier: below, count: 1 };
+  }
+  const roll = rng();
+  if (roll < 0.5) {
+    const count = rng() < 0.55 ? 1 : rng() < 0.7 ? 2 : 3;
+    return { kind: 'tier', tier, count };
+  }
+  const band = WANT_BANDS[tier];
+  const resOptions = (Object.keys(band) as ('money' | 'blood' | 'dragonBone' | 'power')[]);
+  const res = resOptions[Math.floor(rng() * resOptions.length)];
+  const [lo, hi] = band[res]!;
+  return { kind: 'resource', res, amount: spicyAmount(lo, hi, rng), count: 1 };
+}
+
 // `frame` is the creature's own card-border pattern (see WorldCard.frame);
 // optional only because metas saved before frames existed lack it (cards.ts
-// stamps the missing values on load).
-export type Creature = { id: number; name: string; appetite: Appetite; deck: WorldCard[]; frame?: number };
+// stamps the missing values on load). `appetite` is the legacy field — kept so
+// pre-want saves and the not-yet-migrated views still read it; the trading
+// realm now drives off `want`.
+export type Creature = { id: number; name: string; appetite: Appetite; want: Want; deck: WorldCard[]; frame?: number };
+
+// A legacy appetite that roughly mirrors a want, so the old views keep
+// rendering coherently until they're replaced by the want-driven gathering.
+export function legacyAppetiteFor(w: Want): Appetite {
+  if (w.kind === 'resource') {
+    return w.res === 'blood' ? 'blood' : w.res === 'dragonBone' ? 'bones' : 'rich';
+  }
+  return 'any';
+}
 
 // The six creature slots across the three gatherings map onto the six frame
 // patterns — common's lone creature takes 0, the salon pair 1–2, the rare
@@ -745,6 +844,49 @@ export function makeCard(meta: CardMeta, tier: CardTier, rng: () => number, task
   };
 }
 
+// ─── Manual worlds (the dev World Designer's database) ───────────────
+// Hand-authored worlds saved out of the designer. They are the dominant card
+// source: a trader deck is filled 95% from this pool (matching the slot's
+// tier) and only 5% — or whenever the pool can't field the tier — from the
+// procedural generator above. A manual world's serialized GameState already
+// carries `tasksDisabled` + every unlock (makeSandboxWorld), so entering one
+// as a card is automatically a sandbox.
+export type ManualWorld = { id: number; name: string; tier: CardTier; data: string; resources: CardResources };
+
+// Turn a stored manual world into a fresh dealable card (new id; the caller
+// stamps the minting trader's frame, as with procedural cards).
+export function cardFromManual(meta: CardMeta, m: ManualWorld): WorldCard {
+  return {
+    id: meta.nextId++,
+    name: m.name,
+    tier: m.tier,
+    data: m.data,
+    resources: { ...m.resources },
+  };
+}
+
+// Mint one card for a trader's deck: 95% drawn from the manual pool of the
+// matching tier when any exist, otherwise procedurally generated.
+export function mintDeckCard(meta: CardMeta, tier: CardTier, rng: () => number, taskIds: string[], manualPool: ManualWorld[] = []): WorldCard {
+  const pool = manualPool.filter((m) => m.tier === tier);
+  if (pool.length > 0 && rng() < 0.95) {
+    return cardFromManual(meta, pool[Math.floor(rng() * pool.length)]);
+  }
+  return makeCard(meta, tier, rng, taskIds);
+}
+
+// A blank designer/sandbox world: a fresh state, stripped of finale/Bob/Lolly
+// machinery, with every sidebar ability unlocked and the task track disabled.
+// Used both to start a new manual world and (via its flags) by every world
+// the designer saves.
+export function makeSandboxWorld(taskIds: string[]): GameState {
+  const st = createInitialState();
+  sanitizeCardWorld(st);
+  unlockEverything(st, taskIds);
+  st.tasksDisabled = true;
+  return st;
+}
+
 // ─── The gatherings ──────────────────────────────────────────────────
 // One per tier. Trades are same-tier 1:1 (or one-above broken down into
 // two), so the way UP is always a card's own ascension demand — gatherings
@@ -772,43 +914,42 @@ const CREATURE_SPECS: Record<CardTier, number[]> = {
   uncommon: [1, 2],
   rare: [1, 2, 2],
 };
-export function rollCreatures(meta: CardMeta, tier: CardTier, rng: () => number, taskIds: string[]): Creature[] {
+export function rollCreatures(meta: CardMeta, tier: CardTier, rng: () => number, taskIds: string[], manualPool: ManualWorld[] = []): Creature[] {
   const names = [...CREATURE_NAMES];
-  const appetites: Appetite[] = ['blood', 'rich', 'bones'];
-  for (const arr of [names, appetites] as unknown[][]) {
-    for (let i = arr.length - 1; i > 0; i--) {
-      const j = Math.floor(rng() * (i + 1));
-      [arr[i], arr[j]] = [arr[j], arr[i]];
-    }
+  for (let i = names.length - 1; i > 0; i--) {
+    const j = Math.floor(rng() * (i + 1));
+    [names[i], names[j]] = [names[j], names[i]];
   }
   return CREATURE_SPECS[tier].map((deckSize, i) => {
     const frame = FRAME_BASE[tier] + i;
     const deck: WorldCard[] = [];
     for (let k = 0; k < deckSize; k++) {
-      const card = makeCard(meta, tier, rng, taskIds);
+      const card = mintDeckCard(meta, tier, rng, taskIds, manualPool);
       card.frame = frame;
       deck.push(card);
     }
+    const want = rollWant(tier, rng, i === 0);
     return {
       id: creatureSeq++,
       name: names.pop() ?? 'the other one',
-      appetite: i === 0 ? 'any' as const : appetites.pop() ?? 'any' as const,
+      want,
+      appetite: legacyAppetiteFor(want),
       deck,
       frame,
     };
   });
 }
 
-export function generateEvents(meta: CardMeta, stolen: WorldCard | null, taskIds: string[]): TradeEvent[] {
+export function generateEvents(meta: CardMeta, stolen: WorldCard | null, taskIds: string[], manualPool: ManualWorld[] = []): TradeEvent[] {
   const rng = mulberry32((((meta.seed ?? 0) ^ (meta.nextId * 2654435761)) >>> 0));
   const events: TradeEvent[] = (['common', 'uncommon', 'rare'] as CardTier[]).map((tier, i) => ({
     id: i + 1,
     name: EVENT_NAMES[tier],
     tier,
-    creatures: rollCreatures(meta, tier, rng, taskIds),
+    creatures: rollCreatures(meta, tier, rng, taskIds, manualPool),
   }));
-  // The stolen origin card waits at the rare exchange, with the creature who
-  // will consider anything for it.
+  // The stolen origin card waits at the rare exchange, with the creature whose
+  // opening want (a single uncommon) is the easiest to bring it back from.
   if (stolen) events[2].creatures[0].deck.unshift(stolen);
   return events;
 }
@@ -817,10 +958,10 @@ export function generateEvents(meta: CardMeta, stolen: WorldCard | null, taskIds
 // arrives — new creatures, new decks (caller persists the meta). Whatever
 // the player traded away leaves with the departing creatures, except the
 // origin card, which always finds its way to the next table.
-export function regenerateEvent(meta: CardMeta, ev: TradeEvent, taskIds: string[]): void {
+export function regenerateEvent(meta: CardMeta, ev: TradeEvent, taskIds: string[], manualPool: ManualWorld[] = []): void {
   const origin = ev.creatures.flatMap((c) => c.deck).find((c) => c.origin) ?? null;
   const rng = mulberry32((((meta.seed ?? 0) ^ (meta.nextId * 48271 + ev.id)) >>> 0));
-  ev.creatures = rollCreatures(meta, ev.tier, rng, taskIds);
+  ev.creatures = rollCreatures(meta, ev.tier, rng, taskIds, manualPool);
   if (origin) ev.creatures[0].deck.unshift(origin);
 }
 

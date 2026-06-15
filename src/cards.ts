@@ -26,8 +26,8 @@ import { clearSave, getRawSave, saveGame, setRawSave } from './save';
 import { GameState, computePlayBounds, isInPlayCell } from './state';
 import { ALL_TASK_IDS } from './ui';
 import {
-  APPETITE_LINE, CardMeta, CardResources, CardTier, Creature, FRAME_BASE, TIER_ABOVE,
-  TIER_RANK, TradeEvent, UpgradeReq, WorldCard, appetiteAccepts, ascendCard,
+  APPETITE_LINE, CardMeta, CardResources, CardTier, Creature, FRAME_BASE, ManualWorld,
+  TIER_ABOVE, TIER_RANK, TradeEvent, UpgradeReq, Want, WorldCard, appetiteAccepts, ascendCard,
   cardPower, decodeWorld, encodeWorld, generateEvents,
   makeCard, mulberry32, regenerateEvent, reqMet, sceneStructureCounts,
 } from './cards-core';
@@ -56,11 +56,30 @@ const newCard = (meta: CardMeta, tier: CardTier, rng: () => number, junk = false
 const META_KEY = 'rts.cards.v1';
 const ORIGIN_KEY = 'rts.cardorigin.v1';
 const OUTER_KEY = 'rts.cardouter.v1';
+// The dev World Designer's database of hand-authored worlds. These are the
+// dominant card source — generateEvents/regenerateEvent draw 95% of every
+// trader deck from this pool (cards-core's mintDeckCard). Shared with the
+// designer module, which writes it.
+const MANUAL_KEY = 'rts.manualworlds.v1';
 // Set while the player is SPECTATING a trader's card world: the world sits
 // in the regular save slot like an entered card, but time is frozen, the
 // build/summon chrome is hidden, and leaving never serializes back — the
 // trader's card is untouched by the visit.
 const SPECTATE_KEY = 'rts.cardspectate.v1';
+
+// Map a legacy creature appetite onto a want, for metas saved before wants
+// existed. The opener at each gathering stays the easy rung (any one world at
+// the border, a single lesser-tier card at the richer tables).
+function appetiteToWant(a: Creature['appetite'], tier: CardTier, firstSlot: boolean): Want {
+  if (firstSlot) {
+    if (tier === 'common') return { kind: 'any', count: 1 };
+    return { kind: 'tier', tier: tier === 'uncommon' ? 'common' : 'uncommon', count: 1 };
+  }
+  if (a === 'blood') return { kind: 'resource', res: 'blood', amount: 1, count: 1 };
+  if (a === 'rich') return { kind: 'resource', res: 'money', amount: 1000, count: 1 };
+  if (a === 'bones') return { kind: 'resource', res: 'dragonBone', amount: 1, count: 1 };
+  return { kind: 'tier', tier, count: 1 };
+}
 
 function loadMeta(): CardMeta | null {
   try {
@@ -80,6 +99,10 @@ function loadMeta(): CardMeta | null {
               if (wc.frame === undefined && !wc.origin) wc.frame = c.frame;
             }
           }
+          // Metas saved before trader wants existed: synthesize one from the
+          // legacy appetite (the first creature, the open one, becomes an
+          // any-want).
+          if (c.want === undefined) c.want = appetiteToWant(c.appetite, ev.tier, i === 0);
         });
       }
     }
@@ -98,6 +121,20 @@ function saveMeta(meta: CardMeta): void {
 }
 
 export function hasCardMeta(): boolean { return loadMeta() !== null; }
+
+// ─── Manual-world database (shared with the World Designer) ──────────
+export function loadManualWorlds(): ManualWorld[] {
+  try {
+    const raw = localStorage.getItem(MANUAL_KEY);
+    if (!raw) return [];
+    const list = JSON.parse(raw) as ManualWorld[];
+    return Array.isArray(list) ? list : [];
+  } catch { return []; }
+}
+
+export function saveManualWorlds(list: ManualWorld[]): void {
+  try { localStorage.setItem(MANUAL_KEY, JSON.stringify(list)); } catch { /* storage full — skip */ }
+}
 
 // Set just before the enter-/leave-world reloads so the next boot knows it's
 // an explicit transition (skip the title screen) rather than a cold load.
@@ -1049,7 +1086,7 @@ async function runTradeIntro(meta: CardMeta): Promise<void> {
 
   // The books: origin gone (seeded into gathering III), junk card in hand.
   meta.cards = [junk];
-  meta.events = generateEvents(meta, origin, ALL_TASK_IDS);
+  meta.events = generateEvents(meta, origin, ALL_TASK_IDS, loadManualWorlds());
   meta.phase = 'free';
   saveMeta(meta);
   await sleep(400);
@@ -1133,7 +1170,7 @@ function showTable(meta: CardMeta): void {
   };
 
   if (!meta.events) {
-    meta.events = generateEvents(meta, null, ALL_TASK_IDS);
+    meta.events = generateEvents(meta, null, ALL_TASK_IDS, loadManualWorlds());
     saveMeta(meta);
   }
   stage.appendChild(div('ct-caption', 'gatherings'));
@@ -1231,7 +1268,7 @@ function showEvent(meta: CardMeta, ev: TradeEvent): void {
     realmSound('online', 0.4, 0.7);
     stage.classList.add('waiting');
     await sleep(700);
-    regenerateEvent(meta, ev, ALL_TASK_IDS);
+    regenerateEvent(meta, ev, ALL_TASK_IDS, loadManualWorlds());
     saveMeta(meta);
     showEvent(meta, ev);
   });

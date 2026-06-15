@@ -1018,6 +1018,10 @@ export type GameState = {
   // skips the demon reseed/roster for them — and the finale can't re-trigger
   // (gabbonsawBought is forced true on entry).
   cardWorld?: boolean;
+  // True for a hand-authored world from the dev World Designer (and any world
+  // it saves). The task/Work track is suppressed (ui.ts), and every sidebar
+  // ability is unlocked (unlockEverything) so the designer can build freely.
+  tasksDisabled?: boolean;
 };
 
 export type UnlockState = {
@@ -1487,6 +1491,34 @@ export function createInitialState(): GameState {
   }
   appendLog(state, 'Welcome, overseer.');
   return state;
+}
+
+// Flip on every sidebar ability and mark the whole task track completed +
+// revealed, so refreshUI surfaces all build/summon/upgrade buttons regardless
+// of progress. Used by the World Designer's sandbox (makeSandboxWorld) — the
+// `taskIds` come from ui.ts's ALL_TASK_IDS, passed in to avoid a ui→state
+// import cycle.
+export function unlockEverything(state: GameState, taskIds: string[]): void {
+  state.bloodUnlocked = true;
+  state.dragonBoneUnlocked = true;
+  state.spaceUnlocked = true;
+  state.hellUnlocked = true;
+  state.autoAssignEnabled = true;
+  state.autoWaterEnabled = true;
+  state.autoSpawnEnabled = true;
+  state.goldgoblinsEnabled = true;
+  state.tinytaurUnlocked = true;
+  state.lightningUnlocked = true;
+  state.lillyTasksGiven = true;
+  state.optionsUnlocked = true;
+  const all = new Set(taskIds);
+  state.unlocks = {
+    completed: new Set(all),
+    revealed: new Set(all),
+    obsoleted: new Set(),       // hide nothing — every button stays available
+    everBuilt: new Set(),
+    minotaurEverSummoned: true,
+  };
 }
 
 export function appendLog(state: GameState, msg: string) {
