@@ -1221,6 +1221,13 @@ function showGathering(meta: CardMeta, ev: TradeEvent): void {
   // "choose cards to trade", shown above the hand while nothing is picked.
   const choosePrompt = div('ct-choose-prompt', 'choose cards to trade');
 
+  // The player's hand lives INSIDE the scrollable stage (below the stalls), so
+  // a big collection scrolls with the gathering instead of sitting in a fixed
+  // bottom layer that overlaps the traders.
+  const handWrap = div('ct-hand-inline');
+  stage.appendChild(handWrap);
+  const gatherHandRow = (): HTMLElement | null => handWrap.querySelector('.ct-cards');
+
   // Per-stall handles, so a selection change re-states every want and
   // re-evaluates every give-button without rebuilding the (canvas-heavy) cards.
   type StallRef = { lineEl: HTMLElement; giveBtn: HTMLButtonElement | null; token: { v: number }; last: string };
@@ -1275,7 +1282,7 @@ function showGathering(meta: CardMeta, ev: TradeEvent): void {
       ref.giveBtn.style.visibility = ready ? 'visible' : 'hidden';
     }
     choosePrompt.style.display = picked.length === 0 ? '' : 'none';
-    const handRow = handRowEl();
+    const handRow = gatherHandRow();
     if (handRow) {
       for (const el of [...handRow.children] as HTMLElement[]) {
         el.classList.toggle('selected', pickedMine.has(Number(el.dataset.cardId)));
@@ -1321,9 +1328,9 @@ function showGathering(meta: CardMeta, ev: TradeEvent): void {
     const stallEl = row.querySelector(`[data-creature-id="${cr.id}"]`) as HTMLElement | null;
     const stallRect = stallEl?.querySelector('.ct-stall-cards')?.getBoundingClientRect()
       ?? stallEl?.getBoundingClientRect();
-    const handRect = document.getElementById('card-hand')?.getBoundingClientRect();
+    const handRect = handWrap.getBoundingClientRect();
     for (const m of picked) {
-      flyTo(handRowEl()?.querySelector(`[data-card-id="${m.id}"]`) as HTMLElement | null, stallRect, 0.6);
+      flyTo(gatherHandRow()?.querySelector(`[data-card-id="${m.id}"]`) as HTMLElement | null, stallRect, 0.6);
     }
     for (const t of received) {
       flyTo(stallEl?.querySelector(`[data-card-id="${t.id}"]`) as HTMLElement | null, handRect, 0.85);
@@ -1348,9 +1355,9 @@ function showGathering(meta: CardMeta, ev: TradeEvent): void {
         ref?.giveBtn?.remove();
         if (ref) ref.giveBtn = null;
       }
-      wireHand();
+      renderGatherHand();
       for (const t of received) {
-        handRowEl()?.querySelector(`[data-card-id="${t.id}"]`)?.classList.add('trade-arrived');
+        gatherHandRow()?.querySelector(`[data-card-id="${t.id}"]`)?.classList.add('trade-arrived');
       }
       // Selection is cleared — every stall re-states (the traded one now reads
       // "traded out", the rest revert to their want, dropping any "yes!"/"no.").
@@ -1374,8 +1381,24 @@ function showGathering(meta: CardMeta, ev: TradeEvent): void {
     refreshButtons();
   };
 
-  const wireHand = (): void => {
-    renderHand(meta, { topEl: choosePrompt, onCardClick: onMineClick });
+  // Build the in-stage hand: the choose-prompt, a caption, and the player's
+  // cards (clicks toggle the shared selection; ENTER dives into a world).
+  const renderGatherHand = (): void => {
+    handWrap.innerHTML = '';
+    handWrap.appendChild(choosePrompt);
+    if (meta.cards.length > 0) {
+      handWrap.appendChild(div('ct-caption', meta.cards.length === 1 ? 'your world' : 'your worlds'));
+      const cardsRow = div('ct-cards');
+      for (const c of meta.cards) {
+        const el = buildCardEl(c, {
+          enterLabel: 'ENTER',
+          onEnter: (cardEl) => { void enterWorld(meta, c, cardEl); },
+          onClick: () => onMineClick(c),
+        });
+        cardsRow.appendChild(el);
+      }
+      handWrap.appendChild(cardsRow);
+    }
   };
 
   let firstDeal = true;
@@ -1431,6 +1454,6 @@ function showGathering(meta: CardMeta, ev: TradeEvent): void {
     refreshButtons();
   };
 
-  wireHand();
+  renderGatherHand();
   buildStalls();
 }

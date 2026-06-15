@@ -2217,9 +2217,23 @@
          sit just above the hand. */
       #card-stage.table-view > .ct-caption:first-child { margin-top: auto; }
       #card-stage.table-view .ct-events { margin-bottom: 26px; }
-      /* In the gathering view the hand needs no caption (whose else would the
-         bottom row be?). */
-      #card-stage.gathering-view + #card-hand .ct-caption { display: none; }
+      /* The gathering renders the hand INSIDE the scrollable stage (so a big
+         collection scrolls with the traders instead of overlapping them), so
+         the fixed bottom hand layer is hidden here. */
+      #card-stage.gathering-view + #card-hand { display: none; }
+      .ct-hand-inline {
+        display: flex; flex-direction: column; align-items: center; gap: 6px;
+        margin-top: 12px;
+      }
+      .ct-hand-inline .ct-cards {
+        display: flex; flex-wrap: wrap; gap: 14px; justify-content: center;
+        max-width: 1100px;
+      }
+      .ct-hand-inline .world-card { width: 150px; }
+      .ct-hand-inline .world-card.selected {
+        outline: 2px solid rgba(110, 190, 130, 0.9); outline-offset: 2px;
+        box-shadow: 0 0 18px rgba(80, 190, 110, 0.45);
+      }
       @keyframes ctv-pulse {
         0%, 100% { box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.9), 0 0 14px rgba(80, 190, 110, 0.25); }
         50% { box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.9), 0 0 26px 4px rgba(80, 190, 110, 0.5); }
