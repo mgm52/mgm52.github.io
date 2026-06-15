@@ -1370,7 +1370,7 @@ function showGathering(meta: CardMeta, ev: TradeEvent): void {
         giveBtn = document.createElement('button');
         giveBtn.type = 'button';
         giveBtn.className = 'ct-give';
-        giveBtn.textContent = '✓ give & take all';
+        giveBtn.textContent = '✓ trade';
         giveBtn.style.visibility = 'hidden';
         const c = cr;
         giveBtn.addEventListener('click', () => {
