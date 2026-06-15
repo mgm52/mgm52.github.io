@@ -1245,25 +1245,18 @@ function showGathering(meta: CardMeta, ev: TradeEvent): void {
     })();
   };
 
-  // The bold requirement on its own ("any common", "worth Ƶ333+").
-  const condition = (segs: WantSeg[]): string => segs.filter((s) => s.b).map((s) => s.t).join(' ');
-
   // What a trader says for the current selection:
   //  - nothing / too few picked → its want, restated
   //  - more cards than it asked  → "too many cards."
-  //  - the right count, but the wrong worlds → "no, i want <condition>"
-  //  - the right count and a match → "yes, <condition>!"
+  //  - the right count, wrong worlds → "no."; the right count and a match → "yes!"
   const lineFor = (cr: Creature): WantSeg[] => {
     if (cr.deck.length === 0) return [{ t: 'traded out. it is content.' }];
-    const segs = wantSegments(cr.want);
     const picked = minePicked();
     if (picked.length > cr.want.count) return [{ t: 'too many cards.' }];
     if (picked.length === cr.want.count) {
-      return wantSatisfiedBy(cr.want, picked)
-        ? [{ t: 'yes, ' }, { t: condition(segs), b: true }, { t: '!' }]
-        : [{ t: 'no, ' }, ...segs];
+      return wantSatisfiedBy(cr.want, picked) ? [{ t: 'yes!' }] : [{ t: 'no.' }];
     }
-    return segs;
+    return wantSegments(cr.want);
   };
 
   // Give-button visibility (HIDDEN unless the pick exactly satisfies the want),
