@@ -244,6 +244,10 @@ async function main() {
   // slot and skip the title — but it mounts its own chrome (setupDesignerChrome)
   // rather than the card-world chrome below.
   const inDesigner = designerActive();
+  // ?designer (when we didn't boot INTO a designer session) opens the designer
+  // list over the current game. Suppress the trading realm in that case so the
+  // resumed post-finale save doesn't run the trading view behind the overlay.
+  const designerOverlay = !inDesigner && new URLSearchParams(window.location.search).has('designer');
   const metagameBegun = hasCardMeta();
 
   // Production-only title gate. Click here also satisfies the browser's
@@ -389,7 +393,7 @@ async function main() {
   }
   // Dev shortcut: ?designer opens the World Designer list straight away (unless
   // we already booted into a designer session, which mounts its own chrome).
-  if (new URLSearchParams(window.location.search).has('designer') && !inDesigner) {
+  if (designerOverlay) {
     openDesignerList();
   }
   // Dev cheat flag: set by the options menu's "skip to hell" button,
@@ -1170,7 +1174,7 @@ async function main() {
     // the trading-card realm, which mounts itself over the white after a beat.
     if (F.phase === 'shattered') {
       applyFinaleEnded();
-      maybeStartCardRealm();
+      if (!designerOverlay) maybeStartCardRealm();
       finaleLastPhase = F.phase;
       return;
     }
