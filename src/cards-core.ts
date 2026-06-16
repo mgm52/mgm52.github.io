@@ -92,7 +92,7 @@ export type WantSeg = { t: string; b?: boolean };
 export function wantSegments(w: Want): WantSeg[] {
   if (w.kind === 'any') {
     return w.count === 1
-      ? [{ t: 'i will take ' }, { t: 'any one', b: true }, { t: ' world.' }]
+      ? [{ t: 'i will take ' }, { t: 'any', b: true }, { t: ' world.' }]
       : [{ t: 'i want ' }, { t: `any ${countWord(w.count)}`, b: true }, { t: ` ${worldsWord(w.count)}.` }];
   }
   if (w.kind === 'tier') {
@@ -659,23 +659,28 @@ export function sanitizeCardWorld(st: GameState): void {
   st.view = 'ground';
 }
 
-// The power number written on a card. What the world's generators last
-// actually produced — but a world that has never run (or ran with every
-// generator dormant) shouldn't read "nothing" while a reactor sits on its
-// lawn, so fall back to what the placed generators COULD produce.
+// The power number written on a card: only what the world's POWERED buildings
+// are actually generating. A generator counts solely while it's online (active
+// — staffed and on the grid); a dormant reactor sitting idle on the lawn adds
+// nothing. So a world that has never run, or runs with every generator
+// dormant, reads no power — the card reports the real output, not the
+// theoretical sum of every generator placed.
 export function cardPower(st: GameState): number {
-  if (st.lastPowerProduced > 0) return st.lastPowerProduced;
-  let potential = 0;
+  let power = 0;
   for (const b of st.buildings.values()) {
+    if (b.state !== 'active') continue;
     const out = BUILDING_DEFS[b.kind].powerOutput;
-    if (out > 0) potential += out;
+    if (out > 0) power += out;
   }
+  // Orbited generators run upkeep-free, so any that finished assembly are
+  // always powered.
   for (const sb of st.spaceBuildings.values()) {
     if (st.buildings.has(sb.id)) continue;
+    if (sb.building.state !== 'active') continue;
     const out = BUILDING_DEFS[sb.building.kind].powerOutput;
-    if (out > 0) potential += out;
+    if (out > 0) power += out;
   }
-  return potential;
+  return power;
 }
 
 // Per-scene structure counts, driving each preview pane's treatment on the

@@ -562,6 +562,16 @@ async function main() {
     spawnErrorStreak++;
     if (spawnErrorStreak <= 3) playSound('error');
   };
+  // In a card world the player can only RUN the world — spawn units — never
+  // build in it or buy upgrades; worlds are authored only in the designer.
+  // Gates the placement/purchase callbacks below (the UI hides their buttons
+  // too). Main game and designer are untouched: cardWorld is set only on
+  // generated trading-card worlds.
+  const blockedInCardWorld = (): boolean => {
+    if (!state.cardWorld) return false;
+    playSound('error');
+    return true;
+  };
   setupUI(state, {
     onSpawnGoblin: () => {
       if (state.money < GOBLIN.spawnCost) { spawnError(); return; }
@@ -658,6 +668,7 @@ async function main() {
         : 'Terminators stand down.');
     },
     onBuyAutoDragon: () => {
+      if (blockedInCardWorld()) return;
       // Lilly's destroy-a-robot reward, levelling through AUTODRAGON_TIERS
       // like Autospawn. Each tier demands as many active Dragon Beacons as
       // its multiplier — a beacon supports exactly one simultaneous ritual.
@@ -684,6 +695,7 @@ async function main() {
     },
     onQuickTravel: (view: 'ground' | 'hell' | 'space') => quickTravel(view),
     onPlaceOrbital: () => {
+      if (blockedInCardWorld()) return;
       // Toggle Orbital Platform placement (space view only — the button is
       // hidden elsewhere); arming it cancels any other pending mode.
       state.pendingOrbital = !state.pendingOrbital;
@@ -695,6 +707,7 @@ async function main() {
       }
     },
     onPlaceSpaceCentre: () => {
+      if (blockedInCardWorld()) return;
       // Toggle Space Centre placement (space view only — the button is hidden
       // elsewhere); arming it cancels any other pending mode. The next tap
       // must land on a completed Orbital Platform.
@@ -707,6 +720,7 @@ async function main() {
       }
     },
     onBuyAutoAssign: () => {
+      if (blockedInCardWorld()) return;
       if (state.autoAssignEnabled) return;
       const cost = SUMMON_UPGRADES.autoAssign.bloodCost;
       if (state.blood < cost) { playSound('error'); return; }
@@ -717,6 +731,7 @@ async function main() {
       autoAssignAllIdle(state);
     },
     onBuyAutoWater: () => {
+      if (blockedInCardWorld()) return;
       if (state.autoWaterEnabled) return;
       if (!state.autoAssignEnabled) { playSound('error'); return; }
       const cost = SUMMON_UPGRADES.autoWater.bloodCost;
@@ -728,6 +743,7 @@ async function main() {
       autoAssignAllIdle(state);
     },
     onBuyAutoSpawn: () => {
+      if (blockedInCardWorld()) return;
       // Buy the next tier in AUTOSPAWN_TIERS. Each click promotes the
       // multiplier 1 → 2 → 4 → 8 → 16 → 32, replacing the previous button.
       const next = AUTOSPAWN_TIERS.find(t => t.multiplier > state.autoSpawnMultiplier);
@@ -753,6 +769,7 @@ async function main() {
         : `Autospawn x${next.multiplier} — staggered cadence.`);
     },
     onBuyPainGabbonsaw: () => {
+      if (blockedInCardWorld()) return;
       // The demo's true closing ritual. One-shot: the bones are spent and the
       // ritual channels on a summon bar like any other unit; when the bar
       // completes (sim tick) Bob slides back up for one last word (and the
@@ -772,6 +789,7 @@ async function main() {
       appendLog(state, 'The pain gabbonsaw ritual begins...');
     },
     onBuyGoldgoblins: () => {
+      if (blockedInCardWorld()) return;
       if (state.goldgoblinsEnabled) return;
       const cost = SUMMON_UPGRADES.goldgoblins.bloodCost;
       if (state.blood < cost) { playSound('error'); return; }
@@ -781,6 +799,7 @@ async function main() {
       appendLog(state, 'Goldblins — gold-tinted spawns drop Ƶ250.');
     },
     onBuyGoldgoblinsX10: () => {
+      if (blockedInCardWorld()) return;
       if (!state.goldgoblinsEnabled) return;
       if (state.goldgoblinMultiplier >= SUMMON_UPGRADES.goldgoblinsX10.multiplier) return;
       const cost = SUMMON_UPGRADES.goldgoblinsX10.bloodCost;
@@ -791,6 +810,7 @@ async function main() {
       appendLog(state, 'Goldblins x10 — gold drops jump to Ƶ2500.');
     },
     onDig: (dir) => {
+      if (blockedInCardWorld()) return;
       if (state.dugDirections.has(dir)) return;
       const cost = digBloodCost(state.dugDirections.size);
       if (state.blood < cost) { playSound('error'); return; }
@@ -828,6 +848,7 @@ async function main() {
       appendLog(state, `Goblin #${id} killed — +Ƶ${reward.money.toLocaleString('en-US')}, +${reward.blood} blood.`);
     },
     onLightningStrike: () => {
+      if (blockedInCardWorld()) return;
       // Cooldown blocks re-entering aim mode; an already-armed strike can still
       // be cancelled (toggle off) so the player isn't stuck in aim if they
       // armed before realising the cooldown was active.
@@ -840,10 +861,12 @@ async function main() {
       if (state.pendingStrike) state.pendingBuild = null;
     },
     onBuildBuilding: (kind) => {
+      if (blockedInCardWorld()) return;
       state.pendingBuild = state.pendingBuild?.kind === kind ? null : { kind };
       if (state.pendingBuild) { state.pendingStrike = false; state.pendingCandle = false; }
     },
     onPlaceCandle: () => {
+      if (blockedInCardWorld()) return;
       // Toggle hell candle-placement mode; entering it cancels any pending
       // build/strike (none of which can fire in hell anyway, but stay tidy).
       state.pendingCandle = !state.pendingCandle;

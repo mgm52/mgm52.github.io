@@ -1055,15 +1055,21 @@ async function runRealm(): Promise<void> {
     meta.cards = [buildOriginCard(meta, rng)];
     saveMeta(meta);
   }
+  let introCard: HTMLElement | null = null;
   if (meta.phase === 'intro') {
-    await runTradeIntro(meta);
+    introCard = await runTradeIntro(meta);
   }
   showTable(meta);
+  // The intro's big centre card morphs down into its small hand slot, rather
+  // than vanishing as the table appears underneath it.
+  if (introCard) await morphIntroCardToHand(introCard);
 }
 
 // The forced first trade: the origin card is dealt, the player reaches for
-// ENTER, and the white goblin descends to take it.
-async function runTradeIntro(meta: CardMeta): Promise<void> {
+// ENTER, and the white goblin descends to take it. Returns the big junk card
+// element (lifted onto the realm overlay) so the caller can morph it down into
+// the player's hand once the table view is up.
+async function runTradeIntro(meta: CardMeta): Promise<HTMLElement | null> {
   const stage = realmEl('card-stage');
   stage.innerHTML = '';
   stage.className = 'intro-view';
@@ -1143,6 +1149,47 @@ async function runTradeIntro(meta: CardMeta): Promise<void> {
   meta.phase = 'free';
   saveMeta(meta);
   await sleep(400);
+
+  // Lift the junk card out of the stage onto the realm overlay, pinned exactly
+  // where it sits, so showTable's rebuild can't sweep it away — it floats on
+  // top, ready to glide down into the hand (see morphIntroCardToHand).
+  const realm = realmEl('card-realm');
+  const r = junkEl.getBoundingClientRect();
+  junkEl.style.position = 'fixed';
+  junkEl.style.left = `${r.left}px`;
+  junkEl.style.top = `${r.top}px`;
+  junkEl.style.width = `${r.width}px`;
+  junkEl.style.margin = '0';
+  junkEl.style.zIndex = '50';
+  junkEl.style.pointerEvents = 'none';
+  realm.appendChild(junkEl);
+  return junkEl;
+}
+
+// Animate the intro's big centre card into the small card now sitting in the
+// player's hand: a FLIP-style glide + shrink that lands on the real hand card
+// (kept hidden until the morph settles, then revealed in place).
+async function morphIntroCardToHand(bigEl: HTMLElement): Promise<void> {
+  const handCard = document.querySelector('#card-hand .world-card') as HTMLElement | null;
+  if (!handCard) { bigEl.remove(); return; }
+  const from = bigEl.getBoundingClientRect();
+  const to = handCard.getBoundingClientRect();
+  if (from.width === 0 || to.width === 0) { bigEl.remove(); return; }
+  const scale = to.width / from.width;
+  const dx = (to.left + to.width / 2) - (from.left + from.width / 2);
+  const dy = (to.top + to.height / 2) - (from.top + from.height / 2);
+  handCard.style.visibility = 'hidden';
+  bigEl.style.transformOrigin = 'center center';
+  await new Promise<void>((resolve) => {
+    requestAnimationFrame(() => requestAnimationFrame(() => {
+      bigEl.style.transition = 'transform 620ms cubic-bezier(0.45, 0, 0.2, 1)';
+      bigEl.style.transform = `translate(${dx}px, ${dy}px) scale(${scale})`;
+      realmSound('place', 1.1, 0.6);
+      window.setTimeout(resolve, 640);
+    }));
+  });
+  bigEl.remove();
+  handCard.style.visibility = '';
 }
 
 // ─── Table / gathering / trade views ─────────────────────────────────

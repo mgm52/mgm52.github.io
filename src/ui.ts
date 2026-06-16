@@ -1942,9 +1942,11 @@ export function refreshUI(state: GameState) {
     }
   }
   // Fire the celebration animation for any task that crossed the threshold
-  // since the last frame. A tasks-disabled world (the World Designer sandbox)
-  // never celebrates — its track is suppressed entirely.
-  if (!state.tasksDisabled) {
+  // since the last frame. A world with its track suppressed never celebrates:
+  // the World Designer sandbox (tasksDisabled), and card worlds — someone
+  // else's finished world the player only runs, with no Work to hand out.
+  const trackSuppressed = state.tasksDisabled || !!state.cardWorld;
+  if (!trackSuppressed) {
     for (const id of completedTaskIds) {
       if (!previouslyCompletedTaskIds.has(id)) {
         previouslyCompletedTaskIds.add(id);
@@ -1953,8 +1955,9 @@ export function refreshUI(state: GameState) {
     }
   }
   const activeTasks: Task[] = [];
-  // The designer sandbox shows no Work/Optional task lines at all.
-  if (!state.tasksDisabled) {
+  // Suppressed-track worlds (designer sandbox, card worlds) show no
+  // Work/Optional task lines at all.
+  if (!trackSuppressed) {
     for (const t of TASKS) {
       if (completedTaskIds.has(t.id)) continue;
       if (taskReady(t, state)) activeTasks.push(t);
@@ -2020,8 +2023,13 @@ export function refreshUI(state: GameState) {
   // Now that the panel renders as a bordered card, an empty container shows
   // up as a thin empty bar — hide the outer panel until either subsection
   // unlocks.
+  // Card worlds are someone else's finished world: the player can only run it
+  // (spawn units from the Summon panel), never build in it or buy upgrades. So
+  // the whole Build + Ritual panel — every building button plus the candle /
+  // orbital / space-centre placers, dig and lightning — stays hidden here. The
+  // main game and the designer (neither sets cardWorld) are unaffected.
   const panelBuild = document.getElementById('panel-build')!;
-  const panelBuildVisible = firstTaskDone || ritualVisible;
+  const panelBuildVisible = (firstTaskDone || ritualVisible) && !state.cardWorld;
   panelBuild.style.display = panelBuildVisible ? '' : 'none';
 
   // A fresh task surfacing at the bottom of the sidebar is part of the unlock

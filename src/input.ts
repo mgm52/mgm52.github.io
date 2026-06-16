@@ -1787,6 +1787,10 @@ function canPlaceBuilding(state: GameState, topLeft: Cell, kind: BuildingKind): 
 
 function placeBuilding(state: GameState, x: number, y: number) {
   if (!state.pendingBuild) return;
+  // Card worlds can't be built in — the player only runs them (spawns units).
+  // The designer is exempt (it's how worlds are authored). The build menu is
+  // hidden here too; this is the backstop for any other placement path.
+  if (state.cardWorld && !designerNow()) { playSound('error'); return; }
   if (state.view !== 'ground') { playSound('error'); appendLog(state, 'You cannot build in space.'); return; }
   const kind = state.pendingBuild.kind;
   // Wall is a special case: no Building entity, just a wall cell. Stays in
