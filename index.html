@@ -2051,10 +2051,19 @@
       /* The gathering's title carries its tier color too. */
       .ct-event-title.t-uncommon { color: #6f9fd8; }
       .ct-event-title.t-rare { color: #c9a43e; }
-      .ct-event { transition: box-shadow 200ms ease, transform 200ms ease; }
+      .ct-event { transition: box-shadow 220ms ease, transform 240ms cubic-bezier(0.2, 0.9, 0.25, 1.08), opacity 240ms ease; }
       .ct-event:hover:not(.locked) {
         box-shadow: inset 0 1px 0 #fff, 0 18px 40px -8px rgba(88, 88, 150, 0.33), 0 0 26px rgba(168, 160, 240, 0.35);
         transform: translateY(-3px);
+      }
+      /* Opening the doors (cards.ts tags the picked gathering .chosen and the
+         row .opening as it swaps to the traders): the chosen door swells and
+         glows while the rest recede. */
+      .ct-events.opening .ct-event:not(.chosen) { opacity: 0; transform: scale(0.9); }
+      .ct-event.chosen {
+        transform: scale(1.07);
+        box-shadow: inset 0 1px 0 #fff, 0 22px 48px -8px rgba(88, 88, 150, 0.4), 0 0 40px 4px rgba(168, 160, 240, 0.6);
+        z-index: 2;
       }
       .ct-event.locked { opacity: 0.45; cursor: not-allowed; }
       .ct-event.shake { animation: ct-shake 300ms ease; }

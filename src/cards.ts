@@ -785,7 +785,7 @@ type CardElOpts = {
   big?: boolean;
   enterLabel?: string;       // when set, the card carries an enter button
   onEnter?: (cardEl: HTMLElement) => void;
-  onClick?: () => void;      // whole-card click (gathering selection)
+  onClick?: (cardEl: HTMLElement) => void;   // whole-card click (gathering selection)
 };
 
 function buildCardEl(card: WorldCard, opts: CardElOpts = {}): HTMLElement {
@@ -856,10 +856,58 @@ function buildCardEl(card: WorldCard, opts: CardElOpts = {}): HTMLElement {
   }
   if (opts.onClick) {
     root.classList.add('clickable');
-    root.addEventListener('click', () => opts.onClick?.());
+    root.addEventListener('click', () => opts.onClick?.(root));
   }
   return root;
 }
+
+// ─── Persistent hand cards ───────────────────────────────────────────
+// A held card's face never changes without a page reload (developing a world
+// dives through a reload), so each hand card is built ONCE and its exact
+// canvas-drawn node is reused across every view — table ↔ gathering, a
+// reshuffle, a completed trade. Moving a node never re-draws its canvases, so
+// the hand never flashes between gatherings. Listeners delegate to per-element
+// handler slots so a node can be re-wired (table = inert, gathering = select)
+// without rebuilding it. Cleared on a dev realm reset; a real dive reloads.
+const handCardCache = new Map<number, HTMLElement>();
+
+type HandWiring = {
+  onEnter: (cardEl: HTMLElement) => void;
+  onClick?: () => void;        // present only in the gathering (selection)
+  selected?: boolean;
+};
+
+interface WiredCard extends HTMLElement {
+  __onEnter?: (cardEl: HTMLElement) => void;
+  __onClick?: (() => void) | null;
+}
+
+function handCardEl(card: WorldCard, w: HandWiring): HTMLElement {
+  let el = handCardCache.get(card.id) as WiredCard | undefined;
+  if (!el) {
+    const created = buildCardEl(card, {
+      enterLabel: 'ENTER',
+      onEnter: (cardEl) => (cardEl as WiredCard).__onEnter?.(cardEl),
+      onClick: (cardEl) => (cardEl as WiredCard).__onClick?.(),
+    }) as WiredCard;
+    el = created;
+    handCardCache.set(card.id, created);
+  } else {
+    // A reused node: shed any transient animation/selection state and the
+    // inline styles a trade fly-out may have left on it.
+    el.classList.remove('selected', 'dealt', 'trade-arrived', 'trade-given', 'trade-received', 'dived', 'grayed');
+    el.style.transition = '';
+    el.style.transform = '';
+    el.style.opacity = '';
+    el.style.pointerEvents = '';
+  }
+  el.__onEnter = w.onEnter;
+  el.__onClick = w.onClick ?? null;
+  el.classList.toggle('clickable', !!w.onClick);
+  el.classList.toggle('selected', !!w.selected);
+  return el;
+}
+
 
 // ─── Realm dialogue machinery ────────────────────────────────────────
 // A lighter cousin of intro.ts's typed dialogue: lines type into
@@ -974,6 +1022,7 @@ export function maybeStartCardRealm(): void {
 // cinematic isn't covered by it.
 export function resetCardRealm(): void {
   realmStarted = false;
+  handCardCache.clear();
   const realm = document.getElementById('card-realm');
   if (realm) {
     realm.classList.remove('visible', 'goblin-in', 'speaking', 'click-armed', 'show-choice');
@@ -1131,12 +1180,10 @@ function renderHand(meta: CardMeta, opts: HandOpts = {}): void {
     hand.appendChild(div('ct-caption', meta.cards.length === 1 ? 'your world' : 'your worlds'));
     const row = div('ct-cards');
     for (const c of meta.cards) {
-      const el = buildCardEl(c, {
-        enterLabel: 'ENTER',
+      row.appendChild(handCardEl(c, {
         onEnter: (cardEl) => { void enterWorld(meta, c, cardEl); },
         onClick: opts.onCardClick ? () => opts.onCardClick!(c) : undefined,
-      });
-      row.appendChild(el);
+      }));
     }
     hand.appendChild(row);
   }
@@ -1189,6 +1236,11 @@ function showTable(meta: CardMeta): void {
         return;
       }
       realmSound('click', 0.8, 1);
+      // The doors open: the chosen gathering swells and brightens while the
+      // others recede, so entering reads as stepping through that door rather
+      // than a flat crossfade.
+      evRow.classList.add('opening');
+      btn.classList.add('chosen');
       swapView(() => showGathering(meta, ev));
     });
     dealIn(btn);
@@ -1454,12 +1506,13 @@ function showGathering(meta: CardMeta, ev: TradeEvent): void {
     refreshButtons();
   };
 
-  // One held card's element: clicks toggle the shared selection, ENTER dives.
+  // One held card's element (reused across views via the hand cache): clicks
+  // toggle the shared selection, ENTER dives.
   const buildHandCard = (c: WorldCard): HTMLElement =>
-    buildCardEl(c, {
-      enterLabel: 'ENTER',
+    handCardEl(c, {
       onEnter: (cardEl) => { void enterWorld(meta, c, cardEl); },
       onClick: () => onMineClick(c),
+      selected: pickedMine.has(c.id),
     });
 
   // Keep the "your world(s)" caption in step with the held count.
