@@ -1187,8 +1187,12 @@ async function main() {
     // Either way (live shatter or resume), the world is over — hand off to
     // the trading-card realm, which mounts itself over the white after a beat.
     if (F.phase === 'shattered') {
+      // ?designer opens the authoring list over the resumed game; neither the
+      // finale white-out nor the trading realm should take over behind it (the
+      // list fully covers the screen, so the held world need not paint at all).
+      if (designerOverlay) { finaleLastPhase = F.phase; return; }
       applyFinaleEnded();
-      if (!designerOverlay) maybeStartCardRealm();
+      maybeStartCardRealm();
       finaleLastPhase = F.phase;
       return;
     }
