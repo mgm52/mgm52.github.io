@@ -1553,50 +1553,68 @@
         white-space: nowrap;
       }
 
-      /* ───────── The trading-card realm (post-finale; cards.ts) ─────────
+      /* ───────── The Exchange of Spheres (post-finale; cards.ts) ─────────
          The game's last section, mounted above the finale's held white-out
-         (#finale-white, z 100000). An ethereal glass dream: a near-white
-         expanse washed by slow pastel auroras and rising light-motes, with
-         frosted-glass world-cards levitating over it. */
+         (#finale-white, z 100000). No longer a pale dream but an ALIEN VOID:
+         a deep bioluminescent abyss — part deep-ocean, part interstellar —
+         where worlds drift as living SPECIMENS sealed in glowing membranes,
+         and the dealers are floating alien entities. The white-out dissolves
+         into this dark on arrival (card-realm-in fades the void up from
+         white). Typography across the whole realm is the cryptic alien
+         transmission face (Major Mono Display) — set once here as scoped
+         font vars so every descendant label, want and number inherits it. */
       #card-realm {
         position: fixed; inset: 0; z-index: 100001;
-        /* Still reads as the finale's white at first glance — the colour
-           lives in the aurora layer beneath the glass. */
+        --font-display: 'Major Mono Display', 'Consolas', monospace;
+        --font-mono: 'Major Mono Display', 'Consolas', monospace;
+        --font-body: 'Major Mono Display', system-ui, monospace;
+        --font-dialogue: 'Major Mono Display', monospace;
+        /* Bioluminescent accents that the cards / entities / labels share. */
+        --bio-teal: 96, 240, 222;
+        --bio-violet: 170, 130, 255;
+        --bio-amber: 255, 196, 96;
+        --bio-rose: 255, 120, 190;
+        /* The abyss: a faint glow from the centre falling to near-black at
+           the edges — depth, not a flat fill. */
         background:
-          radial-gradient(120% 90% at 50% 40%, rgba(255, 255, 255, 0.88) 42%, rgba(236, 238, 248, 0.9) 100%),
-          linear-gradient(160deg, #f6f3fc 0%, #eef4fb 55%, #f7f1f7 100%);
-        color: #4a4a52;
+          radial-gradient(140% 110% at 50% 38%, #0b1626 0%, #070d18 46%, #03060d 100%);
+        color: #b9d6e6;
         display: none;
         font-family: var(--font-body);
         overflow: hidden;
       }
-      #card-realm.visible { display: block; animation: card-realm-in 1200ms ease both; }
-      @keyframes card-realm-in { from { opacity: 0; } to { opacity: 1; } }
-      /* The dream behind the glass: pastel aurora blobs adrift on slow
-         loops, one slowly turning iridescent halo, and tiled sheets of
-         light-motes rising at different speeds. The cards' backdrop blur
-         samples all of it — that moving colour under the stock is what
-         makes the frosted glass read as glass rather than grey. */
+      /* The arrival: the finale's white blooms through the abyss, then drains
+         away as the bioluminescence settles in. */
+      #card-realm.visible { display: block; animation: card-realm-in 1900ms ease both; }
+      @keyframes card-realm-in {
+        0% { opacity: 0; filter: brightness(3.2) saturate(0.3); }
+        30% { opacity: 1; filter: brightness(2.2) saturate(0.5); }
+        100% { opacity: 1; filter: brightness(1) saturate(1); }
+      }
+      /* The living abyss behind the specimens: slow bioluminescent currents,
+         a turning deep-spectrum halo, and tiers of rising spores. The
+         specimens' membranes sample all of it, so the glass reads as a
+         window onto moving deep-water light rather than onto grey. */
       #card-dream { position: absolute; inset: 0; pointer-events: none; overflow: hidden; }
-      .cd-blob { position: absolute; border-radius: 50%; filter: blur(60px); }
+      .cd-blob { position: absolute; border-radius: 50%; filter: blur(70px); mix-blend-mode: screen; }
       .cd-b1 {
-        width: 55vmax; height: 55vmax; left: -14vmax; top: -20vmax;
-        background: radial-gradient(circle at 35% 35%, rgba(168, 142, 250, 0.42), rgba(168, 142, 250, 0) 70%);
+        width: 60vmax; height: 60vmax; left: -16vmax; top: -22vmax;
+        background: radial-gradient(circle at 35% 35%, rgba(40, 180, 200, 0.5), rgba(40, 180, 200, 0) 70%);
         animation: cd-drift1 41s ease-in-out infinite alternate;
       }
       .cd-b2 {
-        width: 48vmax; height: 48vmax; right: -16vmax; top: 4vmax;
-        background: radial-gradient(circle at 60% 40%, rgba(118, 196, 240, 0.4), rgba(118, 196, 240, 0) 70%);
+        width: 52vmax; height: 52vmax; right: -18vmax; top: 2vmax;
+        background: radial-gradient(circle at 60% 40%, rgba(120, 70, 230, 0.5), rgba(120, 70, 230, 0) 70%);
         animation: cd-drift2 53s ease-in-out infinite alternate;
       }
       .cd-b3 {
-        width: 50vmax; height: 50vmax; left: -10vmax; bottom: -22vmax;
-        background: radial-gradient(circle at 50% 30%, rgba(248, 168, 208, 0.36), rgba(248, 168, 208, 0) 70%);
+        width: 54vmax; height: 54vmax; left: -12vmax; bottom: -24vmax;
+        background: radial-gradient(circle at 50% 30%, rgba(220, 60, 150, 0.4), rgba(220, 60, 150, 0) 70%);
         animation: cd-drift3 47s ease-in-out infinite alternate;
       }
       .cd-b4 {
-        width: 42vmax; height: 42vmax; right: -6vmax; bottom: -16vmax;
-        background: radial-gradient(circle at 45% 45%, rgba(252, 222, 150, 0.3), rgba(252, 222, 150, 0) 70%);
+        width: 46vmax; height: 46vmax; right: -8vmax; bottom: -18vmax;
+        background: radial-gradient(circle at 45% 45%, rgba(40, 200, 170, 0.38), rgba(40, 200, 170, 0) 70%);
         animation: cd-drift4 59s ease-in-out infinite alternate;
       }
       @keyframes cd-drift1 { to { transform: translate(16vw, 12vh) scale(1.22); } }
@@ -1605,28 +1623,30 @@
       @keyframes cd-drift4 { to { transform: translate(-12vw, -10vh) scale(1.25); } }
       .cd-halo {
         position: absolute; left: 50%; top: 42%;
-        width: 120vmin; height: 120vmin;
-        margin: -60vmin 0 0 -60vmin;
+        width: 130vmin; height: 130vmin;
+        margin: -65vmin 0 0 -65vmin;
         border-radius: 50%;
         background: conic-gradient(
-          rgba(168, 142, 250, 0.16), rgba(118, 196, 240, 0.13),
-          rgba(248, 168, 208, 0.14), rgba(252, 222, 150, 0.11),
-          rgba(168, 142, 250, 0.16));
-        filter: blur(46px);
+          rgba(60, 220, 210, 0.18), rgba(120, 90, 250, 0.16),
+          rgba(230, 70, 160, 0.15), rgba(60, 200, 180, 0.14),
+          rgba(60, 220, 210, 0.18));
+        filter: blur(54px);
+        mix-blend-mode: screen;
         animation: cd-halo-spin 100s linear infinite;
       }
       @keyframes cd-halo-spin { to { transform: rotate(360deg); } }
-      /* Mote sheets: each carries one tile of hand-placed glints and rides
-         up by exactly its own tile height, so the loop is seamless. The
-         sheet is one tile taller than the screen to cover both loop ends. */
-      .cd-motes { position: absolute; left: 0; top: 0; width: 100%; }
+      /* Spore sheets: each carries one tile of hand-placed bioluminescent
+         glints and rises by exactly its own tile height, so the loop is
+         seamless. The sheet is one tile taller than the screen to cover both
+         loop ends. Bright dots on the dark — drifting plankton. */
+      .cd-motes { position: absolute; left: 0; top: 0; width: 100%; mix-blend-mode: screen; }
       .cd-m1 {
         height: calc(100% + 520px);
         background-image:
-          radial-gradient(5px 5px at 44px 76px, rgba(172, 152, 255, 0.55) 30%, transparent 100%),
-          radial-gradient(4px 4px at 196px 300px, rgba(140, 196, 252, 0.5) 30%, transparent 100%),
-          radial-gradient(6px 6px at 330px 180px, rgba(255, 255, 255, 0.95) 25%, rgba(190, 170, 255, 0.4) 60%, transparent 100%),
-          radial-gradient(4px 4px at 120px 430px, rgba(250, 182, 216, 0.5) 30%, transparent 100%);
+          radial-gradient(5px 5px at 44px 76px, rgba(90, 240, 220, 0.85) 30%, transparent 100%),
+          radial-gradient(4px 4px at 196px 300px, rgba(160, 130, 255, 0.8) 30%, transparent 100%),
+          radial-gradient(6px 6px at 330px 180px, rgba(220, 255, 250, 0.95) 25%, rgba(120, 220, 255, 0.5) 60%, transparent 100%),
+          radial-gradient(4px 4px at 120px 430px, rgba(255, 130, 200, 0.75) 30%, transparent 100%);
         background-size: 420px 520px;
         animation: cd-rise1 46s linear infinite;
       }
@@ -1634,10 +1654,10 @@
       .cd-m2 {
         height: calc(100% + 460px);
         background-image:
-          radial-gradient(3px 3px at 90px 130px, rgba(160, 170, 250, 0.45) 30%, transparent 100%),
-          radial-gradient(2.5px 2.5px at 410px 360px, rgba(255, 255, 255, 0.85) 30%, transparent 100%),
-          radial-gradient(3px 3px at 280px 40px, rgba(140, 200, 245, 0.45) 30%, transparent 100%),
-          radial-gradient(2.5px 2.5px at 510px 240px, rgba(190, 165, 250, 0.45) 30%, transparent 100%);
+          radial-gradient(3px 3px at 90px 130px, rgba(110, 230, 255, 0.7) 30%, transparent 100%),
+          radial-gradient(2.5px 2.5px at 410px 360px, rgba(220, 255, 250, 0.85) 30%, transparent 100%),
+          radial-gradient(3px 3px at 280px 40px, rgba(150, 120, 255, 0.7) 30%, transparent 100%),
+          radial-gradient(2.5px 2.5px at 510px 240px, rgba(255, 140, 205, 0.7) 30%, transparent 100%);
         background-size: 560px 460px;
         animation: cd-rise2 31s linear infinite;
       }
@@ -1646,9 +1666,9 @@
       .cd-m3 {
         height: calc(100% + 640px);
         background-image:
-          radial-gradient(22px 22px at 130px 200px, rgba(178, 162, 250, 0.13) 40%, transparent 100%),
-          radial-gradient(16px 16px at 470px 480px, rgba(130, 195, 245, 0.12) 40%, transparent 100%),
-          radial-gradient(26px 26px at 320px 90px, rgba(248, 178, 214, 0.1) 40%, transparent 100%);
+          radial-gradient(22px 22px at 130px 200px, rgba(70, 220, 210, 0.16) 40%, transparent 100%),
+          radial-gradient(16px 16px at 470px 480px, rgba(140, 110, 255, 0.15) 40%, transparent 100%),
+          radial-gradient(26px 26px at 320px 90px, rgba(230, 90, 170, 0.13) 40%, transparent 100%);
         background-size: 620px 640px;
         animation: cd-rise3 74s linear infinite;
       }
@@ -1686,41 +1706,102 @@
       }
       /* The between-gatherings blink (cards.ts holds it for ~700ms). */
       #card-stage.waiting { opacity: 0; }
-      /* The ethereal goblin: the intro goblin's orc_idle sheet flattened to a
-         near-white silhouette and hung upside down from the top of the screen.
-         PLACEHOLDER ART — swap for a real ethereal-creature sprite later. */
+
+      /* ── The alien ENTITY ──
+         A procedural deep-void being: a translucent bioluminescent bell with
+         a pulsing core eye and a curtain of swaying tendrils. No sprite — it
+         is built from nested divs (.ent-*) so it scales cleanly from the
+         giant intro descender down to a dealer at a confluence. Size is
+         driven by --esize; hue by --ent-hue (an HSL hue the whole creature
+         tints toward). Reused by #card-goblin and .ct-creature-sprite. */
+      .entity {
+        --esize: 110px; --ent-hue: 170;
+        position: relative; width: var(--esize); height: calc(var(--esize) * 1.85);
+        pointer-events: none;
+        animation: ent-bob 5.5s ease-in-out infinite;
+      }
+      @keyframes ent-bob { 0%, 100% { transform: translateY(0); } 50% { transform: translateY(-4%); } }
+      .ent-glow {
+        position: absolute; left: 50%; top: 30%; transform: translate(-50%, -50%);
+        width: 150%; height: 120%; border-radius: 50%;
+        background: radial-gradient(circle,
+          hsla(var(--ent-hue), 90%, 70%, 0.45) 0%,
+          hsla(var(--ent-hue), 90%, 60%, 0.18) 40%, transparent 70%);
+        filter: blur(6px);
+        animation: ent-pulse 3.4s ease-in-out infinite;
+      }
+      @keyframes ent-pulse { 0%, 100% { opacity: 0.7; transform: translate(-50%, -50%) scale(1); } 50% { opacity: 1; transform: translate(-50%, -50%) scale(1.12); } }
+      /* The bell: a domed membrane, flat-bottomed, translucent. */
+      .ent-bell {
+        position: absolute; left: 50%; top: 4%; transform: translateX(-50%);
+        width: 86%; height: 56%;
+        border-radius: 50% 50% 46% 46% / 64% 64% 36% 36%;
+        background:
+          radial-gradient(120% 90% at 50% 18%,
+            hsla(var(--ent-hue), 95%, 88%, 0.55) 0%,
+            hsla(var(--ent-hue), 90%, 64%, 0.32) 38%,
+            hsla(var(--ent-hue), 85%, 42%, 0.16) 72%, transparent 100%);
+        box-shadow:
+          inset 0 calc(var(--esize) * 0.05) calc(var(--esize) * 0.08) hsla(var(--ent-hue), 100%, 92%, 0.6),
+          inset 0 calc(var(--esize) * -0.06) calc(var(--esize) * 0.1) hsla(var(--ent-hue), 90%, 40%, 0.35),
+          0 0 calc(var(--esize) * 0.18) hsla(var(--ent-hue), 95%, 65%, 0.5);
+        border: 1px solid hsla(var(--ent-hue), 95%, 85%, 0.4);
+        animation: ent-bell-breathe 4.2s ease-in-out infinite;
+      }
+      @keyframes ent-bell-breathe {
+        0%, 100% { border-radius: 50% 50% 46% 46% / 64% 64% 36% 36%; }
+        50% { border-radius: 50% 50% 50% 50% / 60% 60% 40% 40%; }
+      }
+      /* The core: a bright eye that drifts and pulses. */
+      .ent-core {
+        position: absolute; left: 50%; top: 26%; transform: translate(-50%, -50%);
+        width: 22%; height: 22%; border-radius: 50%;
+        background: radial-gradient(circle,
+          #ffffff 0%, hsla(var(--ent-hue), 100%, 85%, 1) 35%,
+          hsla(var(--ent-hue), 95%, 55%, 0.6) 70%, transparent 100%);
+        box-shadow: 0 0 calc(var(--esize) * 0.16) hsla(var(--ent-hue), 100%, 80%, 0.95);
+        animation: ent-core 3.4s ease-in-out infinite;
+      }
+      @keyframes ent-core {
+        0%, 100% { transform: translate(-50%, -50%) scale(1); opacity: 0.9; }
+        50% { transform: translate(-50%, -55%) scale(1.25); opacity: 1; }
+      }
+      /* The tendrils: a fanned curtain of swaying filaments under the bell. */
+      .ent-tendrils {
+        position: absolute; left: 50%; top: 50%; transform: translateX(-50%);
+        width: 70%; height: 50%;
+        display: flex; justify-content: space-around;
+      }
+      .ent-tendrils i {
+        display: block; width: 8%; height: 100%;
+        background: linear-gradient(to bottom,
+          hsla(var(--ent-hue), 95%, 80%, 0.85) 0%,
+          hsla(var(--ent-hue), 90%, 62%, 0.5) 45%, transparent 100%);
+        border-radius: 40%;
+        transform-origin: top center;
+        animation: ent-sway 3.6s ease-in-out infinite;
+      }
+      .ent-tendrils i:nth-child(1) { height: 78%; animation-delay: -0.2s; }
+      .ent-tendrils i:nth-child(2) { height: 96%; animation-delay: -0.9s; }
+      .ent-tendrils i:nth-child(3) { height: 108%; animation-delay: -1.5s; }
+      .ent-tendrils i:nth-child(4) { height: 92%; animation-delay: -0.5s; }
+      .ent-tendrils i:nth-child(5) { height: 74%; animation-delay: -1.2s; }
+      @keyframes ent-sway {
+        0%, 100% { transform: rotate(-5deg) scaleY(1); }
+        50% { transform: rotate(5deg) scaleY(1.06); }
+      }
+
+      /* The dealer that descends in the intro — a giant entity lowered from
+         above the void. #card-goblin is the descender wrapper (id kept; the
+         realm toggles .goblin-in to lower it); the .entity lives inside. */
       #card-goblin {
         position: absolute; top: 0; left: 50%;
-        --csize: 40vh;
-        --crow: 4;
-        width: var(--csize); height: var(--csize);
-        background-image: url('assets/rigged_goblin_dancing_aligol3dart_orc_idle.png');
-        background-repeat: no-repeat;
-        background-size: calc(var(--csize) * 8) calc(var(--csize) * 8);
-        background-position-x: 0;
-        background-position-y: calc(var(--csize) * var(--crow) * -1);
-        image-rendering: pixelated;
-        transform: translate(-50%, -110%) scaleY(-1);
-        transition: transform 1800ms cubic-bezier(0.22, 1, 0.36, 1);
-        filter: brightness(0) invert(0.93) drop-shadow(0 0 18px rgba(162, 150, 230, 0.6));
-        opacity: 0.95;
-        animation:
-          card-goblin-idle 1.6s steps(8) infinite,
-          card-goblin-glow 3.4s ease-in-out infinite;
-        pointer-events: none;
-        z-index: 4;
+        transform: translate(-50%, -116%);
+        transition: transform 1900ms cubic-bezier(0.22, 1, 0.36, 1);
+        z-index: 4; pointer-events: none;
       }
-      #card-realm.goblin-in #card-goblin { transform: translate(-50%, -14%) scaleY(-1); }
-      @keyframes card-goblin-idle {
-        from { background-position-x: 0; }
-        to   { background-position-x: calc(var(--csize) * -8); }
-      }
-      /* A slow breathing glow — the only "alive" tell a silhouette gets.
-         The hue drifts lavender → ice and back, an iridescent shimmer. */
-      @keyframes card-goblin-glow {
-        0%, 100% { filter: brightness(0) invert(0.93) drop-shadow(0 0 14px rgba(168, 150, 235, 0.45)); }
-        50%      { filter: brightness(0) invert(0.94) drop-shadow(0 0 28px rgba(130, 180, 240, 0.8)); }
-      }
+      #card-goblin .entity { --esize: 21vh; --ent-hue: 165; }
+      #card-realm.goblin-in #card-goblin { transform: translate(-50%, 2%); }
       /* Dialogue line. It opens at the top of the empty screen ("wait a
          moment!"), then glides down ahead of the descending creature so it
          ends up just under its head — and the card has dipped away below
@@ -1730,23 +1811,23 @@
         transform: translateX(-50%);
         max-width: min(640px, 80vw);
         text-align: center;
-        color: #56566a;
+        color: #d7f3fb;
         font-family: var(--font-dialogue, var(--font-display));
         font-size: calc(clamp(16px, 2.6vh, 26px) * var(--font-dialogue-scale, 1));
-        letter-spacing: 0.05em; line-height: 1.25;
-        text-shadow: 0 0 14px rgba(255, 255, 255, 1), 0 0 30px rgba(180, 168, 250, 0.5);
+        letter-spacing: 0.05em; line-height: 1.3;
+        text-shadow: 0 0 12px rgba(var(--bio-teal), 0.7), 0 0 30px rgba(var(--bio-violet), 0.45);
         opacity: 0;
         transition: opacity 200ms ease, top 1800ms cubic-bezier(0.22, 1, 0.36, 1);
         pointer-events: none;
         z-index: 5;
       }
-      #card-realm.goblin-in #card-speech { top: 36vh; }
+      #card-realm.goblin-in #card-speech { top: 40vh; }
       #card-realm.speaking #card-speech { opacity: 1; }
       #card-speech::after {
         content: "▍"; display: inline-block; margin-left: 4px;
-        color: #8a8a94;
+        color: rgb(var(--bio-teal));
         animation: intro-caret 0.9s steps(2, end) infinite;
-        opacity: 0.8;
+        opacity: 0.85;
       }
       #card-speech.done::after { visibility: hidden; }
       /* Click wall — absorbs clicks while a creature is talking; arms with the
@@ -1770,95 +1851,98 @@
       #card-realm.show-choice #card-choice { opacity: 1; pointer-events: auto; }
       #card-choice .build-button {
         width: 130px;
-        background: rgba(255, 255, 255, 0.5);
+        background: rgba(20, 44, 60, 0.5);
         backdrop-filter: blur(12px) saturate(1.4);
         -webkit-backdrop-filter: blur(12px) saturate(1.4);
-        border: 1px solid rgba(255, 255, 255, 0.85);
+        border: 1px solid rgba(var(--bio-teal), 0.5);
         border-radius: 14px;
-        box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.95), 0 10px 30px rgba(90, 90, 150, 0.22);
+        box-shadow: inset 0 1px 0 rgba(var(--bio-teal), 0.3), 0 10px 30px rgba(0, 0, 0, 0.45);
       }
       #card-choice .build-button:hover:not(:disabled) {
-        background: rgba(255, 255, 255, 0.75);
-        border-color: rgba(255, 255, 255, 1);
-        box-shadow: inset 0 1px 0 #fff, 0 12px 34px rgba(90, 90, 150, 0.3), 0 0 22px rgba(168, 160, 240, 0.4);
+        background: rgba(28, 64, 84, 0.7);
+        border-color: rgba(var(--bio-teal), 0.9);
+        box-shadow: inset 0 1px 0 rgba(var(--bio-teal), 0.5), 0 12px 34px rgba(0, 0, 0, 0.5), 0 0 26px rgba(var(--bio-teal), 0.5);
       }
       #card-choice .build-name {
         font-family: var(--font-display); font-size: 22px;
         letter-spacing: 0.2em; text-align: center;
-        color: #4a4a5c;
-        text-shadow: 0 0 10px rgba(255, 255, 255, 0.9);
+        color: #d7f3fb;
+        text-shadow: 0 0 12px rgba(var(--bio-teal), 0.7);
       }
-      /* The realm's glass ignores the game's cut-corner button option —
-         its octagon clip + dark ::before fill would paint over the glass. */
+      /* The realm's membrane glass ignores the game's cut-corner button
+         option — its octagon clip + dark ::before fill would paint over it. */
       body.cut-corner-buttons #card-choice .build-button {
         border-radius: 14px;
-        border: 1px solid rgba(255, 255, 255, 0.85);
-        background: rgba(255, 255, 255, 0.5);
+        border: 1px solid rgba(var(--bio-teal), 0.5);
+        background: rgba(20, 44, 60, 0.5);
         clip-path: none;
       }
       body.cut-corner-buttons #card-choice .build-button::before { content: none; }
       body.cut-corner-buttons #card-choice .build-button:hover:not(:disabled) {
-        background: rgba(255, 255, 255, 0.75);
-        border-color: rgba(255, 255, 255, 1);
+        background: rgba(28, 64, 84, 0.7);
+        border-color: rgba(var(--bio-teal), 0.9);
       }
-      /* The world cards: panes of frosted dream-glass. Translucent facets
-         over a backdrop blur (the auroras drift visibly through the stock),
-         a tier-tinted edge-light, and a slow levitating bob. The bob rides
-         the separate `translate` property so the transform-based deals /
-         dives / trade fly-outs compose with the float instead of fighting
-         it. Stacked preview panes — space / earth / hell — the world as a
-         column; a card only carries the scenes its world has opened
-         (cards.ts buildCardEl). */
+      /* The SPECIMENS (still .world-card in the DOM): living worlds sealed in
+         dark bioluminescent membranes, drifting in the abyss. A deep
+         translucent body lets the void glow through; a tier-coloured edge-
+         light traces the membrane; a slow levitating bob keeps them adrift.
+         The bob rides the separate `translate` property so the transform-
+         based deals / dives / trade fly-outs compose with the float instead
+         of fighting it. Stacked preview panes — space / earth / hell — show
+         the world as a column; a specimen only carries the scenes its world
+         has opened (cards.ts buildCardEl). */
       .world-card {
-        --tier-c: #b6b8c6;
-        --tier-b: rgba(176, 178, 198, 0.75);
-        --tier-glow: 168, 170, 200;
+        --tier-c: rgb(var(--bio-teal));
+        --tier-b: rgba(var(--bio-teal), 0.55);
+        --tier-glow: var(--bio-teal);
         /* Resting shadow as a var so the arrive/ascend flashes (and the
            selection glow) can return to or build on the same light. */
         --wc-shadow:
-          inset 0 1px 0 rgba(255, 255, 255, 0.95),
-          inset 0 -16px 30px -22px rgba(var(--tier-glow), 0.7),
-          0 18px 44px -10px rgba(88, 88, 150, 0.28),
-          0 0 28px -4px rgba(var(--tier-glow), 0.4);
+          inset 0 1px 0 rgba(var(--tier-glow), 0.35),
+          inset 0 0 26px -6px rgba(var(--tier-glow), 0.4),
+          0 18px 44px -10px rgba(0, 0, 0, 0.6),
+          0 0 30px -6px rgba(var(--tier-glow), 0.55);
         /* Frame-pattern metrics (see the .wcf-* rules below); the creature
            chips override these to draw the same patterns at chip scale. */
         --fr-thick: 5px; --fr-inset: 3px; --fr-inset2: 7px;
-        --fr-r1: 12px; --fr-r2: 8px;
+        --fr-r1: 14px; --fr-r2: 9px;
         position: relative;
         width: 200px; flex-shrink: 0;
-        /* Diagonal glass facets; oversized so hover can sweep the sheen. */
+        /* The membrane: a dark teal-black body, slightly lit from the top,
+           over a backdrop blur so the abyss currents smear through it. */
         background:
-          linear-gradient(125deg,
-            rgba(255, 255, 255, 0.66) 0%, rgba(255, 255, 255, 0.24) 36%,
-            rgba(255, 255, 255, 0.1) 52%, rgba(255, 255, 255, 0.36) 100%);
-        background-size: 200% 100%;
-        background-position: 0% 0;
-        backdrop-filter: blur(14px) saturate(1.5);
-        -webkit-backdrop-filter: blur(14px) saturate(1.5);
-        border: 2px solid var(--tier-b);
-        border-radius: 20px;
+          linear-gradient(160deg,
+            rgba(20, 46, 60, 0.62) 0%, rgba(10, 24, 38, 0.72) 48%,
+            rgba(8, 18, 30, 0.82) 100%);
+        background-size: 100% 100%;
+        backdrop-filter: blur(6px) saturate(1.3);
+        -webkit-backdrop-filter: blur(6px) saturate(1.3);
+        border: 1.5px solid var(--tier-b);
+        /* Organic, asymmetric membrane corners — not a printed card. */
+        border-radius: 22px 14px 22px 14px;
         box-shadow: var(--wc-shadow);
         padding: 10px 10px 12px;
-        color: #44444c;
+        color: #cfe9f0;
         text-align: left;
         transition:
           transform 650ms cubic-bezier(0.2, 0.9, 0.25, 1.08),
-          opacity 500ms ease, box-shadow 200ms ease,
-          background-position 700ms ease;
+          opacity 500ms ease, box-shadow 200ms ease, border-color 200ms ease;
         animation: wc-float 7s ease-in-out infinite;
         animation-delay: calc(var(--deal-i, 0) * -1.9s);
       }
-      /* The levitation: a few px on `translate`, phase-shifted per card. */
+      /* The levitation: a few px on `translate`, phase-shifted per specimen. */
       @keyframes wc-float {
         0%, 100% { translate: 0 2px; }
         50% { translate: 0 -4px; }
       }
-      .world-card.t-common { --tier-c: #b6b8c6; }
+      .world-card.t-common {
+        --tier-c: rgb(var(--bio-teal)); --tier-b: rgba(var(--bio-teal), 0.55); --tier-glow: var(--bio-teal);
+      }
       .world-card.t-uncommon {
-        --tier-c: #6f9fd8; --tier-b: rgba(122, 168, 226, 0.8); --tier-glow: 122, 168, 226;
+        --tier-c: rgb(var(--bio-violet)); --tier-b: rgba(var(--bio-violet), 0.6); --tier-glow: var(--bio-violet);
       }
       .world-card.t-rare {
-        --tier-c: #d8b54a; --tier-b: rgba(226, 192, 100, 0.85); --tier-glow: 228, 192, 110;
+        --tier-c: rgb(var(--bio-amber)); --tier-b: rgba(var(--bio-amber), 0.7); --tier-glow: var(--bio-amber);
       }
       .world-card.big { width: min(280px, 80vw); }
       /* ── Per-trader card frames ──
@@ -1879,30 +1963,33 @@
       .wcf-3::before { border-width: var(--fr-thick); }
       .wcf-4::after { inset: var(--fr-inset2); border-radius: var(--fr-r2); }
       .wcf-5::before { border-style: dotted; border-width: 2px; }
-      /* The player's own stolen world — gold-lettered, wrapped in a warm
-         halo, so it stands out the moment it appears in a creature's hand. */
+      /* The player's own taken world — its membrane burns amber, ringed in a
+         hot halo, so it stands out the instant it surfaces in a dealer's
+         hand. */
       .world-card.origin {
-        --tier-glow: 226, 184, 90;
-        box-shadow: var(--wc-shadow), 0 0 38px -2px rgba(226, 184, 90, 0.45);
+        --tier-glow: var(--bio-amber);
+        --tier-b: rgba(var(--bio-amber), 0.85);
+        box-shadow: var(--wc-shadow), 0 0 44px -2px rgba(var(--bio-amber), 0.6);
       }
-      .world-card.origin .wc-name { color: #a8842a; }
-      .world-card.origin .wc-name::before { content: "★ "; font-size: 11px; }
-      /* Laid-on-a-table jitter: alternate cards sit a hair off-square.
-         Selection (translateY) overrides it via its own transform, and the
-         trade fly-outs need their transforms left alone too. */
+      .world-card.origin .wc-name { color: rgb(var(--bio-amber)); text-shadow: 0 0 12px rgba(var(--bio-amber), 0.7); }
+      .world-card.origin .wc-name::before { content: "✶ "; font-size: 11px; }
+      /* Adrift jitter: alternate specimens hang a hair off-square. Selection
+         (translateY) overrides it via its own transform, and the trade
+         fly-outs need their transforms left alone too. */
       .ct-cards .world-card:nth-child(odd):not(.selected):not(.dived):not(.trade-given):not(.trade-received) { transform: rotate(-0.6deg); }
       .ct-cards .world-card:nth-child(even):not(.selected):not(.dived):not(.trade-given):not(.trade-received) { transform: rotate(0.5deg); }
       .world-card.clickable { cursor: pointer; }
-      /* Hover: the sheen sweeps across the glass and the edge-light wakes. */
+      /* Hover: the membrane edge wakes and the world-light flares. */
       .world-card.clickable:hover {
-        background-position: 100% 0;
-        box-shadow: var(--wc-shadow), 0 0 34px 0 rgba(var(--tier-glow), 0.5);
+        border-color: rgba(var(--tier-glow), 0.95);
+        box-shadow: var(--wc-shadow), 0 0 40px 2px rgba(var(--tier-glow), 0.6);
       }
       .world-card.grayed { opacity: 0.3; filter: saturate(0.15); }
       .world-card.selected {
-        outline: 3px solid var(--tier-c);
+        outline: 2px solid var(--tier-c);
+        outline-offset: 2px;
         transform: translateY(-6px);
-        box-shadow: var(--wc-shadow), 0 0 42px 2px rgba(var(--tier-glow), 0.55);
+        box-shadow: var(--wc-shadow), 0 0 46px 4px rgba(var(--tier-glow), 0.7);
       }
       /* Dealt in from above (cards.ts removes the class a frame after append);
          taken away upward into the goblin's hand. */
@@ -1943,61 +2030,71 @@
         transition: transform 900ms cubic-bezier(0.5, 0, 0.8, 0.4), opacity 800ms ease;
       }
       .wc-head { display: flex; justify-content: space-between; align-items: baseline; gap: 8px; margin-bottom: 6px; }
-      .wc-name { font-family: var(--font-display); font-size: 16px; letter-spacing: 0.04em; }
+      .wc-name {
+        font-family: var(--font-display); font-size: 15px; letter-spacing: 0.04em;
+        color: #dff3f8; text-shadow: 0 0 10px rgba(var(--tier-glow), 0.45);
+      }
+      /* Tier reads almost entirely through membrane colour; the word is kept
+         as a tiny dim glyph-tag so the language stays low-text. */
       .wc-tier {
-        font-family: var(--font-mono); font-size: 12px; color: var(--tier-c);
-        text-transform: uppercase; letter-spacing: 0.12em;
+        font-family: var(--font-mono); font-size: 10px; color: var(--tier-c);
+        text-transform: lowercase; letter-spacing: 0.16em; opacity: 0.75;
       }
       .wc-prevs { display: flex; flex-direction: column; gap: 3px; }
-      /* Preview panes: little windows set into the glass — white-edged,
-         softly sunken, the world glowing through. */
+      /* Scene windows cut into the membrane — the world's own dark glows
+         through, ringed by a faint bioluminescent edge. */
       .wc-prev {
         display: block; width: 100%;
-        border-radius: 9px; border: 1px solid rgba(255, 255, 255, 0.6);
-        box-shadow: 0 1px 6px rgba(88, 88, 150, 0.25), inset 0 0 0 1px rgba(110, 110, 150, 0.12);
+        border-radius: 8px; border: 1px solid rgba(var(--bio-teal), 0.22);
+        box-shadow: 0 1px 8px rgba(0, 0, 0, 0.55), inset 0 0 0 1px rgba(0, 0, 0, 0.4);
         image-rendering: pixelated;
-        --pane-glow: 255, 226, 150;
+        --pane-glow: var(--bio-amber);
       }
-      /* Per-scene glow tints: cold for orbit, warm for the surface, red for
+      /* Per-scene glow tints: cold for orbit, gold for the surface, red for
          the pit. */
-      .wc-prev.wc-space { --pane-glow: 150, 190, 255; }
-      .wc-prev.wc-hell { --pane-glow: 255, 110, 100; }
-      /* A scene with nothing built fades into the card stock; one holding
-         three or more structures breathes light (cards.ts classifies via
+      .wc-prev.wc-space { --pane-glow: 120, 180, 255; }
+      .wc-prev.wc-hell { --pane-glow: 255, 90, 80; }
+      /* A scene with nothing built sinks into the dark; one holding three or
+         more structures breathes light (cards.ts classifies via
          sceneStructureCounts). */
-      .wc-prev.pane-faded { opacity: 0.42; filter: saturate(0.45); }
+      .wc-prev.pane-faded { opacity: 0.4; filter: saturate(0.5); }
       .wc-prev.pane-glow {
-        border-color: rgba(var(--pane-glow), 0.8);
+        border-color: rgba(var(--pane-glow), 0.85);
         animation: wc-pane-glow 2.8s ease-in-out infinite;
       }
       @keyframes wc-pane-glow {
-        0%, 100% { box-shadow: 0 0 6px 0 rgba(var(--pane-glow), 0.35); }
-        50% { box-shadow: 0 0 13px 2px rgba(var(--pane-glow), 0.6); }
+        0%, 100% { box-shadow: 0 0 7px 0 rgba(var(--pane-glow), 0.4); }
+        50% { box-shadow: 0 0 15px 2px rgba(var(--pane-glow), 0.7); }
       }
+      /* Resources as bioluminescent runes (cards.ts resourcesEl prepends a
+         glyph per kind) + a glowing count — low-text, no unit words. */
       .wc-res {
-        margin-top: 7px; font-family: var(--font-mono); font-size: 13.5px;
+        margin-top: 7px; font-family: var(--font-mono); font-size: 13px;
         display: flex; flex-wrap: wrap; gap: 3px 10px;
         justify-content: center;
       }
-      .wc-res .strong { font-weight: 700; }
-      .wc-res .res-cash { color: #a8861d; }
-      .wc-res .res-blood { color: #b8504d; }
-      .wc-res .res-power { color: #3e7fc1; }
-      .wc-res .res-bones { color: #84848c; }
-      .wc-res .res-goblins { color: #4f8a55; }
-      .wc-res .res-nothing { color: #b6b6bc; font-style: italic; }
+      .wc-res span { display: inline-flex; align-items: baseline; gap: 3px; }
+      .wc-res .wc-rune { font-size: 12px; opacity: 0.95; }
+      .wc-res .strong { font-weight: 700; text-shadow: 0 0 8px currentColor; }
+      .wc-res .res-cash { color: #ffd86b; }
+      .wc-res .res-blood { color: #ff6a78; }
+      .wc-res .res-power { color: #6ad0ff; }
+      .wc-res .res-bones { color: #cdd6e0; }
+      .wc-res .res-goblins { color: #79e89a; }
+      .wc-res .res-nothing { color: #5b7382; font-style: italic; }
       .wc-enter {
         width: 100%; margin-top: 8px;
-        background: rgba(255, 255, 255, 0.45); color: #45455a;
-        border: 1px solid rgba(255, 255, 255, 0.85); border-radius: 12px;
-        font-family: var(--font-display); font-size: 13.5px; letter-spacing: 0.14em;
+        background: rgba(var(--tier-glow), 0.1); color: #e2f6fb;
+        border: 1px solid rgba(var(--tier-glow), 0.5); border-radius: 11px;
+        font-family: var(--font-display); font-size: 13px; letter-spacing: 0.14em;
         padding: 7px 4px; cursor: pointer;
-        box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.9), 0 3px 12px rgba(88, 88, 150, 0.16);
+        box-shadow: inset 0 1px 0 rgba(var(--tier-glow), 0.25), 0 3px 12px rgba(0, 0, 0, 0.4);
         transition: box-shadow 150ms ease, border-color 150ms ease, background 150ms ease;
       }
       .wc-enter:hover {
-        background: rgba(255, 255, 255, 0.78);
-        box-shadow: inset 0 1px 0 #fff, 0 4px 16px rgba(88, 88, 150, 0.24), 0 0 16px rgba(168, 160, 240, 0.35);
+        background: rgba(var(--tier-glow), 0.22);
+        border-color: rgba(var(--tier-glow), 0.95);
+        box-shadow: inset 0 1px 0 rgba(var(--tier-glow), 0.4), 0 4px 16px rgba(0, 0, 0, 0.5), 0 0 18px rgba(var(--tier-glow), 0.5);
       }
       /* Each view deals its pieces in with a small stagger (cards.ts sets
          --deal-i per element). `backwards` keeps late items invisible until
@@ -2017,71 +2114,80 @@
       @keyframes ct-dealt {
         from { opacity: 0; transform: translateY(16px) scale(0.97); }
       }
-      /* Table / gathering / trade furniture. */
+      /* Confluence / drift furniture. */
       .ct-caption {
-        font-family: var(--font-display); font-size: 12px; letter-spacing: 0.3em;
-        text-transform: uppercase; color: #8f8fa8; margin-top: 12px;
-        text-shadow: 0 0 12px rgba(255, 255, 255, 1), 0 0 22px rgba(190, 178, 255, 0.45);
+        font-family: var(--font-display); font-size: 11px; letter-spacing: 0.34em;
+        text-transform: uppercase; color: rgba(150, 210, 225, 0.8); margin-top: 12px;
+        text-shadow: 0 0 14px rgba(var(--bio-teal), 0.55), 0 0 26px rgba(var(--bio-violet), 0.35);
       }
       .ct-cards {
         display: flex; flex-wrap: wrap; gap: 16px; justify-content: center;
         max-width: 1100px;
       }
-      .ct-events { display: flex; flex-wrap: wrap; gap: 14px; justify-content: center; }
-      /* Gathering doors: long panes of the same frosted glass, each wearing
-         its tier's color as a top edge-light so the three tables read at a
-         glance (white / blue / gold — the cards' own language). */
+      .ct-events { display: flex; flex-wrap: wrap; gap: 20px; justify-content: center; }
+      /* Confluences (the trade tiers): membrane RIFTS in the void, each lit
+         by its tier hue (teal / violet / amber — the specimens' own
+         language). A glowing maw-line tops each one. */
       .ct-event {
-        --tier-c: #b6b8c6;
-        min-width: 240px; padding: 14px 18px;
-        display: flex; flex-direction: column; gap: 4px; align-items: center;
-        background: linear-gradient(135deg, rgba(255, 255, 255, 0.6), rgba(255, 255, 255, 0.24));
-        backdrop-filter: blur(12px) saturate(1.4);
-        -webkit-backdrop-filter: blur(12px) saturate(1.4);
-        border: 1px solid rgba(255, 255, 255, 0.8); border-radius: 14px;
-        border-top: none;
-        box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.9), 0 14px 34px -8px rgba(88, 88, 150, 0.25);
-        cursor: pointer; color: #44444c;
+        --tier-c: rgb(var(--bio-teal));
+        --tier-glow: var(--bio-teal);
+        position: relative;
+        min-width: 250px; padding: 18px 22px 16px;
+        display: flex; flex-direction: column; gap: 5px; align-items: center;
+        background:
+          radial-gradient(130% 90% at 50% 0%, rgba(var(--tier-glow), 0.18), transparent 60%),
+          linear-gradient(160deg, rgba(18, 40, 56, 0.62), rgba(8, 18, 30, 0.78));
+        backdrop-filter: blur(7px) saturate(1.3);
+        -webkit-backdrop-filter: blur(7px) saturate(1.3);
+        border: 1px solid rgba(var(--tier-glow), 0.3);
+        border-top: 2px solid rgba(var(--tier-glow), 0.85);
+        border-radius: 4px 4px 16px 16px;
+        box-shadow: inset 0 1px 0 rgba(var(--tier-glow), 0.3), 0 0 24px -6px rgba(var(--tier-glow), 0.4), 0 14px 34px -8px rgba(0, 0, 0, 0.6);
+        cursor: pointer; color: #cfe9f0;
         font-family: var(--font-body);
       }
-      .ct-event.t-uncommon { --tier-c: #7aa8e2; }
-      .ct-event.t-rare { --tier-c: #e2c064; }
-      /* The gathering's title carries its tier color too. */
-      .ct-event-title.t-uncommon { color: #6f9fd8; }
-      .ct-event-title.t-rare { color: #c9a43e; }
-      .ct-event { transition: box-shadow 200ms ease, transform 200ms ease; }
+      .ct-event.t-uncommon { --tier-c: rgb(var(--bio-violet)); --tier-glow: var(--bio-violet); }
+      .ct-event.t-rare { --tier-c: rgb(var(--bio-amber)); --tier-glow: var(--bio-amber); }
+      /* The confluence's name carries its tier hue too. */
+      .ct-event-title.t-uncommon { color: rgb(var(--bio-violet)); }
+      .ct-event-title.t-rare { color: rgb(var(--bio-amber)); }
+      .ct-event { transition: box-shadow 200ms ease, transform 200ms ease, border-color 200ms ease; }
       .ct-event:hover:not(.locked) {
-        box-shadow: inset 0 1px 0 #fff, 0 18px 40px -8px rgba(88, 88, 150, 0.33), 0 0 26px rgba(168, 160, 240, 0.35);
+        border-color: rgba(var(--tier-glow), 0.9);
+        box-shadow: inset 0 1px 0 rgba(var(--tier-glow), 0.4), 0 0 34px -2px rgba(var(--tier-glow), 0.6), 0 18px 40px -8px rgba(0, 0, 0, 0.65);
         transform: translateY(-3px);
       }
-      .ct-event.locked { opacity: 0.45; cursor: not-allowed; }
+      .ct-event.locked { opacity: 0.4; cursor: not-allowed; filter: saturate(0.5); }
       .ct-event.shake { animation: ct-shake 300ms ease; }
       @keyframes ct-shake {
         0%, 100% { transform: translateX(0); }
         25% { transform: translateX(-6px); }
         75% { transform: translateX(6px); }
       }
-      .ct-event-name { font-family: var(--font-display); font-size: 18px; letter-spacing: 0.08em; }
-      .ct-event-sub { font-family: var(--font-mono); font-size: 13px; color: #9a9aa2; }
+      .ct-event-name {
+        font-family: var(--font-display); font-size: 17px; letter-spacing: 0.08em;
+        color: #e2f6fb; text-shadow: 0 0 12px rgba(var(--tier-glow), 0.5);
+      }
+      .ct-event-sub { font-family: var(--font-mono); font-size: 12px; color: #7d96a4; letter-spacing: 0.02em; }
       .ct-back {
         align-self: flex-start;
         background: none; border: none; cursor: pointer;
-        color: #8a8aa0; font-family: var(--font-display); font-size: 13px;
+        color: rgba(150, 200, 215, 0.75); font-family: var(--font-display); font-size: 13px;
         letter-spacing: 0.1em; padding: 6px 8px;
-        text-shadow: 0 0 10px rgba(255, 255, 255, 0.9);
+        text-shadow: 0 0 10px rgba(var(--bio-teal), 0.4);
       }
-      .ct-back:hover { color: #4a4a52; }
+      .ct-back:hover { color: #d7f3fb; }
       .ct-wait {
         margin-top: 18px;
-        background: rgba(255, 255, 255, 0.3);
+        background: rgba(20, 44, 60, 0.3);
         backdrop-filter: blur(8px);
         -webkit-backdrop-filter: blur(8px);
-        border: 1px dashed rgba(150, 150, 190, 0.55); border-radius: 10px;
-        color: #8a8aa0; font-family: var(--font-display); font-size: 12px;
+        border: 1px dashed rgba(var(--bio-teal), 0.4); border-radius: 10px;
+        color: rgba(150, 200, 215, 0.8); font-family: var(--font-display); font-size: 12px;
         letter-spacing: 0.14em; padding: 10px 18px; cursor: pointer;
         transition: background 200ms ease, color 200ms ease, border-color 200ms ease;
       }
-      .ct-wait:hover { color: #4a4a52; border-color: rgba(120, 120, 170, 0.8); background: rgba(255, 255, 255, 0.55); }
+      .ct-wait:hover { color: #d7f3fb; border-color: rgba(var(--bio-teal), 0.8); background: rgba(28, 64, 84, 0.5); }
       /* The gathering shows EVERY trader at once. Header (back + title) sits
          above a wrapping row of stalls; the player's hand persists below. */
       .ct-gathering-head {
@@ -2104,83 +2210,70 @@
          presence than the at-a-glance lines elsewhere. */
       .ct-stall .ct-creature-line {
         font-family: var(--font-dialogue, var(--font-display));
-        font-size: 15px; color: #5e5e6a; text-align: center;
+        font-size: 14px; color: rgba(160, 220, 235, 0.92); text-align: center;
+        text-shadow: 0 0 10px rgba(var(--bio-teal), 0.4);
         /* Reserve two lines so the cards below never shift as the want is
            re-typed or swaps to the shorter "too many cards". */
-        height: 2.6em; max-width: 22ch; overflow: hidden;
+        height: 2.8em; max-width: 22ch; overflow: hidden;
       }
-      .ct-stall .ct-creature-sprite { --csize: 76px; }
-      /* The trader's deck, face-up and a size down so a few stalls read on
-         one screen. Wraps for the rare exchange's deeper hands. */
+      /* The dealer's held specimens, face-up and a size down so a few stalls
+         read on one screen. A dark membrane pool wraps them. */
       .ct-stall-cards {
         display: flex; flex-wrap: wrap; gap: 10px; justify-content: center;
         margin-top: 2px; padding: 14px 12px;
-        background: linear-gradient(160deg, rgba(255, 255, 255, 0.32), rgba(255, 255, 255, 0.1));
-        backdrop-filter: blur(10px) saturate(1.3);
-        -webkit-backdrop-filter: blur(10px) saturate(1.3);
-        border: 1px solid rgba(255, 255, 255, 0.55);
-        border-radius: 16px;
-        box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.7), 0 10px 28px -10px rgba(88, 88, 150, 0.22);
+        background: radial-gradient(120% 100% at 50% 0%, rgba(40, 80, 110, 0.28), rgba(10, 20, 36, 0.5));
+        backdrop-filter: blur(8px) saturate(1.2);
+        -webkit-backdrop-filter: blur(8px) saturate(1.2);
+        border: 1px solid rgba(var(--bio-teal), 0.22);
+        border-radius: 18px;
+        box-shadow: inset 0 1px 0 rgba(var(--bio-teal), 0.18), 0 10px 30px -10px rgba(0, 0, 0, 0.6);
       }
       .ct-stall-cards .world-card { width: 132px; }
-      .ct-creature-sprite {
-        --csize: 110px;
-        --crow: 4;
-        width: var(--csize); height: var(--csize);
-        background-image: url('assets/rigged_goblin_dancing_aligol3dart_orc_idle.png');
-        background-repeat: no-repeat;
-        background-size: calc(var(--csize) * 8) calc(var(--csize) * 8);
-        background-position-x: 0;
-        background-position-y: calc(var(--csize) * var(--crow) * -1);
-        image-rendering: pixelated;
-        filter: brightness(0) invert(0.84) drop-shadow(0 4px 12px rgba(162, 150, 230, 0.55));
-        animation:
-          card-goblin-idle 1.6s steps(8) infinite,
-          ct-creature-glow 3.4s ease-in-out infinite;
+      /* The dealer avatar holds the procedural .entity (see the .entity block
+         above); the stall sets its scale. */
+      .ct-creature-sprite { display: flex; justify-content: center; align-items: flex-start; height: 150px; }
+      .ct-creature-sprite .entity { --esize: 84px; }
+      .ct-creature-name {
+        font-family: var(--font-display); font-size: 15px; letter-spacing: 0.1em;
+        color: #cfeaf2; text-shadow: 0 0 12px rgba(var(--bio-violet), 0.5);
       }
-      /* Gathering creatures sit a shade deeper than the big goblin so they
-         still read against the pale auroras; same breathing shimmer. */
-      @keyframes ct-creature-glow {
-        0%, 100% { filter: brightness(0) invert(0.83) drop-shadow(0 4px 12px rgba(168, 150, 235, 0.5)); }
-        50%      { filter: brightness(0) invert(0.86) drop-shadow(0 4px 20px rgba(130, 180, 240, 0.8)); }
-      }
-      .ct-creature-name { font-family: var(--font-display); font-size: 16px; color: #44444c; letter-spacing: 0.06em; }
       .ct-creature-line { font-family: var(--font-mono); font-size: 13px; color: #9a9aa2; }
-      /* The stall's give-button: greyed until the player's hand selection
-         exactly satisfies this trader's want, then a clickable green pulse —
-         hand over the picked card(s), receive the trader's whole deck. */
+      /* The dealer's offer-button: dark until the player's hand selection
+         exactly satisfies its want, then a clickable bioluminescent pulse —
+         feed it the picked specimen(s), receive its whole hand. */
       .ct-give {
         margin-top: 4px; width: 100%;
-        border-radius: 12px; border: 1px solid rgba(255, 255, 255, 0.6);
-        background: rgba(255, 255, 255, 0.3);
-        font-family: var(--font-display); font-size: 13px; letter-spacing: 0.1em;
-        padding: 8px 10px; color: #9a9aa2; cursor: not-allowed;
+        border-radius: 12px; border: 1px solid rgba(120, 160, 180, 0.3);
+        background: rgba(16, 34, 48, 0.5);
+        font-family: var(--font-display); font-size: 14px; letter-spacing: 0.1em;
+        padding: 8px 10px; color: #5b7382; cursor: not-allowed;
         transition: opacity 200ms ease, background 200ms ease, border-color 200ms ease, color 200ms ease;
       }
       .ct-give.ok {
-        cursor: pointer; color: #2e7a40;
-        background: rgba(255, 255, 255, 0.6);
-        border-color: rgba(110, 190, 130, 0.85);
+        cursor: pointer; color: #8effc0;
+        background: rgba(20, 70, 56, 0.55);
+        border-color: rgba(110, 240, 170, 0.85);
+        text-shadow: 0 0 10px rgba(110, 240, 170, 0.7);
         animation: ctv-pulse 1.6s ease-in-out infinite;
       }
-      .ct-give.ok:hover { background: rgba(255, 255, 255, 0.85); }
-      /* The requirement inside a trader's typed line — the rarity, count, or
-         resource threshold — reads bold and a shade darker. */
-      .ct-stall .ct-creature-line b { color: #3a3a48; font-weight: 700; }
-      /* Typed-dialogue caret while a line is still printing. */
+      .ct-give.ok:hover { background: rgba(28, 96, 76, 0.7); }
+      /* The requirement inside a dealer's typed line — the rarity, count, or
+         resource threshold — reads bold and glowing. */
+      .ct-stall .ct-creature-line b { color: #eafff2; font-weight: 700; text-shadow: 0 0 10px rgba(var(--bio-teal), 0.7); }
+      /* Typed-transmission caret while a line is still printing. */
       .ct-stall .ct-creature-line.typing::after {
-        content: "▍"; margin-left: 2px; color: #8a8a94; opacity: 0.8;
+        content: "▍"; margin-left: 2px; color: rgb(var(--bio-teal)); opacity: 0.85;
         animation: intro-caret 0.9s steps(2, end) infinite;
       }
-      /* "choose cards to trade" — floats above the hand whenever nothing is
-         picked, fading gently to draw the eye downward. */
+      /* The offer prompt — floats above the hand whenever nothing is picked,
+         pulsing gently to draw the eye downward. */
       .ct-choose-prompt {
-        font-family: var(--font-display); font-size: 32px; letter-spacing: 0.14em;
-        color: #6a6a86; text-shadow: 0 0 18px rgba(255, 255, 255, 0.95);
+        font-family: var(--font-display); font-size: 28px; letter-spacing: 0.18em;
+        color: #bfe9f2; text-shadow: 0 0 20px rgba(var(--bio-teal), 0.6), 0 0 40px rgba(var(--bio-violet), 0.4);
         margin-bottom: 6px; pointer-events: none;
         animation: ct-choose-pulse 2.4s ease-in-out infinite;
       }
-      @keyframes ct-choose-pulse { 0%, 100% { opacity: 0.55; } 50% { opacity: 1; } }
+      @keyframes ct-choose-pulse { 0%, 100% { opacity: 0.6; } 50% { opacity: 1; } }
       /* The reshuffle button, pinned to the gathering's top-right corner
          (the stage is the positioned ancestor). */
       .ct-wait-corner {
@@ -2201,12 +2294,12 @@
       /* The hand runs a size down from the stage's cards, so the bottom
          strip stays shallow and the stalls keep the limelight. */
       #card-hand .world-card { width: 150px; }
-      /* A hand card the player has picked toward a trade wears the selected
-         outline (the same one the move-arrow used to ride on). */
+      /* A held specimen the player has marked to offer wears a living green
+         membrane outline. */
       #card-hand .world-card.selected {
-        outline: 2px solid rgba(110, 190, 130, 0.9);
+        outline: 2px solid rgba(110, 240, 170, 0.9);
         outline-offset: 2px;
-        box-shadow: 0 0 18px rgba(80, 190, 110, 0.45);
+        box-shadow: 0 0 22px rgba(80, 230, 140, 0.55);
       }
       /* The gathering packs all the stalls plus the hand on one screen — the
          auto-margin header floats the block down toward the hand rather than
@@ -2231,12 +2324,12 @@
       }
       .ct-hand-inline .world-card { width: 150px; }
       .ct-hand-inline .world-card.selected {
-        outline: 2px solid rgba(110, 190, 130, 0.9); outline-offset: 2px;
-        box-shadow: 0 0 18px rgba(80, 190, 110, 0.45);
+        outline: 2px solid rgba(110, 240, 170, 0.9); outline-offset: 2px;
+        box-shadow: 0 0 22px rgba(80, 230, 140, 0.55);
       }
       @keyframes ctv-pulse {
-        0%, 100% { box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.9), 0 0 14px rgba(80, 190, 110, 0.25); }
-        50% { box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.9), 0 0 26px 4px rgba(80, 190, 110, 0.5); }
+        0%, 100% { box-shadow: inset 0 1px 0 rgba(110, 240, 170, 0.4), 0 0 14px rgba(80, 230, 140, 0.3); }
+        50% { box-shadow: inset 0 1px 0 rgba(110, 240, 170, 0.4), 0 0 28px 4px rgba(80, 230, 140, 0.6); }
       }
       /* ── Legacy move arrows (kept for the dive/trade animations' DOM) ── */
       .ct-move-arrow {
@@ -2312,30 +2405,33 @@
         z-index: 3;
       }
 
-      /* ───────── Inside a card world ─────────
-         White border vignette + the big white LEAVE WORLD button — the white
-         marks what is NOT of this world (cards.ts wires the button). */
+      /* ───────── Inside a specimen world ─────────
+         A bioluminescent membrane vignette + the glowing LEAVE WORLD button —
+         the alien light at the edges marks what is NOT of this world: you are
+         inside a sealed specimen, looking out (cards.ts wires the button). */
       body.card-world::after {
         content: ""; position: fixed; inset: 0; pointer-events: none; z-index: 99990;
         box-shadow:
-          inset 0 0 0 5px rgba(255, 255, 255, 0.96),
-          inset 0 0 46px 8px rgba(255, 255, 255, 0.5),
-          inset 0 0 90px 24px rgba(178, 162, 250, 0.18);
+          inset 0 0 0 4px rgba(96, 240, 222, 0.6),
+          inset 0 0 48px 8px rgba(96, 240, 222, 0.22),
+          inset 0 0 110px 30px rgba(120, 70, 230, 0.18);
       }
       #leave-world-btn {
         position: fixed; bottom: 14px; left: 50%; transform: translateX(-50%);
         z-index: 99991;
-        background: rgba(255, 255, 255, 0.66); color: #3a3a46;
+        background: rgba(12, 28, 40, 0.72); color: #e2f6fb;
         backdrop-filter: blur(10px) saturate(1.4);
         -webkit-backdrop-filter: blur(10px) saturate(1.4);
-        border: 1px solid rgba(255, 255, 255, 0.9); border-radius: 12px;
+        border: 1px solid rgba(96, 240, 222, 0.7); border-radius: 12px;
         font-family: var(--font-display); font-size: 14px; letter-spacing: 0.22em;
         padding: 12px 26px; cursor: pointer;
-        box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.95), 0 6px 22px rgba(255, 255, 255, 0.7), 0 4px 16px rgba(40, 40, 70, 0.3);
+        text-shadow: 0 0 10px rgba(96, 240, 222, 0.6);
+        box-shadow: inset 0 1px 0 rgba(96, 240, 222, 0.35), 0 0 22px rgba(96, 240, 222, 0.45), 0 4px 16px rgba(0, 0, 0, 0.5);
       }
       #leave-world-btn:hover {
-        background: rgba(255, 255, 255, 0.85);
-        box-shadow: inset 0 1px 0 #fff, 0 6px 26px rgba(255, 255, 255, 0.95), 0 5px 18px rgba(40, 40, 70, 0.38);
+        background: rgba(20, 48, 64, 0.85);
+        border-color: rgba(96, 240, 222, 1);
+        box-shadow: inset 0 1px 0 rgba(96, 240, 222, 0.5), 0 0 30px rgba(96, 240, 222, 0.65), 0 5px 18px rgba(0, 0, 0, 0.55);
       }
       #leave-world-btn:disabled { opacity: 0.6; cursor: default; }
       /* ── Spectating a trader's card world ──
@@ -2824,7 +2920,16 @@
            stage, so view swaps (table ↔ gathering ↔ trade) never re-deal or
            fade the cards the player is holding. cards.ts renderHand owns it. -->
       <div id="card-hand"></div>
-      <div id="card-goblin"></div>
+      <!-- The intro dealer: a giant alien entity lowered from the void's
+           ceiling (cards.ts toggles #card-realm.goblin-in to descend it). -->
+      <div id="card-goblin">
+        <div class="entity">
+          <div class="ent-glow"></div>
+          <div class="ent-bell"></div>
+          <div class="ent-core"></div>
+          <div class="ent-tendrils"><i></i><i></i><i></i><i></i><i></i></div>
+        </div>
+      </div>
       <div id="card-speech"></div>
       <div id="card-clickwall"></div>
       <div id="card-choice">

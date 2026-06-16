@@ -757,27 +757,29 @@ function drawHellPreview(cv: HTMLCanvasElement, st: GameState, seed: number): vo
 
 // ─── Card DOM ────────────────────────────────────────────────────────
 
-// The card's resource line: each resource in its own color (cash yellow,
-// blood red, power blue, bones grey), hidden at zero, and bold once it
-// crosses its "serious" threshold (Ƶ500k / 128 blood / 1 GW / 5 bones).
+// A specimen's resource line — low-text: a bioluminescent rune per resource
+// (colour does the naming work) followed by the bare count. Hidden at zero,
+// bold once it crosses its "serious" threshold (Ƶ500k / 128 blood / 1 GW /
+// 5 bones / 25 goblins).
 function resourcesEl(r: CardResources): HTMLElement {
   const wrap = document.createElement('div');
   wrap.className = 'wc-res';
   const fmt = (n: number) => Math.floor(n).toLocaleString('en-US');
-  const add = (cls: string, text: string, strong: boolean) => {
+  const add = (cls: string, rune: string, text: string, strong: boolean) => {
     const span = document.createElement('span');
     span.className = `${cls}${strong ? ' strong' : ''}`;
-    span.textContent = text;
+    span.innerHTML = `<span class="wc-rune">${rune}</span>`;
+    span.appendChild(document.createTextNode(text));
     wrap.appendChild(span);
   };
   const power = r.power ?? 0;
   const goblins = r.goblins ?? 0;
-  if (r.money > 0) add('res-cash', `Ƶ ${fmt(r.money)}`, r.money >= 500_000);
-  if (r.blood > 0) add('res-blood', `${fmt(r.blood)} blood`, r.blood >= 128);
-  if (power > 0) add('res-power', formatPower(power), power >= 1_000_000_000);
-  if (r.dragonBone > 0) add('res-bones', `${fmt(r.dragonBone)} bones`, r.dragonBone >= 5);
-  if (goblins > 0) add('res-goblins', `${fmt(goblins)} goblins`, goblins >= 25);
-  if (!wrap.firstChild) add('res-nothing', 'nothing', false);
+  if (r.money > 0) add('res-cash', 'Ƶ', fmt(r.money), r.money >= 500_000);
+  if (r.blood > 0) add('res-blood', '◈', fmt(r.blood), r.blood >= 128);
+  if (power > 0) add('res-power', '⚡', formatPower(power), power >= 1_000_000_000);
+  if (r.dragonBone > 0) add('res-bones', '✶', fmt(r.dragonBone), r.dragonBone >= 5);
+  if (goblins > 0) add('res-goblins', '☗', fmt(goblins), goblins >= 25);
+  if (!wrap.firstChild) add('res-nothing', '∅', '', false);
   return wrap;
 }
 
@@ -1024,7 +1026,7 @@ async function runTradeIntro(meta: CardMeta): Promise<void> {
   const reentered = new Promise<void>((resolve) => {
     const cardEl = buildCardEl(origin, {
       big: true,
-      enterLabel: 'ENTER',
+      enterLabel: '❂ enter',
       onEnter: () => resolve(),
     });
     // The opening deal: the origin card slides in slowly from off-table,
@@ -1132,7 +1134,7 @@ function renderHand(meta: CardMeta, opts: HandOpts = {}): void {
     const row = div('ct-cards');
     for (const c of meta.cards) {
       const el = buildCardEl(c, {
-        enterLabel: 'ENTER',
+        enterLabel: '❂ enter',
         onEnter: (cardEl) => { void enterWorld(meta, c, cardEl); },
         onClick: opts.onCardClick ? () => opts.onCardClick!(c) : undefined,
       });
@@ -1163,7 +1165,7 @@ function showTable(meta: CardMeta): void {
     meta.events = generateEvents(meta, null, ALL_TASK_IDS, loadManualWorlds());
     saveMeta(meta);
   }
-  stage.appendChild(div('ct-caption', 'gatherings'));
+  stage.appendChild(div('ct-caption', 'confluences'));
   const evRow = div('ct-events');
   for (const ev of meta.events) {
     // A gathering opens its doors when the player holds at least one card AND
@@ -1176,8 +1178,8 @@ function showTable(meta: CardMeta): void {
     btn.className = `ct-event t-${ev.tier}${locked ? ' locked' : ''}`;
     const n = ev.creatures.length;
     const sub = locked
-      ? `${n} ${ev.tier} trader${n === 1 ? '' : 's'} · none want what you hold`
-      : `${n} ${ev.tier} trader${n === 1 ? '' : 's'} · a want you can meet`;
+      ? `${n} ${ev.tier} dealer${n === 1 ? '' : 's'} · none crave what you hold`
+      : `${n} ${ev.tier} dealer${n === 1 ? '' : 's'} · a craving you can sate`;
     btn.innerHTML = `<span class="ct-event-name"></span><span class="ct-event-sub">${sub}</span>`;
     (btn.querySelector('.ct-event-name') as HTMLElement).textContent = ev.name;
     btn.addEventListener('click', () => {
@@ -1209,8 +1211,19 @@ function backButton(label: string, onBack: () => void): HTMLElement {
   return btn;
 }
 
-function creatureAvatar(): HTMLElement {
-  return div('ct-creature-sprite');
+// A dealer at a confluence: the same procedural alien entity as the intro
+// descender (index.html .entity), at stall scale. Each creature gets a hue
+// pulled from its id so the void reads as a crowd of distinct beings.
+function creatureAvatar(seed = 0): HTMLElement {
+  const wrap = div('ct-creature-sprite');
+  const ent = div('entity');
+  ent.style.setProperty('--ent-hue', String((seed * 47 + 150) % 360));
+  ent.innerHTML =
+    '<div class="ent-glow"></div><div class="ent-bell"></div>'
+    + '<div class="ent-core"></div>'
+    + '<div class="ent-tendrils"><i></i><i></i><i></i><i></i><i></i></div>';
+  wrap.appendChild(ent);
+  return wrap;
 }
 
 
@@ -1244,7 +1257,7 @@ function showGathering(meta: CardMeta, ev: TradeEvent): void {
   stage.className = 'gathering-view';
 
   const head = div('ct-gathering-head');
-  head.appendChild(backButton('← leave gathering', () => swapView(() => showTable(meta))));
+  head.appendChild(backButton('← drift away', () => swapView(() => showTable(meta))));
   head.appendChild(div(`ct-caption ct-event-title t-${ev.tier}`, ev.name));
   stage.appendChild(head);
 
@@ -1252,7 +1265,7 @@ function showGathering(meta: CardMeta, ev: TradeEvent): void {
   const wait = document.createElement('button');
   wait.type = 'button';
   wait.className = 'ct-wait ct-wait-corner';
-  wait.textContent = 'wait for the next gathering ⟳';
+  wait.textContent = 'await new dealers ⟳';
   wait.addEventListener('click', async () => {
     if (tradeAnimating) return;
     wait.disabled = true;
@@ -1273,7 +1286,7 @@ function showGathering(meta: CardMeta, ev: TradeEvent): void {
   const minePicked = (): WorldCard[] => meta.cards.filter((c) => pickedMine.has(c.id));
 
   // "choose cards to trade", shown above the hand while nothing is picked.
-  const choosePrompt = div('ct-choose-prompt', 'choose cards to trade');
+  const choosePrompt = div('ct-choose-prompt', 'choose worlds to offer');
 
   // The player's hand lives INSIDE the scrollable stage (below the stalls), so
   // a big collection scrolls with the gathering instead of sitting in a fixed
@@ -1314,7 +1327,7 @@ function showGathering(meta: CardMeta, ev: TradeEvent): void {
   const lineFor = (cr: Creature): WantSeg[] => {
     if (cr.deck.length === 0) return [{ t: 'traded out. it is content.' }];
     const picked = minePicked();
-    if (picked.length > cr.want.count) return [{ t: 'too many cards.' }];
+    if (picked.length > cr.want.count) return [{ t: 'too many.' }];
     if (picked.length === cr.want.count) {
       return wantSatisfiedBy(cr.want, picked) ? [{ t: 'yes!' }] : [{ t: 'no.' }];
     }
@@ -1445,7 +1458,7 @@ function showGathering(meta: CardMeta, ev: TradeEvent): void {
       const cardsRow = div('ct-cards');
       for (const c of meta.cards) {
         const el = buildCardEl(c, {
-          enterLabel: 'ENTER',
+          enterLabel: '❂ enter',
           onEnter: (cardEl) => { void enterWorld(meta, c, cardEl); },
           onClick: () => onMineClick(c),
         });
@@ -1463,7 +1476,7 @@ function showGathering(meta: CardMeta, ev: TradeEvent): void {
       const spent = cr.deck.length === 0;
       const stall = div(`ct-stall${spent ? ' spent' : ''}`);
       stall.dataset.creatureId = String(cr.id);
-      stall.appendChild(creatureAvatar());
+      stall.appendChild(creatureAvatar(cr.id));
       stall.appendChild(div('ct-creature-name', cr.name));
       const lineEl = div('ct-creature-line');
       stall.appendChild(lineEl);
@@ -1471,7 +1484,7 @@ function showGathering(meta: CardMeta, ev: TradeEvent): void {
       const cards = div('ct-stall-cards');
       for (const tc of cr.deck) {
         const el = buildCardEl(tc, {
-          enterLabel: 'INSPECT',
+          enterLabel: '◉ observe',
           onEnter: (cardEl) => { if (!tradeAnimating) void spectateWorld(tc, cardEl); },
         });
         cards.appendChild(el);
@@ -1483,7 +1496,7 @@ function showGathering(meta: CardMeta, ev: TradeEvent): void {
         giveBtn = document.createElement('button');
         giveBtn.type = 'button';
         giveBtn.className = 'ct-give';
-        giveBtn.textContent = '✓ trade';
+        giveBtn.textContent = '⇄ offer';
         giveBtn.style.visibility = 'hidden';
         const c = cr;
         giveBtn.addEventListener('click', () => {
