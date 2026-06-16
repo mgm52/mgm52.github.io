@@ -848,7 +848,6 @@ async function main() {
       appendLog(state, `Goblin #${id} killed — +Ƶ${reward.money.toLocaleString('en-US')}, +${reward.blood} blood.`);
     },
     onLightningStrike: () => {
-      if (blockedInCardWorld()) return;
       // Cooldown blocks re-entering aim mode; an already-armed strike can still
       // be cancelled (toggle off) so the player isn't stuck in aim if they
       // armed before realising the cooldown was active.

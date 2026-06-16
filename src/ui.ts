@@ -2023,13 +2023,8 @@ export function refreshUI(state: GameState) {
   // Now that the panel renders as a bordered card, an empty container shows
   // up as a thin empty bar — hide the outer panel until either subsection
   // unlocks.
-  // Card worlds are someone else's finished world: the player can only run it
-  // (spawn units from the Summon panel), never build in it or buy upgrades. So
-  // the whole Build + Ritual panel — every building button plus the candle /
-  // orbital / space-centre placers, dig and lightning — stays hidden here. The
-  // main game and the designer (neither sets cardWorld) are unaffected.
   const panelBuild = document.getElementById('panel-build')!;
-  const panelBuildVisible = (firstTaskDone || ritualVisible) && !state.cardWorld;
+  const panelBuildVisible = firstTaskDone || ritualVisible;
   panelBuild.style.display = panelBuildVisible ? '' : 'none';
 
   // A fresh task surfacing at the bottom of the sidebar is part of the unlock
@@ -2368,6 +2363,22 @@ export function refreshUI(state: GameState) {
     setBuyFlash('btn-place-space-centre', false);
     // Left orbit with placement still armed — disarm it.
     if (state.pendingSpaceCentre) state.pendingSpaceCentre = false;
+  }
+
+  // Card worlds expose exactly ONE Build/Ritual control: the Lightning Strike
+  // ability (an in-world power, not a build or a purchase). Everything else —
+  // every building button, the candle / orbital / space-centre placers, and
+  // all ritual upgrades plus dig — stays hidden. So the whole Build subsection
+  // collapses and only Lightning survives in the Ritual subsection (and only
+  // while this world actually unlocked it). Main game / designer: unaffected.
+  if (state.cardWorld) {
+    buildSection.style.display = 'none';
+    const ritualListEl = document.getElementById('ritual-list')!;
+    for (const el of Array.from(ritualListEl.children)) {
+      if (el.id !== 'btn-lightning-strike') (el as HTMLElement).style.display = 'none';
+    }
+    ritualSection.style.display = state.lightningUnlocked ? '' : 'none';
+    panelBuild.style.display = state.lightningUnlocked ? '' : 'none';
   }
 
   // Hide separators that mark a task boundary the player hasn't crossed yet.
