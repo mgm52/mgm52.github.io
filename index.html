@@ -1662,7 +1662,9 @@
         align-items: center;
         padding: 6vh 16px 8vh;
         gap: 10px;
-        transition: opacity 500ms ease;
+        /* Matched to swapView's hold in cards.ts so the view fully fades out
+           before the next one is built — no half-faded pop on the swap. */
+        transition: opacity 240ms ease;
       }
       /* The stage scrolls; its rows must never compress to fit — the default
          flex-shrink would squash the card rows over the captions below them
@@ -2093,7 +2095,11 @@
         display: flex; flex-wrap: wrap; gap: 56px; justify-content: center;
         align-items: flex-start; margin: 14px 0 26px;
         max-width: 1240px;
+        transition: opacity 300ms ease;
       }
+      /* A reshuffle fades only the stalls out (cards.ts then deals the fresh
+         traders back in) — the player's hand below never blinks. */
+      .ct-stalls.swapping { opacity: 0; }
       /* One trader: avatar, name, the want line, its deck face-up, and a
          give-button. A spent stall (deck handed over) dims and goes inert. */
       .ct-stall {

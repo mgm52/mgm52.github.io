@@ -1248,7 +1248,9 @@ function showGathering(meta: CardMeta, ev: TradeEvent): void {
   head.appendChild(div(`ct-caption ct-event-title t-${ev.tier}`, ev.name));
   stage.appendChild(head);
 
-  // The reshuffle, pinned to the gathering's top-right corner.
+  // The reshuffle, pinned to the gathering's top-right corner. Only the
+  // stalls shuffle — the player's hand (unchanged by a reshuffle) is left
+  // alone, so the cards below never flash or re-deal between gatherings.
   const wait = document.createElement('button');
   wait.type = 'button';
   wait.className = 'ct-wait ct-wait-corner';
@@ -1257,11 +1259,14 @@ function showGathering(meta: CardMeta, ev: TradeEvent): void {
     if (tradeAnimating) return;
     wait.disabled = true;
     realmSound('online', 0.4, 0.7);
-    stage.classList.add('waiting');
-    await sleep(700);
+    row.classList.add('swapping');
+    await sleep(320);
     regenerateEvent(meta, ev, ALL_TASK_IDS, loadManualWorlds());
     saveMeta(meta);
-    showGathering(meta, ev);
+    firstDeal = true;        // the fresh traders deal back in with a stagger
+    buildStalls();
+    row.classList.remove('swapping');
+    wait.disabled = false;
   });
   stage.appendChild(wait);
 
@@ -1409,9 +1414,23 @@ function showGathering(meta: CardMeta, ev: TradeEvent): void {
         ref?.giveBtn?.remove();
         if (ref) ref.giveBtn = null;
       }
-      renderGatherHand();
-      for (const t of received) {
-        gatherHandRow()?.querySelector(`[data-card-id="${t.id}"]`)?.classList.add('trade-arrived');
+      // Surgically update the hand: drop the cards that flew to the trader,
+      // pop the arrivals in — the cards the player kept are never re-rendered,
+      // so they don't flash. (Falls back to a full build if the row is gone.)
+      const handRow = gatherHandRow();
+      if (handRow) {
+        for (const m of picked) handRow.querySelector(`[data-card-id="${m.id}"]`)?.remove();
+        for (const t of received) {
+          const el = buildHandCard(t);
+          el.classList.add('trade-arrived');
+          handRow.appendChild(el);
+        }
+        refreshHandCaption();
+      } else {
+        renderGatherHand();
+        for (const t of received) {
+          gatherHandRow()?.querySelector(`[data-card-id="${t.id}"]`)?.classList.add('trade-arrived');
+        }
       }
       // Selection is cleared — every stall re-states (the traded one now reads
       // "traded out", the rest revert to their want, dropping any "yes!"/"no.").
@@ -1435,22 +1454,29 @@ function showGathering(meta: CardMeta, ev: TradeEvent): void {
     refreshButtons();
   };
 
+  // One held card's element: clicks toggle the shared selection, ENTER dives.
+  const buildHandCard = (c: WorldCard): HTMLElement =>
+    buildCardEl(c, {
+      enterLabel: 'ENTER',
+      onEnter: (cardEl) => { void enterWorld(meta, c, cardEl); },
+      onClick: () => onMineClick(c),
+    });
+
+  // Keep the "your world(s)" caption in step with the held count.
+  const refreshHandCaption = (): void => {
+    const cap = handWrap.querySelector('.ct-caption') as HTMLElement | null;
+    if (cap) cap.textContent = meta.cards.length === 1 ? 'your world' : 'your worlds';
+  };
+
   // Build the in-stage hand: the choose-prompt, a caption, and the player's
-  // cards (clicks toggle the shared selection; ENTER dives into a world).
+  // cards.
   const renderGatherHand = (): void => {
     handWrap.innerHTML = '';
     handWrap.appendChild(choosePrompt);
     if (meta.cards.length > 0) {
       handWrap.appendChild(div('ct-caption', meta.cards.length === 1 ? 'your world' : 'your worlds'));
       const cardsRow = div('ct-cards');
-      for (const c of meta.cards) {
-        const el = buildCardEl(c, {
-          enterLabel: 'ENTER',
-          onEnter: (cardEl) => { void enterWorld(meta, c, cardEl); },
-          onClick: () => onMineClick(c),
-        });
-        cardsRow.appendChild(el);
-      }
+      for (const c of meta.cards) cardsRow.appendChild(buildHandCard(c));
       handWrap.appendChild(cardsRow);
     }
   };
