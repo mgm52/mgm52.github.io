@@ -904,7 +904,13 @@ function updateMeltdowns(state: GameState) {
   }
 }
 
-function spawnGoblin(state: GameState) {
+// Designer-only: hatch a gold goblin immediately, bypassing the cost + spawn
+// queue. Just spawnGoblin with the gold roll forced on.
+export function spawnGoldGoblinNow(state: GameState): void {
+  spawnGoblin(state, true);
+}
+
+function spawnGoblin(state: GameState, forceGold = false) {
   // Round-robin between the main hole and every completed Goblin Hole. A
   // freshly-built hole is added to the rotation automatically. A main hole
   // Lolly has destroyed drops out of the rotation entirely.
@@ -945,7 +951,7 @@ function spawnGoblin(state: GameState) {
     return;
   }
   const id = state.nextId++;
-  const isGold = state.goldgoblinsEnabled && Math.random() < GOLD_GOBLIN_CHANCE;
+  const isGold = forceGold || (state.goldgoblinsEnabled && Math.random() < GOLD_GOBLIN_CHANCE);
   const g: Goblin = {
     id, pos: cellCenter(cell), cell,
     target: null, goal: null,

@@ -2451,6 +2451,12 @@
         display: inline-flex; align-items: center; gap: 6px;
       }
       .wd-field-label { color: #9a92b8; font-size: 11px; letter-spacing: 0.04em; }
+      .wd-realms { display: inline-flex; align-items: center; gap: 10px; }
+      .wd-realm {
+        display: inline-flex; align-items: center; gap: 4px; cursor: pointer;
+        color: #c9c2e2; font-size: 11px; letter-spacing: 0.04em;
+      }
+      .wd-realm input { accent-color: #c9b9ff; cursor: pointer; }
       .wd-name, .wd-tier, .wd-res-input {
         background: rgba(0, 0, 0, 0.4); color: #f0edff;
         border: 1px solid rgba(150, 130, 220, 0.55); border-radius: 5px;
@@ -2478,6 +2484,39 @@
       }
       .wd-exit:hover { background: rgba(0, 0, 0, 0.6); }
       .wd-exit:disabled { opacity: 0.6; cursor: default; }
+      .wd-time {
+        font-family: var(--font-display); letter-spacing: 0.12em;
+        font-size: 12px; padding: 6px 16px; cursor: pointer;
+        border-radius: 6px;
+        background: rgba(150, 130, 220, 0.18); color: #d8ccff;
+        border: 1px solid rgba(150, 130, 220, 0.7);
+      }
+      .wd-time:hover { background: rgba(150, 130, 220, 0.35); }
+      .wd-time.frozen { background: rgba(255, 217, 107, 0.22); color: #ffe9a8; border-color: rgba(255, 217, 107, 0.7); }
+      .wd-clear {
+        font-family: var(--font-display); letter-spacing: 0.12em;
+        font-size: 12px; padding: 6px 16px; cursor: pointer;
+        border-radius: 6px;
+        background: rgba(220, 120, 120, 0.18); color: #ffcccc;
+        border: 1px solid rgba(220, 120, 120, 0.65);
+      }
+      .wd-clear:hover { background: rgba(220, 120, 120, 0.35); }
+      .wd-hole {
+        font-family: var(--font-display); letter-spacing: 0.12em;
+        font-size: 12px; padding: 6px 16px; cursor: pointer;
+        border-radius: 6px;
+        background: rgba(120, 90, 60, 0.25); color: #f0d8b8;
+        border: 1px solid rgba(180, 130, 80, 0.65);
+      }
+      .wd-hole:hover { background: rgba(120, 90, 60, 0.45); }
+      .wd-gold {
+        font-family: var(--font-display); letter-spacing: 0.12em;
+        font-size: 12px; padding: 6px 16px; cursor: pointer;
+        border-radius: 6px;
+        background: rgba(230, 200, 90, 0.22); color: #ffe9a8;
+        border: 1px solid rgba(230, 200, 90, 0.65);
+      }
+      .wd-gold:hover { background: rgba(230, 200, 90, 0.4); }
       .wd-toast {
         color: #9af0b4; font-size: 11px; opacity: 0;
         white-space: nowrap;
@@ -2522,6 +2561,16 @@
         border: 1px dashed rgba(170, 150, 250, 0.7);
       }
       .wd-newworld:hover { background: rgba(150, 130, 220, 0.4); }
+      .wd-filerow { display: flex; align-items: center; gap: 10px; margin-bottom: 12px; flex-wrap: wrap; }
+      .wd-tofile {
+        cursor: pointer; font-family: var(--font-display); letter-spacing: 0.1em;
+        font-size: 11px; padding: 7px 14px; border-radius: 7px;
+        background: rgba(110, 190, 130, 0.2); color: #b9f0c7;
+        border: 1px solid rgba(110, 190, 130, 0.65);
+      }
+      .wd-tofile:hover { background: rgba(110, 190, 130, 0.38); }
+      .wd-tofile:disabled { opacity: 0.6; cursor: default; }
+      .wd-filestatus { color: #9aa0b8; font-size: 11px; }
       .wd-list { display: flex; flex-direction: column; gap: 8px; }
       .wd-empty { color: #9a92b8; font-size: 12px; text-align: center; padding: 18px 0; }
       .wd-row {

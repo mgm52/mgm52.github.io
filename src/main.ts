@@ -15,8 +15,8 @@ import { ensureHellPortal, executeSkipToPreFinale, executeTaskSkip, refreshUI, s
 import { clearSave, formatRelativeTime, getLastSaveStats, loadGame, saveGame, saveGameInBackground } from './save';
 import {
   abandonCardWorldBoot, captureOriginWorld, cardWorldActive, clearCardData, consumeCardHop,
-  devResetCardRealm, hasCardMeta, isCardHopInProgress, maybeStartCardRealm, resetCardRealm,
-  setupCardWorldChrome, spectateActive,
+  devResetCardRealm, hasCardMeta, initBuiltinWorlds, isCardHopInProgress, maybeStartCardRealm,
+  resetCardRealm, setupCardWorldChrome, spectateActive,
 } from './cards';
 import { designerActive, openDesignerList, setupDesignerChrome } from './designer';
 
@@ -227,6 +227,12 @@ async function main() {
   // on them (they used to load inside createRender, after the click).
   void preloadRenderAssets();
 
+  // Pull the committed world library (public/worlds.json) into the manual-world
+  // cache before anything can generate a trader deck, so file-saved worlds show
+  // up in the realm and the designer list. Cheap and best-effort — a missing
+  // file just leaves the localStorage worlds as the only source.
+  await initBuiltinWorlds();
+
   // The trading-card realm reaches this boot two ways: inside a card world
   // (the entered card's state sits in the save slot — boot straight into it;
   // the reload WAS the transition), or back on the outer table after leaving
@@ -254,7 +260,7 @@ async function main() {
   // user-gesture requirement so audio can play immediately afterwards.
   // Saved-game lookup happens up-front so the title screen can show the
   // resume button (with relative-time meta) when one exists.
-  let saved = (import.meta.env.PROD || inCardWorld || inDesigner || metagameBegun) ? loadGame() : null;
+  let saved = (import.meta.env.PROD || inCardWorld || inDesigner || metagameBegun || designerOverlay) ? loadGame() : null;
   if (inCardWorld && !saved) {
     // The card's save is unreadable — restore the outer realm and fall
     // back to a normal boot instead of a broken world.
@@ -262,8 +268,8 @@ async function main() {
     inCardWorld = false;
     saved = import.meta.env.PROD ? loadGame() : null;
   }
-  const skipTitle = (cardHop || !import.meta.env.PROD)
-    && (inCardWorld || inDesigner || metagameBegun) && saved !== null;
+  const skipTitle = (cardHop || !import.meta.env.PROD || designerOverlay)
+    && (inCardWorld || inDesigner || metagameBegun || designerOverlay) && saved !== null;
   // A skipped title must still be DISMISSED: #title-screen defaults to an
   // opaque black cover and only showTitleScreen's click path hides it, so
   // without this a prod card-world hop boots the world fine — behind black.
@@ -327,7 +333,10 @@ async function main() {
   // goblin slides up, monologues, slides back out. Resumed games skip it
   // entirely (the player has presumably already met the goblin) — as do
   // restart-in-hell runs, which would cut it off mid-descent anyway.
-  const introWillPlay = choice === 'new' && !restartInHell;
+  // ?designer opens the authoring list over the game; never play the goblin
+  // intro underneath it (with no save to resume the boot would otherwise start
+  // a fresh run and run the cutscene behind the overlay).
+  const introWillPlay = choice === 'new' && !restartInHell && !designerOverlay;
   if (introWillPlay) {
     // intro-hold suppresses the spawn panel + (via the existing .revealed
     // gate) the task text. Removed once the intro promise resolves. Purely
@@ -1017,6 +1026,7 @@ async function main() {
         || state.bobPickingHole) return;
     if (view === 'hell' && !state.hellUnlocked) { playSound('error'); return; }
     if (view === 'space' && !state.spaceUnlocked) { playSound('error'); return; }
+    if (view === 'ground' && state.groundLocked) { playSound('error'); return; }
     // First hop ever — retires the strip's fresh-unlock attention pulse.
     state.quickTravelUsed = true;
     quickTravelBusy = true;
@@ -1340,7 +1350,7 @@ async function main() {
     if (e.key === 'Escape') {
       // input.ts clears any pending placement/aim mode on ESC; only an ESC
       // with nothing armed toggles pause.
-      if (state.pendingBuild || state.pendingStrike || state.pendingCandle || state.pendingOrbital || state.pendingSpaceCentre) return;
+      if (state.pendingBuild || state.pendingStrike || state.pendingCandle || state.pendingOrbital || state.pendingSpaceCentre || state.pendingOriginalHole) return;
       togglePause();
     } else if (k === 'p') {
       // Ignore P while typing in an input/select (options panel sliders, etc.)
@@ -1384,6 +1394,10 @@ async function main() {
       // Spectating a trader's card world: time stands still for the whole
       // visit (set by setupCardWorldChrome, cleared by the leave reload).
       || document.body.classList.contains('spectate-hold')
+      // World Designer's PAUSE toggle: freezes the sim (sprites + state.now)
+      // while leaving the world fully interactive for authoring — no overlay,
+      // unlike the player-facing pause. Toggled by setupDesignerChrome.
+      || document.body.classList.contains('designer-time-frozen')
       || state.bobPickingHole;
     if (!paused && !introActive) {
       acc += dt;
@@ -1542,11 +1556,11 @@ async function main() {
         clampSpaceCamera(ctx);
       }
       const atBottom = ctx.spaceCamera.y >= spaceCameraMaxY(ctx) - 1;
-      if (downHeld && atBottom) {
+      if (!state.groundLocked && downHeld && atBottom) {
         descendHold += dt;
         if (descendHold >= SPACE_HOLD_MS) triggerDescendToSurface(now);
       } else { descendHold = 0; }
-      showHints({ descend: atBottom && !transitioning });
+      showHints({ descend: !state.groundLocked && atBottom && !transitioning });
     } else if (ctx.depth >= 0.9999) {
       // ── Hell view ── pan the hell camera; hold ↑ at the top to rise back.
       state.view = 'hell';
@@ -1561,11 +1575,11 @@ async function main() {
         clampHellCamera(ctx);
       }
       const atTop = ctx.hellCamera.y <= 1;
-      if (upHeld && atTop) {
+      if (!state.groundLocked && upHeld && atTop) {
         ascendHellHold += dt;
         if (ascendHellHold >= SPACE_HOLD_MS) triggerAscendFromHell(now);
       } else { ascendHellHold = 0; }
-      showHints({ ascendHell: atTop && !hellTransitioning });
+      showHints({ ascendHell: !state.groundLocked && atTop && !hellTransitioning });
     } else {
       // ── Ground view ── pan the world; hold ↑ at the top to rise into space,
       // or hold ↓ at the bottom (Hell Portal placed) to descend into hell.

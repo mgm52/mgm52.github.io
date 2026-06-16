@@ -123,7 +123,25 @@ function saveMeta(meta: CardMeta): void {
 export function hasCardMeta(): boolean { return loadMeta() !== null; }
 
 // ─── Manual-world database (shared with the World Designer) ──────────
-export function loadManualWorlds(): ManualWorld[] {
+// Worlds shipped in the repo file public/worlds.json, fetched once at boot
+// (initBuiltinWorlds). They form the permanent, committable base library; the
+// localStorage copy below is the live working set layered on top. Empty until
+// the fetch resolves — card generation that runs before then just sees the
+// localStorage worlds, which is fine.
+let builtinWorlds: ManualWorld[] = [];
+
+// Fetch the committed world file and cache it. Call once at boot, before the
+// trading realm can generate decks. Silently tolerates a missing/empty file.
+export async function initBuiltinWorlds(): Promise<void> {
+  try {
+    const res = await fetch(`${import.meta.env.BASE_URL}worlds.json`, { cache: 'no-store' });
+    if (!res.ok) return;
+    const list = await res.json();
+    if (Array.isArray(list)) builtinWorlds = list as ManualWorld[];
+  } catch { /* no file / offline — fall back to localStorage only */ }
+}
+
+function readLocalWorlds(): ManualWorld[] {
   try {
     const raw = localStorage.getItem(MANUAL_KEY);
     if (!raw) return [];
@@ -132,8 +150,34 @@ export function loadManualWorlds(): ManualWorld[] {
   } catch { return []; }
 }
 
+// The merged library: the committed file plus the localStorage working copy,
+// deduped by id with localStorage winning (an edited-but-unsaved-to-file world
+// shadows its committed version).
+export function loadManualWorlds(): ManualWorld[] {
+  const byId = new Map<number, ManualWorld>();
+  for (const w of builtinWorlds) byId.set(w.id, w);
+  for (const w of readLocalWorlds()) byId.set(w.id, w);
+  return [...byId.values()];
+}
+
 export function saveManualWorlds(list: ManualWorld[]): void {
   try { localStorage.setItem(MANUAL_KEY, JSON.stringify(list)); } catch { /* storage full — skip */ }
+}
+
+// Persist the given library to the committed repo file via the dev-only Vite
+// endpoint, and sync the in-memory cache so a later loadManualWorlds() agrees
+// without a reload. Resolves false in a static build (no server) or on error —
+// the localStorage copy is unaffected either way.
+export async function saveWorldsToFile(list: ManualWorld[]): Promise<boolean> {
+  builtinWorlds = list;
+  try {
+    const res = await fetch('/__save-worlds', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(list),
+    });
+    return res.ok;
+  } catch { return false; }
 }
 
 // Set just before the enter-/leave-world reloads so the next boot knows it's

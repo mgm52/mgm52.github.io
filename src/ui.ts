@@ -1303,8 +1303,24 @@ export function setupUI(state: GameState, callbacks: UICallbacks) {
   const destroyBtn = document.getElementById('info-destroy')!;
   let destroyDispatchTimer: number | undefined;
   destroyBtn.addEventListener('click', () => {
+    // Designer-only: deleting the selected original Goblin Hole just flags it
+    // destroyed (it's state.hole, not a Building) and drops the selection.
+    if (state.hole.selected && document.body.classList.contains('world-designer-active')) {
+      state.holeDestroyed = true;
+      state.hole.selected = false;
+      playSound('destroy', 0.5);
+      return;
+    }
     const target = [...state.buildings.values()].find(b => b.selected);
     if (!target) return;
+    // Designer mode: tear down every selected building instantly (no minotaur
+    // needed) — an authoring sandbox, mirroring the free instant-place flow.
+    if (document.body.classList.contains('world-designer-active')) {
+      for (const b of [...state.buildings.values()].filter((b) => b.selected)) {
+        callbacks.onDestroyBuilding(b.id);
+      }
+      return;
+    }
     // A building squatting on the original Goblin Hole can be torn down by
     // hand, no minotaur needed — the player must never be able to brick
     // their spawn point just because nothing big enough is alive to smash it.
@@ -1345,6 +1361,21 @@ export function setupUI(state: GameState, callbacks: UICallbacks) {
       destroyBtn.textContent = 'Destroy';
       destroyDispatchTimer = undefined;
     }, 2000);
+  });
+
+  // Delete / Backspace while a building is selected is a shortcut for the
+  // Destroy button — same path (instant in the designer, minotaur dispatch in
+  // the normal game). Ignored while typing in a field, and only when the
+  // button is actually live (a building is the active selection).
+  window.addEventListener('keydown', (e) => {
+    if (e.key !== 'Delete' && e.key !== 'Backspace') return;
+    const tgt = e.target as HTMLElement | null;
+    if (tgt && (tgt.tagName === 'INPUT' || tgt.tagName === 'SELECT' || tgt.tagName === 'TEXTAREA')) return;
+    if (destroyBtn.style.display === 'none') return;
+    const hasBuilding = [...state.buildings.values()].some((b) => b.selected);
+    if (!hasBuilding && !state.hole.selected) return;
+    e.preventDefault();
+    destroyBtn.click();
   });
 
   // Kill button — kills every currently-selected goblin.
@@ -2556,6 +2587,16 @@ function refreshInfoPanel(state: GameState) {
     name.textContent = 'Distant dragon';
     stateEl.textContent = '';
     extra.innerHTML = '';
+  } else if (selectedBuildings.length > 1 && selectedGoblins.length === 0) {
+    // Designer drag-select grabbed a group of buildings — show a count and the
+    // Destroy button, which tears the whole group down at once (designer only;
+    // a multi-building selection can't arise in the normal game).
+    panel.classList.add('visible');
+    portrait.innerHTML = `<div class="portrait-goblin" style="background:#1a1626;border-color:#c9b9ff;color:#e6e2f4">▦</div>`;
+    name.textContent = `${selectedBuildings.length} buildings`;
+    stateEl.textContent = '';
+    extra.innerHTML = `<span style="color:#6a7080">Drag-selected — Destroy removes them all.</span>`;
+    destroyBtn.style.display = '';
   } else if (selectedBuildings.length === 1 && selectedGoblins.length === 0) {
     showBuilding(state, selectedBuildings[0], panel, portrait, name, stateEl, extra);
     destroyBtn.style.display = '';
@@ -2569,6 +2610,11 @@ function refreshInfoPanel(state: GameState) {
     setCommandHint(extra, state);
   } else if (state.hole.selected) {
     showHole(state, panel, portrait, name, stateEl, extra);
+    // Designer-only: the original hole can be deleted (holeDestroyed) straight
+    // from its panel, mirroring the free instant building destroy.
+    if (document.body.classList.contains('world-designer-active') && !state.holeDestroyed) {
+      destroyBtn.style.display = '';
+    }
   } else if (selectedWater) {
     showWaterSource(state, selectedWater, panel, portrait, name, stateEl, extra);
   } else if ([...state.dragons.values()].some((d) => d.selected)) {

@@ -18,12 +18,13 @@
 // manual-world DB accessors and the shared markCardHop hop guard.
 
 import { clearSave, getRawSave, saveGame, setRawSave } from './save';
-import { GameState } from './state';
+import { GameState, markBuildingsChanged, removeAllUnits } from './state';
+import { spawnGoldGoblinNow } from './sim';
 import { ALL_TASK_IDS } from './ui';
 import {
   CardTier, ManualWorld, cardPower, decodeWorld, encodeWorld, makeSandboxWorld,
 } from './cards-core';
-import { loadManualWorlds, markCardHop, saveManualWorlds } from './cards';
+import { loadManualWorlds, markCardHop, saveManualWorlds, saveWorldsToFile } from './cards';
 
 const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
 
@@ -225,6 +226,72 @@ export function setupDesignerChrome(state: GameState): void {
     if (v > 0) state.dragonBoneUnlocked = true;
   }));
 
+  // Realm access — three checkboxes gating which views the authored world can
+  // reach. earth maps to the inverse of groundLocked; space/hell to the
+  // existing unlock flags. These ride into the saved card via encodeWorld.
+  const realms = document.createElement('div');
+  realms.className = 'wd-realms';
+  realms.appendChild(realmToggle('earth', !state.groundLocked, (on) => { state.groundLocked = !on; }));
+  realms.appendChild(realmToggle('space', state.spaceUnlocked, (on) => { state.spaceUnlocked = on; }));
+  realms.appendChild(realmToggle('hell', state.hellUnlocked, (on) => { state.hellUnlocked = on; }));
+  bar.appendChild(realms);
+
+  // PAUSE / PLAY — freezes the sim (sprites + state.now) so the world holds
+  // still while authoring, without the player-facing pause overlay. main.ts's
+  // frame loop checks the 'designer-time-frozen' body class. Leaving the
+  // designer can't strand the flag: the class lives on the body that the exit
+  // reload replaces. Starts running so the world behaves normally until paused.
+  const timeBtn = document.createElement('button');
+  timeBtn.type = 'button';
+  timeBtn.className = 'wd-time';
+  const syncTimeBtn = () => {
+    const frozen = document.body.classList.contains('designer-time-frozen');
+    timeBtn.textContent = frozen ? '▶ PLAY' : '⏸ PAUSE';
+    timeBtn.classList.toggle('frozen', frozen);
+  };
+  timeBtn.addEventListener('click', () => {
+    document.body.classList.toggle('designer-time-frozen');
+    syncTimeBtn();
+  });
+  syncTimeBtn();
+  bar.appendChild(timeBtn);
+
+  // CLEAR UNITS — wipe every mobile unit (goblins, minotaurs, dragons, …) so
+  // the dev can re-stage a world without hand-killing each one. Buildings and
+  // terrain stay put.
+  const clearBtn = document.createElement('button');
+  clearBtn.type = 'button';
+  clearBtn.className = 'wd-clear';
+  clearBtn.textContent = 'REMOVE ALL UNITS';
+  clearBtn.addEventListener('click', () => {
+    removeAllUnits(state);
+    markBuildingsChanged(state);
+  });
+  bar.appendChild(clearBtn);
+
+  // PLACE ORIGINAL HOLE — arms a one-shot placement: the next ground click
+  // (re)positions the world's original Goblin Hole and un-destroys it, free.
+  // Lets a dev relocate the spawn point or restore it after deleting it from
+  // the hole's info panel.
+  const holeBtn = document.createElement('button');
+  holeBtn.type = 'button';
+  holeBtn.className = 'wd-hole';
+  holeBtn.textContent = 'ORIGINAL HOLE';
+  holeBtn.addEventListener('click', () => {
+    state.pendingBuild = null;
+    state.pendingOriginalHole = true;
+  });
+  bar.appendChild(holeBtn);
+
+  // SPAWN GOLDBLIN — hatch a gold goblin immediately at a hole, free and
+  // queue-free, for staging a world.
+  const goldBtn = document.createElement('button');
+  goldBtn.type = 'button';
+  goldBtn.className = 'wd-gold';
+  goldBtn.textContent = '+ GOLDBLIN';
+  goldBtn.addEventListener('click', () => spawnGoldGoblinNow(state));
+  bar.appendChild(goldBtn);
+
   // SAVE / EXIT.
   const actions = document.createElement('div');
   actions.className = 'wd-actions';
@@ -272,6 +339,22 @@ function labelled(label: string, control: HTMLElement): HTMLElement {
   span.textContent = label;
   wrap.appendChild(span);
   wrap.appendChild(control);
+  return wrap;
+}
+
+// A realm-access checkbox: a labelled toggle whose change writes straight into
+// the live state via `onChange(checked)`.
+function realmToggle(label: string, initial: boolean, onChange: (on: boolean) => void): HTMLElement {
+  const wrap = document.createElement('label');
+  wrap.className = 'wd-realm';
+  const box = document.createElement('input');
+  box.type = 'checkbox';
+  box.checked = initial;
+  box.addEventListener('change', () => onChange(box.checked));
+  const span = document.createElement('span');
+  span.textContent = label;
+  wrap.appendChild(box);
+  wrap.appendChild(span);
   return wrap;
 }
 
@@ -339,6 +422,33 @@ export function openDesignerList(): void {
   newBtn.addEventListener('click', () => launchDesigner());
   panel.appendChild(newBtn);
 
+  // SAVE TO FILE — snapshot the whole library to the committed repo file
+  // (public/worlds.json) via the dev server, making it permanent + shareable
+  // rather than living only in this browser's localStorage.
+  const fileRow = document.createElement('div');
+  fileRow.className = 'wd-filerow';
+  const fileBtn = document.createElement('button');
+  fileBtn.type = 'button';
+  fileBtn.className = 'wd-tofile';
+  fileBtn.textContent = '💾 SAVE ALL TO FILE';
+  const fileStatus = document.createElement('span');
+  fileStatus.className = 'wd-filestatus';
+  fileBtn.addEventListener('click', () => {
+    void (async () => {
+      fileBtn.disabled = true;
+      fileStatus.textContent = 'saving…';
+      const list = loadManualWorlds();
+      const ok = await saveWorldsToFile(list);
+      fileStatus.textContent = ok
+        ? `saved ${list.length} world${list.length === 1 ? '' : 's'} to public/worlds.json`
+        : 'save failed — is the dev server running? (no file write in a static build)';
+      fileBtn.disabled = false;
+    })();
+  });
+  fileRow.appendChild(fileBtn);
+  fileRow.appendChild(fileStatus);
+  panel.appendChild(fileRow);
+
   const listWrap = document.createElement('div');
   listWrap.className = 'wd-list';
   panel.appendChild(listWrap);
@@ -392,7 +502,13 @@ export function openDesignerList(): void {
           }, 2500);
           return;
         }
-        saveManualWorlds(loadManualWorlds().filter((m) => m.id !== w.id));
+        const remaining = loadManualWorlds().filter((m) => m.id !== w.id);
+        saveManualWorlds(remaining);
+        // Also rewrite the committed file so a file-backed world doesn't just
+        // reappear on the next reload (the boot merge would re-add it). Best
+        // effort — in a static build the localStorage delete still holds for
+        // the session. Updates the in-memory cache so the list refresh agrees.
+        void saveWorldsToFile(remaining);
         renderList();
       });
       row.appendChild(delBtn);
