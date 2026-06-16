@@ -62,7 +62,7 @@ await page.goto(REALM, { waitUntil: 'networkidle' });
 console.log('intro: the origin specimen');
 await page.waitForSelector('#card-realm.visible .world-card', { timeout: 20000 });
 await sleep(3000); // the slow slide settles + the void rises from white
-await click('.wc-enter');
+await click('.wc-act');
 
 // ── The alien entity descends and holds court. ──
 console.log('intro: the entity');
@@ -88,7 +88,7 @@ await sleep(2200);
 // (the dive). Go straight to the offer: select a held world, the dealer's
 // offer-rune lights, take the trade.
 let traded = false;
-const mine = await page.$('.ct-hand-inline .world-card .wc-enter');
+const mine = await page.$('.ct-hand-inline .world-card .wc-act');
 const mineCard = await page.$('.ct-hand-inline .world-card');
 if (mineCard) {
   await mineCard.click({ force: true }); // select toward the offer
@@ -110,7 +110,7 @@ await sleep(1800);
 
 // ── The dive into a specimen world. ──
 console.log('dive');
-await click('#card-hand .world-card .wc-enter');
+await click('#card-hand .world-card .wc-act');
 await sleep(2900); // swell + white + reload (realm remounts under ?cardrealm)
 
 // The arrival on the plain URL with the hop flag re-armed, so the

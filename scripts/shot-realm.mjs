@@ -32,7 +32,7 @@ await page.goto(REALM, { waitUntil: 'networkidle' });
 await page.waitForSelector('#card-realm.visible .world-card', { timeout: 20000 });
 await sleep(2500);
 await shot('1-intro');
-await click('.wc-enter');
+await click('.wc-act');
 for (let i = 0; i < 30; i++) {
   if (await page.$('#card-realm.show-choice')) break;
   if (await page.$('#card-realm.click-armed')) { await sleep(120); await click('#card-clickwall'); }

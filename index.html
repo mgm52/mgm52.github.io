@@ -1882,53 +1882,65 @@
         background: rgba(28, 64, 84, 0.7);
         border-color: rgba(var(--bio-teal), 0.9);
       }
-      /* The SPECIMENS (still .world-card in the DOM): living worlds sealed in
-         dark bioluminescent membranes, drifting in the abyss. A deep
-         translucent body lets the void glow through; a tier-coloured edge-
-         light traces the membrane; a slow levitating bob keeps them adrift.
-         The bob rides the separate `translate` property so the transform-
-         based deals / dives / trade fly-outs compose with the float instead
-         of fighting it. Stacked preview panes — space / earth / hell — show
-         the world as a column; a specimen only carries the scenes its world
-         has opened (cards.ts buildCardEl). */
+      /* The SPECIMENS (still .world-card in the DOM, but no longer cards):
+         each is a living world suspended inside a round membrane BUBBLE
+         (.wc-orb) — the world floating in dark fluid behind a glowing rim —
+         with its name drifting beneath as a label and its resources as runes.
+         No header bar, no card frame, no full-width button: the silhouette is
+         a circle, not a rectangle. The root is just a transparent column that
+         stacks the bubble + label + runes and carries the float / deal / dive
+         / trade transforms; all the visual identity lives on .wc-orb. */
       .world-card {
         --tier-c: rgb(var(--bio-teal));
         --tier-b: rgba(var(--bio-teal), 0.55);
         --tier-glow: var(--bio-teal);
-        /* Resting shadow as a var so the arrive/ascend flashes (and the
-           selection glow) can return to or build on the same light. */
+        /* Resting bubble light, kept as a var so the arrive flash + selection
+           glow build on the same rim. */
         --wc-shadow:
-          inset 0 1px 0 rgba(var(--tier-glow), 0.35),
-          inset 0 0 26px -6px rgba(var(--tier-glow), 0.4),
-          0 18px 44px -10px rgba(0, 0, 0, 0.6),
-          0 0 30px -6px rgba(var(--tier-glow), 0.55);
-        /* Frame-pattern metrics (see the .wcf-* rules below); the creature
-           chips override these to draw the same patterns at chip scale. */
-        --fr-thick: 5px; --fr-inset: 3px; --fr-inset2: 7px;
-        --fr-r1: 14px; --fr-r2: 9px;
+          inset 0 2px 10px rgba(var(--tier-glow), 0.4),
+          inset 0 0 30px -4px rgba(var(--tier-glow), 0.35),
+          0 14px 40px -10px rgba(0, 0, 0, 0.65),
+          0 0 30px -4px rgba(var(--tier-glow), 0.55);
         position: relative;
         width: 200px; flex-shrink: 0;
-        /* The membrane: a dark teal-black body, slightly lit from the top,
-           over a backdrop blur so the abyss currents smear through it. */
+        display: flex; flex-direction: column; align-items: center; gap: 7px;
+        background: none; border: none; box-shadow: none; padding: 0;
+        color: #cfe9f0; text-align: center;
+        transition:
+          transform 650ms cubic-bezier(0.2, 0.9, 0.25, 1.08),
+          opacity 500ms ease, filter 200ms ease;
+        animation: wc-float 7s ease-in-out infinite;
+        animation-delay: calc(var(--deal-i, 0) * -1.9s);
+      }
+      /* The bubble itself: a perfect sphere of dark membrane fluid, rimmed in
+         the tier's bioluminescence, the abyss currents smearing through it. */
+      .wc-orb {
+        position: relative;
+        width: 100%; aspect-ratio: 1 / 1;
+        border-radius: 50%;
+        display: flex; align-items: center; justify-content: center;
+        overflow: hidden;
         background:
-          linear-gradient(160deg,
-            rgba(20, 46, 60, 0.62) 0%, rgba(10, 24, 38, 0.72) 48%,
-            rgba(8, 18, 30, 0.82) 100%);
-        background-size: 100% 100%;
+          radial-gradient(circle at 50% 32%, rgba(30, 60, 78, 0.55) 0%, rgba(8, 18, 30, 0.8) 60%, rgba(4, 10, 18, 0.92) 100%);
         backdrop-filter: blur(6px) saturate(1.3);
         -webkit-backdrop-filter: blur(6px) saturate(1.3);
         border: 1.5px solid var(--tier-b);
-        /* Organic, asymmetric membrane corners — not a printed card. */
-        border-radius: 22px 14px 22px 14px;
         box-shadow: var(--wc-shadow);
-        padding: 10px 10px 12px;
-        color: #cfe9f0;
-        text-align: left;
-        transition:
-          transform 650ms cubic-bezier(0.2, 0.9, 0.25, 1.08),
-          opacity 500ms ease, box-shadow 200ms ease, border-color 200ms ease;
-        animation: wc-float 7s ease-in-out infinite;
-        animation-delay: calc(var(--deal-i, 0) * -1.9s);
+        transition: box-shadow 220ms ease, border-color 220ms ease;
+      }
+      /* A glassy highlight arc across the top of the sphere. */
+      .wc-orb::before {
+        content: ""; position: absolute; inset: 0; border-radius: 50%;
+        pointer-events: none;
+        background: radial-gradient(60% 40% at 38% 16%, rgba(255, 255, 255, 0.28), transparent 70%);
+      }
+      /* The world inside the bubble, floating clear of the rim; its strip
+         edges feathered into the fluid so it reads as suspended, not framed. */
+      .wc-core {
+        position: relative; width: 72%; max-height: 82%; overflow: hidden;
+        display: flex; align-items: center; justify-content: center;
+        -webkit-mask: radial-gradient(120% 120% at 50% 50%, #000 62%, transparent 100%);
+        mask: radial-gradient(120% 120% at 50% 50%, #000 62%, transparent 100%);
       }
       /* The levitation: a few px on `translate`, phase-shifted per specimen. */
       @keyframes wc-float {
@@ -1945,51 +1957,31 @@
         --tier-c: rgb(var(--bio-amber)); --tier-b: rgba(var(--bio-amber), 0.7); --tier-glow: var(--bio-amber);
       }
       .world-card.big { width: min(280px, 80vw); }
-      /* ── Per-trader card frames ──
-         Each of the six creature slots across the gatherings deals cards in
-         its own border pattern (cards-core.ts FRAME_BASE), and the card
-         keeps the pattern through every trade — so where a card was minted,
-         and which cards in a creature's hand used to be yours, both read at
-         a glance. Player-minted cards keep the plain 2px frame above.
-         Patterns: 0 one thick · 1 one thin · 2 two thin · 3 two thick ·
-         4 three thin · 5 one thin + one dotted. */
-      .wcf-0, .wcf-3 { border-width: var(--fr-thick); }
-      .wcf-1, .wcf-2, .wcf-4, .wcf-5 { border-width: 1px; }
-      .wcf-2::before, .wcf-3::before, .wcf-4::before, .wcf-4::after, .wcf-5::before {
-        content: ""; position: absolute; pointer-events: none;
-        inset: var(--fr-inset); border-radius: var(--fr-r1);
-        border: 1px solid var(--tier-c, #b6b6bc);
-      }
-      .wcf-3::before { border-width: var(--fr-thick); }
-      .wcf-4::after { inset: var(--fr-inset2); border-radius: var(--fr-r2); }
-      .wcf-5::before { border-style: dotted; border-width: 2px; }
-      /* The player's own taken world — its membrane burns amber, ringed in a
-         hot halo, so it stands out the instant it surfaces in a dealer's
-         hand. */
+      /* The player's own taken world — its bubble burns amber, ringed in a hot
+         halo, so it stands out the instant it surfaces in a dealer's hand. */
       .world-card.origin {
         --tier-glow: var(--bio-amber);
         --tier-b: rgba(var(--bio-amber), 0.85);
-        box-shadow: var(--wc-shadow), 0 0 44px -2px rgba(var(--bio-amber), 0.6);
       }
-      .world-card.origin .wc-name { color: rgb(var(--bio-amber)); text-shadow: 0 0 12px rgba(var(--bio-amber), 0.7); }
-      .world-card.origin .wc-name::before { content: "✶ "; font-size: 11px; }
-      /* Adrift jitter: alternate specimens hang a hair off-square. Selection
+      .world-card.origin .wc-orb { box-shadow: var(--wc-shadow), 0 0 44px -2px rgba(var(--bio-amber), 0.6); }
+      .world-card.origin .wc-label { color: rgb(var(--bio-amber)); text-shadow: 0 0 12px rgba(var(--bio-amber), 0.7); }
+      .world-card.origin .wc-label::before { content: "✶ "; font-size: 11px; }
+      /* Adrift jitter: alternate specimens hang a hair off-true. Selection
          (translateY) overrides it via its own transform, and the trade
          fly-outs need their transforms left alone too. */
-      .ct-cards .world-card:nth-child(odd):not(.selected):not(.dived):not(.trade-given):not(.trade-received) { transform: rotate(-0.6deg); }
-      .ct-cards .world-card:nth-child(even):not(.selected):not(.dived):not(.trade-given):not(.trade-received) { transform: rotate(0.5deg); }
+      .ct-cards .world-card:nth-child(odd):not(.selected):not(.dived):not(.trade-given):not(.trade-received) { transform: rotate(-1.2deg); }
+      .ct-cards .world-card:nth-child(even):not(.selected):not(.dived):not(.trade-given):not(.trade-received) { transform: rotate(1deg); }
       .world-card.clickable { cursor: pointer; }
-      /* Hover: the membrane edge wakes and the world-light flares. */
-      .world-card.clickable:hover {
+      /* Hover: the bubble rim wakes and the world-light flares. */
+      .world-card.clickable:hover .wc-orb {
         border-color: rgba(var(--tier-glow), 0.95);
         box-shadow: var(--wc-shadow), 0 0 40px 2px rgba(var(--tier-glow), 0.6);
       }
       .world-card.grayed { opacity: 0.3; filter: saturate(0.15); }
-      .world-card.selected {
-        outline: 2px solid var(--tier-c);
-        outline-offset: 2px;
-        transform: translateY(-6px);
-        box-shadow: var(--wc-shadow), 0 0 46px 4px rgba(var(--tier-glow), 0.7);
+      .world-card.selected { transform: translateY(-6px); }
+      .world-card.selected .wc-orb {
+        border-color: var(--tier-c);
+        box-shadow: var(--wc-shadow), 0 0 46px 4px rgba(var(--tier-glow), 0.75);
       }
       /* Dealt in from above (cards.ts removes the class a frame after append);
          taken away upward into the goblin's hand. */
@@ -2020,33 +2012,27 @@
           wc-float 7s ease-in-out infinite;
       }
       @keyframes wc-arrive {
-        0% { opacity: 0; transform: translateY(-34px) rotate(2deg) scale(0.9); }
-        55% { box-shadow: var(--wc-shadow), 0 0 30px 8px var(--tier-c); }
-        100% { opacity: 1; box-shadow: var(--wc-shadow); }
+        0% { opacity: 0; transform: translateY(-34px) scale(0.9); filter: drop-shadow(0 0 0 var(--tier-c)); }
+        55% { filter: drop-shadow(0 0 16px var(--tier-c)); }
+        100% { opacity: 1; filter: drop-shadow(0 0 0 transparent); }
       }
       .world-card.taken {
         transform: translateY(-130vh) rotate(9deg) scale(0.7);
         opacity: 0;
         transition: transform 900ms cubic-bezier(0.5, 0, 0.8, 0.4), opacity 800ms ease;
       }
-      .wc-head { display: flex; justify-content: space-between; align-items: baseline; gap: 8px; margin-bottom: 6px; }
-      .wc-name {
-        font-family: var(--font-display); font-size: 15px; letter-spacing: 0.04em;
-        color: #dff3f8; text-shadow: 0 0 10px rgba(var(--tier-glow), 0.45);
+      /* The name drifts beneath the bubble — a glowing caption, not a header. */
+      .wc-label {
+        font-family: var(--font-display); font-size: 14px; letter-spacing: 0.05em;
+        line-height: 1.15; max-width: 92%;
+        color: #dff3f8; text-shadow: 0 0 10px rgba(var(--tier-glow), 0.5);
       }
-      /* Tier reads almost entirely through membrane colour; the word is kept
-         as a tiny dim glyph-tag so the language stays low-text. */
-      .wc-tier {
-        font-family: var(--font-mono); font-size: 10px; color: var(--tier-c);
-        text-transform: lowercase; letter-spacing: 0.16em; opacity: 0.75;
-      }
-      .wc-prevs { display: flex; flex-direction: column; gap: 3px; }
-      /* Scene windows cut into the membrane — the world's own dark glows
-         through, ringed by a faint bioluminescent edge. */
+      /* The world's scene-strip suspended inside the bubble: space band on
+         top, surface in the middle, pit at the bottom — a cross-section of the
+         world, floating. Seamless (no gaps) so it reads as one organism. */
+      .wc-prevs { display: flex; flex-direction: column; gap: 0; width: 100%; border-radius: 7px; overflow: hidden; box-shadow: 0 0 16px rgba(0, 0, 0, 0.6); }
       .wc-prev {
         display: block; width: 100%;
-        border-radius: 8px; border: 1px solid rgba(var(--bio-teal), 0.22);
-        box-shadow: 0 1px 8px rgba(0, 0, 0, 0.55), inset 0 0 0 1px rgba(0, 0, 0, 0.4);
         image-rendering: pixelated;
         --pane-glow: var(--bio-amber);
       }
@@ -2057,21 +2043,39 @@
       /* A scene with nothing built sinks into the dark; one holding three or
          more structures breathes light (cards.ts classifies via
          sceneStructureCounts). */
-      .wc-prev.pane-faded { opacity: 0.4; filter: saturate(0.5); }
-      .wc-prev.pane-glow {
-        border-color: rgba(var(--pane-glow), 0.85);
-        animation: wc-pane-glow 2.8s ease-in-out infinite;
-      }
+      .wc-prev.pane-faded { opacity: 0.45; filter: saturate(0.5); }
+      .wc-prev.pane-glow { animation: wc-pane-glow 2.8s ease-in-out infinite; }
       @keyframes wc-pane-glow {
-        0%, 100% { box-shadow: 0 0 7px 0 rgba(var(--pane-glow), 0.4); }
-        50% { box-shadow: 0 0 15px 2px rgba(var(--pane-glow), 0.7); }
+        0%, 100% { filter: brightness(1); }
+        50% { filter: brightness(1.25) saturate(1.2); }
       }
+      /* The action GLYPH PIP, riding the bottom of the bubble — enter / observe
+         — a small circle showing just the glyph; on hover it stretches to
+         reveal the word. No card-style button. */
+      .wc-act {
+        position: absolute; bottom: 4%; left: 50%; transform: translateX(-50%);
+        z-index: 3; display: inline-flex; align-items: center; gap: 0;
+        height: 26px; padding: 0 8px; max-width: 26px;
+        border-radius: 13px; cursor: pointer; overflow: hidden;
+        background: rgba(6, 14, 24, 0.82); color: #e6fbff;
+        border: 1px solid rgba(var(--tier-glow), 0.7);
+        box-shadow: 0 0 14px rgba(var(--tier-glow), 0.5), inset 0 1px 0 rgba(var(--tier-glow), 0.3);
+        font-family: var(--font-display); letter-spacing: 0.12em; white-space: nowrap;
+        transition: max-width 240ms cubic-bezier(0.2, 0.9, 0.25, 1), background 160ms ease, box-shadow 160ms ease;
+      }
+      .wc-act-glyph { font-size: 14px; line-height: 1; flex: 0 0 auto; width: 14px; text-align: center; }
+      .wc-act-word { font-size: 11px; opacity: 0; padding-left: 5px; transition: opacity 200ms ease; }
+      .world-card:hover .wc-act, .wc-act:hover {
+        max-width: 130px; background: rgba(10, 26, 38, 0.92);
+        box-shadow: 0 0 22px rgba(var(--tier-glow), 0.7), inset 0 1px 0 rgba(var(--tier-glow), 0.4);
+      }
+      .world-card:hover .wc-act-word, .wc-act:hover .wc-act-word { opacity: 1; }
       /* Resources as bioluminescent runes (cards.ts resourcesEl prepends a
          glyph per kind) + a glowing count — low-text, no unit words. */
       .wc-res {
-        margin-top: 7px; font-family: var(--font-mono); font-size: 13px;
-        display: flex; flex-wrap: wrap; gap: 3px 10px;
-        justify-content: center;
+        font-family: var(--font-mono); font-size: 12.5px;
+        display: flex; flex-wrap: wrap; gap: 2px 9px;
+        justify-content: center; max-width: 96%;
       }
       .wc-res span { display: inline-flex; align-items: baseline; gap: 3px; }
       .wc-res .wc-rune { font-size: 12px; opacity: 0.95; }
@@ -2082,20 +2086,6 @@
       .wc-res .res-bones { color: #cdd6e0; }
       .wc-res .res-goblins { color: #79e89a; }
       .wc-res .res-nothing { color: #5b7382; font-style: italic; }
-      .wc-enter {
-        width: 100%; margin-top: 8px;
-        background: rgba(var(--tier-glow), 0.1); color: #e2f6fb;
-        border: 1px solid rgba(var(--tier-glow), 0.5); border-radius: 11px;
-        font-family: var(--font-display); font-size: 13px; letter-spacing: 0.14em;
-        padding: 7px 4px; cursor: pointer;
-        box-shadow: inset 0 1px 0 rgba(var(--tier-glow), 0.25), 0 3px 12px rgba(0, 0, 0, 0.4);
-        transition: box-shadow 150ms ease, border-color 150ms ease, background 150ms ease;
-      }
-      .wc-enter:hover {
-        background: rgba(var(--tier-glow), 0.22);
-        border-color: rgba(var(--tier-glow), 0.95);
-        box-shadow: inset 0 1px 0 rgba(var(--tier-glow), 0.4), 0 4px 16px rgba(0, 0, 0, 0.5), 0 0 18px rgba(var(--tier-glow), 0.5);
-      }
       /* Each view deals its pieces in with a small stagger (cards.ts sets
          --deal-i per element). `backwards` keeps late items invisible until
          their delay; one-shot — re-renders mid-interaction don't re-add it. */
@@ -2362,7 +2352,7 @@
       }
       /* Finger-sized targets on touch. */
       @media (pointer: coarse) {
-        .wc-enter { padding: 11px 4px; }
+        .wc-act { height: 30px; }
         .ct-back, .ct-wait, .ct-give { padding: 12px 20px; }
       }
       /* Still the same dream, just a still one: park the ambient drift

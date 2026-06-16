@@ -791,16 +791,18 @@ type CardElOpts = {
 };
 
 function buildCardEl(card: WorldCard, opts: CardElOpts = {}): HTMLElement {
+  // A SPECIMEN, not a card: a circular world-bubble (.wc-orb) holding the
+  // world suspended in dark membrane fluid, with the name floating beneath
+  // and resources as runes — no header bar, no card frame, no full-width
+  // button. The trade animations still find it by .world-card + data-card-id.
   const root = document.createElement('div');
   root.className = `world-card t-${card.tier}${opts.big ? ' big' : ''}${card.origin ? ' origin' : ''}`;
-  // The trade animations find a card's element by its id. Every card wears the
-  // same plain thin border now (no per-trader frame patterns).
   root.dataset.cardId = String(card.id);
-  const head = document.createElement('div');
-  head.className = 'wc-head';
-  head.innerHTML = `<span class="wc-name"></span><span class="wc-tier">${card.tier}</span>`;
-  (head.querySelector('.wc-name') as HTMLElement).textContent = card.name;
-  root.appendChild(head);
+
+  const orb = document.createElement('div');
+  orb.className = 'wc-orb';
+  const core = document.createElement('div');
+  core.className = 'wc-core';
 
   const st = decodedWorld(card);
   const panes = document.createElement('div');
@@ -844,21 +846,40 @@ function buildCardEl(card: WorldCard, opts: CardElOpts = {}): HTMLElement {
     treat(cvEarth, counts.earth);
     treat(cvHell, counts.hell);
   }
-  root.appendChild(panes);
+  core.appendChild(panes);
+  orb.appendChild(core);
+
+  // The action sits as a glyph PIP on the bubble's rim (enter / observe), so
+  // the specimen never grows a card-style button. The label passed in is
+  // "<glyph> <word>"; the pip shows the glyph and reveals the word on hover.
+  if (opts.enterLabel) {
+    const [glyph, ...rest] = opts.enterLabel.split(' ');
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = 'wc-act';
+    btn.innerHTML = `<span class="wc-act-glyph">${glyph}</span><span class="wc-act-word">${rest.join(' ')}</span>`;
+    btn.addEventListener('click', (e) => { e.stopPropagation(); opts.onEnter?.(root); });
+    orb.appendChild(btn);
+  }
+  root.appendChild(orb);
+
+  const label = document.createElement('div');
+  label.className = 'wc-label';
+  label.textContent = card.name;
+  root.appendChild(label);
 
   root.appendChild(resourcesEl(card.resources));
 
-  if (opts.enterLabel) {
-    const btn = document.createElement('button');
-    btn.type = 'button';
-    btn.className = 'wc-enter';
-    btn.textContent = opts.enterLabel;
-    btn.addEventListener('click', (e) => { e.stopPropagation(); opts.onEnter?.(root); });
-    root.appendChild(btn);
-  }
   if (opts.onClick) {
+    // A selectable specimen (gathering hand): the bubble toggles the offer
+    // selection; the pip still handles enter.
     root.classList.add('clickable');
     root.addEventListener('click', () => opts.onClick?.());
+  } else if (opts.enterLabel) {
+    // Enter-only specimens (table hand, intro, dealer decks): the whole
+    // bubble is the action, the pip just advertises it.
+    root.classList.add('clickable');
+    root.addEventListener('click', () => opts.onEnter?.(root));
   }
   return root;
 }
