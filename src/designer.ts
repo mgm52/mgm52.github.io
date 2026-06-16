@@ -342,6 +342,31 @@ function labelled(label: string, control: HTMLElement): HTMLElement {
   return wrap;
 }
 
+// Copy text to the clipboard, preferring the async Clipboard API and falling
+// back to a hidden-textarea execCommand for insecure/older contexts (e.g. a
+// site served over plain http where navigator.clipboard is unavailable).
+async function copyToClipboard(text: string): Promise<boolean> {
+  try {
+    if (navigator.clipboard?.writeText) {
+      await navigator.clipboard.writeText(text);
+      return true;
+    }
+  } catch { /* fall through to the legacy path */ }
+  try {
+    const ta = document.createElement('textarea');
+    ta.value = text;
+    ta.style.position = 'fixed';
+    ta.style.top = '-9999px';
+    ta.style.opacity = '0';
+    document.body.appendChild(ta);
+    ta.focus();
+    ta.select();
+    const ok = document.execCommand('copy');
+    ta.remove();
+    return ok;
+  } catch { return false; }
+}
+
 // A realm-access checkbox: a labelled toggle whose change writes straight into
 // the live state via `onChange(checked)`.
 function realmToggle(label: string, initial: boolean, onChange: (on: boolean) => void): HTMLElement {
@@ -446,6 +471,25 @@ export function openDesignerList(): void {
     })();
   });
   fileRow.appendChild(fileBtn);
+
+  // COPY DATA — put the whole library's JSON on the clipboard. The escape hatch
+  // when SAVE TO FILE can't reach a dev server (static build, deployed site):
+  // paste it straight into public/worlds.json by hand. Same JSON shape the file
+  // holds, so it round-trips through initBuiltinWorlds on the next boot.
+  const copyBtn = document.createElement('button');
+  copyBtn.type = 'button';
+  copyBtn.className = 'wd-copy';
+  copyBtn.textContent = '📋 COPY DATA';
+  copyBtn.addEventListener('click', () => {
+    void (async () => {
+      const list = loadManualWorlds();
+      const ok = await copyToClipboard(JSON.stringify(list, null, 2));
+      fileStatus.textContent = ok
+        ? `copied ${list.length} world${list.length === 1 ? '' : 's'} JSON to clipboard`
+        : 'copy failed — clipboard unavailable';
+    })();
+  });
+  fileRow.appendChild(copyBtn);
   fileRow.appendChild(fileStatus);
   panel.appendChild(fileRow);
 
