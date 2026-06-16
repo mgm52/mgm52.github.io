@@ -1,0 +1,119 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>goo · glazed (pastel)</title>
+<style>
+  html, body { margin: 0; height: 100%; background: #eef2f8; overflow: hidden; }
+  #gl { display: block; width: 100vw; height: 100vh; }
+</style>
+</head>
+<body>
+<canvas id="gl"></canvas>
+<script src="card.js"></script>
+<script src="gl.js"></script>
+<script>
+// ── Combo 8 · "Glazed" (v2 × v4, pastel) ──
+// v2's flat encased-jelly card (rounded glass bevel, gentle whole-slab
+// refraction) with a handful of fat 3D-looking goo droplets — v4's beads —
+// crawling across the face: each a raised lens that bulges the card under it
+// with a bright wet specular. Card stays dead flat and legible; only the
+// droplets distort. On the pastel-aurora near-white.
+const FRAG = `#version 300 es
+precision highp float;
+in vec2 vUv; out vec4 frag;
+uniform vec2 uRes; uniform float uTime; uniform sampler2D uTex;
+uniform vec4 uCard; uniform float uCardR;
+
+float hash(vec2 p){ p=fract(p*vec2(123.34,345.45)); p+=dot(p,p+34.345); return fract(p.x*p.y); }
+float vnoise(vec2 p){ vec2 i=floor(p),f=fract(p); vec2 u=f*f*(3.0-2.0*f);
+  float a=hash(i),b=hash(i+vec2(1,0)),c=hash(i+vec2(0,1)),d=hash(i+vec2(1,1));
+  return mix(mix(a,b,u.x),mix(c,d,u.x),u.y); }
+float fbm(vec2 p){ float s=0.0,a=0.5; for(int i=0;i<3;i++){ s+=a*vnoise(p); p*=2.03; a*=0.5; } return s; }
+vec4 cardTex(vec2 st){ return texture(uTex, vec2(st.x, 1.0-st.y)); }
+float sdRound(vec2 p, vec2 b, float r){ vec2 q=abs(p)-b+r; return min(max(q.x,q.y),0.0)+length(max(q,0.0))-r; }
+
+vec3 pastelBg(vec2 st, float t){
+  vec2 q=(st-0.5)*vec2(uRes.x/uRes.y,1.0);
+  vec3 col = mix(vec3(0.985,0.982,0.997), vec3(0.927,0.945,0.972), clamp(length(q)*0.95,0.0,1.0));
+  vec3 cLav=vec3(0.66,0.56,0.98), cBlu=vec3(0.46,0.77,0.94), cPnk=vec3(0.97,0.66,0.81), cGld=vec3(0.99,0.87,0.59);
+  vec2 p1=vec2(-0.45+sin(t*0.10)*0.18, -0.35+cos(t*0.08)*0.14);
+  vec2 p2=vec2( 0.50+sin(t*0.07+2.0)*0.16,-0.10+cos(t*0.09+1.0)*0.14);
+  vec2 p3=vec2(-0.30+sin(t*0.06+4.0)*0.16, 0.45+cos(t*0.05+3.0)*0.14);
+  vec2 p4=vec2( 0.35+sin(t*0.08+1.5)*0.16, 0.40+cos(t*0.07+5.0)*0.14);
+  col=mix(col,cLav,exp(-dot(q-p1,q-p1)*2.4)*0.30);
+  col=mix(col,cBlu,exp(-dot(q-p2,q-p2)*2.6)*0.26);
+  col=mix(col,cPnk,exp(-dot(q-p3,q-p3)*2.6)*0.24);
+  col=mix(col,cGld,exp(-dot(q-p4,q-p4)*3.0)*0.20);
+  return col;
+}
+
+vec2 cC, cH; float cR;
+
+// surface height: a near-flat sheet with a few crawling round goo beads
+float H(vec2 p){
+  float h = 0.10*fbm(p*3.0 + uTime*0.2);
+  for(int i=0;i<4;i++){ float fi=float(i);
+    vec2 c = cC + vec2(sin(uTime*0.32+fi*1.7), cos(uTime*0.26+fi*2.1))*vec2(0.17,0.24);
+    h += 0.80*exp(-dot(p-c,p-c)*30.0);
+  }
+  return h;
+}
+
+void main(){
+  vec2 st = vec2(vUv.x, 1.0-vUv.y);
+  float aspect = uRes.x/uRes.y;
+  vec3 bg = pastelBg(st, uTime);
+
+  cC = uCard.xy + uCard.zw*0.5; cH = uCard.zw*0.5; cR = uCardR;
+  vec2 jHalf = cH + vec2(0.035,0.03); float jR = cR+0.04;
+
+  vec2 wob = vec2(sin(uTime*0.6),cos(uTime*0.5))*0.004;
+  vec2 p = st - cC - wob;
+
+  float d = sdRound(p, jHalf, jR);
+  float inside = smoothstep(0.004,-0.004,d);
+
+  // soft drop shadow on the pastel
+  float sh = smoothstep(0.07,0.0,d)*(1.0-inside);
+  bg *= 1.0 - sh*0.16;
+
+  // bead bump normal
+  vec2 e=vec2(0.0020,0.0);
+  float hL=H(p-e.xy),hR=H(p+e.xy),hD=H(p-e.yx),hU=H(p+e.yx);
+  vec3 nB = normalize(vec3((hL-hR), (hD-hU), 0.10));
+  // rounded jelly bevel toward the rim (the v2 encasing)
+  vec2 de=vec2(0.0016,0.0);
+  float dL=sdRound(p-de.xy,jHalf,jR),dR2=sdRound(p+de.xy,jHalf,jR);
+  float dD=sdRound(p-de.yx,jHalf,jR),dU=sdRound(p+de.yx,jHalf,jR);
+  vec2 gd=normalize(vec2(dR2-dL,dU-dD)+1e-6);
+  float tb=clamp(-d/0.06,0.0,1.0);
+  vec3 nBevel=normalize(vec3(gd*(1.0-tb),0.45+0.55*tb));
+  vec3 N=normalize(mix(nBevel,nB,0.25+0.7*tb));
+
+  float beadAmt = smoothstep(0.15,0.6,H(p));
+  vec2 stR = st + N.xy*(0.010 + 0.045*beadAmt + 0.016*(1.0-tb));
+  vec4 cc = cardTex(stR);
+
+  vec3 gooTint=vec3(0.90,0.78,0.42);
+  vec3 under = mix(mix(bg, vec3(0.94,0.91,0.83), 0.5), cc.rgb, cc.a);
+
+  vec3 L=normalize(vec3(0.4*sin(uTime*0.25)+0.15,-0.5,0.78)), V=vec3(0,0,1);
+  vec3 Hh=normalize(L+V);
+  float spec=pow(max(dot(N,Hh),0.0),46.0)*1.2 + pow(max(dot(N,Hh),0.0),140.0)*0.9;
+  float fres=pow(1.0-max(N.z,0.0),3.0);
+
+  vec3 lit=under;
+  lit+=spec*vec3(1.0);
+  lit+=fres*mix(gooTint,vec3(1.0),0.45)*0.4;
+  // a faint warm shading + soft contact darkening at each droplet rim
+  lit+=beadAmt*gooTint*0.07;
+  lit*=1.0 - smoothstep(0.05,0.32,H(p))*smoothstep(0.7,0.32,H(p))*0.10;
+
+  vec3 col=mix(bg, lit, inside);
+  frag=vec4(clamp(col,0.0,1.0),1.0);
+}`;
+GooGL.start(FRAG, { dt: 0.05, w: 760, h: 950, seed: 7 });
+</script>
+</body>
+</html>
