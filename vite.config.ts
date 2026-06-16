@@ -17,10 +17,16 @@ function worldsFile(): Plugin {
     configureServer(server) {
       server.middlewares.use((req, res, next) => {
         if (req.url?.split('?')[0] !== WORLDS_SAVE_URL || req.method !== 'POST') return next();
-        let body = '';
-        req.on('data', (chunk) => { body += chunk; });
+        // Collect raw bytes and decode UTF-8 ONCE at the end. Decoding each
+        // chunk separately (body += chunk) splits any multi-byte character that
+        // straddles a chunk boundary into U+FFFD replacement chars — which
+        // silently corrupts the compressToUTF16 world payloads (their code
+        // points are 3 bytes each in UTF-8), as it did to a saved world before.
+        const chunks: Buffer[] = [];
+        req.on('data', (chunk: Buffer) => { chunks.push(chunk); });
         req.on('end', () => {
           try {
+            const body = Buffer.concat(chunks).toString('utf8');
             // Validate it parses as an array before writing, so a malformed
             // POST can never corrupt the committed file.
             const parsed = JSON.parse(body);
