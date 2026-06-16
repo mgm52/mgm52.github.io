@@ -1653,6 +1653,16 @@
         animation: cd-rise3 74s linear infinite;
       }
       @keyframes cd-rise3 { to { transform: translateY(-640px); } }
+      /* The living iridescent field (card-goo.ts) — opaline metaballs drifting
+         over a luminous near-white, painted full-bleed behind the glass. When
+         WebGL is present it paints opaque and covers the CSS dream above;
+         when it isn't, the canvas stays blank and the dream carries the realm. */
+      #card-goo {
+        position: absolute; inset: 0; width: 100%; height: 100%;
+        display: block; pointer-events: none;
+        /* Below the stage (z auto) but above the CSS dream — paint order by
+           source position; an explicit z-index would lift it over the cards. */
+      }
       /* The stage holds whichever view is up (intro card / table / gathering /
          trade); scrolls when cards overflow a small screen. */
       #card-stage {
@@ -1691,35 +1701,45 @@
          PLACEHOLDER ART — swap for a real ethereal-creature sprite later. */
       #card-goblin {
         position: absolute; top: 0; left: 50%;
-        --csize: 40vh;
-        --crow: 4;
+        --csize: 42vh;
         width: var(--csize); height: var(--csize);
-        background-image: url('assets/rigged_goblin_dancing_aligol3dart_orc_idle.png');
-        background-repeat: no-repeat;
-        background-size: calc(var(--csize) * 8) calc(var(--csize) * 8);
-        background-position-x: 0;
-        background-position-y: calc(var(--csize) * var(--crow) * -1);
-        image-rendering: pixelated;
-        transform: translate(-50%, -110%) scaleY(-1);
+        transform: translate(-50%, -125%);
         transition: transform 1800ms cubic-bezier(0.22, 1, 0.36, 1);
-        filter: brightness(0) invert(0.93) drop-shadow(0 0 18px rgba(162, 150, 230, 0.6));
-        opacity: 0.95;
-        animation:
-          card-goblin-idle 1.6s steps(8) infinite,
-          card-goblin-glow 3.4s ease-in-out infinite;
+        opacity: 0.98;
         pointer-events: none;
         z-index: 4;
       }
-      #card-realm.goblin-in #card-goblin { transform: translate(-50%, -14%) scaleY(-1); }
-      @keyframes card-goblin-idle {
-        from { background-position-x: 0; }
-        to   { background-position-x: calc(var(--csize) * -8); }
+      #card-realm.goblin-in #card-goblin { transform: translate(-50%, -22%); }
+      /* The swindler's liquid body: a big pale-iridescent metaball, the same
+         substance as the traders, fused by the goo filter and lit by a slow
+         drifting glow. Bigger and paler than a trader — ancient, ethereal. */
+      .cg-body {
+        position: absolute; inset: 0;
+        filter: url(#cardGooey) drop-shadow(0 8px 40px rgba(168, 152, 244, 0.9));
+        animation: cg-glow 4.2s ease-in-out infinite;
       }
-      /* A slow breathing glow — the only "alive" tell a silhouette gets.
-         The hue drifts lavender → ice and back, an iridescent shimmer. */
-      @keyframes card-goblin-glow {
-        0%, 100% { filter: brightness(0) invert(0.93) drop-shadow(0 0 14px rgba(168, 150, 235, 0.45)); }
-        50%      { filter: brightness(0) invert(0.94) drop-shadow(0 0 28px rgba(130, 180, 240, 0.8)); }
+      .cg-core, .cg-d {
+        position: absolute; border-radius: 50%;
+        background: radial-gradient(circle at 40% 34%,
+          rgba(255, 255, 255, 0.98) 0%, var(--hue, #e7ddff) 42%, var(--edge, #bda6f2) 65%, rgba(255, 255, 255, 0) 80%);
+      }
+      .cg-core {
+        left: 10%; top: 8%; width: 80%; height: 80%;
+        animation: ct-blob-breathe 5.6s ease-in-out infinite, ct-blob-morph 11s ease-in-out infinite;
+      }
+      .cg-d1 { --hue: #e0ecff; --edge: #a9cdf2; left: 4%; top: 30%; width: 44%; height: 44%; animation: ct-blob-orbit1 7.2s ease-in-out infinite; }
+      .cg-d2 { --hue: #ffe6f2; --edge: #f2b6d4; right: 4%; top: 24%; width: 40%; height: 40%; animation: ct-blob-orbit2 8.6s ease-in-out infinite; }
+      .cg-d3 { --hue: #eee6ff; --edge: #cbb6f2; left: 30%; bottom: 4%; width: 38%; height: 38%; animation: ct-blob-orbit1 9.4s ease-in-out infinite reverse; }
+      .cg-sheen {
+        position: absolute; left: 30%; top: 20%; width: 22%; height: 16%;
+        border-radius: 50%;
+        background: radial-gradient(circle at 40% 35%, rgba(255, 255, 255, 0.95), rgba(255, 255, 255, 0) 70%);
+        filter: blur(2px);
+        animation: ct-blob-breathe 5.6s ease-in-out infinite;
+      }
+      @keyframes cg-glow {
+        0%, 100% { filter: url(#cardGooey) drop-shadow(0 8px 34px rgba(170, 156, 240, 0.75)); }
+        50%      { filter: url(#cardGooey) drop-shadow(0 8px 52px rgba(132, 182, 240, 1)); }
       }
       /* Dialogue line. It opens at the top of the empty screen ("wait a
          moment!"), then glides down ahead of the descending creature so it
@@ -2109,7 +2129,7 @@
            re-typed or swaps to the shorter "too many cards". */
         height: 2.6em; max-width: 22ch; overflow: hidden;
       }
-      .ct-stall .ct-creature-sprite { --csize: 76px; }
+      .ct-stall .ct-blob { --bsize: 132px; }
       /* The trader's deck, face-up and a size down so a few stalls read on
          one screen. Wraps for the rare exchange's deeper hands. */
       .ct-stall-cards {
@@ -2123,27 +2143,133 @@
         box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.7), 0 10px 28px -10px rgba(88, 88, 150, 0.22);
       }
       .ct-stall-cards .world-card { width: 132px; }
-      .ct-creature-sprite {
-        --csize: 110px;
-        --crow: 4;
-        width: var(--csize); height: var(--csize);
-        background-image: url('assets/rigged_goblin_dancing_aligol3dart_orc_idle.png');
-        background-repeat: no-repeat;
-        background-size: calc(var(--csize) * 8) calc(var(--csize) * 8);
-        background-position-x: 0;
-        background-position-y: calc(var(--csize) * var(--crow) * -1);
-        image-rendering: pixelated;
-        filter: brightness(0) invert(0.84) drop-shadow(0 4px 12px rgba(162, 150, 230, 0.55));
-        animation:
-          card-goblin-idle 1.6s steps(8) infinite,
-          ct-creature-glow 3.4s ease-in-out infinite;
+      /* ── The trader as a living iridescent metaball ──
+         The creature's body IS its intent to trade. A breathing core and two
+         orbiting droplets, fused into one rounded mass by the SVG goo filter
+         (#cardGooey) so the satellites pinch off and rejoin like real liquid;
+         a sharp specular glint floats on top (outside the filter, so the blur
+         doesn't soften it). Each sub-blob carries a slightly different opaline
+         hue, so the merged body shimmers oil-on-pearl. Tier sets the palette:
+         lavender-pearl (common), ice-blue (uncommon), warm gold-rose (rare). */
+      .ct-blob {
+        --bsize: 132px;
+        /* common: lavender / aqua / rose, each with a deeper edge so the body
+           keeps colour against the pale field instead of washing to white. */
+        --c1: #e7ddff; --e1: #c1a6f4;
+        --c2: #cfe7ff; --e2: #97c6f4;
+        --c3: #ffd9ec; --e3: #f4a4cd;
+        --bglow: 178, 160, 245;
+        position: relative;
+        width: var(--bsize); height: var(--bsize);
+        transition: transform 700ms cubic-bezier(0.22, 1, 0.36, 1), filter 500ms ease;
       }
-      /* Gathering creatures sit a shade deeper than the big goblin so they
-         still read against the pale auroras; same breathing shimmer. */
-      @keyframes ct-creature-glow {
-        0%, 100% { filter: brightness(0) invert(0.83) drop-shadow(0 4px 12px rgba(168, 150, 235, 0.5)); }
-        50%      { filter: brightness(0) invert(0.86) drop-shadow(0 4px 20px rgba(130, 180, 240, 0.8)); }
+      .ct-blob.t-uncommon {
+        --c1: #dceeff; --e1: #a3d0f7; --c2: #c2dcff; --e2: #8bb6f0;
+        --c3: #d6f3ff; --e3: #97d4f2; --bglow: 130, 180, 240;
       }
+      .ct-blob.t-rare {
+        --c1: #fff0d6; --e1: #f4cd86; --c2: #ffdfc0; --e2: #f0b78b;
+        --c3: #ffd9ec; --e3: #f2a4cd; --bglow: 232, 196, 120;
+      }
+      .ct-blob-body {
+        position: absolute; inset: 0;
+        filter: url(#cardGooey) drop-shadow(0 7px 20px rgba(var(--bglow), 0.62));
+      }
+      .ct-blob-core, .ct-blob-d {
+        position: absolute; border-radius: 50%;
+        /* Opaline: a white glint, an iridescent body, a deeper saturated edge,
+           then a translucent falloff — the soft alpha the goo filter rounds
+           into one rolling mass. */
+        background: radial-gradient(circle at 38% 34%,
+          rgba(255, 255, 255, 0.96) 0%, var(--hue) 38%, var(--edge) 64%, rgba(255, 255, 255, 0) 80%);
+      }
+      .ct-blob-core {
+        --hue: var(--c1); --edge: var(--e1);
+        left: 14%; top: 14%; width: 72%; height: 72%;
+        animation: ct-blob-breathe 5.2s ease-in-out infinite, ct-blob-morph 9s ease-in-out infinite;
+      }
+      .ct-blob-d1 {
+        --hue: var(--c2); --edge: var(--e2);
+        left: 4%; top: 30%; width: 46%; height: 46%;
+        animation: ct-blob-orbit1 6.4s ease-in-out infinite;
+      }
+      .ct-blob-d2 {
+        --hue: var(--c3); --edge: var(--e3);
+        right: 6%; top: 20%; width: 40%; height: 40%;
+        animation: ct-blob-orbit2 7.8s ease-in-out infinite;
+      }
+      /* The sharp light that sells the wet, rounded surface. */
+      .ct-blob-sheen {
+        position: absolute; left: 26%; top: 20%; width: 26%; height: 20%;
+        border-radius: 50%;
+        background: radial-gradient(circle at 40% 35%, rgba(255, 255, 255, 0.95), rgba(255, 255, 255, 0) 70%);
+        filter: blur(1px);
+        animation: ct-blob-breathe 5.2s ease-in-out infinite;
+      }
+      @keyframes ct-blob-breathe {
+        0%, 100% { transform: scale(1); }
+        50% { transform: scale(1.05); }
+      }
+      /* The core slowly kneads its own outline — a soft, ever-shifting mass. */
+      @keyframes ct-blob-morph {
+        0%, 100% { border-radius: 48% 52% 56% 44% / 50% 46% 54% 50%; }
+        33% { border-radius: 56% 44% 47% 53% / 44% 54% 46% 56%; }
+        66% { border-radius: 44% 56% 52% 48% / 56% 48% 52% 44%; }
+      }
+      /* The droplets drift toward and away from the core, fusing and parting. */
+      @keyframes ct-blob-orbit1 {
+        0%, 100% { transform: translate(0, 0) scale(1); }
+        50% { transform: translate(34%, -16%) scale(0.86); }
+      }
+      @keyframes ct-blob-orbit2 {
+        0%, 100% { transform: translate(0, 0) scale(1); }
+        50% { transform: translate(-30%, 22%) scale(0.9); }
+      }
+      /* Intent fulfilled: the player's pick satisfies this trader's want. The
+         whole body surges toward the cards below, swells, and burns brighter —
+         the creature reaching for the trade. */
+      .ct-stall.eager .ct-blob {
+        transform: translateY(10px) scale(1.12);
+        filter: saturate(1.25) brightness(1.04);
+      }
+      .ct-stall.eager .ct-blob-body {
+        filter: url(#cardGooey) drop-shadow(0 8px 26px rgba(var(--bglow), 0.85));
+        animation: ct-blob-yearn 1.5s ease-in-out infinite;
+      }
+      @keyframes ct-blob-yearn {
+        0%, 100% { transform: translateY(0); }
+        50% { transform: translateY(6px); }
+      }
+      /* Drinking the trade in: the body surges large and burns bright as the
+         given worlds pour into it, then settles as it spills its own back. */
+      .ct-blob.absorbing { transform: scale(1.34); }
+      .ct-blob.absorbing .ct-blob-body {
+        filter: url(#cardGooey) drop-shadow(0 10px 34px rgba(var(--bglow), 1)) brightness(1.12) saturate(1.3);
+        animation: ct-blob-throb 0.6s ease-in-out infinite;
+      }
+      @keyframes ct-blob-throb {
+        0%, 100% { transform: scale(1); }
+        50% { transform: scale(1.08); }
+      }
+      /* ── Trade droplets ──
+         Iridescent beads that carry the exchange between hand and trader. The
+         overlay's goo filter fuses beads that bunch up at either end into one
+         flowing mass; in flight they read as a liquid stream. */
+      #card-drips {
+        position: fixed; inset: 0; pointer-events: none; z-index: 8;
+        filter: url(#cardGooey);
+      }
+      .ct-droplet {
+        position: fixed; border-radius: 50%; opacity: 0.96;
+        --dc: #cdb6f4; --dg: 178, 160, 245;
+        background: radial-gradient(circle at 38% 34%,
+          rgba(255, 255, 255, 0.98) 0%, var(--dc) 52%, rgba(255, 255, 255, 0) 80%);
+        box-shadow: 0 0 14px rgba(var(--dg), 0.7);
+        transition: transform 760ms cubic-bezier(0.5, 0, 0.4, 1), opacity 760ms ease;
+        will-change: transform, opacity;
+      }
+      .ct-droplet.t-uncommon { --dc: #9cc6f4; --dg: 130, 180, 240; }
+      .ct-droplet.t-rare { --dc: #f4cd86; --dg: 232, 196, 120; }
       .ct-creature-name { font-family: var(--font-display); font-size: 16px; color: #44444c; letter-spacing: 0.06em; }
       .ct-creature-line { font-family: var(--font-mono); font-size: 13px; color: #9a9aa2; }
       /* The stall's give-button: greyed until the player's hand selection
@@ -2281,6 +2407,13 @@
           animation-name: none;
         }
         .world-card.dealt { animation: ct-dealt 480ms cubic-bezier(0.2, 0.9, 0.25, 1) backwards; }
+        /* The traders' and swindler's bodies hold still — but keep their shape
+           (the goo filter and drop-shadow live on .ct-blob-body / .cg-body, so
+           only the ambient breathing/morph/orbit is parked). The functional
+           trade feedback (eager lean, absorb, droplets) is left moving. */
+        .ct-blob-core, .ct-blob-d, .ct-blob-sheen,
+        .cg-core, .cg-d, .cg-sheen { animation: none; }
+        .cg-body { animation: none; filter: url(#cardGooey) drop-shadow(0 8px 40px rgba(168, 152, 244, 0.85)); }
       }
 
       /* ── Entering / leaving a card world: the finale's pull-back language.
@@ -2819,12 +2952,40 @@
         <div class="cd-motes cd-m1"></div>
         <div class="cd-motes cd-m2"></div>
       </div>
+      <!-- The living iridescent field: a WebGL metaball sheet the cards'
+           frosted glass samples through their backdrop-blur (card-goo.ts).
+           Sits above the CSS dream (its fallback) and below everything else. -->
+      <canvas id="card-goo" aria-hidden="true"></canvas>
+      <!-- The goo filter: gives DOM droplets and the traders' liquid bodies
+           their metaball cohesion — overlapping soft shapes fuse into one
+           rounded mass (blur, then a steep alpha contrast). -->
+      <svg id="card-goo-defs" width="0" height="0" aria-hidden="true" style="position:absolute">
+        <defs>
+          <filter id="cardGooey">
+            <feGaussianBlur in="SourceGraphic" stdDeviation="6" result="b"/>
+            <feColorMatrix in="b" mode="matrix"
+              values="1 0 0 0 0  0 1 0 0 0  0 0 1 0 0  0 0 0 20 -9" result="g"/>
+            <feComposite in="SourceGraphic" in2="g" operator="atop"/>
+          </filter>
+        </defs>
+      </svg>
       <div id="card-stage"></div>
       <!-- The player's hand: pinned to the bottom of the realm, OUTSIDE the
            stage, so view swaps (table ↔ gathering ↔ trade) never re-deal or
            fade the cards the player is holding. cards.ts renderHand owns it. -->
       <div id="card-hand"></div>
-      <div id="card-goblin"></div>
+      <!-- The swindler: a great pale iridescent metaball that hangs from the
+           top of the realm and descends to take the player's first world.
+           The same liquid body the traders wear, scaled up (card-goblin CSS). -->
+      <div id="card-goblin" aria-hidden="true">
+        <div class="cg-body">
+          <div class="cg-core"></div>
+          <div class="cg-d cg-d1"></div>
+          <div class="cg-d cg-d2"></div>
+          <div class="cg-d cg-d3"></div>
+        </div>
+        <div class="cg-sheen"></div>
+      </div>
       <div id="card-speech"></div>
       <div id="card-clickwall"></div>
       <div id="card-choice">

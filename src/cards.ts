@@ -21,6 +21,7 @@
 // reach them; this file is the presentation + persistence half.
 
 import { playSound, type SoundName } from './audio';
+import { splashCardGoo, startCardGoo, stopCardGoo } from './card-goo';
 import { BUILDING_DEFS, BuildingKind, CELL, HELL, SPACE, WORLD, formatPower } from './config';
 import { getOptions } from './options';
 import { clearSave, getRawSave, saveGame, setRawSave } from './save';
@@ -974,6 +975,7 @@ export function maybeStartCardRealm(): void {
 // cinematic isn't covered by it.
 export function resetCardRealm(): void {
   realmStarted = false;
+  stopCardGoo();
   const realm = document.getElementById('card-realm');
   if (realm) {
     realm.classList.remove('visible', 'goblin-in', 'speaking', 'click-armed', 'show-choice');
@@ -992,6 +994,8 @@ async function runRealm(): Promise<void> {
   // the very first arrival, shorter when returning from a card world.
   await sleep(meta && meta.phase === 'free' ? 1200 : 2600);
   realm.classList.add('visible');
+  // The living iridescent field wakes with the realm.
+  startCardGoo();
   if (!meta) {
     meta = {
       v: 1,
@@ -1209,8 +1213,86 @@ function backButton(label: string, onBack: () => void): HTMLElement {
   return btn;
 }
 
-function creatureAvatar(): HTMLElement {
-  return div('ct-creature-sprite');
+// A trader's body: a living iridescent metaball. Two satellite droplets orbit
+// a breathing core, fused into one rounded mass by the SVG goo filter, with a
+// sharp specular glint floating on top (kept outside the filter so it stays
+// crisp). The blob IS the creature's intent to trade — it idles in a slow
+// yearn and, when the player's selection satisfies its want, the stall gains
+// `.eager` and the whole body leans toward the cards and flushes brighter.
+function creatureAvatar(tier: CardTier): HTMLElement {
+  const av = div(`ct-blob t-${tier}`);
+  const body = div('ct-blob-body');
+  body.appendChild(div('ct-blob-core'));
+  body.appendChild(div('ct-blob-d ct-blob-d1'));
+  body.appendChild(div('ct-blob-d ct-blob-d2'));
+  av.appendChild(body);
+  av.appendChild(div('ct-blob-sheen'));
+  return av;
+}
+
+// ─── The confluence: trade in liquid ─────────────────────────────────
+// A trade is two fluids merging. The picked cards liquefy and stream up into
+// the trader's body as iridescent droplets while it swells to drink them in;
+// then the trader's worlds bead off and condense into the player's hand.
+// These helpers paint the droplets that carry that exchange.
+
+// Tier → a hue in 0..1 for the background goo splash (rare gold, uncommon
+// blue, common lavender — the cards' own colour language).
+function tierHue(tier: CardTier): number {
+  return tier === 'rare' ? 0.09 : tier === 'uncommon' ? 0.58 : 0.78;
+}
+
+// A shared, pointer-transparent overlay above the realm where droplets fly.
+function dripLayer(): HTMLElement {
+  let el = document.getElementById('card-drips');
+  if (!el) {
+    el = document.createElement('div');
+    el.id = 'card-drips';
+    el.setAttribute('aria-hidden', 'true');
+    document.getElementById('card-realm')?.appendChild(el);
+  }
+  return el;
+}
+
+// Fling `count` iridescent beads from one rect's centre to another's, each
+// jittered off the path so the stream reads as liquid rather than a line.
+function flyDroplets(from: DOMRect, to: DOMRect, tier: CardTier, count: number, delay = 0): void {
+  const layer = dripLayer();
+  const fcx = from.left + from.width / 2, fcy = from.top + from.height / 2;
+  const tcx = to.left + to.width / 2, tcy = to.top + to.height / 2;
+  for (let i = 0; i < count; i++) {
+    const d = document.createElement('div');
+    d.className = `ct-droplet t-${tier}`;
+    const sz = 13 + Math.random() * 18;
+    const jx = (Math.random() - 0.5) * 46, jy = (Math.random() - 0.5) * 46;
+    d.style.width = d.style.height = `${sz}px`;
+    d.style.left = `${fcx + jx - sz / 2}px`;
+    d.style.top = `${fcy + jy - sz / 2}px`;
+    d.style.transitionDelay = `${delay + i * 45}ms`;
+    layer.appendChild(d);
+    const tx = tcx - fcx - jx, ty = tcy - fcy - jy;
+    requestAnimationFrame(() => requestAnimationFrame(() => {
+      d.style.transform = `translate(${tx}px, ${ty}px) scale(0.28)`;
+      d.style.opacity = '0';
+    }));
+    window.setTimeout(() => d.remove(), 1000 + delay + i * 45);
+  }
+}
+
+// Melt a card toward a target: it shrinks, blurs and fades along the path
+// while a stream of droplets carries its substance the same way.
+function liquefyCard(el: HTMLElement | null | undefined, to: DOMRect | undefined, tier: CardTier, delay = 0): void {
+  if (!el || !to) return;
+  const r = el.getBoundingClientRect();
+  const dx = (to.left + to.width / 2) - (r.left + r.width / 2);
+  const dy = (to.top + to.height / 2) - (r.top + r.height / 2);
+  el.style.transitionDelay = `${delay}ms`;
+  el.style.transition = 'transform 640ms cubic-bezier(0.5, 0, 0.55, 0.4), opacity 560ms ease, filter 560ms ease';
+  el.style.transform = `translate(${dx}px, ${dy}px) scale(0.32) rotate(${(Math.random() - 0.5) * 24}deg)`;
+  el.style.opacity = '0';
+  el.style.filter = 'blur(7px) saturate(1.45)';
+  el.style.pointerEvents = 'none';
+  flyDroplets(r, to, tier, 4, delay);
 }
 
 
@@ -1326,9 +1408,13 @@ function showGathering(meta: CardMeta, ev: TradeEvent): void {
   const refreshButtons = (): void => {
     const picked = minePicked();
     for (const cr of ev.creatures) {
+      const ready = cr.deck.length > 0 && !tradeAnimating && wantSatisfiedBy(cr.want, picked);
+      // The trader's body answers the selection: a satisfied want makes the
+      // whole stall `.eager` — the blob leans toward the cards and brightens.
+      const stallEl = row.querySelector(`[data-creature-id="${cr.id}"]`) as HTMLElement | null;
+      stallEl?.classList.toggle('eager', ready);
       const ref = stalls.get(cr.id);
       if (!ref?.giveBtn) continue;
-      const ready = cr.deck.length > 0 && !tradeAnimating && wantSatisfiedBy(cr.want, picked);
       ref.giveBtn.classList.toggle('ok', ready);
       ref.giveBtn.disabled = !ready;
       // Hidden (not removed) so its row of space stays reserved — the cards
@@ -1357,8 +1443,10 @@ function showGathering(meta: CardMeta, ev: TradeEvent): void {
     }
   };
 
-  // The exchange, in motion: the picked cards lift toward the stall while its
-  // whole deck drops into the hand. Once both halves land the swap re-renders.
+  // The exchange as a confluence: the picked cards liquefy and stream up into
+  // the trader's body as it swells to drink them, then the trader's worlds
+  // bead off and condense into the hand. Once both halves land, the swap
+  // re-renders and the arrivals bloom in.
   const executeTrade = (cr: Creature): void => {
     if (tradeAnimating) return;
     const picked = minePicked();
@@ -1366,30 +1454,36 @@ function showGathering(meta: CardMeta, ev: TradeEvent): void {
     tradeAnimating = true;
     refreshButtons();
     const received = cr.deck;
-    // Fly a card toward a target rect's centre — the given cards rise into the
-    // trader's stall, the received cards fall toward the hand, each tracking
-    // the actual on-screen direction of where it's headed.
-    const flyTo = (el: HTMLElement | null | undefined, target: DOMRect | undefined, scale: number): void => {
-      if (!el || !target) return;
-      const r = el.getBoundingClientRect();
-      const dx = (target.left + target.width / 2) - (r.left + r.width / 2);
-      const dy = (target.top + target.height / 2) - (r.top + r.height / 2);
-      el.style.transition = 'transform 640ms cubic-bezier(0.5, 0, 0.75, 0.4), opacity 560ms ease';
-      el.style.transform = `translate(${dx}px, ${dy}px) scale(${scale})`;
-      el.style.opacity = '0';
-      el.style.pointerEvents = 'none';
-    };
+    const tier = ev.tier;
+
     const stallEl = row.querySelector(`[data-creature-id="${cr.id}"]`) as HTMLElement | null;
-    const stallRect = stallEl?.querySelector('.ct-stall-cards')?.getBoundingClientRect()
-      ?? stallEl?.getBoundingClientRect();
+    const blobEl = stallEl?.querySelector('.ct-blob') as HTMLElement | null;
+    // Everything is given TO and received FROM the trader's body (the blob),
+    // so the substance visibly flows through the creature itself.
+    const blobRect = blobEl?.getBoundingClientRect() ?? stallEl?.getBoundingClientRect();
     const handRect = handWrap.getBoundingClientRect();
-    for (const m of picked) {
-      flyTo(gatherHandRow()?.querySelector(`[data-card-id="${m.id}"]`) as HTMLElement | null, stallRect, 0.6);
+
+    // The trader reaches out and begins to drink: the body swells, and the
+    // background field swells with it (the confluence pushing past the glass).
+    stallEl?.classList.remove('eager');
+    blobEl?.classList.add('absorbing');
+    if (blobRect) {
+      splashCardGoo(blobRect.left + blobRect.width / 2, blobRect.top + blobRect.height / 2, tierHue(tier), 1600);
     }
-    for (const t of received) {
-      flyTo(stallEl?.querySelector(`[data-card-id="${t.id}"]`) as HTMLElement | null, handRect, 0.85);
+
+    // 1) The given worlds melt up into the body.
+    for (const m of picked) {
+      liquefyCard(gatherHandRow()?.querySelector(`[data-card-id="${m.id}"]`) as HTMLElement | null, blobRect, tier);
     }
     realmSound('select', 0.9, 0.8);
+
+    // 2) The trader's own deck melts down toward the hand, beading off the
+    //    body — staggered just behind the give so the body fills, then spills.
+    received.forEach((t, i) => {
+      liquefyCard(stallEl?.querySelector(`[data-card-id="${t.id}"]`) as HTMLElement | null, handRect, tier, 220 + i * 60);
+      if (blobRect) flyDroplets(blobRect, handRect, tier, 3, 260 + i * 60);
+    });
+
     const wonOrigin = received.some((t) => t.origin);
     window.setTimeout(() => {
       tradeAnimating = false;
@@ -1404,6 +1498,7 @@ function showGathering(meta: CardMeta, ev: TradeEvent): void {
       const ref = stalls.get(cr.id);
       if (stallEl) {
         stallEl.classList.add('spent');
+        blobEl?.classList.remove('absorbing');
         const box = stallEl.querySelector('.ct-stall-cards');
         if (box) box.innerHTML = '';
         ref?.giveBtn?.remove();
@@ -1418,7 +1513,7 @@ function showGathering(meta: CardMeta, ev: TradeEvent): void {
       restateAll();
       refreshButtons();
       realmSound(wonOrigin ? 'task_complete' : 'ritual', wonOrigin ? 0.9 : 1, wonOrigin ? 1 : 0.9);
-    }, 680);
+    }, 1020);
   };
 
   // Clicks on the player's hand toggle the shared selection — every trader
@@ -1461,9 +1556,9 @@ function showGathering(meta: CardMeta, ev: TradeEvent): void {
     stalls.clear();
     ev.creatures.forEach((cr, i) => {
       const spent = cr.deck.length === 0;
-      const stall = div(`ct-stall${spent ? ' spent' : ''}`);
+      const stall = div(`ct-stall t-${ev.tier}${spent ? ' spent' : ''}`);
       stall.dataset.creatureId = String(cr.id);
-      stall.appendChild(creatureAvatar());
+      stall.appendChild(creatureAvatar(ev.tier));
       stall.appendChild(div('ct-creature-name', cr.name));
       const lineEl = div('ct-creature-line');
       stall.appendChild(lineEl);
