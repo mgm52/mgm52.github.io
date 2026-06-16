@@ -22,6 +22,7 @@
 
 import { playSound, type SoundName } from './audio';
 import { BUILDING_DEFS, BuildingKind, CELL, HELL, SPACE, WORLD, formatPower } from './config';
+import { getOptions } from './options';
 import { clearSave, getRawSave, saveGame, setRawSave } from './save';
 import { GameState, computePlayBounds, isInPlayCell } from './state';
 import { ALL_TASK_IDS } from './ui';
@@ -605,7 +606,7 @@ function drawEarthPreview(cv: HTMLCanvasElement, st: GameState): void {
   const g = cv.getContext('2d');
   if (!g) return;
   const w = cv.width, h = cv.height;
-  g.fillStyle = '#11140d';
+  g.fillStyle = '#0d0e10';
   g.fillRect(0, 0, w, h);
   const b = computePlayBounds(st);
   const bw = b.x1 - b.x0, bh = b.y1 - b.y0;
@@ -613,13 +614,22 @@ function drawEarthPreview(cv: HTMLCanvasElement, st: GameState): void {
   const ox = (w - bw * s) / 2, oy = (h - bh * s) / 2;
   const px = (cx: number) => ox + (cx - b.x0) * s;
   const py = (cy: number) => oy + (cy - b.y0) * s;
-  // Ground, with gentle per-cell mottling so it reads as terrain rather
-  // than a flat fill.
-  const greens = ['#30502f', '#2b4a2c', '#345633'];
+  // Ground, with gentle per-cell mottling so it reads as terrain rather than a
+  // flat fill. Tracks the real play-area colors (Options.bgColor/bgColor2 —
+  // grey by default) lightened for legibility at thumbnail size, instead of the
+  // old hardcoded green that never matched the actual grey ground in-game.
+  const o = getOptions();
+  const lift = (n: number, by: number): string => {
+    const r = Math.min(255, ((n >> 16) & 0xff) + by);
+    const gc = Math.min(255, ((n >> 8) & 0xff) + by);
+    const bc = Math.min(255, (n & 0xff) + by);
+    return `rgb(${r}, ${gc}, ${bc})`;
+  };
+  const tones = [lift(o.bgColor, 0x24), lift(o.bgColor2, 0x2e), lift(o.bgColor, 0x38)];
   for (let cy = b.y0; cy < b.y1; cy++) {
     for (let cx = b.x0; cx < b.x1; cx++) {
       if (!isInPlayCell(st, cx, cy)) continue;
-      g.fillStyle = greens[(cx * 7 + cy * 13) % 3];
+      g.fillStyle = tones[(cx * 7 + cy * 13) % 3];
       g.fillRect(px(cx), py(cy), s + 0.5, s + 0.5);
     }
   }
