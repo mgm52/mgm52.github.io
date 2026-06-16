@@ -35,5 +35,10 @@ screenshots/
 # Playwright video capture temp files (converted to .mp4, then deleted)
 videos/page@*.webm
 
+# Goo-shader test render scratch (PNG frame sequences, assembled into mp4)
+goo-tests/.frames-*/
+.goo-rec/
+
 # Claude Code local settings
 .claude/
+goo-tests/frames/

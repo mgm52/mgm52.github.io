@@ -1,0 +1,100 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>goo · submerged</title>
+<style>
+  html, body { margin: 0; height: 100%; background: #04100a; overflow: hidden; }
+  #gl { display: block; width: 100vw; height: 100vh; }
+</style>
+</head>
+<body>
+<canvas id="gl"></canvas>
+<script src="card.js"></script>
+<script src="gl.js"></script>
+<script>
+// ── Variation 5 · "Submerged" ──
+// The card hangs deep inside a body of translucent goo. We look down
+// through the wobbling gel surface — so the whole card swims under moving
+// refraction — while bright caustic webs crawl over it, the medium tints
+// and dims it with depth (absorption), and slow bubbles wobble up through
+// the gloop trailing rim-light.
+const FRAG = `#version 300 es
+precision highp float;
+in vec2 vUv; out vec4 frag;
+uniform vec2 uRes; uniform float uTime; uniform sampler2D uTex;
+uniform vec4 uCard; uniform float uCardR;
+
+float hash(vec2 p){ p=fract(p*vec2(123.34,345.45)); p+=dot(p,p+34.345); return fract(p.x*p.y); }
+float vnoise(vec2 p){ vec2 i=floor(p),f=fract(p); vec2 u=f*f*(3.0-2.0*f);
+  float a=hash(i),b=hash(i+vec2(1,0)),c=hash(i+vec2(0,1)),d=hash(i+vec2(1,1));
+  return mix(mix(a,b,u.x),mix(c,d,u.x),u.y); }
+float fbm(vec2 p){ float s=0.0,a=0.5; for(int i=0;i<4;i++){ s+=a*vnoise(p); p*=2.03; a*=0.5; } return s; }
+
+vec4 cardTex(vec2 st){ return texture(uTex, vec2(st.x, 1.0-st.y)); }
+
+const vec3 GOO_DEEP = vec3(0.04,0.16,0.09);
+const vec3 GOO_TINT = vec3(0.45,0.95,0.55);
+
+void main(){
+  vec2 st = vec2(vUv.x, 1.0-vUv.y);
+  float aspect = uRes.x/uRes.y;
+
+  // looking through the wobbling gel surface → refraction of everything below
+  vec2 w = (vec2(fbm(st*4.0+uTime*0.20), fbm(st*4.0+vec2(5.3)+uTime*0.20))-0.5)*0.045;
+  w += vec2(sin(st.y*8.0+uTime*1.1), cos(st.x*7.0+uTime*0.9))*0.007;
+  vec2 ruv = st + w;
+
+  // the card, swimming under the refraction; margin = open medium
+  vec4 c = cardTex(ruv);
+  vec3 col = mix(GOO_DEEP, c.rgb, c.a);
+
+  // depth absorption: deeper (lower) + outer = darker, greener
+  float depth = smoothstep(0.0,1.0, st.y)*0.6 + length((st-0.5)*vec2(aspect,1.0))*0.5;
+  col = mix(col, GOO_DEEP, clamp(depth*0.55,0.0,0.85));
+  col *= mix(vec3(1.0), GOO_TINT, 0.18);
+
+  // caustic webs crawling across the gloop
+  vec2 cp = ruv*vec2(aspect,1.0);
+  float n1 = fbm(cp*5.0 + uTime*0.30);
+  float n2 = fbm(cp*5.0 + vec2(11.0) - uTime*0.22);
+  float cau = pow(max(0.0, 1.0 - abs(n1-n2)*3.2), 3.0);
+  cau *= smoothstep(1.0,0.1, st.y);           // strongest near the lit surface
+  col += cau*GOO_TINT*0.9;
+
+  // suspended motes
+  for(int i=0;i<5;i++){ float fi=float(i);
+    vec2 mp = vec2(fract(hash(vec2(fi,1.0))+0.13*sin(uTime*0.2+fi)),
+                   fract(hash(vec2(fi,7.0)) - uTime*0.02));
+    float m = exp(-dot((st-mp)*vec2(aspect,1.0),(st-mp)*vec2(aspect,1.0))*1400.0);
+    col += m*GOO_TINT*0.5;
+  }
+
+  // bubbles wobbling up through the goo
+  for(int i=0;i<6;i++){ float fi=float(i);
+    float seedx = hash(vec2(fi,3.0));
+    float spd = 0.05 + 0.04*hash(vec2(fi,9.0));
+    float ph = fract(uTime*spd + hash(vec2(fi,5.0)));
+    float by = 1.0 - ph;                       // rising
+    float bx = seedx + 0.03*sin(uTime*1.3+fi*2.0);
+    float rad = 0.018 + 0.016*hash(vec2(fi,2.0));
+    vec2 dd = (st-vec2(bx,by))*vec2(aspect,1.0);
+    float r = length(dd)/rad;
+    // dark refractive body + bright rim crescent
+    float body = smoothstep(1.0,0.6,r);
+    float rim = smoothstep(1.05,0.9,r)*smoothstep(0.6,1.0,r);
+    float hi = rim * (0.5+0.5*dot(normalize(dd+1e-5), vec2(-0.5,-0.8)));
+    col = mix(col, col*0.6, body*0.5);
+    col += hi*vec3(0.8,1.0,0.85)*0.9;
+    col += body*GOO_TINT*0.06;
+  }
+
+  // top light shaft fade
+  col += smoothstep(0.5,-0.1, st.y)*GOO_TINT*0.08;
+
+  frag = vec4(clamp(col,0.0,1.0),1.0);
+}`;
+GooGL.start(FRAG, { dt: 0.05, w: 760, h: 950, seed: 7 });
+</script>
+</body>
+</html>

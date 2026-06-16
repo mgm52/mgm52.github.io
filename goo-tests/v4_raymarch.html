@@ -1,0 +1,145 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>goo · raymarched 3D droplets</title>
+<style>
+  html, body { margin: 0; height: 100%; background: #07080d; overflow: hidden; }
+  #gl { display: block; width: 100vw; height: 100vh; }
+</style>
+</head>
+<body>
+<canvas id="gl"></canvas>
+<script src="card.js"></script>
+<script src="gl.js"></script>
+<script>
+// ── Variation 4 · "Raymarched 3D droplets" ──
+// A genuinely 3D scene: the card is a thin rounded slab in space, and fat
+// beads of goo crawl over its front face — each a sphere smooth-unioned
+// (smin) onto the slab so they melt into one continuous gooey skin. The
+// camera slowly orbits so the relief reads as real depth; the card texture
+// is mapped onto the face and refracts under each raised bead, with key +
+// rim lighting and sliding speculars on the wet surface.
+const FRAG = `#version 300 es
+precision highp float;
+in vec2 vUv; out vec4 frag;
+uniform vec2 uRes; uniform float uTime; uniform sampler2D uTex;
+uniform vec4 uCard; uniform float uCardR;
+
+vec4 cardTex(vec2 st){ return texture(uTex, vec2(st.x, 1.0-st.y)); }
+
+float smin(float a, float b, float k){
+  float h = clamp(0.5+0.5*(b-a)/k, 0.0, 1.0);
+  return mix(b,a,h) - k*h*(1.0-h);
+}
+float sdRoundBox(vec3 p, vec3 b, float r){
+  vec3 q = abs(p)-b+r; return length(max(q,0.0)) + min(max(q.x,max(q.y,q.z)),0.0) - r;
+}
+
+const vec3 SLAB = vec3(0.62, 0.86, 0.055);
+
+// crawling bead positions on the front face
+vec3 beadPos(int i){
+  float fi = float(i);
+  float ph = uTime*0.5 + fi*1.27;
+  return vec3(sin(ph*0.9+fi)*0.42, cos(ph*0.66+fi*1.7)*0.66, SLAB.z);
+}
+float beadRad(int i){
+  float fi=float(i); return 0.15 + 0.045*sin(uTime*0.8+fi*2.0);
+}
+
+float map(vec3 p){
+  float d = sdRoundBox(p, SLAB, 0.06);
+  for(int i=0;i<5;i++){
+    float s = length(p-beadPos(i)) - beadRad(i);
+    d = smin(d, s, 0.11);
+  }
+  // a couple of big slow swells that roll across
+  for(int i=0;i<2;i++){
+    float fi=float(i);
+    vec3 c = vec3(0.55*sin(uTime*0.3+fi*3.1), 0.7*cos(uTime*0.22+fi*2.0), SLAB.z-0.02);
+    float s = length(p-c) - (0.26+0.05*sin(uTime*0.4+fi));
+    d = smin(d, s, 0.16);
+  }
+  return d;
+}
+vec3 calcNormal(vec3 p){
+  vec2 e = vec2(0.0016,0.0);
+  return normalize(vec3(
+    map(p+e.xyy)-map(p-e.xyy),
+    map(p+e.yxy)-map(p-e.yxy),
+    map(p+e.yyx)-map(p-e.yyx)));
+}
+
+vec3 background(vec2 uv){
+  vec3 a = vec3(0.04,0.045,0.075), b = vec3(0.10,0.10,0.15);
+  return mix(b, a, clamp(length(uv)*0.9,0.0,1.0));
+}
+
+void main(){
+  float aspect = uRes.x/uRes.y;
+  vec2 uv = (vUv*2.0-1.0); uv.x *= aspect;
+
+  // orbiting camera
+  float a = 0.42*sin(uTime*0.22);
+  float el = 0.18*sin(uTime*0.17);
+  vec3 ro = vec3(sin(a)*2.5, el*1.4+0.05, cos(a)*2.5);
+  vec3 ww = normalize(-ro);
+  vec3 uu = normalize(cross(vec3(0.0,1.0,0.0), ww));
+  vec3 vv = cross(ww, uu);
+  vec3 rd = normalize(uv.x*uu + uv.y*vv + 1.7*ww);
+
+  // sphere trace
+  float t = 0.0; float d; bool hit=false;
+  for(int i=0;i<78;i++){
+    vec3 p = ro + rd*t;
+    d = map(p);
+    if(d < 0.0008){ hit=true; break; }
+    if(t > 6.0) break;
+    t += d*0.85;
+  }
+
+  vec3 col = background(uv);
+  if(hit){
+    vec3 p = ro + rd*t;
+    vec3 n = calcNormal(p);
+
+    // card uv from the slab's front face footprint (screen-right is world -x
+    // for this camera, so x is flipped to keep the card un-mirrored)
+    float lx = -p.x/SLAB.x*0.5+0.5;
+    float ly =  p.y/SLAB.y*0.5+0.5;
+    vec2 st = uCard.xy + vec2(clamp(lx,0.0,1.0), 1.0-clamp(ly,0.0,1.0))*uCard.zw;
+    // refract the card under raised goo — beads stay translucent so the card
+    // reads through them
+    float raised = clamp((p.z - SLAB.z)*3.5 + 0.2, 0.0, 1.0);
+    st += n.xy * raised * 0.055;
+    vec4 cc = cardTex(st);
+    vec3 gooBody = vec3(0.62,0.80,0.45);
+    vec3 base = mix(cc.rgb, gooBody*0.7, raised*0.22);
+
+    // lighting
+    vec3 L1 = normalize(vec3(0.5, 0.8, 0.6));
+    vec3 L2 = normalize(vec3(-0.6, 0.2, 0.5));
+    vec3 V = -rd;
+    float dif = max(dot(n,L1),0.0)*0.7 + max(dot(n,L2),0.0)*0.3 + 0.5;
+    vec3 H1 = normalize(L1+V);
+    float spec = pow(max(dot(n,H1),0.0), 60.0)*1.1
+               + pow(max(dot(n,normalize(L2+V)),0.0), 30.0)*0.4;
+    float fres = pow(1.0-max(dot(n,V),0.0), 3.5);
+
+    vec3 lit = base*dif + spec*vec3(1.0) + fres*vec3(0.7,0.85,0.6)*0.6;
+    // subtle subsurface warmth in the thick beads
+    lit += raised*vec3(0.16,0.22,0.10)*0.5;
+
+    col = lit;
+
+    // soft ground/contact darkening at grazing depth
+    col *= mix(1.0, 0.85, clamp((t-2.0)*0.4,0.0,1.0));
+  }
+
+  frag = vec4(clamp(col,0.0,1.0), 1.0);
+}`;
+GooGL.start(FRAG, { dt: 0.05, w: 620, h: 775, seed: 7 });
+</script>
+</body>
+</html>

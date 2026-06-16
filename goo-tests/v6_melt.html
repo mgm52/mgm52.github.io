@@ -1,0 +1,121 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>goo · melting</title>
+<style>
+  html, body { margin: 0; height: 100%; background: #0a0810; overflow: hidden; }
+  #gl { display: block; width: 100vw; height: 100vh; }
+</style>
+</head>
+<body>
+<canvas id="gl"></canvas>
+<script src="card.js"></script>
+<script src="gl.js"></script>
+<script>
+// ── Variation 6 · "Melting" ──
+// The card is dissolving into goo: its lower third softens and the image
+// itself stretches downward into long viscous drips that ooze, lengthen and
+// shorten in slow columns, each tapering to a rounded glossy bead, all
+// falling toward a rippling pool of melted tier-gold at the bottom.
+const FRAG = `#version 300 es
+precision highp float;
+in vec2 vUv; out vec4 frag;
+uniform vec2 uRes; uniform float uTime; uniform sampler2D uTex;
+uniform vec4 uCard; uniform float uCardR;
+
+float hash(vec2 p){ p=fract(p*vec2(123.34,345.45)); p+=dot(p,p+34.345); return fract(p.x*p.y); }
+float vnoise(vec2 p){ vec2 i=floor(p),f=fract(p); vec2 u=f*f*(3.0-2.0*f);
+  float a=hash(i),b=hash(i+vec2(1,0)),c=hash(i+vec2(0,1)),d=hash(i+vec2(1,1));
+  return mix(mix(a,b,u.x),mix(c,d,u.x),u.y); }
+
+vec4 cardTex(vec2 st){ return texture(uTex, vec2(st.x, 1.0-st.y)); }
+
+const vec3 GOLD = vec3(0.86,0.70,0.28);
+
+float cLeft, cW, cTop, cH, cBottom, meltStart;
+
+// per-column drip tip y (below the card), as a smooth max of oozing columns
+float tipAt(float cl){
+  float t = cBottom + 0.012;
+  for(int i=0;i<7;i++){ float fi=float(i);
+    float cx = (fi+0.5)/7.0;
+    float len = 0.03 + 0.16*(0.5+0.5*sin(uTime*0.30 + fi*1.7));
+    float w = exp(-pow((cl-cx)/0.085, 2.0));
+    t = max(t, cBottom + len*w);
+  }
+  return t;
+}
+
+void main(){
+  vec2 st = vec2(vUv.x, 1.0-vUv.y);
+  float aspect = uRes.x/uRes.y;
+
+  cLeft=uCard.x; cW=uCard.z; cTop=uCard.y; cH=uCard.w; cBottom=cTop+cH;
+  meltStart = cTop + cH*0.62;
+
+  float cl = clamp((st.x-cLeft)/cW, 0.0, 1.0);
+  float tip = tipAt(cl);
+
+  // background
+  vec3 bg = mix(vec3(0.11,0.10,0.15), vec3(0.04,0.04,0.07),
+               clamp(length((st-0.5)*vec2(aspect,1.0))*1.1,0.0,1.0));
+  vec3 col = bg;
+  float region = 0.0;         // 1 where the card/drip band is active
+  vec2 samp = st;             // where to read the card
+
+  if(st.y < meltStart){
+    // intact card
+    samp = st;
+    region = 1.0;
+  } else if(st.y < tip){
+    // stretch the card's lower band [meltStart..cBottom] across [meltStart..tip]
+    float u = (st.y - meltStart)/(tip - meltStart);
+    float sy = mix(meltStart, cBottom, u);
+    // pinch x toward the nearest column center as the drip narrows
+    float cxNear = (floor(cl*7.0)+0.5)/7.0;
+    float sx = mix(st.x, cLeft + cxNear*cW, smoothstep(0.4,1.0,u)*0.35);
+    samp = vec2(sx, sy);
+    region = 1.0;
+  }
+
+  // only inside the card footprint horizontally
+  float inX = step(cLeft-0.001, st.x)*step(st.x, cLeft+cW+0.001);
+  region *= inX;
+
+  if(region > 0.5){
+    vec4 c = cardTex(samp);
+    vec3 base = c.rgb;
+    // melted region picks up gooey gloss + gold tint as it drips
+    float meltAmt = smoothstep(meltStart, cBottom+0.02, st.y);
+    base = mix(base, base*0.8 + GOLD*0.35, meltAmt*0.7);
+    // drip rim light near the tapering edge
+    float edge = smoothstep(tip, tip-0.02, st.y) * smoothstep(tip-0.10, tip, st.y);
+    base += edge*vec3(1.0,0.92,0.7)*0.5;
+    // a moving sheen streak down the drips
+    float sheen = pow(0.5+0.5*sin((st.x*24.0) + uTime*1.5), 8.0)*meltAmt;
+    base += sheen*vec3(1.0)*0.25;
+    // composite by the card texture's own alpha so the transparent margin
+    // above/around the card stays background, not black
+    col = mix(col, base, c.a);
+  }
+
+  // ── melted pool at the bottom ──
+  float surf = 0.90 + 0.012*sin(st.x*26.0 + uTime*1.3) + 0.008*sin(st.x*61.0 - uTime*1.0);
+  float pool = smoothstep(surf, surf+0.006, st.y);
+  if(pool > 0.0){
+    vec3 pc = GOLD*mix(0.7,1.05, st.y);
+    // ripple specular near the surface
+    float gloss = pow(0.5+0.5*sin(st.x*40.0 - uTime*2.0), 10.0);
+    pc += gloss*vec3(1.0,0.95,0.75)*smoothstep(surf+0.05,surf,st.y)*0.6;
+    // meniscus highlight at the waterline
+    pc += smoothstep(surf+0.004,surf,st.y)*smoothstep(surf-0.01,surf,st.y)*vec3(1.0,0.95,0.8)*0.8;
+    col = mix(col, pc, pool);
+  }
+
+  frag = vec4(clamp(col,0.0,1.0),1.0);
+}`;
+GooGL.start(FRAG, { dt: 0.05, w: 760, h: 950, seed: 7 });
+</script>
+</body>
+</html>

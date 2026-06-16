@@ -1,0 +1,115 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>goo · svg drip</title>
+<style>
+  html, body { margin: 0; height: 100%; overflow: hidden;
+    background: radial-gradient(120% 90% at 50% 38%, #16131d 0%, #0a0810 70%, #070509 100%); }
+  #stage { position: fixed; inset: 0; }
+
+  /* The card image, sitting with its foot dipped into the goo. */
+  #card {
+    position: absolute; left: 50%; top: 46%; transform: translate(-50%,-50%);
+    width: 470px; filter: drop-shadow(0 22px 30px rgba(0,0,0,0.55));
+    z-index: 2;
+  }
+  /* The goo layer: gold blobs that drip off the card foot and merge into a
+     rippling pool, fused by the SVG gooey filter. */
+  #goo { position: absolute; inset: 0; z-index: 1; }
+  .blob { fill: url(#gold); }
+
+  @keyframes drip {
+    0%   { transform: translateY(-30px) scale(0.55); }
+    55%  { transform: translateY(60px)  scale(1.0); }
+    100% { transform: translateY(150px) scale(0.7); }
+  }
+  @keyframes wob { 0%,100% { transform: translateX(-10px) scaleY(0.96); }
+                   50% { transform: translateX(10px) scaleY(1.05); } }
+</style>
+</head>
+<body>
+<div id="stage">
+  <svg id="goo" viewBox="0 0 760 950" preserveAspectRatio="xMidYMid slice">
+    <defs>
+      <radialGradient id="gold" cx="40%" cy="30%" r="80%">
+        <stop offset="0%"  stop-color="#fce9a8"/>
+        <stop offset="45%" stop-color="#e6c266"/>
+        <stop offset="100%" stop-color="#b07f22"/>
+      </radialGradient>
+      <filter id="goofilt">
+        <feGaussianBlur in="SourceGraphic" stdDeviation="11" result="blur"/>
+        <feColorMatrix in="blur" mode="matrix"
+          values="1 0 0 0 0  0 1 0 0 0  0 0 1 0 0  0 0 0 22 -10" result="goo"/>
+        <feComposite in="SourceGraphic" in2="goo" operator="atop"/>
+      </filter>
+    </defs>
+    <g filter="url(#goofilt)">
+      <!-- the rippling pool -->
+      <g style="transform-origin:380px 880px; animation: wob 5s ease-in-out infinite">
+        <ellipse class="blob" cx="380" cy="905" rx="300" ry="70"/>
+        <circle class="blob" cx="200" cy="880" r="46"/>
+        <circle class="blob" cx="560" cy="885" r="52"/>
+        <circle class="blob" cx="380" cy="870" r="60"/>
+      </g>
+      <!-- honey drips off the card foot (anchors stay; travellers fall and
+           the gooey filter bridges them with thinning necks) -->
+      <g id="drips"></g>
+    </g>
+  </svg>
+  <canvas id="cardcanvas" style="display:none"></canvas>
+  <img id="card" alt="">
+</div>
+
+<script src="card.js"></script>
+<script>
+// Draw the representative card to an offscreen canvas, then use it both as
+// the <img> and as the goo-sheen mask on its lower edge.
+const cc = document.getElementById('cardcanvas');
+cc.width = 470; cc.height = 658;
+const rect = window.drawGooCard(cc, { seed: 7, cardFrac: 0.92 });
+const url = cc.toDataURL();
+const img = document.getElementById('card');
+img.src = url;
+
+// Build the drip columns across the card foot.
+const NS = 'http://www.w3.org/2000/svg';
+const drips = document.getElementById('drips');
+const footY = 690;                 // ~ card bottom in viewBox units
+const cols = [255, 330, 400, 470, 540];
+cols.forEach((x, i) => {
+  // anchor bead that stays on the card foot
+  const a = document.createElementNS(NS, 'circle');
+  a.setAttribute('class', 'blob');
+  a.setAttribute('cx', x); a.setAttribute('cy', footY);
+  a.setAttribute('r', 26);
+  drips.appendChild(a);
+  // the falling drop
+  const c = document.createElementNS(NS, 'circle');
+  c.setAttribute('class', 'blob');
+  c.setAttribute('cx', x); c.setAttribute('cy', footY + 30);
+  c.setAttribute('r', 22);
+  c.style.transformBox = 'fill-box';
+  c.style.transformOrigin = 'center';
+  c.style.animation = `drip ${3.2 + i*0.35}s cubic-bezier(.5,0,.7,1) ${i*0.5}s infinite`;
+  drips.appendChild(c);
+});
+
+// Same seek interface as the WebGL tests, but for CSS animations: the
+// recorder stops the live clock and scrubs every animation by hand so each
+// captured frame is deterministic.
+window.__gooFrame = 0;
+window.GOO = {
+  ready: false,
+  dt: 1/30,
+  stop(){ document.getAnimations().forEach(a => a.pause()); },
+  seek(t){
+    const ms = t*1000;
+    document.getAnimations().forEach(a => { a.pause(); a.currentTime = ms; });
+  },
+};
+(function tick(){ window.__gooFrame++; requestAnimationFrame(tick); })();
+requestAnimationFrame(() => { window.GOO.ready = true; document.title = 'GOO_READY'; });
+</script>
+</body>
+</html>
