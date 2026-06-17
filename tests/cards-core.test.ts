@@ -11,6 +11,8 @@ import {
   decodeWorld, encodeWorld, generateEvents, generateJunkWorld, generateWeirdWorld,
   makeCard, mintDeckCard, mulberry32, regenerateEvent, rollWant, sceneStructureCounts,
   spicyAmount, wantLine, wantSatisfiableBy, wantSatisfiedBy, worldName,
+  STREET, gatheringRowCount, gatheringSlot, streetDist, streetDollyPose, streetDoor,
+  streetEnterPose, streetFocusPose, streetHouse, streetViewSpace,
 } from '../src/cards-core';
 import { BUILDING_DEFS, SOUL_SIGIL } from '../src/config';
 import { GameState, cellKey, isInPlayCell } from '../src/state';
@@ -619,5 +621,108 @@ describe('tier tables', () => {
       if (above) expect(TIER_RANK[above]).toBe(TIER_RANK[t] + 1);
       else expect(TIER_RANK[t]).toBe(2);
     }
+  });
+});
+
+// The street-of-gatherings camera. These prove the geometry the renderer
+// drives off — most importantly that clicking a house flies the camera square
+// into its door (the door dead-centre in view, a nose away) — without a DOM.
+describe('street camera', () => {
+  const sides = ['L', 'R'] as const;
+
+  it('lays the houses out in two lines down the street', () => {
+    for (const plot of [0, 1, 2]) {
+      const L = streetHouse(plot, 'L');
+      const R = streetHouse(plot, 'R');
+      expect(L.x).toBe(-STREET.laneX);          // left line
+      expect(R.x).toBe(STREET.laneX);           // right line
+      expect(L.z).toBe(R.z);                     // same plot, same depth
+      expect(L.z).toBeLessThan(0);               // down −Z, into the screen
+      // deeper plots sit further down the street
+      if (plot > 0) expect(streetHouse(plot, 'L').z).toBeLessThan(streetHouse(plot - 1, 'L').z);
+    }
+  });
+
+  it('flies the camera square into each door', () => {
+    for (const side of sides) {
+      for (const plot of [0, 1, 2]) {
+        const house = streetHouse(plot, side);
+        const door = streetDoor(house);
+        const cam = streetEnterPose(house);
+        const v = streetViewSpace(door.pos, cam);
+        // the door projects dead-centre on screen (the "central raycast")
+        expect(Math.abs(v.x)).toBeLessThan(0.5);
+        expect(Math.abs(v.y)).toBeLessThan(0.5);
+        // it sits a nose IN FRONT of the eye (down the street), ~doorStop away
+        expect(v.z).toBeLessThan(0);
+        expect(Math.abs(-v.z - STREET.doorStop)).toBeLessThan(0.5);
+        // the camera really is right at the door — well inside one house depth
+        const dist = streetDist(cam, door.pos);
+        expect(dist).toBeCloseTo(STREET.doorStop, 5);
+        expect(dist).toBeLessThan(STREET.house.d);
+        // …and stands on the door's OUTWARD side (in front of it, not inside)
+        const ahead = (cam.x - door.pos.x) * door.normal.x + (cam.z - door.pos.z) * door.normal.z;
+        expect(ahead).toBeGreaterThan(0);
+      }
+    }
+  });
+
+  it('a focused row sees its left house left-of-centre and right house right', () => {
+    for (const row of [0, 1, 2]) {
+      const cam = streetFocusPose(row);
+      const base = (h: { x: number; z: number }) => ({ x: h.x, y: STREET.groundY, z: h.z });
+      const vL = streetViewSpace(base(streetHouse(row, 'L')), cam);
+      const vR = streetViewSpace(base(streetHouse(row, 'R')), cam);
+      expect(vL.x).toBeLessThan(0);   // left house off to the left
+      expect(vR.x).toBeGreaterThan(0); // right house off to the right
+      expect(vL.z).toBeLessThan(0);   // both ahead, down the street
+      expect(vR.z).toBeLessThan(0);
+    }
+  });
+
+  it('walking forward moves the camera further down the street', () => {
+    expect(streetFocusPose(1).z).toBeLessThan(streetFocusPose(0).z);
+    expect(streetFocusPose(2).z).toBeLessThan(streetFocusPose(1).z);
+  });
+
+  it('the whole fly-in keeps the door centred and dollies it from far → through', () => {
+    for (const side of sides) {
+      const house = streetHouse(0, side);
+      const door = streetDoor(house);
+      // dist: far out on the road → the threshold → well past it, inside.
+      const zs = [240, STREET.doorStop, -640].map((dist) => {
+        const v = streetViewSpace(door.pos, streetDollyPose(house, dist));
+        expect(Math.abs(v.x)).toBeLessThan(0.5);  // dead-centre the whole way in
+        expect(Math.abs(v.y)).toBeLessThan(0.5);
+        return v.z;
+      });
+      // Approaching: the door reads far/small (well into the screen).
+      expect(zs[0]).toBeLessThan(-150);
+      // It swells monotonically toward the eye…
+      expect(zs[1]).toBeGreaterThan(zs[0]);
+      expect(zs[2]).toBeGreaterThan(zs[1]);
+      // …and on the final push the door has crossed the eye plane (z > 0):
+      // it fills the view as we step through, the whole point of "into the door".
+      expect(zs[2]).toBeGreaterThan(0);
+    }
+  });
+
+  it('houses ahead are visible; ones the camera has passed sit behind the eye', () => {
+    // The cull rule keys on view-space z: ahead of the eye (z ≤ 0) renders,
+    // behind it (z large +) gets hidden before CSS perspective blows it up.
+    const cam = streetFocusPose(0);
+    const ahead = streetViewSpace({ x: -STREET.laneX, y: STREET.groundY, z: streetHouse(0, 'L').z }, cam);
+    expect(ahead.z).toBeLessThan(0);   // a row ahead → on screen
+    // A house the camera has already walked past (nearer the viewer than the
+    // eye) lands behind the eye plane — exactly what the cull hides.
+    const behind = streetViewSpace({ x: STREET.laneX, y: STREET.groundY, z: cam.z + 120 }, cam);
+    expect(behind.z).toBeGreaterThan(STREET.doorStop);
+  });
+
+  it('packs gatherings into rows of two (left then right)', () => {
+    expect(gatheringRowCount(3)).toBe(2);
+    expect(gatheringSlot(0)).toEqual({ plot: 0, side: 'L' });
+    expect(gatheringSlot(1)).toEqual({ plot: 0, side: 'R' });
+    expect(gatheringSlot(2)).toEqual({ plot: 1, side: 'L' });
   });
 });

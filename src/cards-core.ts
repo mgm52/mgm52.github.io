@@ -872,3 +872,124 @@ export function regenerateEvent(meta: CardMeta, ev: TradeEvent, taskIds: string[
   ev.creatures = rollCreatures(meta, ev.tier, rng, taskIds, manualPool);
   if (origin) ev.creatures[0].deck.unshift(origin);
 }
+
+// ─── The street-of-gatherings geometry (shared with cards.ts + the tests) ──
+// The gatherings live as little white houses lining a street: two lines of
+// them receding down −Z, the camera out on the road. Every bit of the camera
+// maths lives here, DOM-free, so the unit tests can prove the fly-in lands
+// square on a door — centred in view, a nose away — before any DOM exists.
+//
+// The camera maps to cards.ts's transform on .sv-camera (applied to the whole
+// world group): rotateX(pitch) rotateY(−yaw) translate3d(−x,−y,−z). So a world
+// point W lands in view space at V = Rx(pitch)·Ry(−yaw)·(W − cam). CSS then
+// projects V with the eye at +persp looking down −z, so a point is dead-centre
+// on screen exactly when its view-space x and y are zero, and "in front of the
+// camera, down the street" when its view-space z is negative.
+
+export type Vec3 = { x: number; y: number; z: number };
+export type StreetCam = { x: number; y: number; z: number; yaw: number; pitch: number };
+export type StreetSide = 'L' | 'R';
+export type StreetHouse = { x: number; z: number; faceYaw: number; side: StreetSide; plot: number };
+
+// Every length is a CSS-3D pixel; grouped so the whole street reframes from one
+// place. groundY and doorCenterY are echoed by .sv-ground / .sv-door in CSS.
+export const STREET = {
+  persp: 1150,
+  laneX: 270,        // |x| of each line of houses from the road's centre
+  plotZ0: -430,      // depth of the nearest plot
+  plotGap: 408,      // spacing between plots down the street
+  groundY: 70,       // road height below the eye
+  eyeY: 14,          // eye height out on the road
+  pitch: 5,          // the street view tips gently down the road
+  camBack: 250,      // camera sits this far toward the viewer from its row
+  doorStop: 26,      // the fly-in ends this far in front of the door
+  doorYaw: 74,       // door faces mostly across the street, angled to the walker
+  doorCenterY: 34,   // door centre above the base (matches the CSS door box)
+  house: { w: 176, h: 128, d: 176, rh: 86 },
+};
+
+const STREET_DEG = Math.PI / 180;
+
+// Where a house sits: a plot down the street, on the left or right line. Left
+// doors angle to +X (across + toward the walker), right doors mirror to −X.
+export function streetHouse(plot: number, side: StreetSide): StreetHouse {
+  return {
+    x: side === 'L' ? -STREET.laneX : STREET.laneX,
+    z: STREET.plotZ0 - plot * STREET.plotGap,
+    faceYaw: side === 'L' ? STREET.doorYaw : -STREET.doorYaw,
+    side,
+    plot,
+  };
+}
+
+// The door's centre + outward normal in world space. The door is on the front
+// (+Z local) face, centred across it, doorCenterY up from the base. The house's
+// own transform is translate3d(x,groundY,z) rotateY(faceYaw), so a local point
+// L lands at translate + Ry(faceYaw)·L.
+export function streetDoor(house: { x: number; z: number; faceYaw: number }): { pos: Vec3; normal: Vec3; faceYaw: number } {
+  const f = house.faceYaw * STREET_DEG;
+  const lz = STREET.house.d / 2;
+  return {
+    pos: {
+      x: house.x + Math.sin(f) * lz,
+      y: STREET.groundY - STREET.doorCenterY,
+      z: house.z + Math.cos(f) * lz,
+    },
+    normal: { x: Math.sin(f), y: 0, z: Math.cos(f) },
+    faceYaw: house.faceYaw,
+  };
+}
+
+// A pose `dist` along a door's outward normal, eye at the door's height and yaw
+// aligned with the normal so the door stays dead-centre. dist > 0 sits out in
+// front of the door (it reads small/far), dist < 0 is past the threshold,
+// inside — where the door swells past the eye. This single line IS the fly-in
+// path: large positive dist → doorStop → negative.
+export function streetDollyPose(house: { x: number; z: number; faceYaw: number }, dist: number): StreetCam {
+  const door = streetDoor(house);
+  return {
+    x: door.pos.x + door.normal.x * dist,
+    y: door.pos.y,
+    z: door.pos.z + door.normal.z * dist,
+    yaw: house.faceYaw,
+    pitch: 0,
+  };
+}
+
+// The pose that flies the camera square INTO a door: a nose (doorStop) in front
+// of it, the door projecting dead-centre.
+export function streetEnterPose(house: { x: number; z: number; faceYaw: number }): StreetCam {
+  return streetDollyPose(house, STREET.doorStop);
+}
+
+// Looking straight down the street from a given row (the nearest plot it owns).
+export function streetFocusPose(row: number): StreetCam {
+  return { x: 0, y: STREET.eyeY, z: STREET.plotZ0 - row * STREET.plotGap + STREET.camBack, yaw: 0, pitch: STREET.pitch };
+}
+
+// A world point in the camera's view space (see header): V = Rx(pitch)·Ry(−yaw)·(W − cam).
+export function streetViewSpace(w: Vec3, cam: StreetCam): Vec3 {
+  const dx = w.x - cam.x, dy = w.y - cam.y, dz = w.z - cam.z;
+  // rotateY(−yaw): x' = cos(yaw)·x − sin(yaw)·z ; z' = sin(yaw)·x + cos(yaw)·z
+  const cy = Math.cos(cam.yaw * STREET_DEG), sy = Math.sin(cam.yaw * STREET_DEG);
+  const x1 = cy * dx - sy * dz;
+  const z1 = sy * dx + cy * dz;
+  const y1 = dy;
+  // rotateX(pitch): y' = cos·y − sin·z ; z' = sin·y + cos·z
+  const cx = Math.cos(cam.pitch * STREET_DEG), sx = Math.sin(cam.pitch * STREET_DEG);
+  return { x: x1, y: cx * y1 - sx * z1, z: sx * y1 + cx * z1 };
+}
+
+// Straight-line distance from a camera to a world point.
+export function streetDist(cam: StreetCam, p: Vec3): number {
+  return Math.hypot(cam.x - p.x, cam.y - p.y, cam.z - p.z);
+}
+
+// How a flat list of gatherings fills the street: pairs of (left, right) down
+// the plots, so the focused row always offers "the two houses left and right".
+export function gatheringRowCount(n: number): number {
+  return Math.max(1, Math.ceil(n / 2));
+}
+export function gatheringSlot(i: number): { plot: number; side: StreetSide } {
+  return { plot: Math.floor(i / 2), side: i % 2 === 0 ? 'L' : 'R' };
+}
