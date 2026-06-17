@@ -15,7 +15,8 @@ import { ensureHellPortal, executeSkipToPreFinale, executeTaskSkip, refreshUI, s
 import { clearSave, formatRelativeTime, getLastSaveStats, loadGame, saveGame, saveGameInBackground } from './save';
 import {
   abandonCardWorldBoot, captureOriginWorld, cardWorldActive, clearCardData, consumeCardHop,
-  devDealFreeCard, devResetCardRealm, devReshuffleGatherings, hasCardMeta, initBuiltinWorlds,
+  devDealFreeCard, devResetCardRealm, devReshuffleGatherings, devResetStreet, devSetStreetParam,
+  hasCardMeta, initBuiltinWorlds,
   isCardHopInProgress, maybeStartCardRealm, onRealmShown, resetCardRealm, setupCardWorldChrome,
   spectateActive,
 } from './cards';
@@ -490,6 +491,8 @@ async function main() {
     onWorldDesigner: () => openDesignerList(),
     onReshuffleGatherings: () => devReshuffleGatherings(),
     onDealCard: () => devDealFreeCard(),
+    onStreetParam: (key, value) => devSetStreetParam(key, value),
+    onResetStreet: () => devResetStreet(),
   }));
 
   setupOptionsUI(document.getElementById('game')!, {

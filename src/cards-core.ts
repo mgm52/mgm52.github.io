@@ -910,6 +910,43 @@ export const STREET = {
   house: { w: 384, h: 208, d: 200, rh: 150 },
 };
 
+// ─── Dev-tunable street geometry ────────────────────────────────────
+// The realm's dev cog exposes a slider per entry below, so the camera framing
+// and the houses' size/spacing can be dialled in live (cards.ts rebuilds the
+// scene on each change). Each tunable reads/writes a STREET field directly —
+// STREET is a const binding but its fields are plain mutable numbers — and
+// remembers its compile-time default so "reset" can restore the shipped look.
+export type StreetTunable = {
+  key: string; label: string; min: number; max: number; step: number;
+  def: number; get: () => number; set: (v: number) => void;
+};
+export const STREET_TUNABLES: StreetTunable[] = [
+  { key: 'laneX',    label: 'Lane width (house |x|)', min: 200,  max: 900,  step: 10, def: STREET.laneX,    get: () => STREET.laneX,    set: (v) => { STREET.laneX = v; } },
+  { key: 'plotZ0',   label: 'Nearest plot depth',     min: -900, max: -100, step: 10, def: STREET.plotZ0,   get: () => STREET.plotZ0,   set: (v) => { STREET.plotZ0 = v; } },
+  { key: 'plotGap',  label: 'Plot spacing',           min: 200,  max: 900,  step: 10, def: STREET.plotGap,  get: () => STREET.plotGap,  set: (v) => { STREET.plotGap = v; } },
+  { key: 'groundY',  label: 'Ground depth below eye', min: 0,    max: 200,  step: 2,  def: STREET.groundY,  get: () => STREET.groundY,  set: (v) => { STREET.groundY = v; } },
+  { key: 'eyeY',     label: 'Eye height',             min: -100, max: 150,  step: 2,  def: STREET.eyeY,     get: () => STREET.eyeY,     set: (v) => { STREET.eyeY = v; } },
+  { key: 'pitch',    label: 'Camera pitch (down°)',   min: -20,  max: 30,   step: 1,  def: STREET.pitch,    get: () => STREET.pitch,    set: (v) => { STREET.pitch = v; } },
+  { key: 'camBack',  label: 'Camera stand-back',      min: 0,    max: 600,  step: 10, def: STREET.camBack,  get: () => STREET.camBack,  set: (v) => { STREET.camBack = v; } },
+  { key: 'persp',    label: 'Perspective strength',   min: 400,  max: 2500, step: 25, def: STREET.persp,    get: () => STREET.persp,    set: (v) => { STREET.persp = v; } },
+  { key: 'doorStop', label: 'Door fly-in stop',       min: 0,    max: 200,  step: 2,  def: STREET.doorStop, get: () => STREET.doorStop, set: (v) => { STREET.doorStop = v; } },
+  { key: 'doorYaw',  label: 'Door facing angle (°)',  min: 0,    max: 90,   step: 1,  def: STREET.doorYaw,  get: () => STREET.doorYaw,  set: (v) => { STREET.doorYaw = v; } },
+  { key: 'houseW',   label: 'House width',            min: 150,  max: 700,  step: 10, def: STREET.house.w,  get: () => STREET.house.w,  set: (v) => { STREET.house.w = v; } },
+  { key: 'houseH',   label: 'House wall height',      min: 100,  max: 500,  step: 10, def: STREET.house.h,  get: () => STREET.house.h,  set: (v) => { STREET.house.h = v; } },
+  { key: 'houseD',   label: 'House depth',            min: 100,  max: 500,  step: 10, def: STREET.house.d,  get: () => STREET.house.d,  set: (v) => { STREET.house.d = v; } },
+  { key: 'houseRh',  label: 'Roof height',            min: 0,    max: 400,  step: 10, def: STREET.house.rh, get: () => STREET.house.rh, set: (v) => { STREET.house.rh = v; } },
+];
+
+// Find a tunable by key (the persistence/UI layers address them by key).
+export function streetTunable(key: string): StreetTunable | undefined {
+  return STREET_TUNABLES.find((t) => t.key === key);
+}
+
+// Restore every street tunable to its shipped default.
+export function resetStreet(): void {
+  for (const t of STREET_TUNABLES) t.set(t.def);
+}
+
 const STREET_DEG = Math.PI / 180;
 
 // Where a house sits: a plot down the street, on the left or right line. Left
