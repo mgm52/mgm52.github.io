@@ -546,15 +546,20 @@ async function main() {
     },
     onSkipToCardRealm: () => {
       skipIntro();
+      if (state.view !== 'ground') quickTravel('ground');
       // The realm's first card is the world the finale would have stolen —
-      // snapshot the live state to stand in for the missing ritual. Then
-      // flush the live world into the save slot: entering a card stashes
-      // the SLOT as the outer world, and unlike the real post-finale flow
-      // the slot here may be empty (fresh run) or a stale autosave — and an
-      // empty stash would let the card world replace the main game on the
-      // way back out. Then mount the realm over everything (it brings its
-      // own white).
+      // snapshot the live state to stand in for the missing ritual.
       captureOriginWorld(state);
+      // Then drop the run into the real post-finale END state. The realm only
+      // re-mounts on boot when the finale is in its terminal 'shattered' phase
+      // (driveFinale → maybeStartCardRealm), so without this the slot stashed
+      // as the outer world has no finale, and the first LEAVE WORLD reload
+      // boots the bare overworld instead of returning to the realm. Standing
+      // the finale up and jumping it to the end makes the realm survive the
+      // enter/leave-world reload cycle, exactly as a genuine playthrough does.
+      resetFinaleGuards();
+      devTriggerFinale(state);
+      if (state.finale) { state.finale.phase = 'shattered'; state.finale.phaseStartedAt = state.now; }
       saveGame(state);
       resetCardRealm();
       maybeStartCardRealm();
