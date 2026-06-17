@@ -144,7 +144,120 @@ export function setupOptionsUI(root: HTMLElement, callbacks: OptionsUICallbacks)
   }
 }
 
-// Compact panel for the always-visible public cog. The admin panel mirrors
+// ─── Trading-realm chrome ───────────────────────────────────────────
+// The trading realm lives in its own full-screen overlay above the game, so
+// the game's pause/settings/dev cogs are buried beneath it. This stands up an
+// identical-looking trio — mounted inside the realm — so the same controls
+// work there: pause, public settings (the global audio sliders, which apply
+// everywhere, plus a realm-only toggle), and the dev cog (realm-only tools).
+export type RealmOptionsCallbacks = {
+  onResetRealm: () => void;
+  onWorldDesigner: () => void;
+  onReshuffleGatherings: () => void;
+  onDealCard: () => void;
+};
+
+const REALM_STILL_KEY = 'gs.realm.still';
+
+export function setupRealmOptionsUI(root: HTMLElement, cb: RealmOptionsCallbacks): void {
+  if (root.querySelector('#realm-cog-public')) return;   // already mounted this boot
+
+  // The realm-only "ambient drift" preference parks the aurora/mote drift.
+  let still = false;
+  try { still = localStorage.getItem(REALM_STILL_KEY) === '1'; } catch { /* default */ }
+  root.classList.toggle('realm-still', still);
+
+  const cog = (id: string, label: string, aria: string): HTMLButtonElement => {
+    const b = document.createElement('button');
+    b.id = id; b.type = 'button'; b.textContent = label;
+    b.setAttribute('aria-label', aria);
+    return b;
+  };
+  const publicCog = cog('realm-cog-public', '⚙', 'Settings');
+  const pauseBtn = cog('realm-pause-btn', '⏸', 'Pause');
+  const adminCog = cog('realm-cog', 'D', 'Dev settings');
+  // The dev cog follows the same prod gate as the game's — hidden until the
+  // secret unlock, always on in dev.
+  if (!import.meta.env.DEV && localStorage.getItem(SECRET_UNLOCK_KEY) !== '1') {
+    adminCog.style.display = 'none';
+  }
+
+  const publicPanel = document.createElement('div');
+  publicPanel.id = 'realm-panel-public'; publicPanel.hidden = true;
+  const adminPanel = document.createElement('div');
+  adminPanel.id = 'realm-panel'; adminPanel.hidden = true;
+
+  // Settings: the global audio sliders (shared with the game), plus a realm toggle.
+  const buildPublic = (): void => {
+    publicPanel.innerHTML = '';
+    const o = getOptions();
+    publicPanel.appendChild(section('Audio', [
+      slider('Master volume', o.volume,      0, 1, 0.05, (v) => setOption('volume', v)),
+      slider('Music volume',  o.musicVolume, 0, 1, 0.05, (v) => setOption('musicVolume', v)),
+      toggle('Vinyl crackle', o.crackleEnabled,           (v) => setOption('crackleEnabled', v)),
+    ]));
+    publicPanel.appendChild(section('Trading realm', [
+      toggle('Ambient drift', !still, (v) => {
+        still = !v;
+        try { localStorage.setItem(REALM_STILL_KEY, still ? '1' : '0'); } catch { /* no-op */ }
+        root.classList.toggle('realm-still', still);
+      }),
+    ]));
+    const flavor = document.createElement('div');
+    flavor.className = 'options-flavor';
+    flavor.textContent = 'every world is somebody’s home';
+    publicPanel.appendChild(flavor);
+  };
+
+  // Dev settings: realm-only tools.
+  const realmBtn = (label: string, onClick: () => void): HTMLElement => {
+    const b = document.createElement('button');
+    b.type = 'button'; b.className = 'options-reset'; b.textContent = label;
+    b.addEventListener('click', () => { onClick(); adminPanel.hidden = true; });
+    return b;
+  };
+  const buildAdmin = (): void => {
+    adminPanel.innerHTML = '';
+    adminPanel.appendChild(section('Trading realm', [
+      realmBtn('Reshuffle all gatherings', cb.onReshuffleGatherings),
+      realmBtn('Deal a free card', cb.onDealCard),
+      realmBtn('World Designer', cb.onWorldDesigner),
+      realmBtn('Reset trading realm data', cb.onResetRealm),
+    ]));
+  };
+  buildPublic();
+  buildAdmin();
+
+  // Each cog toggles its panel and closes the other; an outside click closes both.
+  publicCog.addEventListener('click', (e) => { e.stopPropagation(); adminPanel.hidden = true; buildPublic(); publicPanel.hidden = !publicPanel.hidden; });
+  adminCog.addEventListener('click', (e) => { e.stopPropagation(); publicPanel.hidden = true; buildAdmin(); adminPanel.hidden = !adminPanel.hidden; });
+  document.addEventListener('click', (e) => {
+    if (!(e.target instanceof Node)) return;
+    if (!publicPanel.hidden && !publicPanel.contains(e.target) && !publicCog.contains(e.target)) publicPanel.hidden = true;
+    if (!adminPanel.hidden && !adminPanel.contains(e.target) && !adminCog.contains(e.target)) adminPanel.hidden = true;
+  });
+
+  // Pause: a centred overlay that also parks the ambient drift while it's up.
+  const overlay = document.createElement('div');
+  overlay.id = 'realm-pause-overlay';
+  overlay.innerHTML = '<div class="pause-title">PAUSED</div><div class="pause-hint">click, press P or Esc to resume</div>';
+  const isPaused = (): boolean => overlay.classList.contains('visible');
+  const setPaused = (p: boolean): void => {
+    overlay.classList.toggle('visible', p);
+    pauseBtn.classList.toggle('paused', p);
+    root.classList.toggle('realm-paused', p);
+  };
+  pauseBtn.addEventListener('click', (e) => { e.stopPropagation(); publicPanel.hidden = true; adminPanel.hidden = true; setPaused(!isPaused()); });
+  overlay.addEventListener('click', () => setPaused(false));
+  window.addEventListener('keydown', (e) => {
+    if (!isPaused()) return;
+    if (e.key === 'Escape' || e.key === 'p' || e.key === 'P') setPaused(false);
+  });
+
+  root.append(publicCog, pauseBtn, adminCog, publicPanel, adminPanel, overlay);
+}
+
+
 // the same audio sliders so changing one keeps the other in sync after a
 // rebuild — but the public panel is intentionally minimal, plus a flavour
 // line for atmosphere.

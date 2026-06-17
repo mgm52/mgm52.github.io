@@ -213,6 +213,38 @@ export function spectateActive(): boolean {
   try { return localStorage.getItem(SPECTATE_KEY) === '1'; } catch { return false; }
 }
 
+// Mounted onto the realm once it becomes visible (main.ts wires the realm's
+// pause/settings/dev chrome here, since it has the designer launcher too).
+let realmShown: ((realm: HTMLElement) => void) | null = null;
+export function onRealmShown(fn: (realm: HTMLElement) => void): void { realmShown = fn; }
+
+// Refresh whatever realm view is up after a dev edit to the metagame.
+function refreshRealmView(): void {
+  const meta = loadMeta();
+  if (!meta) return;
+  swapView(() => routeRealmView(meta));
+}
+
+// Dev tool (realm dev cog): reshuffle every gathering's traders + decks.
+export function devReshuffleGatherings(): void {
+  const meta = loadMeta();
+  if (!meta) return;
+  if (!meta.events) meta.events = generateEvents(meta, null, ALL_TASK_IDS, loadManualWorlds());
+  else for (const ev of meta.events) regenerateEvent(meta, ev, ALL_TASK_IDS, loadManualWorlds());
+  saveMeta(meta);
+  refreshRealmView();
+}
+
+// Dev tool (realm dev cog): drop a fresh common card into the player's hand.
+export function devDealFreeCard(): void {
+  const meta = loadMeta();
+  if (!meta) return;
+  const rng = mulberry32((Date.now() ^ 0x9e3779b9) >>> 0);
+  meta.cards.push(newCard(meta, 'common', rng));
+  saveMeta(meta);
+  refreshRealmView();
+}
+
 // Dev cheat (options cog): wipe ONLY the trading-section metagame and
 // reload. If the player is currently inside (or spectating) a card world,
 // the stashed outer save is put back first, so the main game survives the
@@ -1067,6 +1099,7 @@ async function runRealm(): Promise<void> {
   // the very first arrival, shorter when returning from a card world.
   await sleep(meta && meta.phase === 'free' ? 1200 : 2600);
   realm.classList.add('visible');
+  realmShown?.(realm);
   if (!meta) {
     meta = {
       v: 1,
@@ -1353,6 +1386,9 @@ function streetLayout(meta: CardMeta): { gatherings: StreetSlot[]; residences: R
 // The last row the player stood at, so backing out of a gathering returns the
 // camera where it was rather than snapping to the top of the street.
 let streetRow = 0;
+// The gathering house last stepped into, so leaving it can reverse the fly-in
+// (emerge back out through that same door) rather than cut to the street.
+let enteredFrom: { row: number; side: StreetSide } | null = null;
 
 // Build the 3-D street into #card-stage and return its moving parts. Interactivity
 // is wired by `focusRow`; the reveal drives the camera itself before calling it.
@@ -1500,14 +1536,36 @@ function buildStreetScene(meta: CardMeta): {
 // The interactive street: build it, drop the camera onto the saved row, and
 // let the player walk and enter. (renderHand keeps "your worlds" along the
 // bottom, exactly as the old table did.)
-function showStreet(meta: CardMeta, opts: { row?: number; fromCam?: StreetCam } = {}): void {
+function showStreet(meta: CardMeta, opts: { row?: number; fromCam?: StreetCam; reverse?: { row: number; side: StreetSide } } = {}): void {
   const s = buildStreetScene(meta);
   const row = Math.max(0, Math.min(s.rows - 1, opts.row ?? streetRow));
+  renderHand(meta);
+  // Leaving a gathering: reverse the fly-in out of that same door.
+  const from = opts.reverse && s.gatherings.find((g) => g.row === opts.reverse!.row && g.side === opts.reverse!.side);
+  if (from) { void reverseOutOfHouse(s, from, row); return; }
   // Snap to a starting pose, then ease into the focus pose so the street
   // "arrives" with a touch of motion rather than a hard cut.
   void s.setCam(opts.fromCam ?? streetFocusPose(row), 0, undefined, 'cull');
   requestAnimationFrame(() => requestAnimationFrame(() => s.focusRow(row)));
-  renderHand(meta);
+}
+
+// The fly-in, played backwards: start nose-deep past the door (white-washed,
+// only that house on screen), draw back out through the threshold and onto the
+// road, then turn down the street as the rest of the houses fade back in.
+async function reverseOutOfHouse(
+  s: { setCam: (p: StreetCam, ms: number, ease?: string, cull?: 'cull' | HTMLElement) => Promise<void>; focusRow: (row: number) => void },
+  slot: StreetSlot, row: number,
+): Promise<void> {
+  const stage = realmEl('card-stage');
+  const target = slot.el;
+  stage.classList.add('sv-exiting');   // a white wash, full → fading, mirrors the door-wash
+  await s.setCam(streetDollyPose(slot.house, -640), 0, undefined, target);
+  await s.setCam(streetEnterPose(slot.house), 460, 'cubic-bezier(0.4,0.4,0.6,1)', target);
+  await s.setCam(streetDollyPose(slot.house, 240), 540, 'cubic-bezier(0.3,0,0.5,1)', target);
+  stage.classList.remove('sv-exiting');
+  // Turn back onto the street; 'cull' un-hides the rest of the houses.
+  await s.setCam(streetFocusPose(row), 720, 'cubic-bezier(0.5,0,0.3,1)', 'cull');
+  s.focusRow(row);
 }
 
 // Dive from the street into a gathering: with only the target house on screen,
@@ -1516,6 +1574,7 @@ function showStreet(meta: CardMeta, opts: { row?: number; fromCam?: StreetCam } 
 // gathering under the door-wash + cross-fade.
 async function enterGatheringHouse(meta: CardMeta, slot: StreetSlot, setCam: (p: StreetCam, ms: number, ease?: string, cull?: 'cull' | HTMLElement) => Promise<void>): Promise<void> {
   streetRow = slot.row;
+  enteredFrom = { row: slot.row, side: slot.side };
   const target = slot.el;
   // Square up out on the road in front of the door (only the target visible, so
   // nothing else crowds the frame).
@@ -1628,7 +1687,7 @@ function showGathering(meta: CardMeta, ev: TradeEvent): void {
   stage.className = 'gathering-view';
 
   const head = div('ct-gathering-head');
-  head.appendChild(backButton('← back to the street', () => swapView(() => showStreet(meta, { row: streetRow }))));
+  head.appendChild(backButton('← back to the street', () => swapView(() => showStreet(meta, { row: streetRow, reverse: enteredFrom ?? undefined }))));
   head.appendChild(div(`ct-caption ct-event-title t-${ev.tier}`, ev.name));
   stage.appendChild(head);
 
