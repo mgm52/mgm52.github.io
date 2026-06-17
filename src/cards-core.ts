@@ -160,8 +160,16 @@ export type TradeEvent = { id: number; name: string; tier: CardTier; creatures: 
 
 export type CardMeta = {
   v: 1;
-  // 'intro' until the white goblin has run the forced first trade.
-  phase: 'intro' | 'free';
+  // 'intro'     — until the white goblin has run the forced first trade.
+  // 'firstworld' — the swindle is done; the player holds the one traded card
+  //               and the realm holds them on its big-card view until they
+  //               ENTER it (their first time inside a card world).
+  // 'free'      — the street of gatherings is open; normal play.
+  phase: 'intro' | 'firstworld' | 'free';
+  // Set the moment the player first LEAVES the traded world, consumed by the
+  // realm to play the one-shot "your card lived inside a house on a street"
+  // reveal before the street view settles in.
+  revealPending?: boolean;
   // Per-playthrough entropy mixed into every gathering roll. Without it the
   // event RNG keyed on nextId alone, and nextId is identical for every
   // player at the moment the tables are first dealt — so everyone met the
