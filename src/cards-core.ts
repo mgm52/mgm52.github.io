@@ -895,17 +895,19 @@ export type StreetHouse = { x: number; z: number; faceYaw: number; side: StreetS
 // place. groundY and doorCenterY are echoed by .sv-ground / .sv-door in CSS.
 export const STREET = {
   persp: 1150,
-  laneX: 270,        // |x| of each line of houses from the road's centre
-  plotZ0: -430,      // depth of the nearest plot
-  plotGap: 408,      // spacing between plots down the street
-  groundY: 70,       // road height below the eye
-  eyeY: 14,          // eye height out on the road
+  laneX: 500,        // |x| of each line of houses from the road's centre — wide
+                     //   enough that the near pair spans to the screen edges
+  plotZ0: -470,      // depth of the nearest plot
+  plotGap: 470,      // spacing between plots down the street
+  groundY: 78,       // road height below the eye
+  eyeY: 18,          // eye height out on the road
   pitch: 5,          // the street view tips gently down the road
-  camBack: 250,      // camera sits this far toward the viewer from its row
+  camBack: 150,      // camera stands this close in front of its row, so the
+                     //   row's two houses loom and fill the left/right edges
   doorStop: 26,      // the fly-in ends this far in front of the door
   doorYaw: 74,       // door faces mostly across the street, angled to the walker
-  doorCenterY: 34,   // door centre above the base (matches the CSS door box)
-  house: { w: 176, h: 128, d: 176, rh: 86 },
+  doorCenterY: 54,   // door centre above the base (matches the CSS door box)
+  house: { w: 384, h: 208, d: 200, rh: 150 },
 };
 
 const STREET_DEG = Math.PI / 180;
