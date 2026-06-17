@@ -31,7 +31,7 @@ import {
   TradeEvent, Want, WorldCard, cardPower, decodeWorld, encodeWorld, generateEvents,
   makeCard, mulberry32, regenerateEvent, sceneStructureCounts,
   WantSeg, wantSatisfiableBy, wantSatisfiedBy, wantSegments,
-  STREET, StreetCam, StreetSide, gatheringRowCount, gatheringSlot,
+  STREET, StreetCam, StreetHouse, StreetSide, gatheringRowCount, gatheringSlot,
   streetDollyPose, streetDoor, streetEnterPose, streetFocusPose, streetHouse, streetViewSpace,
   STREET_TUNABLES, streetTunable, resetStreet,
 } from './cards-core';
@@ -1410,9 +1410,12 @@ function buildHouse(opts: { tier?: CardTier; name?: string; sign?: string; plain
 // A gathering's house on the street, plus its focus row (= the plot it sits at).
 type StreetSlot = { ev: TradeEvent; row: number; side: StreetSide; house: ReturnType<typeof streetHouse>; el?: HTMLElement };
 
-// The player's own house, parked at the head of the street — the one the reveal
-// pulls out of, and just scenery thereafter.
-const REVEAL_HOME = { x: 300, z: -120, faceYaw: 90 };
+// The player's own house, parked at the head of the street (a plot in FRONT of
+// the first gathering, on the right line) — the one the reveal pulls out of,
+// and just scenery thereafter. It's a normal street house: same lane and
+// angled door as the residences, so it sits flush with the street instead of
+// facing flat across it. Derived live so the dev sliders move it too.
+function revealHome(): StreetHouse { return streetHouse(-1, 'R'); }
 
 // Lay the gatherings into two lines (pairs of left/right plots) and fill every
 // other plot — plus a couple beyond — with plain residences, so both sides read
@@ -1488,7 +1491,7 @@ function buildStreetScene(meta: CardMeta): {
   // of, scenery thereafter.
   const home = buildHouse({ plain: true });
   home.classList.add('sv-home');
-  place(home, REVEAL_HOME);
+  place(home, revealHome());
   const homeSign = div('sv-sign sv-home-sign');
   homeSign.textContent = 'home';
   (home.querySelector('.sv-front') as HTMLElement)?.appendChild(homeSign);
@@ -1510,12 +1513,22 @@ function buildStreetScene(meta: CardMeta): {
   // nothing (undefined). CULL_Z gives a small in-front tolerance.
   const CULL_Z = 40;
   type Cull = 'cull' | HTMLElement | undefined;
+  const show = (el: HTMLElement): void => { el.style.visibility = ''; el.style.opacity = ''; };
+  const hide = (el: HTMLElement): void => { el.style.visibility = 'hidden'; el.style.opacity = ''; };
   const applyCull = (p: StreetCam, mode: Cull): void => {
-    if (!mode) { for (const h of houses) h.el.style.visibility = ''; return; }
+    if (!mode) { for (const h of houses) show(h.el); return; }
     for (const h of houses) {
       const v = streetViewSpace({ x: h.cx, y: STREET.groundY - STREET.house.h / 2, z: h.cz }, p);
-      const hidden = mode instanceof HTMLElement ? h.el !== mode : v.z > CULL_Z;
-      h.el.style.visibility = hidden ? 'hidden' : '';
+      const behind = v.z > CULL_Z;
+      // Walking the street ('cull') just hides whatever has slipped behind the
+      // eye. A fly-in (mode = the target house) keeps the target solid and
+      // fades the rest to STREET.cullFade — but anything behind the eye is
+      // still hidden outright, or CSS perspective magnifies it into junk.
+      if (mode === 'cull') { behind ? hide(h.el) : show(h.el); continue; }
+      if (h.el === mode) { show(h.el); continue; }
+      if (behind) { hide(h.el); continue; }
+      h.el.style.visibility = '';
+      h.el.style.opacity = STREET.cullFade >= 1 ? '' : String(STREET.cullFade);
     }
   };
 
@@ -1667,11 +1680,13 @@ async function runStreetReveal(meta: CardMeta): Promise<void> {
     stage.appendChild(cardEl);
   }
 
-  // Looking at the home's front, the card laid over it. (The camera looks
-  // along +X at the home; the 90° turn later swings from here onto the street,
-  // which runs down -Z.)
-  const insidePose: StreetCam = { x: REVEAL_HOME.x - 110, y: STREET.eyeY, z: REVEAL_HOME.z, yaw: 90, pitch: 3 };
-  const exteriorPose: StreetCam = { x: REVEAL_HOME.x - 470, y: STREET.eyeY + 8, z: REVEAL_HOME.z + 30, yaw: 90, pitch: 7 };
+  // Looking square at the home's door, the card laid over it. The poses sit
+  // out along the door's own normal (streetDollyPose), so they stay framed on
+  // the door whatever angle the home faces; the later turn swings from here
+  // onto the street, which runs down -Z.
+  const hh = revealHome();
+  const insidePose: StreetCam = { ...streetDollyPose(hh, 70), pitch: 3 };
+  const exteriorPose: StreetCam = { ...streetDollyPose(hh, 540), pitch: 7 };
   void s.setCam(insidePose, 0);
   await sleep(1000);
 
