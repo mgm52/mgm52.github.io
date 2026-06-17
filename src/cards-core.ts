@@ -894,20 +894,25 @@ export type StreetHouse = { x: number; z: number; faceYaw: number; side: StreetS
 // Every length is a CSS-3D pixel; grouped so the whole street reframes from one
 // place. groundY and doorCenterY are echoed by .sv-ground / .sv-door in CSS.
 export const STREET = {
-  persp: 1150,
-  laneX: 500,        // |x| of each line of houses from the road's centre — wide
+  persp: 825,
+  laneX: 570,        // |x| of each line of houses from the road's centre — wide
                      //   enough that the near pair spans to the screen edges
-  plotZ0: -470,      // depth of the nearest plot
-  plotGap: 470,      // spacing between plots down the street
-  groundY: 78,       // road height below the eye
-  eyeY: 18,          // eye height out on the road
-  pitch: 5,          // the street view tips gently down the road
-  camBack: 150,      // camera stands this close in front of its row, so the
+  plotZ0: -540,      // depth of the nearest plot
+  plotGap: 570,      // spacing between plots down the street
+  groundY: 46,       // road height below the eye
+  eyeY: -4,          // eye height out on the road
+  pitch: -11,        // the street view tips gently down the road
+  camBack: 0,        // camera stands this close in front of its row, so the
                      //   row's two houses loom and fill the left/right edges
   doorStop: 26,      // the fly-in ends this far in front of the door
-  doorYaw: 74,       // door faces mostly across the street, angled to the walker
+  doorYaw: 73,       // door faces mostly across the street, angled to the walker
   doorCenterY: 54,   // door centre above the base (matches the CSS door box)
-  house: { w: 384, h: 208, d: 200, rh: 150 },
+  // During a fly-in/out the non-target houses are pulled back: this is the
+  // opacity they fade to (0 = vanish entirely, as the scene shipped; 1 = stay
+  // fully solid). Houses that cross behind the eye are always hidden outright
+  // regardless, since CSS perspective would otherwise blow them up.
+  cullFade: 0,
+  house: { w: 300, h: 230, d: 370, rh: 140 },
 };
 
 // ─── Dev-tunable street geometry ────────────────────────────────────
@@ -921,20 +926,21 @@ export type StreetTunable = {
   def: number; get: () => number; set: (v: number) => void;
 };
 export const STREET_TUNABLES: StreetTunable[] = [
-  { key: 'laneX',    label: 'Lane width (house |x|)', min: 200,  max: 900,  step: 10, def: STREET.laneX,    get: () => STREET.laneX,    set: (v) => { STREET.laneX = v; } },
-  { key: 'plotZ0',   label: 'Nearest plot depth',     min: -900, max: -100, step: 10, def: STREET.plotZ0,   get: () => STREET.plotZ0,   set: (v) => { STREET.plotZ0 = v; } },
-  { key: 'plotGap',  label: 'Plot spacing',           min: 200,  max: 900,  step: 10, def: STREET.plotGap,  get: () => STREET.plotGap,  set: (v) => { STREET.plotGap = v; } },
-  { key: 'groundY',  label: 'Ground depth below eye', min: 0,    max: 200,  step: 2,  def: STREET.groundY,  get: () => STREET.groundY,  set: (v) => { STREET.groundY = v; } },
-  { key: 'eyeY',     label: 'Eye height',             min: -100, max: 150,  step: 2,  def: STREET.eyeY,     get: () => STREET.eyeY,     set: (v) => { STREET.eyeY = v; } },
-  { key: 'pitch',    label: 'Camera pitch (down°)',   min: -20,  max: 30,   step: 1,  def: STREET.pitch,    get: () => STREET.pitch,    set: (v) => { STREET.pitch = v; } },
-  { key: 'camBack',  label: 'Camera stand-back',      min: 0,    max: 600,  step: 10, def: STREET.camBack,  get: () => STREET.camBack,  set: (v) => { STREET.camBack = v; } },
-  { key: 'persp',    label: 'Perspective strength',   min: 400,  max: 2500, step: 25, def: STREET.persp,    get: () => STREET.persp,    set: (v) => { STREET.persp = v; } },
-  { key: 'doorStop', label: 'Door fly-in stop',       min: 0,    max: 200,  step: 2,  def: STREET.doorStop, get: () => STREET.doorStop, set: (v) => { STREET.doorStop = v; } },
-  { key: 'doorYaw',  label: 'Door facing angle (°)',  min: 0,    max: 90,   step: 1,  def: STREET.doorYaw,  get: () => STREET.doorYaw,  set: (v) => { STREET.doorYaw = v; } },
-  { key: 'houseW',   label: 'House width',            min: 150,  max: 700,  step: 10, def: STREET.house.w,  get: () => STREET.house.w,  set: (v) => { STREET.house.w = v; } },
-  { key: 'houseH',   label: 'House wall height',      min: 100,  max: 500,  step: 10, def: STREET.house.h,  get: () => STREET.house.h,  set: (v) => { STREET.house.h = v; } },
-  { key: 'houseD',   label: 'House depth',            min: 100,  max: 500,  step: 10, def: STREET.house.d,  get: () => STREET.house.d,  set: (v) => { STREET.house.d = v; } },
-  { key: 'houseRh',  label: 'Roof height',            min: 0,    max: 400,  step: 10, def: STREET.house.rh, get: () => STREET.house.rh, set: (v) => { STREET.house.rh = v; } },
+  { key: 'laneX',    label: 'Lane width (house |x|)', min: 0,     max: 2000, step: 10,   def: STREET.laneX,    get: () => STREET.laneX,    set: (v) => { STREET.laneX = v; } },
+  { key: 'plotZ0',   label: 'Nearest plot depth',     min: -3000, max: 200,  step: 10,   def: STREET.plotZ0,   get: () => STREET.plotZ0,   set: (v) => { STREET.plotZ0 = v; } },
+  { key: 'plotGap',  label: 'Plot spacing',           min: 50,    max: 2000, step: 10,   def: STREET.plotGap,  get: () => STREET.plotGap,  set: (v) => { STREET.plotGap = v; } },
+  { key: 'groundY',  label: 'Ground depth below eye', min: -300,  max: 600,  step: 2,    def: STREET.groundY,  get: () => STREET.groundY,  set: (v) => { STREET.groundY = v; } },
+  { key: 'eyeY',     label: 'Eye height',             min: -500,  max: 500,  step: 2,    def: STREET.eyeY,     get: () => STREET.eyeY,     set: (v) => { STREET.eyeY = v; } },
+  { key: 'pitch',    label: 'Camera pitch (down°)',   min: -90,   max: 90,   step: 1,    def: STREET.pitch,    get: () => STREET.pitch,    set: (v) => { STREET.pitch = v; } },
+  { key: 'camBack',  label: 'Camera stand-back',      min: -1000, max: 3000, step: 10,   def: STREET.camBack,  get: () => STREET.camBack,  set: (v) => { STREET.camBack = v; } },
+  { key: 'persp',    label: 'Perspective strength',   min: 100,   max: 6000, step: 25,   def: STREET.persp,    get: () => STREET.persp,    set: (v) => { STREET.persp = v; } },
+  { key: 'doorStop', label: 'Door fly-in stop',       min: -400,  max: 600,  step: 2,    def: STREET.doorStop, get: () => STREET.doorStop, set: (v) => { STREET.doorStop = v; } },
+  { key: 'doorYaw',  label: 'Door facing angle (°)',  min: -180,  max: 180,  step: 1,    def: STREET.doorYaw,  get: () => STREET.doorYaw,  set: (v) => { STREET.doorYaw = v; } },
+  { key: 'cullFade', label: 'Other houses fade (0–1)',min: 0,     max: 1,    step: 0.05, def: STREET.cullFade, get: () => STREET.cullFade, set: (v) => { STREET.cullFade = v; } },
+  { key: 'houseW',   label: 'House width',            min: 20,    max: 1600, step: 10,   def: STREET.house.w,  get: () => STREET.house.w,  set: (v) => { STREET.house.w = v; } },
+  { key: 'houseH',   label: 'House wall height',      min: 20,    max: 1200, step: 10,   def: STREET.house.h,  get: () => STREET.house.h,  set: (v) => { STREET.house.h = v; } },
+  { key: 'houseD',   label: 'House depth',            min: 20,    max: 1600, step: 10,   def: STREET.house.d,  get: () => STREET.house.d,  set: (v) => { STREET.house.d = v; } },
+  { key: 'houseRh',  label: 'Roof height',            min: -200,  max: 900,  step: 10,   def: STREET.house.rh, get: () => STREET.house.rh, set: (v) => { STREET.house.rh = v; } },
 ];
 
 // Find a tunable by key (the persistence/UI layers address them by key).

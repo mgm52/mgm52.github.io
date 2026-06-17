@@ -2302,7 +2302,7 @@
       }
       /* House volume: front brightest, sides stepped darker, roof palest, so a
          flat-white house still reads as 3-D. A soft lilac shadow grounds it. */
-      .sv-house { position: absolute; transform-style: preserve-3d; }
+      .sv-house { position: absolute; transform-style: preserve-3d; transition: opacity 360ms ease; }
       .sv-wall { background: linear-gradient(180deg, #ffffff 0%, #eef0f8 100%); }
       .sv-front { background: linear-gradient(180deg, #ffffff 0%, #f3f4fb 100%); }
       .sv-back { background: #e4e6f2; }
