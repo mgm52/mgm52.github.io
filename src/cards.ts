@@ -31,6 +31,8 @@ import {
   TradeEvent, Want, WorldCard, cardPower, decodeWorld, encodeWorld, generateEvents,
   makeCard, mulberry32, regenerateEvent, sceneStructureCounts,
   WantSeg, wantSatisfiableBy, wantSatisfiedBy, wantSegments,
+  STREET, StreetCam, StreetSide, gatheringRowCount, gatheringSlot,
+  streetDollyPose, streetDoor, streetEnterPose, streetFocusPose, streetHouse, streetViewSpace,
 } from './cards-core';
 
 const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
@@ -1257,31 +1259,22 @@ function renderHand(meta: CardMeta, opts: HandOpts = {}): void {
 // 3d world (.sv-camera) that we move by applying the INVERSE of the camera
 // pose, so "moving the camera" is one transform on one element.
 
-// Every length here is a CSS-3D pixel; the constants are grouped so the whole
-// street can be reframed from one place.
-const SV = {
-  persp: 1150,
-  eyeY: -28,          // eye sits a little above the doorsteps
-  groundY: 70,        // ground plane below the eye (matches .sv-ground transform)
-  pitch: 10,          // the street view looks down the road
-  row0Z: -410,        // depth of the nearest row of houses
-  rowGap: 560,        // spacing between rows, down the street
-  lane: 300,          // house centre offset from the road's centreline
-  camBack: 232,       // how far toward the viewer the camera sits from a row
-  house: { w: 180, h: 132, d: 180, rh: 92 },
-  homeX: 300, homeZ: -120,   // the player's own house, off to one side
-};
+// The street's geometry + camera maths live DOM-free in cards-core (STREET,
+// streetHouse, streetDoor, streetEnterPose, streetFocusPose) so the unit tests
+// can prove the fly-in lands square on a door. This module is the DOM half.
 
-type CamPose = { x: number; y: number; z: number; yaw: number; pitch?: number };
-function camTransform(p: CamPose): string {
-  return `rotateX(${p.pitch ?? SV.pitch}deg) rotateY(${-p.yaw}deg) translate3d(${(-p.x).toFixed(1)}px, ${(-p.y).toFixed(1)}px, ${(-p.z).toFixed(1)}px)`;
+// The .sv-camera transform — the INVERSE of the camera pose, applied to the
+// world group — kept exactly in step with cards-core's streetViewSpace so the
+// tested maths and the rendered scene agree.
+function camTransform(p: StreetCam): string {
+  return `rotateX(${(p.pitch ?? STREET.pitch)}deg) rotateY(${-p.yaw}deg) translate3d(${(-p.x).toFixed(1)}px, ${(-p.y).toFixed(1)}px, ${(-p.z).toFixed(1)}px)`;
 }
 
 // One simple white house: four walls, a gabled roof, a door and (for a
 // gathering) a lit sign over it. `face` rotates the whole house so its door
 // looks the way we want; the door/sign live on the front face's 2-D plane.
 function buildHouse(opts: { tier?: CardTier; name?: string; sign?: string; plain?: boolean }): HTMLElement {
-  const { w, h, d, rh } = SV.house;
+  const { w, h, d, rh } = STREET.house;
   const house = div(`sv-house${opts.plain ? ' plain' : ''}${opts.tier ? ` t-${opts.tier}` : ''}`);
   const slant = Math.hypot(w / 2, rh);
   const lean = Math.atan2(w / 2, rh) * 180 / Math.PI;
@@ -1328,25 +1321,34 @@ function buildHouse(opts: { tier?: CardTier; name?: string; sign?: string; plain
   return house;
 }
 
-type StreetSlot = { ev: TradeEvent | null; x: number; z: number; faceYaw: number; row: number; side: 'L' | 'R'; el?: HTMLElement };
+// A gathering's house on the street, plus its focus row (= the plot it sits at).
+type StreetSlot = { ev: TradeEvent; row: number; side: StreetSide; house: ReturnType<typeof streetHouse>; el?: HTMLElement };
 
-function streetRows(meta: CardMeta): { slots: StreetSlot[]; rows: number } {
+// The player's own house, parked at the head of the street — the one the reveal
+// pulls out of, and just scenery thereafter.
+const REVEAL_HOME = { x: 300, z: -120, faceYaw: 90 };
+
+// Lay the gatherings into two lines (pairs of left/right plots) and fill every
+// other plot — plus a couple beyond — with plain residences, so both sides read
+// as a continuous street rather than a sparse handful of houses.
+function streetLayout(meta: CardMeta): { gatherings: StreetSlot[]; residences: ReturnType<typeof streetHouse>[]; rows: number } {
   const evs = meta.events ?? [];
-  const rows = Math.max(1, Math.ceil(evs.length / 2));
-  const slots: StreetSlot[] = [];
-  for (let r = 0; r < rows; r++) {
-    const z = SV.row0Z - r * SV.rowGap;
-    // Doors angle inward toward the road and a touch toward the walker (a 3/4
-    // view of each front), so a row reads as "two houses, left and right".
-    slots.push({ ev: evs[r * 2] ?? null, x: -SV.lane, z, faceYaw: 62, row: r, side: 'L' });
-    slots.push({ ev: evs[r * 2 + 1] ?? null, x: SV.lane, z, faceYaw: -62, row: r, side: 'R' });
+  const rows = gatheringRowCount(evs.length);
+  const gatherings: StreetSlot[] = [];
+  const taken = new Set<string>();
+  evs.forEach((ev, i) => {
+    const { plot, side } = gatheringSlot(i);
+    taken.add(`${plot},${side}`);
+    gatherings.push({ ev, row: plot, side, house: streetHouse(plot, side) });
+  });
+  const residences: ReturnType<typeof streetHouse>[] = [];
+  for (let plot = 0; plot <= rows + 1; plot++) {
+    for (const side of ['L', 'R'] as StreetSide[]) {
+      if (!taken.has(`${plot},${side}`)) residences.push(streetHouse(plot, side));
+    }
   }
-  return { slots, rows };
+  return { gatherings, residences, rows };
 }
-
-const camFocusPose = (row: number): CamPose => ({
-  x: 0, y: SV.eyeY, z: SV.row0Z - row * SV.rowGap + SV.camBack, yaw: 0,
-});
 
 // The last row the player stood at, so backing out of a gathering returns the
 // camera where it was rather than snapping to the top of the street.
@@ -1355,8 +1357,8 @@ let streetRow = 0;
 // Build the 3-D street into #card-stage and return its moving parts. Interactivity
 // is wired by `focusRow`; the reveal drives the camera itself before calling it.
 function buildStreetScene(meta: CardMeta): {
-  scene: HTMLElement; camera: HTMLElement; home: HTMLElement; slots: StreetSlot[]; rows: number;
-  setCam: (p: CamPose, ms: number, ease?: string) => Promise<void>;
+  scene: HTMLElement; camera: HTMLElement; home: HTMLElement; gatherings: StreetSlot[]; rows: number;
+  setCam: (p: StreetCam, ms: number, ease?: string, cull?: 'cull' | HTMLElement) => Promise<void>;
   focusRow: (row: number) => void;
 } {
   const stage = realmEl('card-stage');
@@ -1370,7 +1372,7 @@ function buildStreetScene(meta: CardMeta): {
   }
 
   const scene = div('sv-scene');
-  scene.style.perspective = `${SV.persp}px`;
+  scene.style.perspective = `${STREET.persp}px`;
   const camera = div('sv-camera');
   scene.appendChild(camera);
   stage.appendChild(scene);
@@ -1380,30 +1382,55 @@ function buildStreetScene(meta: CardMeta): {
   ground.appendChild(div('sv-road'));
   camera.appendChild(ground);
 
-  // The player's own house, off to the side near the street's head — the one
-  // the reveal pulls out of.
-  const home = buildHouse({ plain: true, name: 'home' });
+  // Every house, with its world centre — so a pose can hide any that have
+  // crossed behind the eye (where CSS perspective would blow them up into
+  // screen-filling junk) and the fly-in can keep only its target on screen.
+  const houses: { el: HTMLElement; cx: number; cz: number }[] = [];
+  const place = (el: HTMLElement, h: { x: number; z: number; faceYaw: number }) => {
+    el.style.transform = `translate3d(${h.x}px,${STREET.groundY}px,${h.z}px) rotateY(${h.faceYaw}deg)`;
+    camera.appendChild(el);
+    houses.push({ el, cx: h.x, cz: h.z });
+  };
+
+  // The player's own house at the street's head — the one the reveal pulls out
+  // of, scenery thereafter.
+  const home = buildHouse({ plain: true });
   home.classList.add('sv-home');
-  home.style.transform = `translate3d(${SV.homeX}px,${SV.groundY}px,${SV.homeZ}px) rotateY(90deg)`;
+  place(home, REVEAL_HOME);
   const homeSign = div('sv-sign sv-home-sign');
   homeSign.textContent = 'home';
   (home.querySelector('.sv-front') as HTMLElement)?.appendChild(homeSign);
-  camera.appendChild(home);
 
-  const { slots, rows } = streetRows(meta);
-  for (const slot of slots) {
-    const ev = slot.ev;
-    const house = ev
-      ? buildHouse({ tier: ev.tier, sign: ev.name })
-      : buildHouse({ plain: true });
-    house.style.transform = `translate3d(${slot.x}px,${SV.groundY}px,${slot.z}px) rotateY(${slot.faceYaw}deg)`;
-    slot.el = house;
-    camera.appendChild(house);
+  const { gatherings, residences, rows } = streetLayout(meta);
+  // Plain residences flesh the two lines out into a real street.
+  for (const h of residences) place(buildHouse({ plain: true }), h);
+  // The gatherings themselves, each a signed, enterable house.
+  for (const slot of gatherings) {
+    const el = buildHouse({ tier: slot.ev.tier, sign: slot.ev.name });
+    slot.el = el;
+    place(el, slot.house);
   }
 
-  const setCam = (p: CamPose, ms: number, ease = 'cubic-bezier(0.66,0,0.34,1)'): Promise<void> => {
+  // Cull mode for a pose. The interactive street hides any house at/behind the
+  // eye plane ('cull') — the ones CSS would magnify into the frame from the
+  // side — and the fly-in keeps only its target on screen (an element). The
+  // hand-choreographed reveal frames home up close on purpose, so it culls
+  // nothing (undefined). CULL_Z gives a small in-front tolerance.
+  const CULL_Z = 40;
+  type Cull = 'cull' | HTMLElement | undefined;
+  const applyCull = (p: StreetCam, mode: Cull): void => {
+    if (!mode) { for (const h of houses) h.el.style.visibility = ''; return; }
+    for (const h of houses) {
+      const v = streetViewSpace({ x: h.cx, y: STREET.groundY - STREET.house.h / 2, z: h.cz }, p);
+      const hidden = mode instanceof HTMLElement ? h.el !== mode : v.z > CULL_Z;
+      h.el.style.visibility = hidden ? 'hidden' : '';
+    }
+  };
+
+  const setCam = (p: StreetCam, ms: number, ease = 'cubic-bezier(0.66,0,0.34,1)', cull?: Cull): Promise<void> => {
     camera.style.transition = ms > 0 ? `transform ${ms}ms ${ease}` : 'none';
     camera.style.transform = camTransform(p);
+    applyCull(p, cull);
     return sleep(ms);
   };
 
@@ -1428,13 +1455,12 @@ function buildStreetScene(meta: CardMeta): {
     label.textContent = rows > 1 ? `street · ${streetRow + 1} / ${rows}` : 'the street';
     back.disabled = streetRow === 0;
     fwd.disabled = streetRow >= rows - 1;
-    // Only the focused row's houses light up and take clicks.
-    for (const slot of slots) {
-      const lit = slot.row === streetRow && slot.ev !== null;
-      slot.el?.classList.toggle('sv-active', lit);
+    // Only the focused row's gatherings light up and take clicks.
+    for (const slot of gatherings) {
+      slot.el?.classList.toggle('sv-active', slot.row === streetRow);
       slot.el?.classList.toggle('sv-dim', slot.row !== streetRow);
     }
-    if (active) void setCam(camFocusPose(streetRow), 900);
+    if (active) void setCam(streetFocusPose(streetRow), 900, undefined, 'cull');
   };
 
   const stepTo = (row: number): void => {
@@ -1445,11 +1471,11 @@ function buildStreetScene(meta: CardMeta): {
   back.addEventListener('click', () => stepTo(streetRow - 1));
   fwd.addEventListener('click', () => stepTo(streetRow + 1));
 
-  // Clicking a focused gathering house walks the camera down to it, swings to
-  // face the door and pushes through — then hands off to the gathering view.
-  for (const slot of slots) {
+  // Clicking a focused gathering flies the camera straight into its door, then
+  // hands off to the gathering view.
+  for (const slot of gatherings) {
     slot.el?.addEventListener('click', () => {
-      if (!active || slot.ev === null || slot.row !== streetRow) return;
+      if (!active || slot.row !== streetRow) return;
       const locked = meta.cards.length === 0
         || !slot.ev.creatures.some((cr) => wantSatisfiableBy(cr.want, meta.cards));
       if (locked) {
@@ -1466,7 +1492,7 @@ function buildStreetScene(meta: CardMeta): {
   }
 
   return {
-    scene, camera, home, slots, rows, setCam,
+    scene, camera, home, gatherings, rows, setCam,
     focusRow: (row: number) => { active = true; focusRow(row); },
   };
 }
@@ -1474,27 +1500,32 @@ function buildStreetScene(meta: CardMeta): {
 // The interactive street: build it, drop the camera onto the saved row, and
 // let the player walk and enter. (renderHand keeps "your worlds" along the
 // bottom, exactly as the old table did.)
-function showStreet(meta: CardMeta, opts: { row?: number; fromCam?: CamPose } = {}): void {
+function showStreet(meta: CardMeta, opts: { row?: number; fromCam?: StreetCam } = {}): void {
   const s = buildStreetScene(meta);
   const row = Math.max(0, Math.min(s.rows - 1, opts.row ?? streetRow));
   // Snap to a starting pose, then ease into the focus pose so the street
   // "arrives" with a touch of motion rather than a hard cut.
-  void s.setCam(opts.fromCam ?? camFocusPose(row), 0);
+  void s.setCam(opts.fromCam ?? streetFocusPose(row), 0, undefined, 'cull');
   requestAnimationFrame(() => requestAnimationFrame(() => s.focusRow(row)));
   renderHand(meta);
 }
 
-// Dive from the street into a gathering: dolly to the chosen house, swing to
-// its door, push in, then swap to the gathering view under the cover of the
-// stage cross-fade.
-async function enterGatheringHouse(meta: CardMeta, slot: StreetSlot, setCam: (p: CamPose, ms: number, ease?: string) => Promise<void>): Promise<void> {
+// Dive from the street into a gathering: with only the target house on screen,
+// turn to face its door head-on, fly square at it (streetEnterPose — door
+// dead-centre, a nose away) and push on THROUGH the threshold, then swap to the
+// gathering under the door-wash + cross-fade.
+async function enterGatheringHouse(meta: CardMeta, slot: StreetSlot, setCam: (p: StreetCam, ms: number, ease?: string, cull?: 'cull' | HTMLElement) => Promise<void>): Promise<void> {
   streetRow = slot.row;
-  // Walk down beside the house, swing toward its door, then push through it.
-  await setCam({ x: slot.x * 0.45, y: SV.eyeY, z: slot.z + 240, yaw: slot.side === 'L' ? -16 : 16 }, 720, 'cubic-bezier(0.4,0,0.5,1)');
-  await setCam({ x: slot.x * 0.9, y: SV.eyeY, z: slot.z + 70, yaw: slot.side === 'L' ? -46 : 46, pitch: 2 }, 620, 'cubic-bezier(0.5,0,0.7,0.6)');
+  const target = slot.el;
+  // Square up out on the road in front of the door (only the target visible, so
+  // nothing else crowds the frame).
+  await setCam(streetDollyPose(slot.house, 240), 720, 'cubic-bezier(0.4,0,0.5,1)', target);
   realmEl('card-stage').classList.add('sv-entering');
-  await setCam({ x: slot.x, y: SV.eyeY, z: slot.z, yaw: slot.side === 'L' ? -62 : 62, pitch: 0 }, 460, 'cubic-bezier(0.6,0,0.85,0.5)');
-  if (slot.ev) swapView(() => showGathering(meta, slot.ev as TradeEvent));
+  // Fly to the threshold (the door dead-centre), then push on through it: the
+  // door swells past the eye as the wash whites out, reading as stepping in.
+  await setCam(streetEnterPose(slot.house), 540, 'cubic-bezier(0.5,0,0.8,0.5)', target);
+  await setCam(streetDollyPose(slot.house, -640), 460, 'cubic-bezier(0.55,0,0.95,0.7)', target);
+  swapView(() => showGathering(meta, slot.ev));
 }
 
 // The one-shot reveal, played the first time the player leaves the traded
@@ -1524,8 +1555,8 @@ async function runStreetReveal(meta: CardMeta): Promise<void> {
   // Looking at the home's front, the card laid over it. (The camera looks
   // along +X at the home; the 90° turn later swings from here onto the street,
   // which runs down -Z.)
-  const insidePose: CamPose = { x: SV.homeX - 110, y: SV.eyeY, z: SV.homeZ, yaw: 90, pitch: 3 };
-  const exteriorPose: CamPose = { x: SV.homeX - 470, y: SV.eyeY + 10, z: SV.homeZ + 30, yaw: 90, pitch: 7 };
+  const insidePose: StreetCam = { x: REVEAL_HOME.x - 110, y: STREET.eyeY, z: REVEAL_HOME.z, yaw: 90, pitch: 3 };
+  const exteriorPose: StreetCam = { x: REVEAL_HOME.x - 470, y: STREET.eyeY + 8, z: REVEAL_HOME.z + 30, yaw: 90, pitch: 7 };
   void s.setCam(insidePose, 0);
   await sleep(1000);
 
@@ -1545,7 +1576,7 @@ async function runStreetReveal(meta: CardMeta): Promise<void> {
 
   // The ninety-degree turn (yaw 90 → 0), drawing back to look down the street.
   realmSound('online', 0.4, 0.7);
-  await s.setCam({ x: 0, y: SV.eyeY, z: SV.row0Z + SV.camBack + 240, yaw: 0, pitch: SV.pitch }, 2100, 'cubic-bezier(0.5,0,0.25,1)');
+  await s.setCam({ x: 0, y: STREET.eyeY, z: STREET.plotZ0 + STREET.camBack + 240, yaw: 0, pitch: STREET.pitch }, 2100, 'cubic-bezier(0.5,0,0.25,1)');
   await sleep(450);
 
   // Settle onto the first row (a gentle dolly in) and hand control over.
