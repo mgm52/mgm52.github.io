@@ -33,6 +33,7 @@ import {
   WantSeg, wantSatisfiableBy, wantSatisfiedBy, wantSegments,
   STREET, StreetCam, StreetSide, gatheringRowCount, gatheringSlot,
   streetDollyPose, streetDoor, streetEnterPose, streetFocusPose, streetHouse, streetViewSpace,
+  STREET_TUNABLES, streetTunable, resetStreet,
 } from './cards-core';
 
 const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
@@ -243,6 +244,58 @@ export function devDealFreeCard(): void {
   meta.cards.push(newCard(meta, 'common', rng));
   saveMeta(meta);
   refreshRealmView();
+}
+
+// ─── Dev street-geometry tuning ──────────────────────────────────────
+// The realm dev cog's sliders (options-ui.ts) write STREET fields through
+// these helpers. Values persist in localStorage so a tuned framing survives a
+// reload, and re-apply at module load below. Rebuilds are coalesced into one
+// per frame so dragging a slider doesn't thrash the DOM.
+const STREET_GEOM_KEY = 'gs.realm.streetGeom';
+
+function saveStreetGeom(): void {
+  try {
+    const out: Record<string, number> = {};
+    for (const t of STREET_TUNABLES) if (t.get() !== t.def) out[t.key] = t.get();
+    if (Object.keys(out).length) localStorage.setItem(STREET_GEOM_KEY, JSON.stringify(out));
+    else localStorage.removeItem(STREET_GEOM_KEY);
+  } catch { /* storage blocked — tuning just won't persist */ }
+}
+
+function loadStreetGeom(): void {
+  try {
+    const raw = localStorage.getItem(STREET_GEOM_KEY);
+    if (!raw) return;
+    const saved = JSON.parse(raw) as Record<string, number>;
+    for (const [key, v] of Object.entries(saved)) {
+      if (typeof v === 'number') streetTunable(key)?.set(v);
+    }
+  } catch { /* malformed — ignore and keep defaults */ }
+}
+// Re-apply any persisted tuning before the realm ever builds a street.
+loadStreetGeom();
+
+let streetRebuildQueued = false;
+function queueStreetRebuild(): void {
+  if (streetRebuildQueued) return;
+  streetRebuildQueued = true;
+  requestAnimationFrame(() => { streetRebuildQueued = false; refreshRealmView(); });
+}
+
+// Dev tool (realm dev cog): set one street tunable, persist it, and rebuild.
+export function devSetStreetParam(key: string, value: number): void {
+  const t = streetTunable(key);
+  if (!t) return;
+  t.set(value);
+  saveStreetGeom();
+  queueStreetRebuild();
+}
+
+// Dev tool (realm dev cog): restore the shipped street framing.
+export function devResetStreet(): void {
+  resetStreet();
+  saveStreetGeom();
+  queueStreetRebuild();
 }
 
 // Dev cheat (options cog): wipe ONLY the trading-section metagame and
@@ -1414,7 +1467,10 @@ function buildStreetScene(meta: CardMeta): {
   stage.appendChild(scene);
 
   // Ground: one big plane laid flat, with a paler road strip down the middle.
+  // Pin its Y to STREET.groundY (overriding the CSS fallback) so the dev
+  // ground-depth slider moves the road with the houses' bases.
   const ground = div('sv-ground');
+  ground.style.transform = `translate3d(0, ${STREET.groundY}px, -2520px) rotateX(90deg)`;
   ground.appendChild(div('sv-road'));
   camera.appendChild(ground);
 

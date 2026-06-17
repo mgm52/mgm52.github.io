@@ -1,4 +1,5 @@
 import { SOUND_NAMES, type SoundName } from './audio';
+import { STREET_TUNABLES } from './cards-core';
 import { HELL } from './config';
 import { getDemonSheetList, loadDemonSheetList } from './demon-sheets';
 import {
@@ -155,6 +156,10 @@ export type RealmOptionsCallbacks = {
   onWorldDesigner: () => void;
   onReshuffleGatherings: () => void;
   onDealCard: () => void;
+  // Live street-geometry tuning: set one tunable (camera framing / house
+  // size + spacing) and rebuild the street, or restore the shipped framing.
+  onStreetParam: (key: string, value: number) => void;
+  onResetStreet: () => void;
 };
 
 const REALM_STILL_KEY = 'gs.realm.still';
@@ -224,6 +229,12 @@ export function setupRealmOptionsUI(root: HTMLElement, cb: RealmOptionsCallbacks
       realmBtn('World Designer', cb.onWorldDesigner),
       realmBtn('Reset trading realm data', cb.onResetRealm),
     ]));
+    // Live street tuning: one slider per geometry knob (camera framing, house
+    // size + spacing), plus a reset. Each rebuilds the street as you drag.
+    const geomRows = STREET_TUNABLES.map((t) =>
+      slider(t.label, t.get(), t.min, t.max, t.step, (v) => cb.onStreetParam(t.key, v)));
+    geomRows.push(realmBtn('Reset street geometry', cb.onResetStreet));
+    adminPanel.appendChild(collapsibleSection('Street geometry', geomRows));
   };
   buildPublic();
   buildAdmin();
