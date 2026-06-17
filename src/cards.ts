@@ -213,6 +213,38 @@ export function spectateActive(): boolean {
   try { return localStorage.getItem(SPECTATE_KEY) === '1'; } catch { return false; }
 }
 
+// Mounted onto the realm once it becomes visible (main.ts wires the realm's
+// pause/settings/dev chrome here, since it has the designer launcher too).
+let realmShown: ((realm: HTMLElement) => void) | null = null;
+export function onRealmShown(fn: (realm: HTMLElement) => void): void { realmShown = fn; }
+
+// Refresh whatever realm view is up after a dev edit to the metagame.
+function refreshRealmView(): void {
+  const meta = loadMeta();
+  if (!meta) return;
+  swapView(() => routeRealmView(meta));
+}
+
+// Dev tool (realm dev cog): reshuffle every gathering's traders + decks.
+export function devReshuffleGatherings(): void {
+  const meta = loadMeta();
+  if (!meta) return;
+  if (!meta.events) meta.events = generateEvents(meta, null, ALL_TASK_IDS, loadManualWorlds());
+  else for (const ev of meta.events) regenerateEvent(meta, ev, ALL_TASK_IDS, loadManualWorlds());
+  saveMeta(meta);
+  refreshRealmView();
+}
+
+// Dev tool (realm dev cog): drop a fresh common card into the player's hand.
+export function devDealFreeCard(): void {
+  const meta = loadMeta();
+  if (!meta) return;
+  const rng = mulberry32((Date.now() ^ 0x9e3779b9) >>> 0);
+  meta.cards.push(newCard(meta, 'common', rng));
+  saveMeta(meta);
+  refreshRealmView();
+}
+
 // Dev cheat (options cog): wipe ONLY the trading-section metagame and
 // reload. If the player is currently inside (or spectating) a card world,
 // the stashed outer save is put back first, so the main game survives the
@@ -1067,6 +1099,7 @@ async function runRealm(): Promise<void> {
   // the very first arrival, shorter when returning from a card world.
   await sleep(meta && meta.phase === 'free' ? 1200 : 2600);
   realm.classList.add('visible');
+  realmShown?.(realm);
   if (!meta) {
     meta = {
       v: 1,

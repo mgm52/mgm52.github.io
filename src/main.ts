@@ -7,7 +7,7 @@ import { setupInput } from './input';
 import { finaleBark, runDemonDialogue, runFinaleConfrontation, runGhostChat } from './demon-dialogue';
 import { playIntroSequence, runGabbonsawCutscene, setIntroPaused, skipIntro } from './intro';
 import { getOptions, onOptionsChange } from './options';
-import { getRestartInHell, relockOptionsCog, setupOptionsUI } from './options-ui';
+import { getRestartInHell, relockOptionsCog, setupOptionsUI, setupRealmOptionsUI } from './options-ui';
 import { applyDomOptions, centerCameraOn, centerHellCameraOnWorld, centerSpaceCamera, clampCamera, clampHellCamera, clampSpaceCamera, createRender, currentHellScale, preloadRenderAssets, render, spaceCameraMaxY } from './render';
 import { appendLog, buildingCenter, cellCenter, countHypercentres, countSpaceCentres, createInitialState, destroyBuilding, digDirection, dragonsAtCap, earnBlood, earnDragonBone, earnMoney, getSpawnCapacity, pushDeathEffect, pushFloater, recordGhost, removeGoblin, type GameState, type Ghost } from './state';
 import { autoAssignAllIdle, devSkipFinaleToConfront, devTriggerFinale, maybeDepartBobAndLolly, spawnDragon, spawnLollyRampage, spawnMinotaur, spawnRobot, spawnTinytaur, tick } from './sim';
@@ -15,8 +15,9 @@ import { ensureHellPortal, executeSkipToPreFinale, executeTaskSkip, refreshUI, s
 import { clearSave, formatRelativeTime, getLastSaveStats, loadGame, saveGame, saveGameInBackground } from './save';
 import {
   abandonCardWorldBoot, captureOriginWorld, cardWorldActive, clearCardData, consumeCardHop,
-  devResetCardRealm, hasCardMeta, initBuiltinWorlds, isCardHopInProgress, maybeStartCardRealm,
-  resetCardRealm, setupCardWorldChrome, spectateActive,
+  devDealFreeCard, devResetCardRealm, devReshuffleGatherings, hasCardMeta, initBuiltinWorlds,
+  isCardHopInProgress, maybeStartCardRealm, onRealmShown, resetCardRealm, setupCardWorldChrome,
+  spectateActive,
 } from './cards';
 import { designerActive, openDesignerList, setupDesignerChrome } from './designer';
 
@@ -482,6 +483,15 @@ async function main() {
   // run one refresh now so the sidebar is fully populated while the title
   // screen is still fading out. Pixi setup (createRender/setupInput) can
   // continue in the background and only blocks canvas interaction.
+  // The trading realm mounts its own pause/settings/dev chrome when it shows —
+  // wired here since this module has the World Designer launcher too.
+  onRealmShown((realm) => setupRealmOptionsUI(realm, {
+    onResetRealm: () => devResetCardRealm(),
+    onWorldDesigner: () => openDesignerList(),
+    onReshuffleGatherings: () => devReshuffleGatherings(),
+    onDealCard: () => devDealFreeCard(),
+  }));
+
   setupOptionsUI(document.getElementById('game')!, {
     onCheatMoney: () => {
       state.money += 1_000_000;

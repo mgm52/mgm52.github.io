@@ -908,7 +908,10 @@
          Pause button sits to the left of both. */
       #options-cog,
       #options-cog-public,
-      #pause-btn {
+      #pause-btn,
+      #realm-cog,
+      #realm-cog-public,
+      #realm-pause-btn {
         position: absolute;
         bottom: 10px;
         width: 26px; height: 26px;
@@ -924,17 +927,20 @@
         font-family: inherit;
         transition: background 0.1s, color 0.1s, transform 0.1s;
       }
-      #options-cog-public { right: 10px; }
-      #pause-btn          { right: 44px; z-index: 70; }
-      #options-cog        { right: 78px; }
+      #options-cog-public, #realm-cog-public { right: 10px; }
+      #pause-btn, #realm-pause-btn           { right: 44px; z-index: 70; }
+      #options-cog, #realm-cog               { right: 78px; }
       #options-cog:hover,
-      #options-cog-public:hover { background: rgba(40, 48, 60, 0.9); color: #fff; transform: rotate(15deg); }
-      #pause-btn:hover { background: rgba(40, 48, 60, 0.9); color: #fff; }
-      #pause-btn.paused { color: #ffd96b; border-color: #ffd96b; }
+      #options-cog-public:hover,
+      #realm-cog:hover,
+      #realm-cog-public:hover { background: rgba(40, 48, 60, 0.9); color: #fff; transform: rotate(15deg); }
+      #pause-btn:hover, #realm-pause-btn:hover { background: rgba(40, 48, 60, 0.9); color: #fff; }
+      #pause-btn.paused, #realm-pause-btn.paused { color: #ffd96b; border-color: #ffd96b; }
       /* Centred overlay shown while the game is paused. Click the overlay,
          press P or Esc to resume. The "Game saved" line fades after 2s but
          the PAUSED title stays until the player resumes. */
-      #pause-overlay {
+      #pause-overlay,
+      #realm-pause-overlay {
         position: absolute; inset: 0;
         display: none;
         align-items: center; justify-content: center;
@@ -944,7 +950,8 @@
         pointer-events: auto;
         cursor: pointer;
       }
-      #pause-overlay.visible { display: flex; }
+      #pause-overlay.visible,
+      #realm-pause-overlay.visible { display: flex; }
       #pause-overlay .pause-title {
         font-family: var(--font-display);
         font-size: calc(48px * var(--font-display-scale));
@@ -968,7 +975,9 @@
         letter-spacing: 0.08em;
       }
       #options-panel,
-      #options-panel-public {
+      #options-panel-public,
+      #realm-panel,
+      #realm-panel-public {
         position: absolute;
         bottom: 44px;
         width: 280px;
@@ -984,10 +993,23 @@
         color: #d8dee4;
         box-shadow: 0 6px 20px rgba(0, 0, 0, 0.5);
       }
-      #options-panel-public { right: 10px; width: 240px; }
-      #options-panel        { right: 78px; }
+      #options-panel-public, #realm-panel-public { right: 10px; width: 240px; }
+      #options-panel, #realm-panel               { right: 78px; }
       #options-panel[hidden],
-      #options-panel-public[hidden] { display: none; }
+      #options-panel-public[hidden],
+      #realm-panel[hidden],
+      #realm-panel-public[hidden] { display: none; }
+      /* The realm settings sit on the realm's pale glass, so a panel/cog there
+         keeps its own dark chrome but the pause overlay parks the ambient drift
+         (matching the "ambient drift" toggle's still mode). */
+      #card-realm.realm-still .cd-blob,
+      #card-realm.realm-still .cd-halo,
+      #card-realm.realm-still .cd-motes,
+      #card-realm.realm-paused .cd-blob,
+      #card-realm.realm-paused .cd-halo,
+      #card-realm.realm-paused .cd-motes,
+      #card-realm.realm-paused .world-card,
+      #card-realm.realm-paused .sv-house.sv-active .sv-sign { animation-play-state: paused; }
       .options-flavor {
         margin-top: 6px;
         padding: 6px 4px 2px;
