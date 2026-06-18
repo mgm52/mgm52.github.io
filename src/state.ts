@@ -910,6 +910,10 @@ export type GameState = {
   // = hunt everything fleshy; false = stand down (acquire no new targets).
   terminatorsTerminating: boolean;
   pendingBuild: PendingBuild;
+  // Designer-only: armed by the World Designer's "ORIGINAL HOLE" button — the
+  // next ground click (re)places the original Goblin Hole at that cell and
+  // clears holeDestroyed. Ephemeral, reset on load.
+  pendingOriginalHole?: boolean;
   // True while the player is placing hell candles (the Candle option in the
   // hell-view Build panel; each tap on a mirror's outer ring places one for
   // SOUL_SIGIL.candleBloodCost blood). Ephemeral — reset on load.
@@ -958,6 +962,11 @@ export type GameState = {
   // Sticky: flips true the first time a Hell Portal is placed. Gates the
   // "hold ↓ at the bottom of the map to descend into hell" affordance.
   hellUnlocked: boolean;
+  // Designer-set: when true the ground/earth realm is sealed off — every
+  // path back to ground (quick-travel + the edge holds out of space/hell) is
+  // refused. Lets an authored world live entirely in space or hell. Defaults
+  // false (earth always reachable in the normal game).
+  groundLocked: boolean;
   // Sticky once the player has accepted the Bob cutscene (the "tag me in
   // boss?" prompt that fires after the 20th building). Stays true even after
   // Bob dies, so the cutscene never re-offers.
@@ -1037,6 +1046,10 @@ export type GameState = {
   // skips the demon reseed/roster for them — and the finale can't re-trigger
   // (gabbonsawBought is forced true on entry).
   cardWorld?: boolean;
+  // True for a hand-authored world from the dev World Designer (and any world
+  // it saves). The task/Work track is suppressed (ui.ts), and every sidebar
+  // ability is unlocked (unlockEverything) so the designer can build freely.
+  tasksDisabled?: boolean;
 };
 
 export type UnlockState = {
@@ -1465,6 +1478,7 @@ export function createInitialState(): GameState {
     optionsUnlocked: false,
     spaceUnlocked: false,
     hellUnlocked: false,
+    groundLocked: false,
     bobSpawned: false,
     bobPickingHole: false,
     bobCheatPending: false,
@@ -1507,6 +1521,34 @@ export function createInitialState(): GameState {
   }
   appendLog(state, 'Welcome, overseer.');
   return state;
+}
+
+// Flip on every sidebar ability and mark the whole task track completed +
+// revealed, so refreshUI surfaces all build/summon/upgrade buttons regardless
+// of progress. Used by the World Designer's sandbox (makeSandboxWorld) — the
+// `taskIds` come from ui.ts's ALL_TASK_IDS, passed in to avoid a ui→state
+// import cycle.
+export function unlockEverything(state: GameState, taskIds: string[]): void {
+  state.bloodUnlocked = true;
+  state.dragonBoneUnlocked = true;
+  state.spaceUnlocked = true;
+  state.hellUnlocked = true;
+  state.autoAssignEnabled = true;
+  state.autoWaterEnabled = true;
+  state.autoSpawnEnabled = true;
+  state.goldgoblinsEnabled = true;
+  state.tinytaurUnlocked = true;
+  state.lightningUnlocked = true;
+  state.lillyTasksGiven = true;
+  state.optionsUnlocked = true;
+  const all = new Set(taskIds);
+  state.unlocks = {
+    completed: new Set(all),
+    revealed: new Set(all),
+    obsoleted: new Set(),       // hide nothing — every button stays available
+    everBuilt: new Set(),
+    minotaurEverSummoned: true,
+  };
 }
 
 export function appendLog(state: GameState, msg: string) {
@@ -1912,6 +1954,22 @@ export function removeGoblin(state: GameState, goblinId: number) {
   releaseCell(state, g.cell.cx, g.cell.cy, goblinId);
   if (g.target) releaseCell(state, g.target.cx, g.target.cy, goblinId);
   state.goblins.delete(goblinId);
+}
+
+// Designer-only: wipe every mobile unit from the world (goblins, minotaurs,
+// dragons, demons, orbiting castaways, free souls, and the rampaging duo),
+// leaving buildings + terrain intact. Goblins go through removeGoblin so their
+// occupancy/assignment bookkeeping unwinds; the rest are plain Maps/arrays we
+// can clear outright. A final prune drops any now-dangling build assignments.
+export function removeAllUnits(state: GameState): void {
+  for (const id of [...state.goblins.keys()]) removeGoblin(state, id);
+  state.minotaurs.clear();
+  state.dragons.clear();
+  state.demons.clear();
+  state.spaceUnits.clear();
+  state.ghosts = [];
+  state.lolly = null;
+  pruneAllAssignedGoblins(state);
 }
 
 // Walks every building's assignedGoblins and removes duplicate entries plus

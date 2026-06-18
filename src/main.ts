@@ -7,7 +7,7 @@ import { setupInput } from './input';
 import { finaleBark, runDemonDialogue, runFinaleConfrontation, runGhostChat } from './demon-dialogue';
 import { playIntroSequence, runGabbonsawCutscene, setIntroPaused, skipIntro } from './intro';
 import { getOptions, onOptionsChange } from './options';
-import { getRestartInHell, relockOptionsCog, setupOptionsUI } from './options-ui';
+import { getRestartInHell, relockOptionsCog, setupOptionsUI, setupRealmOptionsUI } from './options-ui';
 import { applyDomOptions, centerCameraOn, centerHellCameraOnWorld, centerSpaceCamera, clampCamera, clampHellCamera, clampSpaceCamera, createRender, currentHellScale, preloadRenderAssets, render, spaceCameraMaxY } from './render';
 import { appendLog, buildingCenter, cellCenter, countHypercentres, countSpaceCentres, createInitialState, destroyBuilding, digDirection, dragonsAtCap, earnBlood, earnDragonBone, earnMoney, getSpawnCapacity, pushDeathEffect, pushFloater, recordGhost, removeGoblin, type GameState, type Ghost } from './state';
 import { autoAssignAllIdle, devSkipFinaleToConfront, devTriggerFinale, maybeDepartBobAndLolly, spawnDragon, spawnLollyRampage, spawnMinotaur, spawnRobot, spawnTinytaur, tick } from './sim';
@@ -15,8 +15,12 @@ import { ensureHellPortal, executeSkipToPreFinale, executeTaskSkip, refreshUI, s
 import { clearSave, formatRelativeTime, getLastSaveStats, loadGame, saveGame, saveGameInBackground } from './save';
 import {
   abandonCardWorldBoot, captureOriginWorld, cardWorldActive, clearCardData, consumeCardHop,
-  hasCardMeta, isCardHopInProgress, maybeStartCardRealm, resetCardRealm, setupCardWorldChrome,
+  devDealFreeCard, devResetCardRealm, devReshuffleGatherings, devResetStreet, devSetStreetParam,
+  hasCardMeta, initBuiltinWorlds,
+  isCardHopInProgress, isRealmReturnBoot, maybeStartCardRealm, onRealmShown, resetCardRealm,
+  setupCardWorldChrome, spectateActive,
 } from './cards';
+import { designerActive, openDesignerList, setupDesignerChrome } from './designer';
 
 const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
 
@@ -220,10 +224,29 @@ async function main() {
   // applyOptions inside createRender re-applies these for any later changes.
   applyDomOptions(getOptions());
 
+  // Returning to the trading realm (leaving a card world, or the first-card
+  // reveal): the realm only mounts a couple seconds in (worlds preload, fonts,
+  // Pixi all init first), so raise the held white-out NOW — before the first
+  // await below can let the bare overworld paint — and let the realm settle
+  // over it. Mirrors applyFinaleEnded; driveFinale re-applies it idempotently.
+  if (isRealmReturnBoot()) {
+    const w = document.getElementById('finale-white') ?? document.body.appendChild(
+      Object.assign(document.createElement('div'), { id: 'finale-white' }));
+    w.style.transition = 'none';
+    w.style.opacity = '1';
+    document.getElementById('app')?.classList.add('finale-zoom');
+  }
+
   // Start downloading/decoding the sprite sheets + building art right away,
   // in parallel with the title screen, so clicking Play/Resume doesn't stall
   // on them (they used to load inside createRender, after the click).
   void preloadRenderAssets();
+
+  // Pull the committed world library (public/worlds.json) into the manual-world
+  // cache before anything can generate a trader deck, so file-saved worlds show
+  // up in the realm and the designer list. Cheap and best-effort — a missing
+  // file just leaves the localStorage worlds as the only source.
+  await initBuiltinWorlds();
 
   // The trading-card realm reaches this boot two ways: inside a card world
   // (the entered card's state sits in the save slot — boot straight into it;
@@ -233,14 +256,26 @@ async function main() {
   // Once the metagame has begun, dev sessions also resume the save rather
   // than starting fresh, so the realm loop survives its reloads.
   const cardHop = consumeCardHop();
-  let inCardWorld = cardWorldActive();
+  // Spectated worlds ride the same boot path as entered cards — the slot
+  // holds the visited world either way; cards.ts's chrome setup tells the
+  // two apart and freezes/locks the spectated one.
+  let inCardWorld = cardWorldActive() || spectateActive();
+  // The dev World Designer rides the same boot shape as a card world: the
+  // sandbox world it's editing sits in the save slot, so it must resume that
+  // slot and skip the title — but it mounts its own chrome (setupDesignerChrome)
+  // rather than the card-world chrome below.
+  const inDesigner = designerActive();
+  // ?designer (when we didn't boot INTO a designer session) opens the designer
+  // list over the current game. Suppress the trading realm in that case so the
+  // resumed post-finale save doesn't run the trading view behind the overlay.
+  const designerOverlay = !inDesigner && new URLSearchParams(window.location.search).has('designer');
   const metagameBegun = hasCardMeta();
 
   // Production-only title gate. Click here also satisfies the browser's
   // user-gesture requirement so audio can play immediately afterwards.
   // Saved-game lookup happens up-front so the title screen can show the
   // resume button (with relative-time meta) when one exists.
-  let saved = (import.meta.env.PROD || inCardWorld || metagameBegun) ? loadGame() : null;
+  let saved = (import.meta.env.PROD || inCardWorld || inDesigner || metagameBegun || designerOverlay) ? loadGame() : null;
   if (inCardWorld && !saved) {
     // The card's save is unreadable — restore the outer realm and fall
     // back to a normal boot instead of a broken world.
@@ -248,8 +283,8 @@ async function main() {
     inCardWorld = false;
     saved = import.meta.env.PROD ? loadGame() : null;
   }
-  const skipTitle = (cardHop || !import.meta.env.PROD)
-    && (inCardWorld || metagameBegun) && saved !== null;
+  const skipTitle = (cardHop || !import.meta.env.PROD || designerOverlay)
+    && (inCardWorld || inDesigner || metagameBegun || designerOverlay) && saved !== null;
   // A skipped title must still be DISMISSED: #title-screen defaults to an
   // opaque black cover and only showTitleScreen's click path hides it, so
   // without this a prod card-world hop boots the world fine — behind black.
@@ -313,7 +348,10 @@ async function main() {
   // goblin slides up, monologues, slides back out. Resumed games skip it
   // entirely (the player has presumably already met the goblin) — as do
   // restart-in-hell runs, which would cut it off mid-descent anyway.
-  const introWillPlay = choice === 'new' && !restartInHell;
+  // ?designer opens the authoring list over the game; never play the goblin
+  // intro underneath it (with no save to resume the boot would otherwise start
+  // a fresh run and run the cutscene behind the overlay).
+  const introWillPlay = choice === 'new' && !restartInHell && !designerOverlay;
   if (introWillPlay) {
     // intro-hold suppresses the spawn panel + (via the existing .revealed
     // gate) the task text. Removed once the intro promise resolves. Purely
@@ -365,10 +403,40 @@ async function main() {
   // An explicit hop also plays the arrival zoom — the world swelling out of
   // the white the player just dove into.
   if (inCardWorld) setupCardWorldChrome(state, cardHop);
+  // In the dev World Designer: mount the top authoring bar instead. The
+  // sandbox world resumed above is already task-free + fully unlocked
+  // (makeSandboxWorld), so the standard sidebar places everything.
+  else if (inDesigner) setupDesignerChrome(state);
+  // Resuming straight into the post-finale trading realm — a reload while in
+  // the realm, or stepping back out of a card world (LEAVE WORLD restores the
+  // shattered outer save and reloads). The realm only mounts once the frame
+  // loop's driveFinale sees 'shattered', which is a beat away (fonts + Pixi
+  // still initialising), so raise the held white-out NOW, synchronously, before
+  // the sidebar and bare canvas can paint behind it. driveFinale re-applies it
+  // idempotently and mounts the realm over the top.
+  else if (state.finale?.phase === 'shattered' && !designerOverlay) {
+    const w = document.getElementById('finale-white') ?? document.body.appendChild(
+      Object.assign(document.createElement('div'), { id: 'finale-white' }));
+    w.style.transition = 'none';
+    w.style.opacity = '1';
+    document.getElementById('app')?.classList.add('finale-zoom');
+  }
   // Dev shortcut: ?cardrealm mounts the trading-card realm immediately,
-  // without playing the finale first.
-  if (!import.meta.env.PROD && new URLSearchParams(window.location.search).has('cardrealm')) {
+  // without playing the finale first. Flush the just-booted world into the
+  // save slot first — entering a card stashes the slot as the outer world,
+  // and on a fresh dev boot the slot is empty (see onSkipToCardRealm).
+  // Not while a card world is booting: the query string survives the
+  // enter-world reload, and mounting the realm here would cover the world
+  // just dived into (and re-stash it as its own outer save).
+  if (!import.meta.env.PROD && !inCardWorld
+    && new URLSearchParams(window.location.search).has('cardrealm')) {
+    saveGame(state);
     maybeStartCardRealm();
+  }
+  // Dev shortcut: ?designer opens the World Designer list straight away (unless
+  // we already booted into a designer session, which mounts its own chrome).
+  if (designerOverlay) {
+    openDesignerList();
   }
   // Dev cheat flag: set by the options menu's "skip to hell" button,
   // consumed at the top of the frame loop (where the transition state lives).
@@ -443,6 +511,17 @@ async function main() {
   // run one refresh now so the sidebar is fully populated while the title
   // screen is still fading out. Pixi setup (createRender/setupInput) can
   // continue in the background and only blocks canvas interaction.
+  // The trading realm mounts its own pause/settings/dev chrome when it shows —
+  // wired here since this module has the World Designer launcher too.
+  onRealmShown((realm) => setupRealmOptionsUI(realm, {
+    onResetRealm: () => devResetCardRealm(),
+    onWorldDesigner: () => openDesignerList(),
+    onReshuffleGatherings: () => devReshuffleGatherings(),
+    onDealCard: () => devDealFreeCard(),
+    onStreetParam: (key, value) => devSetStreetParam(key, value),
+    onResetStreet: () => devResetStreet(),
+  }));
+
   setupOptionsUI(document.getElementById('game')!, {
     onCheatMoney: () => {
       state.money += 1_000_000;
@@ -492,6 +571,28 @@ async function main() {
       devSkipFinaleToConfront(state);
       appendLog(state, 'Cheat: skipped to the moon confrontation.');
     },
+    onSkipToCardRealm: () => {
+      skipIntro();
+      if (state.view !== 'ground') quickTravel('ground');
+      // The realm's first card is the world the finale would have stolen —
+      // snapshot the live state to stand in for the missing ritual.
+      captureOriginWorld(state);
+      // Then drop the run into the real post-finale END state. The realm only
+      // re-mounts on boot when the finale is in its terminal 'shattered' phase
+      // (driveFinale → maybeStartCardRealm), so without this the slot stashed
+      // as the outer world has no finale, and the first LEAVE WORLD reload
+      // boots the bare overworld instead of returning to the realm. Standing
+      // the finale up and jumping it to the end makes the realm survive the
+      // enter/leave-world reload cycle, exactly as a genuine playthrough does.
+      resetFinaleGuards();
+      devTriggerFinale(state);
+      if (state.finale) { state.finale.phase = 'shattered'; state.finale.phaseStartedAt = state.now; }
+      saveGame(state);
+      resetCardRealm();
+      maybeStartCardRealm();
+    },
+    onResetCardRealm: () => { devResetCardRealm(); },
+    onLaunchWorldDesigner: () => openDesignerList(),
   });
   // "Restart in hell": this run started fresh (choice forced to 'new'), so
   // ride straight down. The flag just queues requestSkipToHell — the frame
@@ -505,6 +606,16 @@ async function main() {
   const spawnError = () => {
     spawnErrorStreak++;
     if (spawnErrorStreak <= 3) playSound('error');
+  };
+  // In a card world the player can only RUN the world — spawn units — never
+  // build in it or buy upgrades; worlds are authored only in the designer.
+  // Gates the placement/purchase callbacks below (the UI hides their buttons
+  // too). Main game and designer are untouched: cardWorld is set only on
+  // generated trading-card worlds.
+  const blockedInCardWorld = (): boolean => {
+    if (!state.cardWorld) return false;
+    playSound('error');
+    return true;
   };
   setupUI(state, {
     onSpawnGoblin: () => {
@@ -602,6 +713,7 @@ async function main() {
         : 'Terminators stand down.');
     },
     onBuyAutoDragon: () => {
+      if (blockedInCardWorld()) return;
       // Lilly's destroy-a-robot reward, levelling through AUTODRAGON_TIERS
       // like Autospawn. Each tier demands as many active Dragon Beacons as
       // its multiplier — a beacon supports exactly one simultaneous ritual.
@@ -628,6 +740,7 @@ async function main() {
     },
     onQuickTravel: (view: 'ground' | 'hell' | 'space') => quickTravel(view),
     onPlaceOrbital: () => {
+      if (blockedInCardWorld()) return;
       // Toggle Orbital Platform placement (space view only — the button is
       // hidden elsewhere); arming it cancels any other pending mode.
       state.pendingOrbital = !state.pendingOrbital;
@@ -639,6 +752,7 @@ async function main() {
       }
     },
     onPlaceSpaceCentre: () => {
+      if (blockedInCardWorld()) return;
       // Toggle Space Centre placement (space view only — the button is hidden
       // elsewhere); arming it cancels any other pending mode. The next tap
       // must land on a completed Orbital Platform.
@@ -651,6 +765,7 @@ async function main() {
       }
     },
     onBuyAutoAssign: () => {
+      if (blockedInCardWorld()) return;
       if (state.autoAssignEnabled) return;
       const cost = SUMMON_UPGRADES.autoAssign.bloodCost;
       if (state.blood < cost) { playSound('error'); return; }
@@ -661,6 +776,7 @@ async function main() {
       autoAssignAllIdle(state);
     },
     onBuyAutoWater: () => {
+      if (blockedInCardWorld()) return;
       if (state.autoWaterEnabled) return;
       if (!state.autoAssignEnabled) { playSound('error'); return; }
       const cost = SUMMON_UPGRADES.autoWater.bloodCost;
@@ -672,6 +788,7 @@ async function main() {
       autoAssignAllIdle(state);
     },
     onBuyAutoSpawn: () => {
+      if (blockedInCardWorld()) return;
       // Buy the next tier in AUTOSPAWN_TIERS. Each click promotes the
       // multiplier 1 → 2 → 4 → 8 → 16 → 32, replacing the previous button.
       const next = AUTOSPAWN_TIERS.find(t => t.multiplier > state.autoSpawnMultiplier);
@@ -697,6 +814,7 @@ async function main() {
         : `Autospawn x${next.multiplier} — staggered cadence.`);
     },
     onBuyPainGabbonsaw: () => {
+      if (blockedInCardWorld()) return;
       // The demo's true closing ritual. One-shot: the bones are spent and the
       // ritual channels on a summon bar like any other unit; when the bar
       // completes (sim tick) Bob slides back up for one last word (and the
@@ -716,6 +834,7 @@ async function main() {
       appendLog(state, 'The pain gabbonsaw ritual begins...');
     },
     onBuyGoldgoblins: () => {
+      if (blockedInCardWorld()) return;
       if (state.goldgoblinsEnabled) return;
       const cost = SUMMON_UPGRADES.goldgoblins.bloodCost;
       if (state.blood < cost) { playSound('error'); return; }
@@ -725,6 +844,7 @@ async function main() {
       appendLog(state, 'Goldblins — gold-tinted spawns drop Ƶ250.');
     },
     onBuyGoldgoblinsX10: () => {
+      if (blockedInCardWorld()) return;
       if (!state.goldgoblinsEnabled) return;
       if (state.goldgoblinMultiplier >= SUMMON_UPGRADES.goldgoblinsX10.multiplier) return;
       const cost = SUMMON_UPGRADES.goldgoblinsX10.bloodCost;
@@ -735,6 +855,7 @@ async function main() {
       appendLog(state, 'Goldblins x10 — gold drops jump to Ƶ2500.');
     },
     onDig: (dir) => {
+      if (blockedInCardWorld()) return;
       if (state.dugDirections.has(dir)) return;
       const cost = digBloodCost(state.dugDirections.size);
       if (state.blood < cost) { playSound('error'); return; }
@@ -784,10 +905,12 @@ async function main() {
       if (state.pendingStrike) state.pendingBuild = null;
     },
     onBuildBuilding: (kind) => {
+      if (blockedInCardWorld()) return;
       state.pendingBuild = state.pendingBuild?.kind === kind ? null : { kind };
       if (state.pendingBuild) { state.pendingStrike = false; state.pendingCandle = false; }
     },
     onPlaceCandle: () => {
+      if (blockedInCardWorld()) return;
       // Toggle hell candle-placement mode; entering it cancels any pending
       // build/strike (none of which can fire in hell anyway, but stay tidy).
       state.pendingCandle = !state.pendingCandle;
@@ -974,6 +1097,7 @@ async function main() {
         || state.bobPickingHole) return;
     if (view === 'hell' && !state.hellUnlocked) { playSound('error'); return; }
     if (view === 'space' && !state.spaceUnlocked) { playSound('error'); return; }
+    if (view === 'ground' && state.groundLocked) { playSound('error'); return; }
     // First hop ever — retires the strip's fresh-unlock attention pulse.
     state.quickTravelUsed = true;
     quickTravelBusy = true;
@@ -1130,6 +1254,10 @@ async function main() {
     // Either way (live shatter or resume), the world is over — hand off to
     // the trading-card realm, which mounts itself over the white after a beat.
     if (F.phase === 'shattered') {
+      // ?designer opens the authoring list over the resumed game; neither the
+      // finale white-out nor the trading realm should take over behind it (the
+      // list fully covers the screen, so the held world need not paint at all).
+      if (designerOverlay) { finaleLastPhase = F.phase; return; }
       applyFinaleEnded();
       maybeStartCardRealm();
       finaleLastPhase = F.phase;
@@ -1297,7 +1425,7 @@ async function main() {
     if (e.key === 'Escape') {
       // input.ts clears any pending placement/aim mode on ESC; only an ESC
       // with nothing armed toggles pause.
-      if (state.pendingBuild || state.pendingStrike || state.pendingCandle || state.pendingOrbital || state.pendingSpaceCentre) return;
+      if (state.pendingBuild || state.pendingStrike || state.pendingCandle || state.pendingOrbital || state.pendingSpaceCentre || state.pendingOriginalHole) return;
       togglePause();
     } else if (k === 'p') {
       // Ignore P while typing in an input/select (options panel sliders, etc.)
@@ -1338,6 +1466,13 @@ async function main() {
       // The finale's closing confrontation + shatter freezes the world like a
       // cutscene; the autonomous beats before it (Lolly's flight) run live.
       || document.body.classList.contains('finale-hold')
+      // Spectating a trader's card world: time stands still for the whole
+      // visit (set by setupCardWorldChrome, cleared by the leave reload).
+      || document.body.classList.contains('spectate-hold')
+      // World Designer's PAUSE toggle: freezes the sim (sprites + state.now)
+      // while leaving the world fully interactive for authoring — no overlay,
+      // unlike the player-facing pause. Toggled by setupDesignerChrome.
+      || document.body.classList.contains('designer-time-frozen')
       || state.bobPickingHole;
     if (!paused && !introActive) {
       acc += dt;
@@ -1496,11 +1631,11 @@ async function main() {
         clampSpaceCamera(ctx);
       }
       const atBottom = ctx.spaceCamera.y >= spaceCameraMaxY(ctx) - 1;
-      if (downHeld && atBottom) {
+      if (!state.groundLocked && downHeld && atBottom) {
         descendHold += dt;
         if (descendHold >= SPACE_HOLD_MS) triggerDescendToSurface(now);
       } else { descendHold = 0; }
-      showHints({ descend: atBottom && !transitioning });
+      showHints({ descend: !state.groundLocked && atBottom && !transitioning });
     } else if (ctx.depth >= 0.9999) {
       // ── Hell view ── pan the hell camera; hold ↑ at the top to rise back.
       state.view = 'hell';
@@ -1515,11 +1650,11 @@ async function main() {
         clampHellCamera(ctx);
       }
       const atTop = ctx.hellCamera.y <= 1;
-      if (upHeld && atTop) {
+      if (!state.groundLocked && upHeld && atTop) {
         ascendHellHold += dt;
         if (ascendHellHold >= SPACE_HOLD_MS) triggerAscendFromHell(now);
       } else { ascendHellHold = 0; }
-      showHints({ ascendHell: atTop && !hellTransitioning });
+      showHints({ ascendHell: !state.groundLocked && atTop && !hellTransitioning });
     } else {
       // ── Ground view ── pan the world; hold ↑ at the top to rise into space,
       // or hold ↓ at the bottom (Hell Portal placed) to descend into hell.

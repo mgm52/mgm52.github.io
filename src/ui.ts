@@ -1303,8 +1303,24 @@ export function setupUI(state: GameState, callbacks: UICallbacks) {
   const destroyBtn = document.getElementById('info-destroy')!;
   let destroyDispatchTimer: number | undefined;
   destroyBtn.addEventListener('click', () => {
+    // Designer-only: deleting the selected original Goblin Hole just flags it
+    // destroyed (it's state.hole, not a Building) and drops the selection.
+    if (state.hole.selected && document.body.classList.contains('world-designer-active')) {
+      state.holeDestroyed = true;
+      state.hole.selected = false;
+      playSound('destroy', 0.5);
+      return;
+    }
     const target = [...state.buildings.values()].find(b => b.selected);
     if (!target) return;
+    // Designer mode: tear down every selected building instantly (no minotaur
+    // needed) — an authoring sandbox, mirroring the free instant-place flow.
+    if (document.body.classList.contains('world-designer-active')) {
+      for (const b of [...state.buildings.values()].filter((b) => b.selected)) {
+        callbacks.onDestroyBuilding(b.id);
+      }
+      return;
+    }
     // A building squatting on the original Goblin Hole can be torn down by
     // hand, no minotaur needed — the player must never be able to brick
     // their spawn point just because nothing big enough is alive to smash it.
@@ -1345,6 +1361,21 @@ export function setupUI(state: GameState, callbacks: UICallbacks) {
       destroyBtn.textContent = 'Destroy';
       destroyDispatchTimer = undefined;
     }, 2000);
+  });
+
+  // Delete / Backspace while a building is selected is a shortcut for the
+  // Destroy button — same path (instant in the designer, minotaur dispatch in
+  // the normal game). Ignored while typing in a field, and only when the
+  // button is actually live (a building is the active selection).
+  window.addEventListener('keydown', (e) => {
+    if (e.key !== 'Delete' && e.key !== 'Backspace') return;
+    const tgt = e.target as HTMLElement | null;
+    if (tgt && (tgt.tagName === 'INPUT' || tgt.tagName === 'SELECT' || tgt.tagName === 'TEXTAREA')) return;
+    if (destroyBtn.style.display === 'none') return;
+    const hasBuilding = [...state.buildings.values()].some((b) => b.selected);
+    if (!hasBuilding && !state.hole.selected) return;
+    e.preventDefault();
+    destroyBtn.click();
   });
 
   // Kill button — kills every currently-selected goblin.
@@ -1872,6 +1903,12 @@ export function refreshUI(state: GameState) {
     qtStripWasVisible = qtVisible;
     (document.getElementById('qt-space') as HTMLButtonElement).style.display =
       state.spaceUnlocked ? '' : 'none';
+    // Hell mirrors space: no jump button to a scene this world hasn't
+    // opened. Outside card worlds the strip only exists post-feed_hell_core
+    // (hell long since open), but generated card worlds stamp every task —
+    // some of them have never dug a portal.
+    (document.getElementById('qt-hell') as HTMLButtonElement).style.display =
+      state.hellUnlocked ? '' : 'none';
     const qtViews: [string, GameState['view']][] = [
       ['qt-ground', 'ground'], ['qt-hell', 'hell'], ['qt-space', 'space'],
     ];
@@ -1905,17 +1942,26 @@ export function refreshUI(state: GameState) {
     }
   }
   // Fire the celebration animation for any task that crossed the threshold
-  // since the last frame.
-  for (const id of completedTaskIds) {
-    if (!previouslyCompletedTaskIds.has(id)) {
-      previouslyCompletedTaskIds.add(id);
-      playTaskCompleteAnimation(id);
+  // since the last frame. A world with its track suppressed never celebrates:
+  // the World Designer sandbox (tasksDisabled), and card worlds — someone
+  // else's finished world the player only runs, with no Work to hand out.
+  const trackSuppressed = state.tasksDisabled || !!state.cardWorld;
+  if (!trackSuppressed) {
+    for (const id of completedTaskIds) {
+      if (!previouslyCompletedTaskIds.has(id)) {
+        previouslyCompletedTaskIds.add(id);
+        playTaskCompleteAnimation(id);
+      }
     }
   }
   const activeTasks: Task[] = [];
-  for (const t of TASKS) {
-    if (completedTaskIds.has(t.id)) continue;
-    if (taskReady(t, state)) activeTasks.push(t);
+  // Suppressed-track worlds (designer sandbox, card worlds) show no
+  // Work/Optional task lines at all.
+  if (!trackSuppressed) {
+    for (const t of TASKS) {
+      if (completedTaskIds.has(t.id)) continue;
+      if (taskReady(t, state)) activeTasks.push(t);
+    }
   }
   // Mandatory tasks first, optional side-tasks after (stable within each group).
   activeTasks.sort((a, b) => Number(a.optional ?? false) - Number(b.optional ?? false));
@@ -2319,6 +2365,22 @@ export function refreshUI(state: GameState) {
     if (state.pendingSpaceCentre) state.pendingSpaceCentre = false;
   }
 
+  // Card worlds expose exactly ONE Build/Ritual control: the Lightning Strike
+  // ability (an in-world power, not a build or a purchase). Everything else —
+  // every building button, the candle / orbital / space-centre placers, and
+  // all ritual upgrades plus dig — stays hidden. So the whole Build subsection
+  // collapses and only Lightning survives in the Ritual subsection (and only
+  // while this world actually unlocked it). Main game / designer: unaffected.
+  if (state.cardWorld) {
+    buildSection.style.display = 'none';
+    const ritualListEl = document.getElementById('ritual-list')!;
+    for (const el of Array.from(ritualListEl.children)) {
+      if (el.id !== 'btn-lightning-strike') (el as HTMLElement).style.display = 'none';
+    }
+    ritualSection.style.display = state.lightningUnlocked ? '' : 'none';
+    panelBuild.style.display = state.lightningUnlocked ? '' : 'none';
+  }
+
   // Hide separators that mark a task boundary the player hasn't crossed yet.
   // Hide separators that don't actually sit between two visible buttons.
   // Walks the live DOM so this stays correct regardless of how visibility
@@ -2544,6 +2606,16 @@ function refreshInfoPanel(state: GameState) {
     name.textContent = 'Distant dragon';
     stateEl.textContent = '';
     extra.innerHTML = '';
+  } else if (selectedBuildings.length > 1 && selectedGoblins.length === 0) {
+    // Designer drag-select grabbed a group of buildings — show a count and the
+    // Destroy button, which tears the whole group down at once (designer only;
+    // a multi-building selection can't arise in the normal game).
+    panel.classList.add('visible');
+    portrait.innerHTML = `<div class="portrait-goblin" style="background:#1a1626;border-color:#c9b9ff;color:#e6e2f4">▦</div>`;
+    name.textContent = `${selectedBuildings.length} buildings`;
+    stateEl.textContent = '';
+    extra.innerHTML = `<span style="color:#6a7080">Drag-selected — Destroy removes them all.</span>`;
+    destroyBtn.style.display = '';
   } else if (state.moon?.selected) {
     // Like the distant dragons: scenery the player can point at. It takes no
     // orders and does nothing — for now.
@@ -2565,6 +2637,11 @@ function refreshInfoPanel(state: GameState) {
     setCommandHint(extra, state);
   } else if (state.hole.selected) {
     showHole(state, panel, portrait, name, stateEl, extra);
+    // Designer-only: the original hole can be deleted (holeDestroyed) straight
+    // from its panel, mirroring the free instant building destroy.
+    if (document.body.classList.contains('world-designer-active') && !state.holeDestroyed) {
+      destroyBtn.style.display = '';
+    }
   } else if (selectedWater) {
     showWaterSource(state, selectedWater, panel, portrait, name, stateEl, extra);
   } else if ([...state.dragons.values()].some((d) => d.selected)) {

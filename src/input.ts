@@ -26,6 +26,20 @@ function finaleRefusalLine(): string {
   return FINALE_REFUSAL_LINES[Math.floor(Math.random() * FINALE_REFUSAL_LINES.length)];
 }
 
+// Spectating a trader's card world (cards.ts sets the class for the whole
+// visit): looking and selecting are fine, but the world takes no orders.
+function spectatingNow(): boolean {
+  return document.body.classList.contains('spectate-hold');
+}
+
+// In the dev World Designer (setupDesignerChrome tags the body): every building
+// is free, placed straight to active, and drag-paintable like a wall — so the
+// dev can lay out a world fast. Outside the designer this is always false and
+// the normal cost/construction path runs.
+function designerNow(): boolean {
+  return document.body.classList.contains('world-designer-active');
+}
+
 type ActivePointer = {
   startX: number; startY: number;
   x: number; y: number;
@@ -243,6 +257,20 @@ export function setupInput(
       }
       return;
     }
+    // Designer-only: (re)place the original Goblin Hole at the clicked cell.
+    if (state.pendingOriginalHole) {
+      const c = pixelToCell(local.x, local.y);
+      if (isInBounds(c.cx, c.cy)) {
+        state.hole.cell = { cx: c.cx, cy: c.cy };
+        state.holeDestroyed = false;
+        playSound('place', 1.6);
+      } else {
+        playSound('error');
+      }
+      state.pendingOriginalHole = false;
+      input.placementGhost.clear();
+      return;
+    }
     if (state.pendingBuild) {
       placeBuilding(state, local.x, local.y);
       drawGhost(input, local.x, local.y, state);
@@ -338,11 +366,16 @@ export function setupInput(
     if (state.pendingStrike) drawStrikeGhost(input, local.x, local.y);
     else if (state.pendingBuild) drawGhost(input, local.x, local.y, state);
     else input.placementGhost.clear();
-    // Drag-paint walls — pointer is held (still in input.pointers) and the
-    // current pending kind is wall. Silently skips duplicate cells.
-    if (state.pendingBuild?.kind === 'wall' && input.pointers.has(e.pointerId)) {
-      const c = pixelToCell(local.x, local.y);
-      tryPlaceWallAt(state, c.cx, c.cy, true);
+    // Drag-paint — pointer is held (still in input.pointers) with a pending
+    // build. Walls always drag-paint; in the designer EVERY kind does too.
+    // Silently skips duplicate/blocked cells so a sweep doesn't beep.
+    if (state.pendingBuild && input.pointers.has(e.pointerId)) {
+      if (state.pendingBuild.kind === 'wall') {
+        const c = pixelToCell(local.x, local.y);
+        tryPlaceWallAt(state, c.cx, c.cy, true);
+      } else if (designerNow()) {
+        tryPlaceBuildingInstant(state, local.x, local.y, state.pendingBuild.kind, true);
+      }
     }
     if (!input.isDragging) return;
     input.selectionGfx.clear();
@@ -577,7 +610,24 @@ export function setupInput(
       const room = Math.max(0, MAX_SELECTED_UNITS - selectedUnitCount(state));
       const taken = grabbed.slice(0, room);
       for (const u of taken) u.selected = true;
-      const count = taken.length;
+      let count = taken.length;
+      // Designer mode: a drag-box also rubber-band-selects every building whose
+      // footprint overlaps it (no cap — they aren't units), so a group can be
+      // deleted at once from the info panel. Outside the designer, buildings are
+      // single-click only, exactly as before.
+      if (designerNow()) {
+        for (const b of state.buildings.values()) {
+          const def = BUILDING_DEFS[b.kind];
+          const bx1 = b.cell.cx * CELL;
+          const by1 = b.cell.cy * CELL;
+          const bx2 = bx1 + def.cellSize * CELL;
+          const by2 = by1 + def.cellSize * CELL;
+          if (bx1 < x2 && bx2 > x1 && by1 < y2 && by2 > y1) {
+            b.selected = true;
+            count++;
+          }
+        }
+      }
       if (count > 0) playSound('select', 0.33);
       if (grabbed.length > room) {
         if (count === 0) playSound('error');
@@ -646,6 +696,7 @@ export function setupInput(
       state.pendingCandle = false;
       state.pendingOrbital = false;
       state.pendingSpaceCentre = false;
+      state.pendingOriginalHole = false;
       input.placementGhost.clear();
       return;
     }
@@ -1104,6 +1155,7 @@ function tryPlaceSpaceCentre(state: GameState, x: number, y: number) {
 // Non-robot castaways can't be steered (they're busy suffocating); a selection
 // with no robots in it just error-beeps.
 function handleSpaceRightClick(state: GameState, x: number, y: number) {
+  if (spectatingNow()) return; // a spectated world takes no orders
   const robots = [...state.spaceUnits.values()].filter((su) => su.selected && su.robot);
   if (robots.length === 0) { playSound('error'); return; }
   const m = SPACE_UNIT.margin;
@@ -1138,6 +1190,7 @@ function playGhostCommandBurst(ghosts: Ghost[]) {
 // Multiple ghosts get a small per-ghost offset so they don't pile up exactly on
 // the same point. No-op (with an error beep) if nothing is selected.
 function handleHellRightClick(state: GameState, hx: number, hy: number) {
+  if (spectatingNow()) return; // a spectated world takes no orders
   // Commanding a bound chair away from its candle frees the soul: any
   // selected occupied chair unseats its occupant on the spot, and the freed
   // ghost inherits the selection so it takes the walk order (and the info
@@ -1367,6 +1420,7 @@ function minotaurAt(state: GameState, x: number, y: number): Minotaur | null {
 
 function handleRightClick(state: GameState, x: number, y: number) {
   if (state.view !== 'ground') return; // no commanding from orbit
+  if (spectatingNow()) return; // a spectated world takes no orders
   const selectedGoblins = [...state.goblins.values()].filter((g) => g.selected);
   const selectedMinotaurs = [...state.minotaurs.values()].filter((m) => m.selected);
   const selectedDragons = [...state.dragons.values()].filter((d) => d.selected);
@@ -1737,6 +1791,10 @@ function canPlaceBuilding(state: GameState, topLeft: Cell, kind: BuildingKind): 
 
 function placeBuilding(state: GameState, x: number, y: number) {
   if (!state.pendingBuild) return;
+  // Card worlds can't be built in — the player only runs them (spawns units).
+  // The designer is exempt (it's how worlds are authored). The build menu is
+  // hidden here too; this is the backstop for any other placement path.
+  if (state.cardWorld && !designerNow()) { playSound('error'); return; }
   if (state.view !== 'ground') { playSound('error'); appendLog(state, 'You cannot build in space.'); return; }
   const kind = state.pendingBuild.kind;
   // Wall is a special case: no Building entity, just a wall cell. Stays in
@@ -1744,6 +1802,12 @@ function placeBuilding(state: GameState, x: number, y: number) {
   if (kind === 'wall') {
     const c = pixelToCell(x, y);
     tryPlaceWallAt(state, c.cx, c.cy, false);
+    return;
+  }
+  // Designer mode: every building behaves like a wall — free, instant, and
+  // left pending so it can be drag-painted across the world.
+  if (designerNow()) {
+    tryPlaceBuildingInstant(state, x, y, kind, false);
     return;
   }
   const def = BUILDING_DEFS[kind];
@@ -1839,6 +1903,33 @@ function tryPlaceWallAt(state: GameState, cx: number, cy: number, silent: boolea
   markBuildingsChanged(state);
   maybeTriggerBobCutscene(state, b, BUILDING_DEFS.wall.name);
   maybeBobBuildingRemark(state, b);
+  return true;
+}
+
+// Designer-only: drop any building straight to active for free (no cost, no
+// construction, no Bob cutscenes — this is an authoring sandbox). Mirrors
+// tryPlaceWallAt so non-wall kinds get the same instant + drag-paint flow.
+// silent=true keeps drag-paint from beeping on blocked/duplicate cells.
+function tryPlaceBuildingInstant(state: GameState, x: number, y: number, kind: BuildingKind, silent: boolean): boolean {
+  const tl = topLeftFromClick(x, y, kind);
+  if (!canPlaceBuilding(state, tl, kind)) {
+    if (!silent) refusePlacement(state, x, y, 'blocked', 'Cannot place there — blocked.');
+    return false;
+  }
+  const b: Building = {
+    id: state.nextId++,
+    displayNum: nextBuildingDisplayNum(state, kind),
+    kind,
+    cell: tl,
+    state: 'active',
+    buildProgress: 1,
+    assignedGoblins: [],
+    selected: false,
+  };
+  state.buildings.set(b.id, b);
+  markBuildingsChanged(state);
+  if (kind === 'hell_portal') state.hellUnlocked = true;
+  playSound('place', 1.6);
   return true;
 }
 

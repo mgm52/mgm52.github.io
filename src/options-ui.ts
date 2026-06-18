@@ -1,5 +1,7 @@
 import { SOUND_NAMES, type SoundName } from './audio';
+import { STREET_TUNABLES } from './cards-core';
 import { HELL } from './config';
+import { applyRealmTheme, getRealmTheme, resetRealmTheme, setRealmThemeValue } from './realm-theme';
 import { getDemonSheetList, loadDemonSheetList } from './demon-sheets';
 import {
   DEFAULT_OPTIONS, FONT_FAMILIES, FONT_KEYS, ensureFontLoaded,
@@ -21,6 +23,15 @@ export type OptionsUICallbacks = {
   onSkipToPreFinale: () => void;
   onTriggerFinale: () => void;
   onSkipToConfront: () => void;
+  // Jump straight to the start of the trading-card realm (the held white
+  // screen where the first card is dealt), skipping the finale cinematic.
+  onSkipToCardRealm: () => void;
+  // Wipe only the trading-realm metagame (cards, gatherings, origin
+  // snapshot) and reload — the main save survives.
+  onResetCardRealm: () => void;
+  // Open the dev World Designer's list/edit overlay (hand-author the manual
+  // worlds that feed the trading realm).
+  onLaunchWorldDesigner: () => void;
 };
 
 export function setupOptionsUI(root: HTMLElement, callbacks: OptionsUICallbacks): void {
@@ -135,7 +146,156 @@ export function setupOptionsUI(root: HTMLElement, callbacks: OptionsUICallbacks)
   }
 }
 
-// Compact panel for the always-visible public cog. The admin panel mirrors
+// ─── Trading-realm chrome ───────────────────────────────────────────
+// The trading realm lives in its own full-screen overlay above the game, so
+// the game's pause/settings/dev cogs are buried beneath it. This stands up an
+// identical-looking trio — mounted inside the realm — so the same controls
+// work there: pause, public settings (the global audio sliders, which apply
+// everywhere, plus a realm-only toggle), and the dev cog (realm-only tools).
+export type RealmOptionsCallbacks = {
+  onResetRealm: () => void;
+  onWorldDesigner: () => void;
+  onReshuffleGatherings: () => void;
+  onDealCard: () => void;
+  // Live street-geometry tuning: set one tunable (camera framing / house
+  // size + spacing) and rebuild the street, or restore the shipped framing.
+  onStreetParam: (key: string, value: number) => void;
+  onResetStreet: () => void;
+};
+
+const REALM_STILL_KEY = 'gs.realm.still';
+
+export function setupRealmOptionsUI(root: HTMLElement, cb: RealmOptionsCallbacks): void {
+  // Apply any persisted realm theme to the root every show (cheap, idempotent),
+  // even before the dev cog is opened or if it's gated off in prod.
+  applyRealmTheme(root);
+  if (root.querySelector('#realm-cog-public')) return;   // already mounted this boot
+
+  // The realm-only "ambient drift" preference parks the aurora/mote drift.
+  let still = false;
+  try { still = localStorage.getItem(REALM_STILL_KEY) === '1'; } catch { /* default */ }
+  root.classList.toggle('realm-still', still);
+
+  const cog = (id: string, label: string, aria: string): HTMLButtonElement => {
+    const b = document.createElement('button');
+    b.id = id; b.type = 'button'; b.textContent = label;
+    b.setAttribute('aria-label', aria);
+    return b;
+  };
+  const publicCog = cog('realm-cog-public', '⚙', 'Settings');
+  const pauseBtn = cog('realm-pause-btn', '⏸', 'Pause');
+  const adminCog = cog('realm-cog', 'D', 'Dev settings');
+  // The dev cog follows the same prod gate as the game's — hidden until the
+  // secret unlock, always on in dev.
+  if (!import.meta.env.DEV && localStorage.getItem(SECRET_UNLOCK_KEY) !== '1') {
+    adminCog.style.display = 'none';
+  }
+
+  const publicPanel = document.createElement('div');
+  publicPanel.id = 'realm-panel-public'; publicPanel.hidden = true;
+  const adminPanel = document.createElement('div');
+  adminPanel.id = 'realm-panel'; adminPanel.hidden = true;
+
+  // Settings: the global audio sliders (shared with the game), plus a realm toggle.
+  const buildPublic = (): void => {
+    publicPanel.innerHTML = '';
+    const o = getOptions();
+    publicPanel.appendChild(section('Audio', [
+      slider('Master volume', o.volume,      0, 1, 0.05, (v) => setOption('volume', v)),
+      slider('Music volume',  o.musicVolume, 0, 1, 0.05, (v) => setOption('musicVolume', v)),
+      toggle('Vinyl crackle', o.crackleEnabled,           (v) => setOption('crackleEnabled', v)),
+    ]));
+    publicPanel.appendChild(section('Trading realm', [
+      toggle('Ambient drift', !still, (v) => {
+        still = !v;
+        try { localStorage.setItem(REALM_STILL_KEY, still ? '1' : '0'); } catch { /* no-op */ }
+        root.classList.toggle('realm-still', still);
+      }),
+    ]));
+    const flavor = document.createElement('div');
+    flavor.className = 'options-flavor';
+    flavor.textContent = 'every world is somebody’s home';
+    publicPanel.appendChild(flavor);
+  };
+
+  // Dev settings: realm-only tools.
+  const realmBtn = (label: string, onClick: () => void): HTMLElement => {
+    const b = document.createElement('button');
+    b.type = 'button'; b.className = 'options-reset'; b.textContent = label;
+    b.addEventListener('click', () => { onClick(); adminPanel.hidden = true; });
+    return b;
+  };
+  const buildAdmin = (): void => {
+    adminPanel.innerHTML = '';
+    adminPanel.appendChild(section('Trading realm', [
+      realmBtn('Reshuffle all gatherings', cb.onReshuffleGatherings),
+      realmBtn('Deal a free card', cb.onDealCard),
+      realmBtn('World Designer', cb.onWorldDesigner),
+      realmBtn('Reset trading realm data', cb.onResetRealm),
+    ]));
+    // Live street tuning: one slider per geometry knob (camera framing, house
+    // size + spacing), plus a reset. Each rebuilds the street as you drag.
+    const geomRows = STREET_TUNABLES.map((t) =>
+      slider(t.label, t.get(), t.min, t.max, t.step, (v) => cb.onStreetParam(t.key, v)));
+    geomRows.push(realmBtn('Reset street geometry', cb.onResetStreet));
+    adminPanel.appendChild(collapsibleSection('Street geometry', geomRows));
+
+    // Realm theme: recolour the houses + restyle the name-labels, and pick the
+    // realm font. These drive CSS variables on the realm root, so they apply
+    // live with no rebuild.
+    const th = getRealmTheme();
+    const fontOpts = [{ value: '', label: '— inherit —' }, ...FONT_FAMILIES.map((f) => ({ value: f.id, label: f.label }))];
+    const resetTheme = document.createElement('button');
+    resetTheme.type = 'button'; resetTheme.className = 'options-reset'; resetTheme.textContent = 'Reset realm theme';
+    resetTheme.addEventListener('click', () => { resetRealmTheme(); buildAdmin(); });
+    adminPanel.appendChild(collapsibleSection('Realm theme', [
+      subheader('Houses'),
+      color('House colour', th.house, (v) => setRealmThemeValue('house', v)),
+      color('Roof colour', th.roof, (v) => setRealmThemeValue('roof', v)),
+      color('Door colour', th.door, (v) => setRealmThemeValue('door', v)),
+      subheader('Name labels'),
+      color('Label background', th.signBg, (v) => setRealmThemeValue('signBg', v)),
+      color('Label text', th.signColor, (v) => setRealmThemeValue('signColor', v)),
+      slider('Label text size', th.signSize, 6, 40, 1, (v) => setRealmThemeValue('signSize', v)),
+      subheader('Fonts'),
+      select('Realm font', th.font, fontOpts, (v) => setRealmThemeValue('font', v)),
+      slider('Font scale', th.fontScale, 0.4, 2.5, 0.05, (v) => setRealmThemeValue('fontScale', v)),
+      resetTheme,
+    ]));
+  };
+  buildPublic();
+  buildAdmin();
+
+  // Each cog toggles its panel and closes the other; an outside click closes both.
+  publicCog.addEventListener('click', (e) => { e.stopPropagation(); adminPanel.hidden = true; buildPublic(); publicPanel.hidden = !publicPanel.hidden; });
+  adminCog.addEventListener('click', (e) => { e.stopPropagation(); publicPanel.hidden = true; buildAdmin(); adminPanel.hidden = !adminPanel.hidden; });
+  document.addEventListener('click', (e) => {
+    if (!(e.target instanceof Node)) return;
+    if (!publicPanel.hidden && !publicPanel.contains(e.target) && !publicCog.contains(e.target)) publicPanel.hidden = true;
+    if (!adminPanel.hidden && !adminPanel.contains(e.target) && !adminCog.contains(e.target)) adminPanel.hidden = true;
+  });
+
+  // Pause: a centred overlay that also parks the ambient drift while it's up.
+  const overlay = document.createElement('div');
+  overlay.id = 'realm-pause-overlay';
+  overlay.innerHTML = '<div class="pause-title">PAUSED</div><div class="pause-hint">click, press P or Esc to resume</div>';
+  const isPaused = (): boolean => overlay.classList.contains('visible');
+  const setPaused = (p: boolean): void => {
+    overlay.classList.toggle('visible', p);
+    pauseBtn.classList.toggle('paused', p);
+    root.classList.toggle('realm-paused', p);
+  };
+  pauseBtn.addEventListener('click', (e) => { e.stopPropagation(); publicPanel.hidden = true; adminPanel.hidden = true; setPaused(!isPaused()); });
+  overlay.addEventListener('click', () => setPaused(false));
+  window.addEventListener('keydown', (e) => {
+    if (!isPaused()) return;
+    if (e.key === 'Escape' || e.key === 'p' || e.key === 'P') setPaused(false);
+  });
+
+  root.append(publicCog, pauseBtn, adminCog, publicPanel, adminPanel, overlay);
+}
+
+
 // the same audio sliders so changing one keeps the other in sync after a
 // rebuild — but the public panel is intentionally minimal, plus a flavour
 // line for atmosphere.
@@ -466,6 +626,9 @@ function rebuildPanel(panel: HTMLElement, callbacks: OptionsUICallbacks, refresh
     cheatButton('Cheat: skip to pre-finale state', callbacks.onSkipToPreFinale),
     cheatButton('Cheat: trigger finale now', callbacks.onTriggerFinale),
     cheatButton('Cheat: skip to moon confrontation', callbacks.onSkipToConfront),
+    cheatButton('Cheat: skip to trading realm', callbacks.onSkipToCardRealm),
+    cheatButton('Cheat: reset trading realm data', callbacks.onResetCardRealm),
+    cheatButton('World Designer', callbacks.onLaunchWorldDesigner),
   ]));
 
   // Cheats + debug shortcuts, folded into their own section like everything

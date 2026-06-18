@@ -8,29 +8,24 @@
 import * as devalue from 'devalue';
 import { compressToUTF16, decompressFromUTF16 } from 'lz-string';
 import {
-  BUILDING_DEFS, BuildingKind, CELL, SPACE,
+  BUILDING_DEFS, BuildingKind, CELL, SOUL_SIGIL, SPACE, formatPower,
 } from './config';
 import {
   Building, Cell, GameState, Goblin, SpaceBuilding,
   buildingAtCell, cellCenter, cellKey, computePlayBounds, createInitialState,
   digDirection, isInPlayCell, markBuildingsChanged, nextBuildingDisplayNum,
-  occupyCell, recordGhost, removeGoblin, waterSourceAtCell,
+  occupyCell, recordGhost, removeGoblin, unlockEverything, waterSourceAtCell,
 } from './state';
 
 export type CardTier = 'common' | 'uncommon' | 'rare';
 export const TIER_RANK: Record<CardTier, number> = { common: 0, uncommon: 1, rare: 2 };
 export const TIER_ABOVE: Record<CardTier, CardTier | null> = { common: 'uncommon', uncommon: 'rare', rare: null };
 
-// What a card demands before it can ascend to the next tier: hold this much
-// of one resource inside its world. Different per card — part of a card's
-// identity, and the reason to trade sideways for one whose demand suits the
-// world you can actually grow. Null once the card is rare (top tier).
-export type UpgradeReq = { res: 'money' | 'blood' | 'dragonBone' | 'power'; amount: number };
-
 // The headline numbers written on a card. `power` is the world's last
 // measured production in watts (0 until its buildings have actually run);
-// optional for metas saved before it existed.
-export type CardResources = { money: number; blood: number; dragonBone: number; power?: number };
+// `goblins` is the standing population. Both optional for metas saved
+// before they existed.
+export type CardResources = { money: number; blood: number; dragonBone: number; power?: number; goblins?: number };
 
 export type WorldCard = {
   id: number;
@@ -41,8 +36,6 @@ export type WorldCard = {
   data: string;
   // Headline numbers written on the card; refreshed alongside `data`.
   resources: CardResources;
-  // Ascension demand for the next tier (see UpgradeReq). Null at rare.
-  upgradeReq?: UpgradeReq | null;
   // The player's own stolen pre-finale world — winnable back at gathering III.
   origin?: boolean;
   // Border-pattern index (index.html's .wcf-N rules) of the trader whose
@@ -52,26 +45,107 @@ export type WorldCard = {
   frame?: number;
 };
 
-// What a creature looks for in a card. Cards that match are the ones it's
-// "open to trading for"; everything else greys out.
-export type Appetite = 'any' | 'blood' | 'rich' | 'bones';
-export const APPETITE_LINE: Record<Appetite, string> = {
-  any: 'i will consider any world.',
-  blood: 'i want worlds with blood in them.',
-  rich: 'i want wealthy worlds.',
-  bones: 'i want worlds that keep bones.',
+// ─── Trader wants ────────────────────────────────────────────────────
+// A creature advertises ONE want — the worlds it will take. Hand it the
+// card(s) that satisfy the want and it gives you its ENTIRE deck in return
+// (the only way the collection grows now that cards no longer ascend on their
+// own). Wants vary per trader: an open "any one world", a tier ask ("three
+// common worlds"), or a resource threshold ("a world worth Ƶ10,000+").
+export type Want =
+  | { kind: 'any'; count: number }
+  | { kind: 'tier'; tier: CardTier; count: number }
+  | { kind: 'resource'; res: 'money' | 'blood' | 'dragonBone' | 'power'; amount: number; count: number };
+
+const COUNT_WORDS = ['zero', 'one', 'two', 'three', 'four', 'five', 'six', 'seven', 'eight', 'nine', 'ten'];
+function countWord(n: number): string { return COUNT_WORDS[n] ?? String(n); }
+function worldsWord(n: number): string { return n === 1 ? 'world' : 'worlds'; }
+
+// The card resource a want reads (power is the card's measured production).
+export function wantResAmount(res: 'money' | 'blood' | 'dragonBone' | 'power', card: WorldCard): number {
+  return res === 'power' ? (card.resources.power ?? 0) : (card.resources[res] ?? 0);
+}
+
+// Does a single card qualify toward a want?
+export function cardQualifies(w: Want, card: WorldCard): boolean {
+  if (w.kind === 'any') return true;
+  if (w.kind === 'tier') return card.tier === w.tier;
+  return wantResAmount(w.res, card) >= w.amount;
+}
+
+// How many cards in a hand qualify, and whether the hand can satisfy the want
+// at all (enough qualifying cards to hand over).
+export function countQualifying(w: Want, hand: WorldCard[]): number {
+  return hand.reduce((n, c) => n + (cardQualifies(w, c) ? 1 : 0), 0);
+}
+export function wantSatisfiableBy(w: Want, hand: WorldCard[]): boolean {
+  return countQualifying(w, hand) >= w.count;
+}
+// Is THIS exact offer the trade? Every offered card must qualify and the count
+// must match — you hand over precisely the cards the want names, no more.
+export function wantSatisfiedBy(w: Want, offered: WorldCard[]): boolean {
+  return offered.length === w.count && offered.every((c) => cardQualifies(w, c));
+}
+
+// The trader's advertised line, split into segments — the `b` (bold) ones are
+// the actual requirement (the rarity, the count, the resource threshold).
+export type WantSeg = { t: string; b?: boolean };
+export function wantSegments(w: Want): WantSeg[] {
+  if (w.kind === 'any') {
+    return w.count === 1
+      ? [{ t: 'i will take ' }, { t: 'any', b: true }, { t: ' world.' }]
+      : [{ t: 'i want ' }, { t: `any ${countWord(w.count)}`, b: true }, { t: ` ${worldsWord(w.count)}.` }];
+  }
+  if (w.kind === 'tier') {
+    return w.count === 1
+      ? [{ t: 'i want any ' }, { t: w.tier, b: true }, { t: ' world.' }]
+      : [{ t: 'i want ' }, { t: `${countWord(w.count)} ${w.tier}`, b: true }, { t: ` ${worldsWord(w.count)}.` }];
+  }
+  const amt = Math.floor(w.amount).toLocaleString('en-US');
+  const desc = w.res === 'money' ? `worth Ƶ${amt}+`
+    : w.res === 'blood' ? `with ${amt}+ blood`
+    : w.res === 'dragonBone' ? `keeping ${amt}+ bones`
+    : `making ${formatPower(w.amount)}+`;
+  return w.count === 1
+    ? [{ t: 'i want a world ' }, { t: desc, b: true }, { t: '.' }]
+    : [{ t: 'i want ' }, { t: `${countWord(w.count)} worlds`, b: true }, { t: ` ${desc}.` }];
+}
+export function wantLine(w: Want): string {
+  return wantSegments(w).map((s) => s.t).join('');
+}
+
+// Resource bands a non-"any" want draws its threshold from, by gathering tier.
+const WANT_BANDS: Record<CardTier, Partial<Record<'money' | 'blood' | 'dragonBone' | 'power', [number, number]>>> = {
+  common: { money: [1_000, 15_000], blood: [50, 800] },
+  uncommon: { money: [50_000, 1_000_000], blood: [2_000, 20_000], dragonBone: [2, 12], power: [1_000_000_000, 3_000_000_000] },
+  rare: { money: [1_000_000, 200_000_000], blood: [50_000, 500_000], dragonBone: [50, 500], power: [1_000_000_000, 5_000_000_000] },
 };
-export function appetiteAccepts(a: Appetite, card: WorldCard): boolean {
-  if (a === 'any') return true;
-  if (a === 'blood') return card.resources.blood >= 1;
-  if (a === 'rich') return card.resources.money >= 1000;
-  return card.resources.dragonBone >= 1;
+
+// Roll a creature's want. The first creature at every gathering keeps an easy
+// ask so the player is never hard-locked — at the common border it takes any
+// one world, and each richer table's opener takes a single card of the tier
+// just below it (the rung you climb up by). The rest are pickier: more of the
+// table's own tier, or a resource threshold.
+export function rollWant(tier: CardTier, rng: () => number, firstSlot: boolean): Want {
+  if (firstSlot) {
+    if (tier === 'common') return { kind: 'any', count: 1 };
+    const below = tier === 'uncommon' ? 'common' : 'uncommon';
+    return { kind: 'tier', tier: below, count: 1 };
+  }
+  // Some traders want more than one card, all meeting the same condition.
+  const count = rng() < 0.55 ? 1 : rng() < 0.7 ? 2 : 3;
+  if (rng() < 0.5) return { kind: 'tier', tier, count };
+  const band = WANT_BANDS[tier];
+  const resOptions = (Object.keys(band) as ('money' | 'blood' | 'dragonBone' | 'power')[]);
+  const res = resOptions[Math.floor(rng() * resOptions.length)];
+  const [lo, hi] = band[res]!;
+  return { kind: 'resource', res, amount: spicyAmount(lo, hi, rng), count };
 }
 
 // `frame` is the creature's own card-border pattern (see WorldCard.frame);
 // optional only because metas saved before frames existed lack it (cards.ts
-// stamps the missing values on load).
-export type Creature = { id: number; name: string; appetite: Appetite; deck: WorldCard[]; frame?: number };
+// stamps the missing values on load). Each creature advertises ONE `want` —
+// hand it the card(s) that satisfy the want and it gives you its entire deck.
+export type Creature = { id: number; name: string; want: Want; deck: WorldCard[]; frame?: number };
 
 // The six creature slots across the three gatherings map onto the six frame
 // patterns — common's lone creature takes 0, the salon pair 1–2, the rare
@@ -86,8 +160,22 @@ export type TradeEvent = { id: number; name: string; tier: CardTier; creatures: 
 
 export type CardMeta = {
   v: 1;
-  // 'intro' until the white goblin has run the forced first trade.
-  phase: 'intro' | 'free';
+  // 'intro'     — until the white goblin has run the forced first trade.
+  // 'firstworld' — the swindle is done; the player holds the one traded card
+  //               and the realm holds them on its big-card view until they
+  //               ENTER it (their first time inside a card world).
+  // 'free'      — the street of gatherings is open; normal play.
+  phase: 'intro' | 'firstworld' | 'free';
+  // Set the moment the player first LEAVES the traded world, consumed by the
+  // realm to play the one-shot "your card lived inside a house on a street"
+  // reveal before the street view settles in.
+  revealPending?: boolean;
+  // Per-playthrough entropy mixed into every gathering roll. Without it the
+  // event RNG keyed on nextId alone, and nextId is identical for every
+  // player at the moment the tables are first dealt — so everyone met the
+  // same first trader. Optional only for metas saved before it existed
+  // (loadMeta stamps those).
+  seed?: number;
   nextId: number;
   cards: WorldCard[];
   // Generated once, after the intro (so the stolen origin card can be seeded
@@ -244,10 +332,30 @@ const KIND_POOLS: Record<CardTier, BuildingKind[]> = {
 //  - mint:        swimming in cash, bloodless
 //  - boneyard:    keeps bones (even at common, where bones are unheard of)
 //  - monoculture: one building kind, everywhere
-//  - crowd:       goblins wall to wall, little else
+//  - crowd:       goblins wall to wall, little else (units ARE the wealth)
+//  - flooded:     the land is mostly lake — water-hungry buildings thrive
+//                 in the gaps between the shores
+// Three flavors are CHALLENGES — the world is a small puzzle:
+//  - seance:      a bad power source stands ready, the bank holds exactly a
+//                 five-candle séance's worth of blood. Spawn them, kill them,
+//                 seat them — a fully soul-fed sigil makes serious power.
+//  - overcharged: reactors everywhere, no cash — the opening money grind
+//                 replayed without ever worrying about generators (its work
+//                 track resets to the very start to match).
+//  - goldrush:    every goblin glitters — an economy of killing your own
+//                 citizens for clean Ƶ250 heads.
 //  - haunted:     hell is full; the surface is thin
-export type WorldFlavor = 'balanced' | 'bloodbath' | 'mint' | 'boneyard' | 'monoculture' | 'crowd' | 'haunted';
-export const WORLD_FLAVORS: WorldFlavor[] = ['balanced', 'bloodbath', 'mint', 'boneyard', 'monoculture', 'crowd', 'haunted'];
+export type WorldFlavor = 'balanced' | 'bloodbath' | 'mint' | 'boneyard' | 'monoculture' | 'crowd' | 'flooded' | 'seance' | 'overcharged' | 'goldrush' | 'haunted';
+export const WORLD_FLAVORS: WorldFlavor[] = ['balanced', 'bloodbath', 'mint', 'boneyard', 'monoculture', 'crowd', 'flooded', 'seance', 'overcharged', 'goldrush', 'haunted'];
+
+// The main game's task chain, in order (ui.ts TASKS). A generated world sits
+// partway along it — like an adopted save file — so entering a card can mean
+// finding a colony still grinding "Run a Phone Farm". Filtered against the
+// caller's task id list, so a trimmed list (tests) still works.
+export const MAIN_TRACK = [
+  'earn_100', 'run_phone_farm', 'build_gas_engine', 'run_datacentre',
+  'build_nuclear_reactor', 'build_hypercentre', 'collect_blood',
+];
 
 export function generateWeirdWorld(seed: number, tier: CardTier, taskIds: string[], flavorOverride?: WorldFlavor): GameState {
   const rng = mulberry32(seed);
@@ -289,9 +397,10 @@ export function generateWeirdWorld(seed: number, tier: CardTier, taskIds: string
   let dragonGhostBias = 0.1;
   let pool = KIND_POOLS[tier];
   let forcePortal = false;
+  let lakes = 0;
 
   if (flavor === 'bloodbath') {
-    st.blood = [ri(15, 60), ri(1_200, 8_000), ri(240_000, 800_000)][T];
+    st.blood = [ri(16, 60), ri(1_200, 8_000), ri(240_000, 800_000)][T];
     st.money = ri(0, [8, 90, 900][T]);
     st.dragonBone = 0;
     ghostCount *= 2;
@@ -316,6 +425,44 @@ export function generateWeirdWorld(seed: number, tier: CardTier, taskIds: string
     goblinCount = [ri(6, 12), ri(15, 30), ri(30, 60)][T];
     goldChance = 0.25;
     buildingCount = Math.max(1, Math.floor(buildingCount / 2));
+    // The crowd IS the wealth — the bank holds next to nothing.
+    st.money = ri(0, 12);
+    st.blood = ri(0, 10);
+    st.dragonBone = 0;
+  } else if (flavor === 'flooded') {
+    // The land is mostly lake. Water everywhere makes this the promised
+    // ground for the thirsty buildings — if you can find dry cells to
+    // build them on.
+    lakes = ri(3, 5 + T);
+    if (tier !== 'common') pool = [...pool, 'datacentre', 'datacentre'];
+    st.blood = Math.floor(st.blood / 2);
+  } else if (flavor === 'goldrush') {
+    // Every goblin glitters. The bank is empty; the citizens ARE the bank.
+    goldChance = 1;
+    goblinCount += ri(3, 6 + T * 3);
+    st.money = ri(0, 30);
+    st.blood = Math.floor(st.blood / 2);
+    st.dragonBone = 0;
+  } else if (flavor === 'seance') {
+    // The candle challenge: hell stands open behind a "bad power source",
+    // and the bank holds exactly five candles' worth of blood (plus crumbs).
+    // Spawning is free — the souls for the chairs are made, not found.
+    st.blood = SOUL_SIGIL.count * SOUL_SIGIL.candleBloodCost + ri(0, 6);
+    st.money = ri(0, 40);
+    st.dragonBone = 0;
+    forcePortal = true;
+    buildingCount = ri(0, 1);
+    goblinCount = ri(1, 2);
+    ghostCount = ri(0, 2); // a head start on souls, never the full five
+  } else if (flavor === 'overcharged') {
+    // Standing power, empty pockets: the early game replayed with the
+    // generator problem already solved (by somebody with dubious taste).
+    st.money = ri(0, 10);
+    st.blood = 0;
+    st.dragonBone = 0;
+    pool = ['nuclear_reactor', 'nuclear_reactor', 'gas_engine'];
+    buildingCount = [ri(2, 3), ri(3, 5), ri(4, 8)][T];
+    goblinCount = Math.max(goblinCount, 4 + T * 4);
   } else if (flavor === 'haunted') {
     ghostCount = [ri(10, 25), ri(25, 60), ri(60, 120)][T];
     forcePortal = true;
@@ -325,11 +472,52 @@ export function generateWeirdWorld(seed: number, tier: CardTier, taskIds: string
     goblinCount = Math.max(1, Math.floor(goblinCount / 2));
   }
 
+  // Never deal a world with a meaningless trickle of a resource: cash is
+  // either none or a real Ƶ100+, blood either none or a real 16+.
+  if (st.money > 0 && st.money < 100) st.money = 0;
+  if (st.blood > 0 && st.blood < 16) st.blood = 0;
+
   st.moneyEarned = st.money;
   st.bloodEarned = st.blood;
   st.dragonBoneEarned = st.dragonBone;
   st.bloodUnlocked = st.blood > 0;
   st.dragonBoneUnlocked = st.dragonBone > 0;
+
+  // Where this world sits on the work track — like an adopted save file.
+  // Commons are still grinding the early tasks, uncommons sit mid-game,
+  // rares are late or finished (a finished world has seen everything,
+  // optional Work included). Overcharged worlds reset to the very start:
+  // their whole point is replaying the opening grind. The buildings already
+  // standing don't have to agree with the phase — some of these saves are
+  // a bit hacked.
+  const track = MAIN_TRACK.filter((id) => taskIds.includes(id));
+  const phaseRoll = flavor === 'overcharged' ? ri(0, 1)
+    : tier === 'common' ? ri(1, 3)
+    : tier === 'uncommon' ? ri(3, 5)
+    : ri(5, 7);
+  const phase = Math.min(phaseRoll, track.length);
+  const finished = phase >= track.length && flavor !== 'overcharged';
+  const done = new Set<string>(track.slice(0, phase));
+  if (finished) for (const id of taskIds) done.add(id);
+  // The optional minotaur side-task: some mid-track worlds did the Work.
+  else if (done.has('build_gas_engine') && rng() < 0.6) done.add('summon_minotaurs');
+
+  // Extra lakes (the flooded flavor): random pools dropped before any
+  // structure, so buildings and goblins place around the water. The hole
+  // keeps a dry berth.
+  for (let i = 0; i < lakes; i++) {
+    const b = computePlayBounds(st);
+    const w = ri(2, 4 + T), h = ri(2, 4);
+    for (let attempt = 0; attempt < 20; attempt++) {
+      const x0 = b.x0 + Math.floor(rng() * Math.max(1, b.x1 - b.x0 - w));
+      const y0 = b.y0 + Math.floor(rng() * Math.max(1, b.y1 - b.y0 - h));
+      if (Math.abs(x0 + w / 2 - st.hole.cell.cx) <= w / 2 + 2
+        && Math.abs(y0 + h / 2 - st.hole.cell.cy) <= h / 2 + 2) continue;
+      const id = st.nextId++;
+      st.waterSources.set(id, { id, x0, y0, x1: x0 + w, y1: y0 + h, selected: false });
+      break;
+    }
+  }
 
   // Scattered, unstaffed buildings — they wake (or stay dormant) under the
   // normal sim rules once the player starts assigning goblins.
@@ -370,16 +558,19 @@ export function generateWeirdWorld(seed: number, tier: CardTier, taskIds: string
     }
   }
 
-  // Ritual flags loosen with tier, so richer worlds resume mid-automation.
+  // Ritual flags loosen with tier — but never ahead of the work track: an
+  // ability's flag only sticks if the task that grants it is already done
+  // in this world (autobuild rides run_phone_farm, Goldblins rides the
+  // minotaur side-task, Lightning rides run_datacentre).
   if (tier !== 'common') {
-    st.autoAssignEnabled = rng() < 0.7;
+    st.autoAssignEnabled = done.has('run_phone_farm') && rng() < 0.7;
     st.autoWaterEnabled = st.autoAssignEnabled && rng() < 0.5;
-    st.goldgoblinsEnabled = rng() < 0.5;
-    st.lightningUnlocked = rng() < 0.6;
+    st.goldgoblinsEnabled = done.has('summon_minotaurs') && rng() < 0.5;
+    st.lightningUnlocked = done.has('run_datacentre') && rng() < 0.6;
   }
   if (tier === 'rare') {
-    st.autoAssignEnabled = true;
-    st.lightningUnlocked = true;
+    st.autoAssignEnabled = done.has('run_phone_farm');
+    st.lightningUnlocked = done.has('run_datacentre');
     st.goldgoblinMultiplier = rng() < 0.3 ? 10 : 1;
     st.tinytaurUnlocked = rng() < 0.4;
     if (rng() < 0.7) {
@@ -389,16 +580,22 @@ export function generateWeirdWorld(seed: number, tier: CardTier, taskIds: string
       st.autoSpawnLevel = m;
     }
   }
+  // A goldrush keeps minting gold: fresh spawns can glitter too, whatever
+  // the work track says — this world was hacked that way.
+  if (flavor === 'goldrush') st.goldgoblinsEnabled = true;
 
-  // Everything is unlocked in the card worlds: all tasks pre-completed (no
-  // celebration replays), all onboarding hints pre-seen.
+  // The work track, stamped: tasks up to the phase are completed AND
+  // revealed (no celebration replays for them), everything beyond is still
+  // to be played inside the card. Onboarding hints stay pre-seen — these
+  // are somebody's mid-game saves, not fresh ground.
   st.unlocks = {
-    completed: new Set(taskIds),
-    revealed: new Set(taskIds),
+    completed: new Set(done),
+    revealed: new Set(done),
     obsoleted: new Set(),
     everBuilt: new Set([...st.buildings.values()].map((b) => b.kind)),
-    minotaurEverSummoned: tier !== 'common',
+    minotaurEverSummoned: done.has('summon_minotaurs') || finished,
   };
+  if (finished) st.lillyTasksGiven = true;
   st.waterSeen = true;
   st.cameraPanSeen = true;
   st.multiSelectSeen = true;
@@ -410,10 +607,13 @@ export function generateWeirdWorld(seed: number, tier: CardTier, taskIds: string
 }
 
 // The goblin's replacement for the player's stolen world: an obviously
-// pitiful one. A handful of scattered walls, two goblins, Ƶ3.
+// pitiful one. A handful of scattered walls, two goblins, Ƶ3 — and no
+// spawn hole, so nothing can ever be summoned. Its pinned Ƶ10,000 demand
+// is unreachable from the inside; the only way up is to TRADE it, which is
+// exactly the lesson the white goblin meant to teach.
 export function generateJunkWorld(seed: number, taskIds: string[]): GameState {
   const rng = mulberry32(seed);
-  const st = generateWeirdWorld(seed, 'common', taskIds);
+  const st = generateWeirdWorld(seed, 'common', taskIds, 'balanced');
   st.buildings.clear();
   markBuildingsChanged(st);
   const wallCount = 5 + Math.floor(rng() * 5);
@@ -434,6 +634,14 @@ export function generateJunkWorld(seed: number, taskIds: string[]): GameState {
   st.hellUnlocked = false;
   st.spaceUnlocked = false;
   st.unlocks!.everBuilt = new Set(['wall']);
+  // The junk world starts at the very bottom of the work track — and with
+  // the spawn hole caved in (and Goblin Holes locked behind a task it will
+  // never reach), no goblin can ever join the two already standing there.
+  st.unlocks!.completed = new Set();
+  st.unlocks!.revealed = new Set();
+  st.unlocks!.minotaurEverSummoned = false;
+  st.lillyTasksGiven = false;
+  st.holeDestroyed = true;
   return st;
 }
 
@@ -459,6 +667,30 @@ export function sanitizeCardWorld(st: GameState): void {
   st.view = 'ground';
 }
 
+// The power number written on a card: only what the world's POWERED buildings
+// are actually generating. A generator counts solely while it's online (active
+// — staffed and on the grid); a dormant reactor sitting idle on the lawn adds
+// nothing. So a world that has never run, or runs with every generator
+// dormant, reads no power — the card reports the real output, not the
+// theoretical sum of every generator placed.
+export function cardPower(st: GameState): number {
+  let power = 0;
+  for (const b of st.buildings.values()) {
+    if (b.state !== 'active') continue;
+    const out = BUILDING_DEFS[b.kind].powerOutput;
+    if (out > 0) power += out;
+  }
+  // Orbited generators run upkeep-free, so any that finished assembly are
+  // always powered.
+  for (const sb of st.spaceBuildings.values()) {
+    if (st.buildings.has(sb.id)) continue;
+    if (sb.building.state !== 'active') continue;
+    const out = BUILDING_DEFS[sb.building.kind].powerOutput;
+    if (out > 0) power += out;
+  }
+  return power;
+}
+
 // Per-scene structure counts, driving each preview pane's treatment on the
 // card: a pane with nothing built fades; one holding three or more
 // structures glows. Walls are scenery, not development; hell counts what
@@ -479,56 +711,30 @@ export function sceneStructureCounts(st: GameState): { space: number; earth: num
 
 // ─── Card construction ───────────────────────────────────────────────
 
-// Roll a card's ascension demand for its CURRENT tier, shaped by what the
-// world already holds. The demand leans INTO a world's spike — a blood farm
-// is asked for more blood, a mint for more cash — at 2–4× its current
-// holding, so a freshly-rolled card is never born already met and growing a
-// world means growing its identity. Spike-blind floors keep the climb a real
-// session even in a world that starts from nothing. Bones can only be
-// demanded of a world that already keeps bones; power only at uncommon
-// (reactors are mid-game toys).
-export function rollUpgradeReq(tier: CardTier, rng: () => number, resources: CardResources): UpgradeReq | null {
-  const ri = (a: number, b: number) => a + Math.floor(rng() * (b - a + 1));
-  if (tier === 'rare') return null;
-  const bands: Partial<Record<UpgradeReq['res'], [number, number]>> = tier === 'common'
-    ? { money: [5_000, 15_000], blood: [200, 800] }
-    : { money: [250_000, 1_000_000], blood: [5_000, 20_000], dragonBone: [3, 10], power: [1_000_000_000, 3_000_000_000] };
-  const candidates: UpgradeReq['res'][] = ['money', 'blood'];
-  if (tier === 'uncommon') {
-    if (resources.dragonBone > 0 && rng() < 0.5) candidates.push('dragonBone');
-    if (rng() < 0.25) candidates.push('power');
+// A "charismatic" amount inside a band: half the time the rolled figure
+// snaps to a power of two, a repdigit, or a clean single-digit round — so a
+// trader's resource want asks for Ƶ8,192 or 6,666 blood instead of a beige
+// 7,341 (rollWant uses this for its resource thresholds).
+export function spicyAmount(lo: number, hi: number, rng: () => number): number {
+  const plain = lo + Math.floor(rng() * (hi - lo + 1));
+  if (rng() < 0.5) return plain;
+  const cands: number[] = [];
+  for (let p = 1; p <= 40; p++) {
+    const v = 2 ** p;
+    if (v >= lo && v <= hi) cands.push(v);
   }
-  // Bias toward the world's dominant holding (relative to its band ceiling).
-  let dominant: UpgradeReq['res'] = 'money';
-  let dominance = -1;
-  for (const res of candidates) {
-    if (res === 'power') continue; // production is measured later, not held
-    const [, hi] = bands[res]!;
-    const score = (resources[res] ?? 0) / hi;
-    if (score > dominance) { dominance = score; dominant = res; }
+  for (let d = 1; d <= 9; d++) {
+    for (let n = 2; n <= 12; n++) {
+      const v = d * Math.floor((10 ** n - 1) / 9); // d repeated n times
+      if (v >= lo && v <= hi) cands.push(v);
+    }
   }
-  const res = dominance > 0 && rng() < 0.65 ? dominant : candidates[Math.floor(rng() * candidates.length)];
-  const [lo, hi] = bands[res]!;
-  let amount = ri(lo, hi);
-  // Lean past the spike: never born met, always 2–4× the current holding.
-  const have = resources[res] ?? 0;
-  if (have * 2 > amount) amount = Math.ceil(have * (2 + rng() * 2));
-  return { res, amount };
-}
-
-export function reqMet(card: WorldCard): boolean {
-  const r = card.upgradeReq;
-  return !!r && (card.resources[r.res] ?? 0) >= r.amount;
-}
-
-// Ascend a card one tier (caller checks reqMet and persists the meta) and
-// roll its next demand against the world's current holdings.
-export function ascendCard(meta: CardMeta, card: WorldCard): void {
-  const next = TIER_ABOVE[card.tier];
-  if (!next) return;
-  card.tier = next;
-  const rng = mulberry32((card.id * 1103515245 + meta.nextId) >>> 0);
-  card.upgradeReq = rollUpgradeReq(next, rng, card.resources);
+  const mag = 10 ** Math.floor(Math.log10(hi));
+  for (let k = 1; k <= 9; k++) {
+    const v = k * mag;
+    if (v >= lo && v <= hi) cands.push(v);
+  }
+  return cands.length > 0 ? cands[Math.floor(rng() * cands.length)] : plain;
 }
 
 export function makeCard(meta: CardMeta, tier: CardTier, rng: () => number, taskIds: string[], junk = false): WorldCard {
@@ -536,7 +742,7 @@ export function makeCard(meta: CardMeta, tier: CardTier, rng: () => number, task
   const st = junk ? generateJunkWorld(seed, taskIds) : generateWeirdWorld(seed, tier, taskIds);
   const resources: CardResources = {
     money: st.money, blood: st.blood, dragonBone: st.dragonBone,
-    power: st.lastPowerProduced,
+    power: cardPower(st), goblins: st.goblins.size,
   };
   return {
     id: meta.nextId++,
@@ -544,19 +750,60 @@ export function makeCard(meta: CardMeta, tier: CardTier, rng: () => number, task
     tier,
     data: encodeWorld(st),
     resources,
-    // The junk card's ascension demand is pinned to plain cash so the
-    // player's first climb out of the dirt has a legible goal.
-    upgradeReq: junk ? { res: 'money', amount: 10_000 } : rollUpgradeReq(tier, rng, resources),
   };
 }
 
+// ─── Manual worlds (the dev World Designer's database) ───────────────
+// Hand-authored worlds saved out of the designer. They are the dominant card
+// source: a trader deck is filled 95% from this pool (matching the slot's
+// tier) and only 5% — or whenever the pool can't field the tier — from the
+// procedural generator above. A manual world's serialized GameState already
+// carries `tasksDisabled` + every unlock (makeSandboxWorld), so entering one
+// as a card is automatically a sandbox.
+export type ManualWorld = { id: number; name: string; tier: CardTier; data: string; resources: CardResources };
+
+// Turn a stored manual world into a fresh dealable card (new id; the caller
+// stamps the minting trader's frame, as with procedural cards).
+export function cardFromManual(meta: CardMeta, m: ManualWorld): WorldCard {
+  return {
+    id: meta.nextId++,
+    name: m.name,
+    tier: m.tier,
+    data: m.data,
+    resources: { ...m.resources },
+  };
+}
+
+// Mint one card for a trader's deck: 95% drawn from the manual pool of the
+// matching tier when any exist, otherwise procedurally generated.
+export function mintDeckCard(meta: CardMeta, tier: CardTier, rng: () => number, taskIds: string[], manualPool: ManualWorld[] = []): WorldCard {
+  const pool = manualPool.filter((m) => m.tier === tier);
+  if (pool.length > 0 && rng() < 0.95) {
+    return cardFromManual(meta, pool[Math.floor(rng() * pool.length)]);
+  }
+  return makeCard(meta, tier, rng, taskIds);
+}
+
+// A blank designer/sandbox world: a fresh state, stripped of finale/Bob/Lolly
+// machinery, with every sidebar ability unlocked and the task track disabled.
+// Used both to start a new manual world and (via its flags) by every world
+// the designer saves.
+export function makeSandboxWorld(taskIds: string[]): GameState {
+  const st = createInitialState();
+  sanitizeCardWorld(st);
+  unlockEverything(st, taskIds);
+  st.tasksDisabled = true;
+  return st;
+}
+
 // ─── The gatherings ──────────────────────────────────────────────────
-// One per tier. Trades are same-tier 1:1 (or one-above broken down into
-// two), so the way UP is always a card's own ascension demand — gatherings
-// are where you swap a world whose demand doesn't suit you for one that
-// does (or, at the rare exchange, win your own world back). Every gathering
-// keeps one any-appetite creature so the player is never hard-locked; for
-// everything else there's the "wait for the next gathering" reshuffle.
+// One per tier. Each gathering seats a few traders, all on screen at once;
+// every trader advertises ONE want and, satisfied, gives its WHOLE deck for
+// the card(s) the want names. The way the collection grows is finding a want
+// you can meet — gatherings are where you spend a world (or a few) to gain a
+// trader's hand, or, at the rare exchange, win your own world back. Every
+// gathering's opener keeps an easy want so the player is never hard-locked;
+// for everything else there's the "wait for the next gathering" reshuffle.
 
 export const EVENT_NAMES: Record<CardTier, string> = {
   common: 'gathering at the soft border',
@@ -565,55 +812,52 @@ export const EVENT_NAMES: Record<CardTier, string> = {
 };
 
 let creatureSeq = 1;
-// The tables grow with the tiers — one creature at the soft border, two at
-// the salon, three at the rare exchange — and stay small-handed so no view
-// ever overwhelms. The first creature anywhere considers anything; the rest
-// are picky. The common gathering's lone creature holds TWO cards, making it
-// the first arc's two-for-one partner (ascend the junk common, break the
-// uncommon down into its two cards, ascend both halves); at richer tables
-// the first creature holds one card and the picky ones hold two.
+// The tables grow with the tiers — one trader at the soft border, two at the
+// salon, three at the rare exchange — and stay small-handed so no view ever
+// overwhelms. The first trader anywhere wants the easy rung (any one world at
+// the border, a single lesser card at the richer tables); the rest are picky.
+// The common gathering's lone trader holds TWO cards, so satisfying its open
+// want with a single world doubles the player's hand on the first trade.
 const CREATURE_SPECS: Record<CardTier, number[]> = {
   common: [2],
   uncommon: [1, 2],
   rare: [1, 2, 2],
 };
-export function rollCreatures(meta: CardMeta, tier: CardTier, rng: () => number, taskIds: string[]): Creature[] {
+export function rollCreatures(meta: CardMeta, tier: CardTier, rng: () => number, taskIds: string[], manualPool: ManualWorld[] = []): Creature[] {
   const names = [...CREATURE_NAMES];
-  const appetites: Appetite[] = ['blood', 'rich', 'bones'];
-  for (const arr of [names, appetites] as unknown[][]) {
-    for (let i = arr.length - 1; i > 0; i--) {
-      const j = Math.floor(rng() * (i + 1));
-      [arr[i], arr[j]] = [arr[j], arr[i]];
-    }
+  for (let i = names.length - 1; i > 0; i--) {
+    const j = Math.floor(rng() * (i + 1));
+    [names[i], names[j]] = [names[j], names[i]];
   }
   return CREATURE_SPECS[tier].map((deckSize, i) => {
     const frame = FRAME_BASE[tier] + i;
     const deck: WorldCard[] = [];
     for (let k = 0; k < deckSize; k++) {
-      const card = makeCard(meta, tier, rng, taskIds);
+      const card = mintDeckCard(meta, tier, rng, taskIds, manualPool);
       card.frame = frame;
       deck.push(card);
     }
+    const want = rollWant(tier, rng, i === 0);
     return {
       id: creatureSeq++,
       name: names.pop() ?? 'the other one',
-      appetite: i === 0 ? 'any' as const : appetites.pop() ?? 'any' as const,
+      want,
       deck,
       frame,
     };
   });
 }
 
-export function generateEvents(meta: CardMeta, stolen: WorldCard | null, taskIds: string[]): TradeEvent[] {
-  const rng = mulberry32((meta.nextId * 2654435761) >>> 0);
+export function generateEvents(meta: CardMeta, stolen: WorldCard | null, taskIds: string[], manualPool: ManualWorld[] = []): TradeEvent[] {
+  const rng = mulberry32((((meta.seed ?? 0) ^ (meta.nextId * 2654435761)) >>> 0));
   const events: TradeEvent[] = (['common', 'uncommon', 'rare'] as CardTier[]).map((tier, i) => ({
     id: i + 1,
     name: EVENT_NAMES[tier],
     tier,
-    creatures: rollCreatures(meta, tier, rng, taskIds),
+    creatures: rollCreatures(meta, tier, rng, taskIds, manualPool),
   }));
-  // The stolen origin card waits at the rare exchange, with the creature who
-  // will consider anything for it.
+  // The stolen origin card waits at the rare exchange, with the creature whose
+  // opening want (a single uncommon) is the easiest to bring it back from.
   if (stolen) events[2].creatures[0].deck.unshift(stolen);
   return events;
 }
@@ -622,37 +866,175 @@ export function generateEvents(meta: CardMeta, stolen: WorldCard | null, taskIds
 // arrives — new creatures, new decks (caller persists the meta). Whatever
 // the player traded away leaves with the departing creatures, except the
 // origin card, which always finds its way to the next table.
-export function regenerateEvent(meta: CardMeta, ev: TradeEvent, taskIds: string[]): void {
+export function regenerateEvent(meta: CardMeta, ev: TradeEvent, taskIds: string[], manualPool: ManualWorld[] = []): void {
   const origin = ev.creatures.flatMap((c) => c.deck).find((c) => c.origin) ?? null;
-  const rng = mulberry32((meta.nextId * 48271 + ev.id) >>> 0);
-  ev.creatures = rollCreatures(meta, ev.tier, rng, taskIds);
+  const rng = mulberry32((((meta.seed ?? 0) ^ (meta.nextId * 48271 + ev.id)) >>> 0));
+  ev.creatures = rollCreatures(meta, ev.tier, rng, taskIds, manualPool);
   if (origin) ev.creatures[0].deck.unshift(origin);
 }
 
-// ─── Trade rules ─────────────────────────────────────────────────────
-// Same tier in, same tier out — 1:1. The one exception is breaking DOWN:
-// offer a card exactly one tier above what a creature holds and it will
-// give TWO of the lesser tier for it (1 uncommon → 2 commons, 1 rare →
-// 2 uncommons). A creature is open to trading for your card at all only
-// when it matches its appetite.
-export function sameTierGives(c: Creature, yours: WorldCard): WorldCard[] {
-  return c.deck.filter((d) => d.tier === yours.tier);
+// ─── The street-of-gatherings geometry (shared with cards.ts + the tests) ──
+// The gatherings live as little white houses lining a street: two lines of
+// them receding down −Z, the camera out on the road. Every bit of the camera
+// maths lives here, DOM-free, so the unit tests can prove the fly-in lands
+// square on a door — centred in view, a nose away — before any DOM exists.
+//
+// The camera maps to cards.ts's transform on .sv-camera (applied to the whole
+// world group): rotateX(pitch) rotateY(−yaw) translate3d(−x,−y,−z). So a world
+// point W lands in view space at V = Rx(pitch)·Ry(−yaw)·(W − cam). CSS then
+// projects V with the eye at +persp looking down −z, so a point is dead-centre
+// on screen exactly when its view-space x and y are zero, and "in front of the
+// camera, down the street" when its view-space z is negative.
+
+export type Vec3 = { x: number; y: number; z: number };
+export type StreetCam = { x: number; y: number; z: number; yaw: number; pitch: number };
+export type StreetSide = 'L' | 'R';
+export type StreetHouse = { x: number; z: number; faceYaw: number; side: StreetSide; plot: number };
+
+// Every length is a CSS-3D pixel; grouped so the whole street reframes from one
+// place. groundY and doorCenterY are echoed by .sv-ground / .sv-door in CSS.
+export const STREET = {
+  persp: 825,
+  laneX: 570,        // |x| of each line of houses from the road's centre — wide
+                     //   enough that the near pair spans to the screen edges
+  plotZ0: -540,      // depth of the nearest plot
+  plotGap: 570,      // spacing between plots down the street
+  groundY: 46,       // road height below the eye
+  eyeY: -4,          // eye height out on the road
+  pitch: -11,        // the street view tips gently down the road
+  camBack: 0,        // camera stands this close in front of its row, so the
+                     //   row's two houses loom and fill the left/right edges
+  doorStop: 26,      // the fly-in ends this far in front of the door
+  doorYaw: 73,       // door faces mostly across the street, angled to the walker
+  doorCenterY: 54,   // door centre above the base (matches the CSS door box)
+  // During a fly-in/out the non-target houses are pulled back: this is the
+  // opacity they fade to (0 = vanish entirely, as the scene shipped; 1 = stay
+  // fully solid). Houses that cross behind the eye are always hidden outright
+  // regardless, since CSS perspective would otherwise blow them up.
+  cullFade: 0,
+  house: { w: 300, h: 230, d: 370, rh: 140 },
+};
+
+// ─── Dev-tunable street geometry ────────────────────────────────────
+// The realm's dev cog exposes a slider per entry below, so the camera framing
+// and the houses' size/spacing can be dialled in live (cards.ts rebuilds the
+// scene on each change). Each tunable reads/writes a STREET field directly —
+// STREET is a const binding but its fields are plain mutable numbers — and
+// remembers its compile-time default so "reset" can restore the shipped look.
+export type StreetTunable = {
+  key: string; label: string; min: number; max: number; step: number;
+  def: number; get: () => number; set: (v: number) => void;
+};
+export const STREET_TUNABLES: StreetTunable[] = [
+  { key: 'laneX',    label: 'Lane width (house |x|)', min: 0,     max: 2000, step: 10,   def: STREET.laneX,    get: () => STREET.laneX,    set: (v) => { STREET.laneX = v; } },
+  { key: 'plotZ0',   label: 'Nearest plot depth',     min: -3000, max: 200,  step: 10,   def: STREET.plotZ0,   get: () => STREET.plotZ0,   set: (v) => { STREET.plotZ0 = v; } },
+  { key: 'plotGap',  label: 'Plot spacing',           min: 50,    max: 2000, step: 10,   def: STREET.plotGap,  get: () => STREET.plotGap,  set: (v) => { STREET.plotGap = v; } },
+  { key: 'groundY',  label: 'Ground depth below eye', min: -300,  max: 600,  step: 2,    def: STREET.groundY,  get: () => STREET.groundY,  set: (v) => { STREET.groundY = v; } },
+  { key: 'eyeY',     label: 'Eye height',             min: -500,  max: 500,  step: 2,    def: STREET.eyeY,     get: () => STREET.eyeY,     set: (v) => { STREET.eyeY = v; } },
+  { key: 'pitch',    label: 'Camera pitch (down°)',   min: -90,   max: 90,   step: 1,    def: STREET.pitch,    get: () => STREET.pitch,    set: (v) => { STREET.pitch = v; } },
+  { key: 'camBack',  label: 'Camera stand-back',      min: -1000, max: 3000, step: 10,   def: STREET.camBack,  get: () => STREET.camBack,  set: (v) => { STREET.camBack = v; } },
+  { key: 'persp',    label: 'Perspective strength',   min: 100,   max: 6000, step: 25,   def: STREET.persp,    get: () => STREET.persp,    set: (v) => { STREET.persp = v; } },
+  { key: 'doorStop', label: 'Door fly-in stop',       min: -400,  max: 600,  step: 2,    def: STREET.doorStop, get: () => STREET.doorStop, set: (v) => { STREET.doorStop = v; } },
+  { key: 'doorYaw',  label: 'Door facing angle (°)',  min: -180,  max: 180,  step: 1,    def: STREET.doorYaw,  get: () => STREET.doorYaw,  set: (v) => { STREET.doorYaw = v; } },
+  { key: 'cullFade', label: 'Other houses fade (0–1)',min: 0,     max: 1,    step: 0.05, def: STREET.cullFade, get: () => STREET.cullFade, set: (v) => { STREET.cullFade = v; } },
+  { key: 'houseW',   label: 'House width',            min: 20,    max: 1600, step: 10,   def: STREET.house.w,  get: () => STREET.house.w,  set: (v) => { STREET.house.w = v; } },
+  { key: 'houseH',   label: 'House wall height',      min: 20,    max: 1200, step: 10,   def: STREET.house.h,  get: () => STREET.house.h,  set: (v) => { STREET.house.h = v; } },
+  { key: 'houseD',   label: 'House depth',            min: 20,    max: 1600, step: 10,   def: STREET.house.d,  get: () => STREET.house.d,  set: (v) => { STREET.house.d = v; } },
+  { key: 'houseRh',  label: 'Roof height',            min: -200,  max: 900,  step: 10,   def: STREET.house.rh, get: () => STREET.house.rh, set: (v) => { STREET.house.rh = v; } },
+];
+
+// Find a tunable by key (the persistence/UI layers address them by key).
+export function streetTunable(key: string): StreetTunable | undefined {
+  return STREET_TUNABLES.find((t) => t.key === key);
 }
-export function breakdownGives(c: Creature, yours: WorldCard): WorldCard[] {
-  const below = TIER_RANK[yours.tier] - 1;
-  const cards = c.deck.filter((d) => TIER_RANK[d.tier] === below);
-  // A two-for-one needs two to give.
-  return cards.length >= 2 ? cards : [];
+
+// Restore every street tunable to its shipped default.
+export function resetStreet(): void {
+  for (const t of STREET_TUNABLES) t.set(t.def);
 }
-export function creatureTakesFor(c: Creature, theirs: WorldCard, mine: WorldCard[]): WorldCard[] {
-  return mine.filter((m) => appetiteAccepts(c.appetite, m) && m.tier === theirs.tier);
+
+const STREET_DEG = Math.PI / 180;
+
+// Where a house sits: a plot down the street, on the left or right line. Left
+// doors angle to +X (across + toward the walker), right doors mirror to −X.
+export function streetHouse(plot: number, side: StreetSide): StreetHouse {
+  return {
+    x: side === 'L' ? -STREET.laneX : STREET.laneX,
+    z: STREET.plotZ0 - plot * STREET.plotGap,
+    faceYaw: side === 'L' ? STREET.doorYaw : -STREET.doorYaw,
+    side,
+    plot,
+  };
 }
-// Is the creature open to trading for this card at all? Appetite gates
-// same-tier swaps (preference between equals); a card one tier above its
-// stock is universally coveted — every creature with two lesser cards will
-// break it down, whatever its tastes. This keeps the ascend → break down →
-// ascend-both arc open at every table.
-export function creatureOpenTo(c: Creature, card: WorldCard): boolean {
-  return (appetiteAccepts(c.appetite, card) && sameTierGives(c, card).length > 0)
-    || breakdownGives(c, card).length > 0;
+
+// The door's centre + outward normal in world space. The door is on the front
+// (+Z local) face, centred across it, doorCenterY up from the base. The house's
+// own transform is translate3d(x,groundY,z) rotateY(faceYaw), so a local point
+// L lands at translate + Ry(faceYaw)·L.
+export function streetDoor(house: { x: number; z: number; faceYaw: number }): { pos: Vec3; normal: Vec3; faceYaw: number } {
+  const f = house.faceYaw * STREET_DEG;
+  const lz = STREET.house.d / 2;
+  return {
+    pos: {
+      x: house.x + Math.sin(f) * lz,
+      y: STREET.groundY - STREET.doorCenterY,
+      z: house.z + Math.cos(f) * lz,
+    },
+    normal: { x: Math.sin(f), y: 0, z: Math.cos(f) },
+    faceYaw: house.faceYaw,
+  };
+}
+
+// A pose `dist` along a door's outward normal, eye at the door's height and yaw
+// aligned with the normal so the door stays dead-centre. dist > 0 sits out in
+// front of the door (it reads small/far), dist < 0 is past the threshold,
+// inside — where the door swells past the eye. This single line IS the fly-in
+// path: large positive dist → doorStop → negative.
+export function streetDollyPose(house: { x: number; z: number; faceYaw: number }, dist: number): StreetCam {
+  const door = streetDoor(house);
+  return {
+    x: door.pos.x + door.normal.x * dist,
+    y: door.pos.y,
+    z: door.pos.z + door.normal.z * dist,
+    yaw: house.faceYaw,
+    pitch: 0,
+  };
+}
+
+// The pose that flies the camera square INTO a door: a nose (doorStop) in front
+// of it, the door projecting dead-centre.
+export function streetEnterPose(house: { x: number; z: number; faceYaw: number }): StreetCam {
+  return streetDollyPose(house, STREET.doorStop);
+}
+
+// Looking straight down the street from a given row (the nearest plot it owns).
+export function streetFocusPose(row: number): StreetCam {
+  return { x: 0, y: STREET.eyeY, z: STREET.plotZ0 - row * STREET.plotGap + STREET.camBack, yaw: 0, pitch: STREET.pitch };
+}
+
+// A world point in the camera's view space (see header): V = Rx(pitch)·Ry(−yaw)·(W − cam).
+export function streetViewSpace(w: Vec3, cam: StreetCam): Vec3 {
+  const dx = w.x - cam.x, dy = w.y - cam.y, dz = w.z - cam.z;
+  // rotateY(−yaw): x' = cos(yaw)·x − sin(yaw)·z ; z' = sin(yaw)·x + cos(yaw)·z
+  const cy = Math.cos(cam.yaw * STREET_DEG), sy = Math.sin(cam.yaw * STREET_DEG);
+  const x1 = cy * dx - sy * dz;
+  const z1 = sy * dx + cy * dz;
+  const y1 = dy;
+  // rotateX(pitch): y' = cos·y − sin·z ; z' = sin·y + cos·z
+  const cx = Math.cos(cam.pitch * STREET_DEG), sx = Math.sin(cam.pitch * STREET_DEG);
+  return { x: x1, y: cx * y1 - sx * z1, z: sx * y1 + cx * z1 };
+}
+
+// Straight-line distance from a camera to a world point.
+export function streetDist(cam: StreetCam, p: Vec3): number {
+  return Math.hypot(cam.x - p.x, cam.y - p.y, cam.z - p.z);
+}
+
+// How a flat list of gatherings fills the street: pairs of (left, right) down
+// the plots, so the focused row always offers "the two houses left and right".
+export function gatheringRowCount(n: number): number {
+  return Math.max(1, Math.ceil(n / 2));
+}
+export function gatheringSlot(i: number): { plot: number; side: StreetSide } {
+  return { plot: Math.floor(i / 2), side: i % 2 === 0 ? 'L' : 'R' };
 }
