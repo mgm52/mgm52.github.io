@@ -4,7 +4,7 @@ import { DEMON_FACING_ANGLE, getOptions } from './options';
 import {
   ALL_DIRS, Building, Cell, DX, DY, Demon, Dir, Dragon, Finale, FinalePhase, GameState, Ghost, Goblin, HOLE_SIZE, LollyBoostKind, LollyTarget, Minotaur, SoulChair, SpaceBuilding, SpaceUnit, Vec2, WaterSource, lollyBoostState,
   anySpawnHole, appendLog, buildingAtCell, buildingCenter, buildingFootprint, buildingPerimeter,
-  cellCenter, cellKey, chairSoulSnapshot, constructedDragonBeacon, currentPowerBoost, defOf, demonScaleOf, destroyBuilding, dragonsAtCap, dragonTargetBuilding,
+  cellCenter, cellKey, chairSoulSnapshot, constructedDragonBeacon, createMoon, currentPowerBoost, defOf, demonScaleOf, destroyBuilding, dragonsAtCap, dragonTargetBuilding,
   earnBlood, earnDragonBone, earnMoney, findHoleEmergenceCell, maxOverworldDragons,
   getSpawnCapacity, holeBlockedByBuilding, holeCenter, isCellBlocked, isCellInBuilding, isCellInWaterSource,
   isInBounds, maintainerCount, markBuildingsChanged, nearestCellInWaterSource, occupyCell, pushDeathEffect, pushFloater,
@@ -1955,8 +1955,9 @@ function stepToward(p: Vec2, goal: Vec2, speed: number, arrive: number): { arriv
 }
 
 // Begin the finale, lifting Lolly's live rampage position into the cinematic.
-// Returns true once it's running (idempotent). The moon is seeded floating in
-// space so it's already there when the player rises to watch.
+// Returns true once it's running (idempotent). The moon has hung in space
+// since the start of the run (state.moon) — it's already there waiting when
+// the player rises to watch.
 function startFinale(state: GameState): boolean {
   if (state.finale) return true;
   const L = state.lolly;
@@ -1973,12 +1974,6 @@ function startFinale(state: GameState): boolean {
     bobFacing: Math.PI / 2,
     bobAtCentre: false,
     target: null,
-    moon: {
-      pos: { x: SPACE.width * 0.5, y: SPACE.height * 0.24 },
-      scene: 'space',
-      state: 'floating',
-      seed: Math.floor(Math.random() * 1e6),
-    },
     confrontReady: false,
   };
   // She's bound for space whether or not the player ever sent a building up —
@@ -2006,6 +2001,9 @@ export function devTriggerFinale(state: GameState): void {
   const c = playAreaCentre(state);
   state.lolly = { pos: { x: c.x, y: c.y }, facing: Math.PI / 2, target: null, nextWanderAt: 0, spawnAt: state.now };
   state.finale = null;
+  // A re-triggered cinematic needs a moon back in the sky (the previous run
+  // may have shattered it).
+  state.moon = createMoon();
   startFinale(state);
 }
 
@@ -2024,7 +2022,9 @@ export function devSkipFinaleToConfront(state: GameState): void {
   F.bobAtCentre = true;
   F.lollyPos = { x: c.x + FINALE.landGap + 30, y: c.y };
   F.lollyFacing = Math.PI;
-  if (F.moon) { F.moon.state = 'grabbed'; F.moon.scene = 'ground'; }
+  state.moon.state = 'grabbed';
+  state.moon.scene = 'ground';
+  state.moon.selected = false;
   F.phase = 'lolly_descends';
   F.phaseStartedAt = state.now;
 }
@@ -2073,7 +2073,7 @@ function updateFinale(state: GameState): void {
           // Re-enter the overworld from above the centre, the moon still hers.
           F.scene = 'ground';
           F.lollyPos = { x: playAreaCentre(state).x, y: state.playArea.y0 * CELL - FINALE.edgeOffset };
-          if (F.moon) F.moon.scene = 'ground';
+          state.moon.scene = 'ground';
         }
       } else {
         // Settle just to the side of Bob, facing him across the centre.
@@ -2084,13 +2084,11 @@ function updateFinale(state: GameState): void {
           F.dragonShown = false;     // she dismounts; the dragon wheels away (render)
           // She sets the moon down on the ground between herself and Bob — her
           // offering, there for the taking (or the breaking).
-          if (F.moon) {
-            F.moon.scene = 'ground';
-            F.moon.state = 'placed';
-            // Down on the ground midway between them, dropped toward the camera
-            // so it rests in the foreground rather than over her torso.
-            F.moon.pos = { x: (F.lollyPos.x + F.bobPos.x) / 2, y: (F.lollyPos.y + F.bobPos.y) / 2 + 78 };
-          }
+          state.moon.scene = 'ground';
+          state.moon.state = 'placed';
+          // Down on the ground midway between them, dropped toward the camera
+          // so it rests in the foreground rather than over her torso.
+          state.moon.pos = { x: (F.lollyPos.x + F.bobPos.x) / 2, y: (F.lollyPos.y + F.bobPos.y) / 2 + 78 };
           F.confrontReady = true;    // hand the modal to main.ts
           enter('confront');
         }
@@ -2189,8 +2187,7 @@ function finaleSpaceRampage(state: GameState, F: Finale): void {
 
 function finaleGrabMoon(state: GameState, F: Finale): void {
   const spd = finaleSpeed();
-  const m = F.moon;
-  if (!m) { F.phase = 'lolly_descends'; F.phaseStartedAt = state.now; return; }
+  const m = state.moon;
   const dx = m.pos.x - F.lollyPos.x, dy = m.pos.y - F.lollyPos.y;
   const d = Math.hypot(dx, dy);
   if (d > FINALE.moonGrabDist) {
@@ -2205,6 +2202,7 @@ function finaleGrabMoon(state: GameState, F: Finale): void {
   if (F.grabHoverUntil === undefined) { F.grabHoverUntil = state.now + FINALE.moonGrabHover / spd; playSound('ritual', 0.7, 0.5); return; }
   if (state.now < F.grabHoverUntil) return;
   m.state = 'grabbed';
+  m.selected = false;     // no inspecting what's no longer in the sky
   appendLog(state, 'Lolly tears the moon down from the sky.');
   playSound('destroy', 0.7, 0.4);
   F.phase = 'lolly_descends';
