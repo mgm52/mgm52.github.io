@@ -1,6 +1,7 @@
 import { SOUND_NAMES, type SoundName } from './audio';
 import { STREET_TUNABLES } from './cards-core';
 import { HELL } from './config';
+import { applyRealmTheme, getRealmTheme, resetRealmTheme, setRealmThemeValue } from './realm-theme';
 import { getDemonSheetList, loadDemonSheetList } from './demon-sheets';
 import {
   DEFAULT_OPTIONS, FONT_FAMILIES, FONT_KEYS, ensureFontLoaded,
@@ -165,6 +166,9 @@ export type RealmOptionsCallbacks = {
 const REALM_STILL_KEY = 'gs.realm.still';
 
 export function setupRealmOptionsUI(root: HTMLElement, cb: RealmOptionsCallbacks): void {
+  // Apply any persisted realm theme to the root every show (cheap, idempotent),
+  // even before the dev cog is opened or if it's gated off in prod.
+  applyRealmTheme(root);
   if (root.querySelector('#realm-cog-public')) return;   // already mounted this boot
 
   // The realm-only "ambient drift" preference parks the aurora/mote drift.
@@ -235,6 +239,29 @@ export function setupRealmOptionsUI(root: HTMLElement, cb: RealmOptionsCallbacks
       slider(t.label, t.get(), t.min, t.max, t.step, (v) => cb.onStreetParam(t.key, v)));
     geomRows.push(realmBtn('Reset street geometry', cb.onResetStreet));
     adminPanel.appendChild(collapsibleSection('Street geometry', geomRows));
+
+    // Realm theme: recolour the houses + restyle the name-labels, and pick the
+    // realm font. These drive CSS variables on the realm root, so they apply
+    // live with no rebuild.
+    const th = getRealmTheme();
+    const fontOpts = [{ value: '', label: '— inherit —' }, ...FONT_FAMILIES.map((f) => ({ value: f.id, label: f.label }))];
+    const resetTheme = document.createElement('button');
+    resetTheme.type = 'button'; resetTheme.className = 'options-reset'; resetTheme.textContent = 'Reset realm theme';
+    resetTheme.addEventListener('click', () => { resetRealmTheme(); buildAdmin(); });
+    adminPanel.appendChild(collapsibleSection('Realm theme', [
+      subheader('Houses'),
+      color('House colour', th.house, (v) => setRealmThemeValue('house', v)),
+      color('Roof colour', th.roof, (v) => setRealmThemeValue('roof', v)),
+      color('Door colour', th.door, (v) => setRealmThemeValue('door', v)),
+      subheader('Name labels'),
+      color('Label background', th.signBg, (v) => setRealmThemeValue('signBg', v)),
+      color('Label text', th.signColor, (v) => setRealmThemeValue('signColor', v)),
+      slider('Label text size', th.signSize, 6, 40, 1, (v) => setRealmThemeValue('signSize', v)),
+      subheader('Fonts'),
+      select('Realm font', th.font, fontOpts, (v) => setRealmThemeValue('font', v)),
+      slider('Font scale', th.fontScale, 0.4, 2.5, 0.05, (v) => setRealmThemeValue('fontScale', v)),
+      resetTheme,
+    ]));
   };
   buildPublic();
   buildAdmin();

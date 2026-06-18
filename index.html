@@ -2303,21 +2303,21 @@
       /* House volume: front brightest, sides stepped darker, roof palest, so a
          flat-white house still reads as 3-D. A soft lilac shadow grounds it. */
       .sv-house { position: absolute; transform-style: preserve-3d; transition: opacity 360ms ease; }
-      .sv-wall { background: linear-gradient(180deg, #ffffff 0%, #eef0f8 100%); }
-      .sv-front { background: linear-gradient(180deg, #ffffff 0%, #f3f4fb 100%); }
-      .sv-back { background: #e4e6f2; }
-      .sv-left { background: linear-gradient(90deg, #d8dbec 0%, #e7e9f5 100%); }
-      .sv-right { background: linear-gradient(90deg, #e7e9f5 0%, #d8dbec 100%); }
-      .sv-gable { background: linear-gradient(180deg, #f1f2fb 0%, #e1e3f1 100%); }
+      .sv-wall { background: var(--sv-wall-bg, linear-gradient(180deg, #ffffff 0%, #eef0f8 100%)); }
+      .sv-front { background: var(--sv-front-bg, linear-gradient(180deg, #ffffff 0%, #f3f4fb 100%)); }
+      .sv-back { background: var(--sv-back-bg, #e4e6f2); }
+      .sv-left { background: var(--sv-left-bg, linear-gradient(90deg, #d8dbec 0%, #e7e9f5 100%)); }
+      .sv-right { background: var(--sv-right-bg, linear-gradient(90deg, #e7e9f5 0%, #d8dbec 100%)); }
+      .sv-gable { background: var(--sv-gable-bg, linear-gradient(180deg, #f1f2fb 0%, #e1e3f1 100%)); }
       .sv-roof {
-        background: linear-gradient(180deg, #fbfbff 0%, #e9ebf7 100%);
+        background: var(--sv-roof-bg, linear-gradient(180deg, #fbfbff 0%, #e9ebf7 100%));
         box-shadow: inset 0 0 30px rgba(170, 165, 220, 0.18);
       }
       /* The door + sign sit on the front wall's own 2-D plane. */
       .sv-door {
         position: absolute; left: 50%; bottom: 0;
         width: 34%; height: 52%; margin-left: -17%;
-        background: linear-gradient(180deg, #b9b3df 0%, #8f88c4 100%);
+        background: var(--sv-door-bg, linear-gradient(180deg, #b9b3df 0%, #8f88c4 100%));
         border-radius: 6px 6px 0 0;
         box-shadow: inset 0 0 0 2px rgba(255, 255, 255, 0.5), inset 0 8px 16px rgba(0, 0, 0, 0.18);
       }
@@ -2329,10 +2329,10 @@
       .sv-sign {
         position: absolute; left: 50%; top: 8%; transform: translateX(-50%);
         max-width: 92%; padding: 5px 9px; border-radius: 8px;
-        font-family: var(--font-display); font-size: 12px; letter-spacing: 0.04em;
+        font-family: var(--font-display); font-size: var(--sv-sign-size, 12px); letter-spacing: 0.04em;
         line-height: 1.15; text-align: center; white-space: normal;
-        color: #4a4658;
-        background: rgba(255, 255, 255, 0.92);
+        color: var(--sv-sign-color, #4a4658);
+        background: var(--sv-sign-bg, rgba(255, 255, 255, 0.92));
         border: 1px solid var(--tier-c, #c7c2e6);
         box-shadow: 0 3px 10px rgba(70, 66, 110, 0.22), 0 0 0 3px rgba(255, 255, 255, 0.35);
       }
@@ -2345,8 +2345,8 @@
       .sv-house.sv-active { cursor: pointer; }
       .sv-house.sv-active .sv-front { background: linear-gradient(180deg, #ffffff 0%, #f7f8ff 100%); }
       .sv-house.sv-active .sv-sign {
-        color: #322e44;
-        background: #fff;
+        color: var(--sv-sign-color, #322e44);
+        background: var(--sv-sign-bg, #fff);
         box-shadow: 0 4px 16px rgba(120, 110, 200, 0.4), 0 0 18px 3px var(--tier-c, #c7c2e6);
         animation: sv-sign-glow 2.4s ease-in-out infinite;
       }
