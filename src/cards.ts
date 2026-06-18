@@ -204,6 +204,23 @@ export function consumeCardHop(): boolean {
   } catch { return false; }
 }
 
+// True at the very start of a boot that's RETURNING to the realm — leaving a
+// card world, or the first-card reveal: an explicit hop is in progress and the
+// metagame exists with no active card (so we're NOT diving into a card). Peeks
+// the hop flag without consuming it. Lets main.ts raise the realm's white-out
+// immediately, before the long async boot (worlds preload, fonts, Pixi) can
+// paint the bare overworld underneath during the ~2s before the realm mounts.
+export function isRealmReturnBoot(): boolean {
+  try {
+    if (sessionStorage.getItem(HOP_KEY) !== '1') return false;
+  } catch { return false; }
+  // Spectating dives INTO a trader's world (activeCardId stays null but the
+  // spectate flag is set) — that's an arrival, not a return; don't white it out.
+  if (spectateActive()) return false;
+  const m = loadMeta();
+  return m !== null && m.activeCardId === null;
+}
+
 export function cardWorldActive(): boolean {
   const m = loadMeta();
   return m !== null && m.activeCardId !== null;

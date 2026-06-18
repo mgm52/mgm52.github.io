@@ -17,8 +17,8 @@ import {
   abandonCardWorldBoot, captureOriginWorld, cardWorldActive, clearCardData, consumeCardHop,
   devDealFreeCard, devResetCardRealm, devReshuffleGatherings, devResetStreet, devSetStreetParam,
   hasCardMeta, initBuiltinWorlds,
-  isCardHopInProgress, maybeStartCardRealm, onRealmShown, resetCardRealm, setupCardWorldChrome,
-  spectateActive,
+  isCardHopInProgress, isRealmReturnBoot, maybeStartCardRealm, onRealmShown, resetCardRealm,
+  setupCardWorldChrome, spectateActive,
 } from './cards';
 import { designerActive, openDesignerList, setupDesignerChrome } from './designer';
 
@@ -224,6 +224,19 @@ async function main() {
   // applyOptions inside createRender re-applies these for any later changes.
   applyDomOptions(getOptions());
 
+  // Returning to the trading realm (leaving a card world, or the first-card
+  // reveal): the realm only mounts a couple seconds in (worlds preload, fonts,
+  // Pixi all init first), so raise the held white-out NOW — before the first
+  // await below can let the bare overworld paint — and let the realm settle
+  // over it. Mirrors applyFinaleEnded; driveFinale re-applies it idempotently.
+  if (isRealmReturnBoot()) {
+    const w = document.getElementById('finale-white') ?? document.body.appendChild(
+      Object.assign(document.createElement('div'), { id: 'finale-white' }));
+    w.style.transition = 'none';
+    w.style.opacity = '1';
+    document.getElementById('app')?.classList.add('finale-zoom');
+  }
+
   // Start downloading/decoding the sprite sheets + building art right away,
   // in parallel with the title screen, so clicking Play/Resume doesn't stall
   // on them (they used to load inside createRender, after the click).
@@ -394,6 +407,20 @@ async function main() {
   // sandbox world resumed above is already task-free + fully unlocked
   // (makeSandboxWorld), so the standard sidebar places everything.
   else if (inDesigner) setupDesignerChrome(state);
+  // Resuming straight into the post-finale trading realm — a reload while in
+  // the realm, or stepping back out of a card world (LEAVE WORLD restores the
+  // shattered outer save and reloads). The realm only mounts once the frame
+  // loop's driveFinale sees 'shattered', which is a beat away (fonts + Pixi
+  // still initialising), so raise the held white-out NOW, synchronously, before
+  // the sidebar and bare canvas can paint behind it. driveFinale re-applies it
+  // idempotently and mounts the realm over the top.
+  else if (state.finale?.phase === 'shattered' && !designerOverlay) {
+    const w = document.getElementById('finale-white') ?? document.body.appendChild(
+      Object.assign(document.createElement('div'), { id: 'finale-white' }));
+    w.style.transition = 'none';
+    w.style.opacity = '1';
+    document.getElementById('app')?.classList.add('finale-zoom');
+  }
   // Dev shortcut: ?cardrealm mounts the trading-card realm immediately,
   // without playing the finale first. Flush the just-booted world into the
   // save slot first — entering a card stashes the slot as the outer world,
@@ -546,15 +573,20 @@ async function main() {
     },
     onSkipToCardRealm: () => {
       skipIntro();
+      if (state.view !== 'ground') quickTravel('ground');
       // The realm's first card is the world the finale would have stolen —
-      // snapshot the live state to stand in for the missing ritual. Then
-      // flush the live world into the save slot: entering a card stashes
-      // the SLOT as the outer world, and unlike the real post-finale flow
-      // the slot here may be empty (fresh run) or a stale autosave — and an
-      // empty stash would let the card world replace the main game on the
-      // way back out. Then mount the realm over everything (it brings its
-      // own white).
+      // snapshot the live state to stand in for the missing ritual.
       captureOriginWorld(state);
+      // Then drop the run into the real post-finale END state. The realm only
+      // re-mounts on boot when the finale is in its terminal 'shattered' phase
+      // (driveFinale → maybeStartCardRealm), so without this the slot stashed
+      // as the outer world has no finale, and the first LEAVE WORLD reload
+      // boots the bare overworld instead of returning to the realm. Standing
+      // the finale up and jumping it to the end makes the realm survive the
+      // enter/leave-world reload cycle, exactly as a genuine playthrough does.
+      resetFinaleGuards();
+      devTriggerFinale(state);
+      if (state.finale) { state.finale.phase = 'shattered'; state.finale.phaseStartedAt = state.now; }
       saveGame(state);
       resetCardRealm();
       maybeStartCardRealm();
