@@ -350,6 +350,14 @@ export type Options = {
   terminatorLampInFront: boolean; // draw the lamp glow over the sprite (off = behind)
   terminatorLaserWindup: number; // seconds of charge-up per auto-shot
   terminatorYOffset: number;     // sprite (+ lamp) vertical nudge, fraction of px (− = up)
+  // ─── Goblin crowd-control (dev) ──────────────────────────────────
+  // A stream of births piles idle goblins onto the hole's doorstep, walling
+  // it in and freezing units in place — which starves the terminators'
+  // distance-based target picker and looks like "prioritisation" stalling.
+  // These two knobs keep the crowd flowing; both default off.
+  goblinDisperseOnSpawn: boolean; // fresh spawns walk a few cells off the hole
+  goblinDisperseRadius: number;   // cells from the hole a fresh spawn aims for
+  goblinIdleYield: boolean;       // idle goblins step aside for a blocked mover
   // The endgame finale (Lolly's moon). The camera eases to follow her flight,
   // and a speed dial lets a tester run the whole cinematic fast.
   finaleAutoFollow: boolean;     // ease the camera to keep Lolly framed
@@ -558,6 +566,9 @@ export const DEFAULT_OPTIONS: Options = {
   terminatorLampInFront: false,
   terminatorLaserWindup: 0.65,
   terminatorYOffset: -0.1,
+  goblinDisperseOnSpawn: false,
+  goblinDisperseRadius: 4,
+  goblinIdleYield: false,
   finaleAutoFollow: true,
   finaleSpeedMult: 1,
 };

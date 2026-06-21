@@ -931,11 +931,13 @@ function spawnGoblin(state: GameState, forceGold = false) {
   // hole walled over yields none). Bump rotation regardless so spawns spread out.
   const start = state.spawnHoleRotation % holeCells.length;
   let cell: Cell | null = null;
+  let spawnHole: Cell | null = null;
   for (let i = 0; i < holeCells.length; i++) {
     const idx = (start + i) % holeCells.length;
     if (isMain[idx] && holeBlockedByBuilding(state)) continue;
     cell = findHoleEmergenceCell(state, holeCells[idx].cx, holeCells[idx].cy);
     if (cell) {
+      spawnHole = holeCells[idx];
       state.spawnHoleRotation = idx + 1;
       break;
     }
@@ -962,6 +964,16 @@ function spawnGoblin(state: GameState, forceGold = false) {
   };
   state.goblins.set(id, g);
   occupyCell(state, cell.cx, cell.cy, id);
+  // Disperse fresh spawns off the hole's doorstep (dev toggle) so a stream of
+  // births doesn't wall the hole in and strand units the terminators target.
+  if (getOptions().goblinDisperseOnSpawn && spawnHole) {
+    const radius = Math.max(1, Math.round(getOptions().goblinDisperseRadius));
+    const dest = findDispersalCell(state, cell, spawnHole, radius, id);
+    if (dest && (dest.cx !== cell.cx || dest.cy !== cell.cy)) {
+      g.goal = dest;
+      g.state = { kind: 'moving' };
+    }
+  }
   state.spawnsCompleted++;
   state.spawnFailStreak = 0;
   // Decaying-volume helper in audio.ts so a wall of late-game goblins
@@ -3970,6 +3982,85 @@ function bfsPath(
   return null;
 }
 
+// Breadth-first walk outward from a fresh spawn's cell (up to maxSteps deep)
+// over cells the goblin could actually step into, returning the reachable free
+// cell farthest from its hole. Backs the "Disperse on spawn" dev toggle so
+// births trickle away from the doorstep instead of clotting on it.
+function findDispersalCell(
+  state: GameState, start: Cell, hole: Cell, maxSteps: number, gid: number,
+): Cell | null {
+  const visited = new Set<number>([nkey(start.cx, start.cy)]);
+  let frontier: Cell[] = [start];
+  let best: Cell | null = null;
+  let bestD = -1;
+  for (let depth = 0; depth < maxSteps && frontier.length > 0; depth++) {
+    const nextFrontier: Cell[] = [];
+    for (const c of frontier) {
+      for (const d of ALL_DIRS) {
+        const nx = c.cx + DX[d], ny = c.cy + DY[d];
+        if (!isInBounds(nx, ny)) continue;
+        const k = nkey(nx, ny);
+        if (visited.has(k)) continue;
+        visited.add(k);
+        if (!canStep(state, c.cx, c.cy, nx, ny, gid, undefined)) continue;
+        nextFrontier.push({ cx: nx, cy: ny });
+        const dist = Math.max(Math.abs(nx - hole.cx), Math.abs(ny - hole.cy));
+        if (dist > bestD) { bestD = dist; best = { cx: nx, cy: ny }; }
+      }
+    }
+    frontier = nextFrontier;
+  }
+  return best;
+}
+
+// Step an idle blocker one cell aside (preferring a cell away from the mover)
+// so a goal-directed goblin's route can open up. Mirrors the wander move:
+// occupy the new cell and set a target; the old cell is released when the
+// interpolation lands. No-op if the blocker isn't idle or is already mid-step.
+function tryShoveIdle(state: GameState, blocker: Goblin, mover: Goblin): boolean {
+  if (blocker.state.kind !== 'idle' || blocker.target) return false;
+  let best: Cell | null = null;
+  let bestScore = -Infinity;
+  for (const d of ALL_DIRS) {
+    const nx = blocker.cell.cx + DX[d], ny = blocker.cell.cy + DY[d];
+    if (!isInBounds(nx, ny)) continue;
+    if (nx === mover.cell.cx && ny === mover.cell.cy) continue;
+    if (!canStep(state, blocker.cell.cx, blocker.cell.cy, nx, ny, blocker.id, undefined)) continue;
+    const score = Math.hypot(nx - mover.cell.cx, ny - mover.cell.cy);
+    if (score > bestScore) { bestScore = score; best = { cx: nx, cy: ny }; }
+  }
+  if (!best) return false;
+  occupyCell(state, best.cx, best.cy, blocker.id);
+  blocker.target = best;
+  blocker.facing = Math.atan2(best.cy - blocker.cell.cy, best.cx - blocker.cell.cx);
+  return true;
+}
+
+// When a mover has no path to its goal, find an idle goblin in an adjacent
+// cell that lies toward the goal and nudge it aside. The mover waits this
+// tick; the cell frees once the shoved goblin lands, and the next replan finds
+// the opening. Gated by the "Idle goblins yield" dev toggle.
+function tryYieldTowardGoal(state: GameState, g: Goblin): boolean {
+  if (!g.goal) return false;
+  let best: Goblin | null = null;
+  let bestD = Infinity;
+  for (const d of ALL_DIRS) {
+    const nx = g.cell.cx + DX[d], ny = g.cell.cy + DY[d];
+    if (!isInBounds(nx, ny)) continue;
+    // Only worth shoving if we could actually step in once it's vacated —
+    // nothing static (wall/building) must occupy the cell.
+    if (state.walls.has(cellKey(nx, ny)) || buildingAtCell(state, nx, ny)) continue;
+    const occ = state.occupancy.get(cellKey(nx, ny));
+    if (occ === undefined) continue;
+    const blocker = state.goblins.get(occ);
+    if (!blocker || blocker.state.kind !== 'idle' || blocker.target) continue;
+    const dist = Math.max(Math.abs(nx - g.goal.cx), Math.abs(ny - g.goal.cy));
+    if (dist < bestD) { bestD = dist; best = blocker; }
+  }
+  if (!best) return false;
+  return tryShoveIdle(state, best, g);
+}
+
 function planStep(state: GameState, g: Goblin) {
   if (g.target) return;
   if (!g.goal) return;
@@ -4001,6 +4092,9 @@ function planStep(state: GameState, g: Goblin) {
     const path = bfsPath(state, g.id, g.cell, g.goal, exemptB, confineB);
     g.path = path ?? [];
     next = g.path[0];
+    // Fully walled in by idle goblins? Nudge one aside (dev toggle) and wait a
+    // tick for its cell to clear, rather than stalling indefinitely.
+    if (!next && getOptions().goblinIdleYield) tryYieldTowardGoal(state, g);
   }
 
   if (!next) return; // no path right now; wait a tick
