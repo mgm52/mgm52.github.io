@@ -420,6 +420,12 @@ function rebuildPanel(panel: HTMLElement, callbacks: OptionsUICallbacks, refresh
     color('Blood color', o.bloodColor, (v) => setOption('bloodColor', v)),
   ]));
 
+  panel.appendChild(collapsibleSection('Goblin behavior', [
+    toggle('Disperse on spawn', o.goblinDisperseOnSpawn, (v) => setOption('goblinDisperseOnSpawn', v)),
+    slider('Disperse radius', o.goblinDisperseRadius, 1, 12, 1, (v) => setOption('goblinDisperseRadius', v)),
+    toggle('Idle goblins yield', o.goblinIdleYield, (v) => setOption('goblinIdleYield', v)),
+  ]));
+
   panel.appendChild(collapsibleSection('Minotaurs', [
     slider('Saturation', o.minotaurSaturation, 0, 2, 0.05, (v) => setOption('minotaurSaturation', v)),
     slider('Brightness', o.minotaurBrightness, 0.2, 2, 0.05, (v) => setOption('minotaurBrightness', v)),
