@@ -24,8 +24,8 @@ export type RealmTheme = {
 
 export const REALM_THEME_DEFAULTS: RealmTheme = {
   house: 0xffffff,
-  roof: 0xfbfbff,
-  door: 0xb9b3df,
+  roof: 0xfbfbfb,
+  door: 0xffffff,
   signBg: 0xffffff,
   signColor: 0x4a4658,
   signSize: 12,
@@ -79,7 +79,7 @@ export function resetRealmTheme(): void {
 }
 
 // ─── Colour helpers ─────────────────────────────────────────────────
-const SHADOW = 0x5a567f;   // lilac-grey the faces are shaded toward
+const SHADOW = 0x6a6a6a;   // neutral grey the faces are shaded toward
 const rgb = (n: number): [number, number, number] => [(n >> 16) & 255, (n >> 8) & 255, n & 255];
 const hex = ([r, g, b]: [number, number, number]): string =>
   '#' + [r, g, b].map((x) => Math.round(Math.max(0, Math.min(255, x))).toString(16).padStart(2, '0')).join('');
