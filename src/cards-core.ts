@@ -44,10 +44,12 @@ export type WorldCard = {
   // origin, the junk replacement) carry none and keep the plain frame.
   frame?: number;
   // The gatekeeper's wares: a key card (a picture of a key, no world behind
-  // it — `data` is empty). `tier` is the gathering it was minted at, i.e. the
-  // locked door it opens. Key cards never satisfy a normal want, so they can
-  // only ever be spent on the door.
+  // it — `data` is empty). `tier` is the gathering it was minted at (for the
+  // card's look); `keyDepth` is the salon depth the key actually opens — the
+  // door up out of the salon that minted it. Key cards never satisfy a normal
+  // want, so they can only ever be spent on that one door.
   key?: boolean;
+  keyDepth?: number;
 };
 
 // ─── Trader wants ────────────────────────────────────────────────────
@@ -164,7 +166,7 @@ export const FRAME_BASE: Record<CardTier, number> = { common: 0, uncommon: 1, ra
 // tier and accept cards of that tier. Entry needs a card of the tier (or one
 // tier above, breakable into two) in hand. Two-for-one breakdowns are the
 // only way the collection grows.
-export type TradeEvent = { id: number; name: string; tier: CardTier; creatures: Creature[] };
+export type TradeEvent = { id: number; name: string; tier: CardTier; depth: number; creatures: Creature[] };
 
 export type CardMeta = {
   v: 1;
@@ -174,10 +176,14 @@ export type CardMeta = {
   //               ENTER it (their first time inside a card world).
   // 'free'      — the gatherings are open; normal play.
   phase: 'intro' | 'firstworld' | 'free';
-  // Tiers the player has unlocked the locked door up to (by spending a key).
-  // 'common' is always home; opening the soft-border door adds 'uncommon',
-  // the salon door adds 'rare'. Absent on metas saved before doors existed.
+  // Legacy: tiers the player had unlocked the door up to. Superseded by
+  // unlockedDepth (loadMeta migrates it); kept only so old saves still read.
   unlockedTiers?: CardTier[];
+  // How far down the endless salon chain the player has opened doors: the
+  // highest salon depth they can reach without a key. 0 means only the soft
+  // border (home); spending the gatekeeper's key at salon d raises it to d+1.
+  // Absent on metas saved before the chain went endless.
+  unlockedDepth?: number;
   // Per-playthrough entropy mixed into every gathering roll. Without it the
   // event RNG keyed on nextId alone, and nextId is identical for every
   // player at the moment the tables are first dealt — so everyone met the
@@ -186,8 +192,9 @@ export type CardMeta = {
   seed?: number;
   nextId: number;
   cards: WorldCard[];
-  // Generated once, after the intro (so the stolen origin card can be seeded
-  // into gathering III's deck). Null until then.
+  // The endless salon chain, indexed by depth and grown on demand: the intro
+  // seeds salons 0..STOLEN_DEPTH (so the stolen origin world has a home), and
+  // deeper salons are appended as the player reaches them. Null until the intro.
   events: TradeEvent[] | null;
   // Card the player is currently inside (boot resumes into it). Null on the table.
   activeCardId: number | null;
@@ -804,27 +811,43 @@ export function makeSandboxWorld(taskIds: string[]): GameState {
   return st;
 }
 
-// ─── The gatherings ──────────────────────────────────────────────────
-// One per tier. Each gathering seats a few traders, all on screen at once;
-// every trader advertises ONE want and, satisfied, gives its WHOLE deck for
-// the card(s) the want names. The way the collection grows is finding a want
-// you can meet — gatherings are where you spend a world (or a few) to gain a
-// trader's hand, or, at the rare exchange, win your own world back. Every
-// gathering's opener keeps an easy want so the player is never hard-locked;
-// for everything else there's the "wait for the next gathering" reshuffle.
+// ─── The salons ──────────────────────────────────────────────────────
+// A salon seats a few traders, all on screen at once; every trader advertises
+// ONE want and, satisfied, gives its WHOLE deck for the card(s) the want
+// names. The way the collection grows is finding a want you can meet. The
+// salons form an ENDLESS chain: salon 0 is the gentle soft border (home),
+// every salon after it is procedurally rolled, and each but the way you came
+// holds a gatekeeper whose key opens the locked door onward to the next,
+// freshly generated salon. Every salon's opener keeps an easy want so the
+// player is never hard-locked; for everything else there's the dev reshuffle.
 
-export const EVENT_NAMES: Record<CardTier, string> = {
-  common: 'gathering at the soft border',
-  uncommon: 'the uncommon salon',
-  rare: 'the rare exchange',
-};
+// The salon depth that holds the player's stolen origin world — the fixed
+// "win your world back" rung along the otherwise-endless chain.
+export const STOLEN_DEPTH = 2;
+
+// Salons don't escalate (for now): the soft border is the gentle bootstrap
+// (its lone trader holds two cards, doubling the first trade), and every salon
+// past it trades at the uncommon tier.
+export function salonTierForDepth(depth: number): CardTier {
+  return depth <= 0 ? 'common' : 'uncommon';
+}
+
+// The endless chain needs a name per salon. Depth 0 is always the soft border;
+// deeper salons get a stable procedural name seeded by the playthrough seed and
+// the depth, so revisiting one reads the same name every time.
+const SALON_ADJ = ['velvet', 'hollow', 'gilded', 'quiet', 'crooked', 'amber', 'sunken', 'porcelain', 'marble', 'candlelit', 'glass', 'copper', 'ivory', 'listening', 'patient', 'folded', 'low', 'far', 'dim', 'smoke'];
+export function salonName(seed: number, depth: number): string {
+  if (depth <= 0) return 'gathering at the soft border';
+  const rng = mulberry32((((seed ?? 0) ^ (depth * 2654435761)) >>> 0));
+  return `the ${SALON_ADJ[Math.floor(rng() * SALON_ADJ.length)]} salon`;
+}
 
 // The gatekeeper's single ware: a key card. It carries no world (`data` is
-// empty); its `tier` names the gathering it was minted at, i.e. the locked
-// door it opens (common's key opens the door up to the uncommon salon). Key
-// cards never satisfy a want (cardQualifies), so they can only be spent on
-// the door, never re-traded.
-export function makeKeyCard(meta: CardMeta, tier: CardTier): WorldCard {
+// empty). `tier` gives the card its look; `keyDepth` is the salon depth the
+// key opens — the door up out of the salon that minted it (a key minted at
+// salon d opens the door to salon d+1). Key cards never satisfy a want
+// (cardQualifies), so they can only be spent on that door, never re-traded.
+export function makeKeyCard(meta: CardMeta, tier: CardTier, keyDepth?: number): WorldCard {
   return {
     id: meta.nextId++,
     name: 'a key',
@@ -832,6 +855,7 @@ export function makeKeyCard(meta: CardMeta, tier: CardTier): WorldCard {
     data: '',
     resources: { money: 0, blood: 0, dragonBone: 0 },
     key: true,
+    keyDepth,
   };
 }
 
@@ -847,7 +871,7 @@ const CREATURE_SPECS: Record<CardTier, number[]> = {
   uncommon: [1, 2],
   rare: [1, 2, 2],
 };
-export function rollCreatures(meta: CardMeta, tier: CardTier, rng: () => number, taskIds: string[], manualPool: ManualWorld[] = []): Creature[] {
+export function rollCreatures(meta: CardMeta, tier: CardTier, depth: number, rng: () => number, taskIds: string[], manualPool: ManualWorld[] = []): Creature[] {
   const names = [...CREATURE_NAMES];
   for (let i = names.length - 1; i > 0; i--) {
     const j = Math.floor(rng() * (i + 1));
@@ -870,41 +894,52 @@ export function rollCreatures(meta: CardMeta, tier: CardTier, rng: () => number,
       frame,
     };
   });
-  // Every gathering below the top seats a gatekeeper too: it offers a single
-  // key card for any one world — the key that opens the locked door up to the
-  // next tier. (The rare exchange is the top; it has no door onward.)
-  if (TIER_ABOVE[tier]) {
-    creatures.push({
-      id: creatureSeq++,
-      name: 'the gatekeeper',
-      want: { kind: 'any', count: 1 },
-      deck: [makeKeyCard(meta, tier)],
-    });
-  }
+  // Every salon seats a gatekeeper too: it offers a single key card for any one
+  // world — the key that opens the locked door up to the NEXT salon (depth+1).
+  // The chain is endless, so every salon has a door onward.
+  creatures.push({
+    id: creatureSeq++,
+    name: 'the gatekeeper',
+    want: { kind: 'any', count: 1 },
+    deck: [makeKeyCard(meta, tier, depth + 1)],
+  });
   return creatures;
 }
 
+// Roll a single salon at a given depth (its name, tier, traders + gatekeeper).
+export function makeSalon(meta: CardMeta, depth: number, rng: () => number, taskIds: string[], manualPool: ManualWorld[] = []): TradeEvent {
+  const tier = salonTierForDepth(depth);
+  return {
+    id: depth + 1,
+    depth,
+    name: salonName(meta.seed ?? 0, depth),
+    tier,
+    creatures: rollCreatures(meta, tier, depth, rng, taskIds, manualPool),
+  };
+}
+
+// The realm's initial salons: the chain from the soft border down to the salon
+// that holds the stolen origin world. Deeper salons are rolled lazily as the
+// player reaches them (see cards.ts salonAtDepth).
 export function generateEvents(meta: CardMeta, stolen: WorldCard | null, taskIds: string[], manualPool: ManualWorld[] = []): TradeEvent[] {
   const rng = mulberry32((((meta.seed ?? 0) ^ (meta.nextId * 2654435761)) >>> 0));
-  const events: TradeEvent[] = (['common', 'uncommon', 'rare'] as CardTier[]).map((tier, i) => ({
-    id: i + 1,
-    name: EVENT_NAMES[tier],
-    tier,
-    creatures: rollCreatures(meta, tier, rng, taskIds, manualPool),
-  }));
-  // The stolen origin card waits at the rare exchange, with the creature whose
-  // opening want (a single uncommon) is the easiest to bring it back from.
-  if (stolen) events[2].creatures[0].deck.unshift(stolen);
+  const events: TradeEvent[] = [];
+  for (let depth = 0; depth <= STOLEN_DEPTH; depth++) {
+    events.push(makeSalon(meta, depth, rng, taskIds, manualPool));
+  }
+  // The stolen origin card waits at the fixed stolen-world salon, on its
+  // easy-want opener so it's the gentlest rung to win the world back from.
+  if (stolen) events[STOLEN_DEPTH].creatures[0].deck.unshift(stolen);
   return events;
 }
 
-// The reshuffle: this gathering ends and the next one of the same tier
-// arrives — new creatures, new decks (caller persists the meta). Whatever
-// the player traded away leaves with the departing creatures, except the
-// origin card, which always finds its way to the next table.
+// The reshuffle: this salon ends and a fresh one at the same depth arrives —
+// new creatures, new decks (caller persists the meta). Whatever the player
+// traded away leaves with the departing creatures, except the origin card,
+// which always finds its way to the next table.
 export function regenerateEvent(meta: CardMeta, ev: TradeEvent, taskIds: string[], manualPool: ManualWorld[] = []): void {
   const origin = ev.creatures.flatMap((c) => c.deck).find((c) => c.origin) ?? null;
   const rng = mulberry32((((meta.seed ?? 0) ^ (meta.nextId * 48271 + ev.id)) >>> 0));
-  ev.creatures = rollCreatures(meta, ev.tier, rng, taskIds, manualPool);
+  ev.creatures = rollCreatures(meta, ev.tier, ev.depth, rng, taskIds, manualPool);
   if (origin) ev.creatures[0].deck.unshift(origin);
 }

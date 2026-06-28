@@ -27,10 +27,10 @@ import { clearSave, getRawSave, saveGame, setRawSave } from './save';
 import { GameState, computePlayBounds, isInPlayCell } from './state';
 import { ALL_TASK_IDS } from './ui';
 import {
-  CardMeta, CardResources, CardTier, Creature, EVENT_NAMES, FRAME_BASE, ManualWorld,
-  TradeEvent, TIER_ABOVE, Want, WorldCard, cardPower, decodeWorld, encodeWorld,
-  generateEvents, makeCard, makeKeyCard, mulberry32, regenerateEvent,
-  sceneStructureCounts, WantSeg, wantSatisfiedBy, wantSegments,
+  CardMeta, CardResources, CardTier, Creature, FRAME_BASE, ManualWorld,
+  TradeEvent, Want, WorldCard, cardPower, decodeWorld, encodeWorld,
+  generateEvents, makeCard, makeKeyCard, makeSalon, mulberry32, regenerateEvent,
+  salonName, sceneStructureCounts, WantSeg, wantSatisfiedBy, wantSegments,
 } from './cards-core';
 
 const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
@@ -82,6 +82,16 @@ function appetiteToWant(a: string | undefined, tier: CardTier, firstSlot: boolea
   return { kind: 'tier', tier, count: 1 };
 }
 
+// Pre-keyDepth keys carried only the tier they were minted at; map that onto
+// the salon depth the key opens (common's opened the door to salon 1, the
+// uncommon salon's to salon 2). `mintedDepth`, when known (a key still in a
+// salon deck), pins it exactly; loose keys in hand fall back to the tier.
+function stampLegacyKeyDepth(wc: WorldCard, mintedDepth: number | undefined): void {
+  if (!wc.key || wc.keyDepth !== undefined) return;
+  if (mintedDepth !== undefined) { wc.keyDepth = mintedDepth + 1; return; }
+  wc.keyDepth = wc.tier === 'common' ? 1 : wc.tier === 'uncommon' ? 2 : 3;
+}
+
 function loadMeta(): CardMeta | null {
   try {
     const raw = localStorage.getItem(META_KEY);
@@ -92,7 +102,10 @@ function loadMeta(): CardMeta | null {
     // patterns onto the creatures and their unclaimed decks. Cards already
     // traded into the player's hand are unattributable and stay plain.
     if (m.events) {
-      for (const ev of m.events) {
+      m.events.forEach((ev, depth) => {
+        // Metas saved before the endless chain: the salon's array index IS its
+        // depth, and a gatekeeper's key opens the door to the next one.
+        if (ev.depth === undefined) ev.depth = depth;
         ev.creatures.forEach((c, i) => {
           if (c.frame === undefined) {
             c.frame = FRAME_BASE[ev.tier] + i;
@@ -100,12 +113,21 @@ function loadMeta(): CardMeta | null {
               if (wc.frame === undefined && !wc.origin) wc.frame = c.frame;
             }
           }
+          for (const wc of c.deck) stampLegacyKeyDepth(wc, ev.depth);
           // Metas saved before trader wants existed: synthesize one from the
           // legacy appetite (the first creature, the open one, becomes an
           // any-want).
           if (c.want === undefined) c.want = appetiteToWant((c as { appetite?: string }).appetite, ev.tier, i === 0);
         });
-      }
+      });
+    }
+    // Keys already in hand from before keyDepth existed: infer which door they
+    // open from the tier they were minted at (common→1, uncommon→2).
+    for (const wc of m.cards) stampLegacyKeyDepth(wc, undefined);
+    // Migrate the old tier-set unlock flags onto the depth counter: each tier
+    // the player had climbed past is one salon depth they can still reach.
+    if (m.unlockedDepth === undefined) {
+      m.unlockedDepth = Array.isArray(m.unlockedTiers) ? m.unlockedTiers.length : 0;
     }
     // Metas saved before the per-playthrough seed existed: stamp one now so
     // future gathering rolls stop being identical across playthroughs.
@@ -240,9 +262,9 @@ function refreshRealmView(): void {
   swapView(() => routeRealmView(meta));
 }
 
-// Which tier's gathering is currently on screen — set by showGathering, read
+// Which salon (by depth) is currently on screen — set by showGathering, read
 // by the dev cog's "refresh current traders" so it re-rolls the right one.
-let currentGatheringTier: CardTier | null = null;
+let currentGatheringDepth: number | null = null;
 
 // Dev tool (realm dev cog): reshuffle every gathering's traders + decks.
 export function devReshuffleGatherings(): void {
@@ -254,14 +276,14 @@ export function devReshuffleGatherings(): void {
   refreshRealmView();
 }
 
-// Dev tool (realm dev cog): re-roll only the gathering currently on screen —
-// the old in-gathering "wait for the next gathering" reshuffle, now a dev
-// control. Re-shows that same tier rather than routing home to the common one.
+// Dev tool (realm dev cog): re-roll only the salon currently on screen — the
+// old in-gathering "wait for the next gathering" reshuffle, now a dev control.
+// Re-shows that same salon rather than routing home to the soft border.
 export function devRefreshCurrentTraders(): void {
   const meta = loadMeta();
   if (!meta) return;
-  if (currentGatheringTier == null) { devReshuffleGatherings(); return; }
-  const ev = eventForTier(meta, currentGatheringTier);
+  if (currentGatheringDepth == null) { devReshuffleGatherings(); return; }
+  const ev = salonAtDepth(meta, currentGatheringDepth);
   if (!ev) return;
   regenerateEvent(meta, ev, ALL_TASK_IDS, loadManualWorlds());
   saveMeta(meta);
@@ -373,17 +395,23 @@ async function enterWorld(meta: CardMeta, card: WorldCard, cardEl?: HTMLElement)
   if (written === null || written === outer) { realmSound('error'); return; }
   meta.activeCardId = card.id;
   saveMeta(meta);
+  // The dive cue (rides the ENTER click's gesture — a post-reload arrival
+  // sound would be muted until the next gesture): the ritual tone over a deep
+  // whoosh that swells as the world rushes up, then a soft impact as the white
+  // lands.
   realmSound('ritual', 1, 0.7);
+  realmSound('online', 0.5, 0.42);
+  window.setTimeout(() => realmSound('place', 0.6, 0.5), 480);
   markCardHop();
   // The dive: the chosen card swells toward the viewer while the white
   // takes over — it bridges into the arrival zoom on the far side of the
   // reload (setupCardWorldChrome).
   const white = hopWhite();
-  white.style.transition = 'opacity 900ms ease-in';
+  white.style.transition = 'opacity 520ms ease-in';
   cardEl?.classList.add('dived');
   requestAnimationFrame(() => { white.style.opacity = '1'; });
   // Hold until the white fully lands so the reload cuts on a clean frame.
-  await sleep(1200);
+  await sleep(700);
   location.reload();
 }
 
@@ -416,12 +444,14 @@ async function spectateWorld(card: WorldCard, cardEl?: HTMLElement): Promise<voi
     return;
   }
   realmSound('ritual', 1, 0.7);
+  realmSound('online', 0.5, 0.42);
+  window.setTimeout(() => realmSound('place', 0.6, 0.5), 480);
   markCardHop();
   const white = hopWhite();
-  white.style.transition = 'opacity 900ms ease-in';
+  white.style.transition = 'opacity 520ms ease-in';
   cardEl?.classList.add('dived');
   requestAnimationFrame(() => { white.style.opacity = '1'; });
-  await sleep(1200);
+  await sleep(700);
   location.reload();
 }
 
@@ -431,10 +461,10 @@ async function leaveSpectate(): Promise<void> {
   // leaves no mark on the trader's card.
   const app = document.getElementById('app');
   const white = hopWhite();
-  white.style.transition = 'opacity 1150ms ease-in';
+  white.style.transition = 'opacity 680ms ease-in';
   app?.classList.add('card-exit-zoom');
   requestAnimationFrame(() => { white.style.opacity = '1'; });
-  await sleep(1250);
+  await sleep(760);
   try { localStorage.removeItem(SPECTATE_KEY); } catch { /* no-op */ }
   const outer = localStorage.getItem(OUTER_KEY);
   if (outer) {
@@ -456,10 +486,10 @@ async function leaveWorld(state: GameState): Promise<void> {
   // AFTER the zoom so the final second of play still makes it onto the card.
   const app = document.getElementById('app');
   const white = hopWhite();
-  white.style.transition = 'opacity 1150ms ease-in';
+  white.style.transition = 'opacity 680ms ease-in';
   app?.classList.add('card-exit-zoom');
   requestAnimationFrame(() => { white.style.opacity = '1'; });
-  await sleep(1250);
+  await sleep(760);
   const card = meta.cards.find((c) => c.id === meta.activeCardId);
   if (card) {
     // The card remembers everything the player just did inside it.
@@ -537,7 +567,10 @@ export function setupCardWorldChrome(state: GameState, arriving = false): void {
     btn.addEventListener('click', () => {
       btn.disabled = true;
       btn.classList.remove('flash-in');
+      // The pull-back cue: the ritual tone over a rising swell as the whole
+      // world recedes to a point.
       realmSound('ritual', 1, 0.7);
+      realmSound('online', 0.45, 0.5);
       void (spectating ? leaveSpectate() : leaveWorld(state));
     }, { once: true });
   }
@@ -554,13 +587,13 @@ export function setupCardWorldChrome(state: GameState, arriving = false): void {
     requestAnimationFrame(() => {
       requestAnimationFrame(() => {
         app?.classList.add('card-enter-zoom-go');
-        white.style.transition = 'opacity 1600ms ease-out';
+        white.style.transition = 'opacity 900ms ease-out';
         white.style.opacity = '0';
       });
     });
     window.setTimeout(() => {
       app?.classList.remove('card-enter-zoom', 'card-enter-zoom-go');
-    }, 1750);
+    }, 1000);
   }
 }
 
@@ -887,7 +920,6 @@ function resourcesEl(r: CardResources): HTMLElement {
 }
 
 type CardElOpts = {
-  big?: boolean;
   enterLabel?: string;       // ENTER / INSPECT — the card's primary action button
   onEnter?: (cardEl: HTMLElement) => void;
   onSelect?: (cardEl: HTMLElement) => void;  // own cards in a trade: the SELECT button
@@ -900,7 +932,7 @@ function buildCardEl(card: WorldCard, opts: CardElOpts = {}): HTMLElement {
   // and it carries no preview panes or resource line.
   if (card.key) {
     const keyEl = document.createElement('div');
-    keyEl.className = `world-card wc-keycard${opts.big ? ' big' : ''}`;
+    keyEl.className = 'world-card wc-keycard';
     keyEl.dataset.cardId = String(card.id);
     const head = document.createElement('div');
     head.className = 'wc-head';
@@ -914,7 +946,7 @@ function buildCardEl(card: WorldCard, opts: CardElOpts = {}): HTMLElement {
     return keyEl;
   }
   const root = document.createElement('div');
-  root.className = `world-card t-${card.tier}${opts.big ? ' big' : ''}${card.origin ? ' origin' : ''}`;
+  root.className = `world-card t-${card.tier}${card.origin ? ' origin' : ''}`;
   // The trade animations find a card's element by its id. Every card wears the
   // same plain thin border now (no per-trader frame patterns).
   root.dataset.cardId = String(card.id);
@@ -1220,8 +1252,8 @@ function routeRealmView(meta: CardMeta): void {
   showHomeGathering(meta);
 }
 
-// The gatherings, generated on demand. The intro seeds them, but a dev hop
-// straight into the 'free' phase might land here without them.
+// The salon chain, generated on demand. The intro seeds the opening salons,
+// but a dev hop straight into the 'free' phase might land here without them.
 function ensureEvents(meta: CardMeta): TradeEvent[] {
   if (!meta.events) {
     meta.events = generateEvents(meta, null, ALL_TASK_IDS, loadManualWorlds());
@@ -1229,16 +1261,26 @@ function ensureEvents(meta: CardMeta): TradeEvent[] {
   }
   return meta.events;
 }
-function eventForTier(meta: CardMeta, tier: CardTier): TradeEvent | undefined {
-  return ensureEvents(meta).find((e) => e.tier === tier);
+
+// The salon at a given depth, rolled (and appended) the first time the player
+// reaches it. Deeper salons each get a stable per-depth seed, so walking back
+// down the chain and forward again lands on the same table until a reshuffle.
+function salonAtDepth(meta: CardMeta, depth: number): TradeEvent {
+  const events = ensureEvents(meta);
+  if (depth < events.length) return events[depth];
+  for (let d = events.length; d <= depth; d++) {
+    const rng = mulberry32((((meta.seed ?? 0) ^ (d * 2246822519)) >>> 0));
+    events.push(makeSalon(meta, d, rng, ALL_TASK_IDS, loadManualWorlds()));
+  }
+  saveMeta(meta);
+  return events[depth];
 }
 
-// The realm's home view: the soft-border (common) gathering. Its locked door
-// leads up to the salon, the salon's up to the rare exchange — each opened
-// once that gathering's key has been traded for and spent.
+// The realm's home view: the soft-border salon (depth 0). Its locked door leads
+// onward to the next salon, and so on without end — each door opened once that
+// salon's gatekeeper key has been traded for and spent.
 function showHomeGathering(meta: CardMeta): void {
-  const ev = eventForTier(meta, 'common');
-  if (ev) showGathering(meta, ev);
+  showGathering(meta, salonAtDepth(meta, 0));
 }
 
 // The held-on big-card view: after the swindle (and on any reload while the
@@ -1252,7 +1294,6 @@ function showFirstCard(meta: CardMeta): void {
   const card = meta.cards[0];
   if (!card) { showHomeGathering(meta); return; }
   const cardEl = buildCardEl(card, {
-    big: true,
     enterLabel: 'ENTER',
     onEnter: (el) => { void enterWorld(meta, card, el); },
   });
@@ -1276,7 +1317,6 @@ async function runTradeIntro(meta: CardMeta): Promise<void> {
   await sleep(500);
   const reentered = new Promise<void>((resolve) => {
     const cardEl = buildCardEl(origin, {
-      big: true,
       enterLabel: 'ENTER',
       onEnter: () => resolve(),
     });
@@ -1327,7 +1367,7 @@ async function runTradeIntro(meta: CardMeta): Promise<void> {
   // demand is pinned to plain cash — see makeCard's junk path).
   const rng = mulberry32((Date.now() ^ 0x5f356495) >>> 0);
   const junk = newCard(meta, 'common', rng, true);
-  const junkEl = buildCardEl(junk, { big: true });
+  const junkEl = buildCardEl(junk);
   junkEl.classList.add('deal-from-top');
   stage.appendChild(junkEl);
   requestAnimationFrame(() => {
@@ -1396,15 +1436,6 @@ function renderHand(meta: CardMeta, opts: HandOpts = {}): void {
   if (stage) stage.style.paddingBottom = hand.offsetHeight > 0 ? `${hand.offsetHeight + 8}px` : '';
 }
 
-function backButton(label: string, onBack: () => void): HTMLElement {
-  const btn = document.createElement('button');
-  btn.type = 'button';
-  btn.className = 'ct-back';
-  btn.textContent = label;
-  btn.addEventListener('click', () => { realmSound('click', 0.8, 1); onBack(); });
-  return btn;
-}
-
 function creatureAvatar(): HTMLElement {
   return div('ct-creature-sprite');
 }
@@ -1439,23 +1470,21 @@ function showGathering(meta: CardMeta, ev: TradeEvent): void {
   stage.innerHTML = '';
   stage.className = 'gathering-view';
 
-  // Swap to another tier's gathering (a door, or the back button).
-  const goToTier = (tier: CardTier): void => {
-    const target = eventForTier(meta, tier);
-    if (target) swapView(() => showGathering(meta, target));
+  // Swap to another salon (via a door — the forward door up, or the back door
+  // down). The target salon is rolled the first time it's reached.
+  const goToSalon = (depth: number): void => {
+    const target = salonAtDepth(meta, depth);
+    swapView(() => showGathering(meta, target));
   };
 
-  // Remember which gathering is on screen, so the dev cog's "refresh current
+  // Remember which salon is on screen, so the dev cog's "refresh current
   // traders" knows which one to re-roll.
-  currentGatheringTier = ev.tier;
+  currentGatheringDepth = ev.depth;
 
   const head = div('ct-gathering-head');
-  // Climbing UP a tier is the gated move (the locked door, added below);
-  // stepping back DOWN is mundane, so it's a plain back button.
-  const below: CardTier | null = ev.tier === 'rare' ? 'uncommon' : ev.tier === 'uncommon' ? 'common' : null;
-  if (below) head.appendChild(backButton(`← back to ${EVENT_NAMES[below]}`, () => goToTier(below)));
-  // The gathering's name, flanked by ornaments (CSS), with a soft subtitle
-  // beneath — the realm's own "TRADE / select cards" masthead.
+  // The salon's name, flanked by ornaments (CSS), with a soft subtitle beneath
+  // — the realm's own "TRADE / select cards" masthead. (Navigation between
+  // salons is the pair of doors, added below, not a header button.)
   head.appendChild(div(`ct-event-title t-${ev.tier}`, ev.name));
   head.appendChild(div('ct-gathering-sub', 'offer your worlds to the entities'));
   stage.appendChild(head);
@@ -1758,13 +1787,13 @@ function showGathering(meta: CardMeta, ev: TradeEvent): void {
     refreshButtons();
   };
 
-  // The locked door to the next tier, pinned top-right and turned on its side.
-  // Trade the gatekeeper for this gathering's key, then click the door to spend
-  // it and pass up to the salon / rare exchange; without the key it just
-  // rattles. Once spent the door stays open (meta.unlockedTiers).
-  const above = TIER_ABOVE[ev.tier];
-  if (above) {
-    const isOpen = (): boolean => (meta.unlockedTiers ?? []).includes(above);
+  // The forward door: the locked door UP to the NEXT salon, pinned top-right.
+  // Trade the gatekeeper for this salon's key, then click the door to spend it
+  // and pass onward; without the key it just rattles. Once spent the door stays
+  // open (meta.unlockedDepth). The chain is endless — there's always a next.
+  const above = ev.depth + 1;
+  {
+    const isOpen = (): boolean => (meta.unlockedDepth ?? 0) >= above;
     const door = div('ct-door ct-door-fwd');
     door.appendChild(div('ct-door-glyph'));
     const label = div('ct-door-label');
@@ -1772,23 +1801,32 @@ function showGathering(meta: CardMeta, ev: TradeEvent): void {
     const sync = (): void => {
       door.classList.toggle('open', isOpen());
       door.classList.toggle('locked', !isOpen());
-      // Open doors point to where they lead; a locked door stays bare (its
-      // "locked" only floats up on a key-less tug).
-      label.textContent = isOpen() ? `${above} →` : '';
+      // An open door names where it leads; a locked one stays bare (it doesn't
+      // give the next salon's name away until you've opened it).
+      label.textContent = isOpen() ? `${salonName(meta.seed ?? 0, above)} →` : '';
     };
     sync();
+    let doorBusy = false;   // latched through the unlock beat so clicks can't double-fire
     door.addEventListener('click', () => {
-      if (tradeAnimating) return;
-      if (isOpen()) { realmSound('online', 0.7, 0.9); goToTier(above); return; }
-      // Spend a key minted at this gathering (its tier) to open the door.
-      const keyIdx = meta.cards.findIndex((c) => c.key && c.tier === ev.tier);
+      if (tradeAnimating || doorBusy) return;
+      if (isOpen()) { realmSound('online', 0.7, 0.9); goToSalon(above); return; }
+      // Spend this salon's key (its keyDepth opens this one door, no other).
+      const keyIdx = meta.cards.findIndex((c) => c.key && c.keyDepth === above);
       if (keyIdx >= 0) {
+        doorBusy = true;
         meta.cards.splice(keyIdx, 1);
-        meta.unlockedTiers = [...(meta.unlockedTiers ?? []), above];
+        meta.unlockedDepth = Math.max(meta.unlockedDepth ?? 0, above);
         saveMeta(meta);
-        realmSound('online', 0.85, 0.95);   // the key turns
-        sync();
-        goToTier(above);
+        // A beat of payoff before we pass through: the key turns with a
+        // ka-chunk, the padlock springs and tumbles off, the doorway blooms
+        // with light (CSS .unlocking), then the door swings us onward.
+        door.classList.remove('locked');
+        door.classList.add('open', 'unlocking');
+        label.textContent = `${salonName(meta.seed ?? 0, above)} →`;
+        realmSound('click', 0.8, 0.7);                                          // the key turns
+        window.setTimeout(() => realmSound('place', 1.1, 0.7), 110);            // the bolt drops — clunk
+        window.setTimeout(() => realmSound('task_complete', 0.85, 0.95), 300);  // it gives; light spills
+        window.setTimeout(() => { realmSound('online', 0.7, 0.7); goToSalon(above); }, 740); // swing through
       } else {
         realmSound('door_locked', 0.95, 1);
         door.classList.remove('shake');
@@ -1802,6 +1840,23 @@ function showGathering(meta: CardMeta, ev: TradeEvent): void {
       }
     });
     stage.appendChild(door);
+  }
+
+  // The back door: a black door pinned top-LEFT, the way DOWN to the salon you
+  // came from. Stepping back is free — no key, always open — so it's a plain
+  // click that walks one salon down the chain. Hidden at the soft border (0).
+  if (ev.depth > 0) {
+    const back = div('ct-door ct-door-back');
+    back.appendChild(div('ct-door-glyph'));
+    const label = div('ct-door-label');
+    label.textContent = `← ${salonName(meta.seed ?? 0, ev.depth - 1)}`;
+    back.appendChild(label);
+    back.addEventListener('click', () => {
+      if (tradeAnimating) return;
+      realmSound('online', 0.7, 0.8);
+      goToSalon(ev.depth - 1);
+    });
+    stage.appendChild(back);
   }
 
   renderGatherHand();

@@ -11,7 +11,7 @@ import {
   decodeWorld, encodeWorld, generateEvents, generateJunkWorld, generateWeirdWorld,
   makeCard, mintDeckCard, mulberry32, regenerateEvent, rollWant, sceneStructureCounts,
   spicyAmount, wantLine, wantSatisfiableBy, wantSatisfiedBy, worldName,
-  makeKeyCard,
+  makeKeyCard, makeSalon, salonName, salonTierForDepth, STOLEN_DEPTH,
 } from '../src/cards-core';
 import { BUILDING_DEFS, SOUL_SIGIL } from '../src/config';
 import { GameState, cellKey, isInPlayCell } from '../src/state';
@@ -500,71 +500,102 @@ describe('mintDeckCard', () => {
 // ─── Gatherings ──────────────────────────────────────────────────────
 
 describe('generateEvents', () => {
-  it('grows the tables with the tiers: 1 creature (two cards), then 2, then 3 — every trader wants and decks the table\'s tier', () => {
+  it('seeds the opening salons from the soft border down to the stolen-world depth — every salon seats a gatekeeper and decks its own tier', () => {
     const meta = freshMeta();
     const events = generateEvents(meta, null, TASK_IDS);
-    expect(events.map((e) => e.tier)).toEqual(['common', 'uncommon', 'rare']);
-    // Each gathering below the top also seats a gatekeeper (a key for any one
-    // world), so the creature counts are 1+1 / 2+1 / 3+0.
+    // The chain opens with one salon per depth, the gentle common bootstrap
+    // then the (non-escalating) uncommon salons, down to STOLEN_DEPTH; deeper
+    // salons are rolled lazily as the player reaches them.
+    expect(events.length).toBe(STOLEN_DEPTH + 1);
+    expect(events.map((e) => e.depth)).toEqual([0, 1, 2]);
+    expect(events.map((e) => e.tier)).toEqual(['common', 'uncommon', 'uncommon']);
+    // Every salon now seats a gatekeeper (a key for any one world) atop its
+    // traders, so the creature counts are 1+1 / 2+1 / 2+1.
     expect(events.map((e) => e.creatures.length)).toEqual([2, 3, 3]);
     // The soft border's lone creature holds two commons — satisfying its open
     // want with a single world doubles the hand on the first trade.
     expect(events[0].creatures[0].deck.length).toBe(2);
     for (const ev of events) {
       for (const cr of ev.creatures) {
-        // Every creature advertises a want, and decks only the table's tier.
+        // Every creature advertises a want, and its non-key deck is the salon's
+        // own tier (keys carry no tier rung).
         expect(cr.want).toBeTruthy();
         expect(wantLine(cr.want)).toBeTruthy();
-        expect(cr.deck.every((c) => c.tier === ev.tier)).toBe(true);
+        expect(cr.deck.every((c) => c.key || c.tier === ev.tier)).toBe(true);
       }
     }
-    // The opener everywhere keeps the easy rung.
+    // The opener everywhere keeps the easy rung (any world at the border, a
+    // single common at the salons).
     expect(events[0].creatures[0].want).toEqual({ kind: 'any', count: 1 });
     expect(events[1].creatures[0].want).toEqual({ kind: 'tier', tier: 'common', count: 1 });
-    expect(events[2].creatures[0].want).toEqual({ kind: 'tier', tier: 'uncommon', count: 1 });
+    expect(events[2].creatures[0].want).toEqual({ kind: 'tier', tier: 'common', count: 1 });
   });
 
-  it('seats the stolen origin card with the rare exchange\'s easy-want opener', () => {
+  it('seats the stolen origin card at the fixed stolen-world salon, on its easy-want opener', () => {
     const meta = freshMeta();
-    const stolen = card('rare', { id: 1, origin: true });
+    const stolen = card('uncommon', { id: 1, origin: true });
     const events = generateEvents(meta, stolen, TASK_IDS);
-    const holder = events[2].creatures[0];
-    // The opener wants a single uncommon — the easiest rung to win the rare back from.
-    expect(holder.want).toEqual({ kind: 'tier', tier: 'uncommon', count: 1 });
+    const holder = events[STOLEN_DEPTH].creatures[0];
+    // The opener wants a single common — the easiest rung to win the world back from.
+    expect(holder.want).toEqual({ kind: 'tier', tier: 'common', count: 1 });
     expect(holder.deck[0].origin).toBe(true);
   });
 
   it('gives each creature slot its own frame pattern, stamped onto its deck and stable across reshuffles', () => {
     const meta = freshMeta();
-    const stolen = card('rare', { id: 1, origin: true });
+    const stolen = card('uncommon', { id: 1, origin: true });
     const events = generateEvents(meta, stolen, TASK_IDS);
-    // The six trading slots map onto the six patterns: 0 / 1–2 / 3–5.
-    // Gatekeepers carry no frame, so filter them out.
-    expect(events.flatMap((e) => e.creatures.filter((c) => c.frame !== undefined).map((c) => c.frame))).toEqual([0, 1, 2, 3, 4, 5]);
+    // Frames are FRAME_BASE[tier] + slot: the border's lone trader is 0, and
+    // each uncommon salon's pair is 1–2. Gatekeepers + the seeded origin carry
+    // no frame, so filter them out.
+    expect(events.flatMap((e) => e.creatures.filter((c) => c.frame !== undefined).map((c) => c.frame)))
+      .toEqual([0, 1, 2, 1, 2]);
     for (const ev of events) {
       for (const cr of ev.creatures) {
-        // Every minted card wears its dealer's frame; the seeded origin
-        // card is player-minted and stays plain.
-        expect(cr.deck.every((c) => c.origin ? c.frame === undefined : c.frame === cr.frame)).toBe(true);
+        // Every minted card wears its dealer's frame; the seeded origin card
+        // (player-minted) and key cards stay plain.
+        expect(cr.deck.every((c) => (c.origin || c.key) ? c.frame === undefined : c.frame === cr.frame)).toBe(true);
       }
     }
-    regenerateEvent(meta, events[2], TASK_IDS);
-    expect(events[2].creatures.map((c) => c.frame)).toEqual([3, 4, 5]);
+    regenerateEvent(meta, events[STOLEN_DEPTH], TASK_IDS);
+    expect(events[STOLEN_DEPTH].creatures.filter((c) => c.frame !== undefined).map((c) => c.frame)).toEqual([1, 2]);
   });
 
   it('keeps the origin card through reshuffles and discards the rest', () => {
     const meta = freshMeta();
-    const stolen = card('rare', { id: 1, origin: true });
+    const stolen = card('uncommon', { id: 1, origin: true });
     const events = generateEvents(meta, stolen, TASK_IDS);
-    const ev = events[2];
-    const strayId = ev.creatures[2].deck[0].id;
+    const ev = events[STOLEN_DEPTH];
+    const strayId = ev.creatures[1].deck[0].id;
     for (let i = 0; i < 3; i++) {
       regenerateEvent(meta, ev, TASK_IDS);
       const all = ev.creatures.flatMap((c) => c.deck);
       expect(all.filter((c) => c.origin).length).toBe(1);
       expect(all.some((c) => c.id === strayId)).toBe(false);
-      expect(all.every((c) => c.origin || c.tier === ev.tier)).toBe(true);
+      expect(all.every((c) => c.origin || c.key || c.tier === ev.tier)).toBe(true);
     }
+  });
+});
+
+// ─── The endless chain ───────────────────────────────────────────────
+
+describe('endless salon chain', () => {
+  it('maps every depth to a non-escalating tier and a stable name', () => {
+    expect(salonTierForDepth(0)).toBe('common');
+    for (let d = 1; d < 20; d++) expect(salonTierForDepth(d)).toBe('uncommon');
+    expect(salonName(123, 0)).toBe('gathering at the soft border');
+    for (let d = 1; d < 20; d++) expect(salonName(123, d)).toMatch(/^the [a-z]+ salon$/);
+    // Names are stable per (seed, depth) so a revisited salon reads the same.
+    expect(salonName(123, 7)).toBe(salonName(123, 7));
+  });
+
+  it('rolls a fresh salon at any depth, its gatekeeper keyed to the door onward', () => {
+    const meta = freshMeta();
+    const deep = makeSalon(meta, 9, mulberry32(999), TASK_IDS);
+    expect(deep.depth).toBe(9);
+    expect(deep.tier).toBe('uncommon');
+    const gate = deep.creatures.find((c) => c.deck.some((d) => d.key))!;
+    expect(gate.deck[0].keyDepth).toBe(10);
   });
 });
 
@@ -590,15 +621,15 @@ describe('progression sanity (trade-only, fixed tiers)', () => {
     expect(junk.tier).toBe('common');
   });
 
-  it('winning the origin back: a rare in hand satisfies the rare opener\'s want', () => {
+  it('winning the origin back: a common in hand satisfies the stolen-world opener\'s want', () => {
     const meta = freshMeta();
-    const stolen = card('rare', { id: meta.nextId++, origin: true });
+    const stolen = card('uncommon', { id: meta.nextId++, origin: true });
     meta.events = generateEvents(meta, stolen, TASK_IDS);
-    const holder = meta.events[2].creatures[0];
-    // The opener wants a single uncommon — but the rare exchange's tiers are
-    // fixed: to win the rare origin back you bring it an uncommon.
-    expect(holder.want).toEqual({ kind: 'tier', tier: 'uncommon', count: 1 });
-    const mine = [card('uncommon', { id: 999 })];
+    const holder = meta.events[STOLEN_DEPTH].creatures[0];
+    // The stolen-world salon's opener keeps the easy rung — a single common —
+    // so the world is always winnable back.
+    expect(holder.want).toEqual({ kind: 'tier', tier: 'common', count: 1 });
+    const mine = [card('common', { id: 999 })];
     expect(wantSatisfiedBy(holder.want, mine)).toBe(true);
     expect(holder.deck.find((c) => c.origin)).toBeTruthy();
   });
@@ -629,32 +660,31 @@ describe('tier tables', () => {
 // ─── Keys + the gatekeeper ───────────────────────────────────────────
 
 describe('keys and the gatekeeper', () => {
-  const keyHolder = (events: ReturnType<typeof generateEvents>, tier: CardTier) =>
-    events.find((e) => e.tier === tier)!.creatures.find((c) => c.deck.some((d) => d.key));
+  const keyHolder = (ev: ReturnType<typeof generateEvents>[number]) =>
+    ev.creatures.find((c) => c.deck.some((d) => d.key));
 
-  it('seats a key-bearing gatekeeper below the top tier only', () => {
+  it('seats a key-bearing gatekeeper in every salon — its key opens the one door onward', () => {
     const meta = freshMeta();
     const events = generateEvents(meta, null, TASK_IDS);
-    // Common + uncommon gatherings have a gatekeeper; the rare exchange (top
-    // tier) has no door onward, so no gatekeeper.
-    expect(keyHolder(events, 'common')).toBeTruthy();
-    expect(keyHolder(events, 'uncommon')).toBeTruthy();
-    expect(keyHolder(events, 'rare')).toBeUndefined();
-    // It takes any one world, and its key is minted at its own tier — the
-    // locked door that key opens.
-    const gate = keyHolder(events, 'common')!;
-    expect(gate.want).toEqual({ kind: 'any', count: 1 });
-    expect(gate.deck).toHaveLength(1);
-    expect(gate.deck[0].key).toBe(true);
-    expect(gate.deck[0].tier).toBe('common');
-    expect(keyHolder(events, 'uncommon')!.deck[0].tier).toBe('uncommon');
+    // The chain is endless, so every salon (no top tier any more) has a door
+    // onward and a gatekeeper minting the key for it.
+    for (const ev of events) {
+      const gate = keyHolder(ev)!;
+      expect(gate).toBeTruthy();
+      expect(gate.want).toEqual({ kind: 'any', count: 1 });
+      expect(gate.deck).toHaveLength(1);
+      expect(gate.deck[0].key).toBe(true);
+      // The key opens exactly the door up out of this salon — the next depth.
+      expect(gate.deck[0].keyDepth).toBe(ev.depth + 1);
+    }
   });
 
   it('a key never satisfies a want — not even an open one', () => {
     const meta = freshMeta();
-    const key = makeKeyCard(meta, 'common');
+    const key = makeKeyCard(meta, 'common', 1);
     expect(key.key).toBe(true);
     expect(key.data).toBe('');
+    expect(key.keyDepth).toBe(1);
     expect(cardQualifies({ kind: 'any', count: 1 }, key)).toBe(false);
     expect(wantSatisfiedBy({ kind: 'any', count: 1 }, [key])).toBe(false);
     // A real world still satisfies the same open want.
@@ -664,10 +694,12 @@ describe('keys and the gatekeeper', () => {
   it('keeps a gatekeeper across reshuffles', () => {
     const meta = freshMeta();
     const events = generateEvents(meta, null, TASK_IDS);
-    const common = events[0];
+    const home = events[0];
     for (let i = 0; i < 3; i++) {
-      regenerateEvent(meta, common, TASK_IDS);
-      expect(common.creatures.some((c) => c.deck.some((d) => d.key))).toBe(true);
+      regenerateEvent(meta, home, TASK_IDS);
+      const gate = keyHolder(home)!;
+      expect(gate).toBeTruthy();
+      expect(gate.deck[0].keyDepth).toBe(1);
     }
   });
 });
