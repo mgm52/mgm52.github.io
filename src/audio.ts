@@ -42,6 +42,9 @@ const REGISTRY = {
   task_complete: 'audio/task_complete.mp3',
   water_splash: 'audio/water_splash.mp3',
   cash:         'audio/cash.mp3',
+  // The trading realm's locked-door rattle (a key-less tug on the door up to
+  // the next tier).
+  door_locked:  'audio/door_locked.mp3',
   // The Lightning Strike thunderclap — same sample as 'destroy', pitched way
   // down at the call site (rate 0.4 ≈ 2.5× longer). Shares the decoded
   // buffer but gets its own voice slots, so building smashes can't steal the

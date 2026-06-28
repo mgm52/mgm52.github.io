@@ -1,7 +1,6 @@
 import { SOUND_NAMES, type SoundName } from './audio';
-import { STREET_TUNABLES } from './cards-core';
 import { HELL } from './config';
-import { applyRealmTheme, getRealmTheme, resetRealmTheme, setRealmThemeValue } from './realm-theme';
+import { applyRealmTheme, getRealmTheme, REALM_FONT_SLOTS, resetRealmTheme, setRealmThemeValue } from './realm-theme';
 import { getDemonSheetList, loadDemonSheetList } from './demon-sheets';
 import {
   DEFAULT_OPTIONS, FONT_FAMILIES, FONT_KEYS, ensureFontLoaded,
@@ -157,10 +156,6 @@ export type RealmOptionsCallbacks = {
   onWorldDesigner: () => void;
   onReshuffleGatherings: () => void;
   onDealCard: () => void;
-  // Live street-geometry tuning: set one tunable (camera framing / house
-  // size + spacing) and rebuild the street, or restore the shipped framing.
-  onStreetParam: (key: string, value: number) => void;
-  onResetStreet: () => void;
 };
 
 const REALM_STILL_KEY = 'gs.realm.still';
@@ -233,35 +228,31 @@ export function setupRealmOptionsUI(root: HTMLElement, cb: RealmOptionsCallbacks
       realmBtn('World Designer', cb.onWorldDesigner),
       realmBtn('Reset trading realm data', cb.onResetRealm),
     ]));
-    // Live street tuning: one slider per geometry knob (camera framing, house
-    // size + spacing), plus a reset. Each rebuilds the street as you drag.
-    const geomRows = STREET_TUNABLES.map((t) =>
-      slider(t.label, t.get(), t.min, t.max, t.step, (v) => cb.onStreetParam(t.key, v)));
-    geomRows.push(realmBtn('Reset street geometry', cb.onResetStreet));
-    adminPanel.appendChild(collapsibleSection('Street geometry', geomRows));
 
-    // Realm theme: recolour the houses + restyle the name-labels, and pick the
-    // realm font. These drive CSS variables on the realm root, so they apply
-    // live with no rebuild.
+    // Realm fonts: give the realm its own typography per slot (display / mono /
+    // body / dialogue), each a family + scale. These drive CSS variables on the
+    // realm root, so they apply live with no rebuild. A slot on "— inherit —"
+    // keeps the main game's font for that slot.
     const th = getRealmTheme();
     const fontOpts = [{ value: '', label: '— inherit —' }, ...FONT_FAMILIES.map((f) => ({ value: f.id, label: f.label }))];
     const resetTheme = document.createElement('button');
-    resetTheme.type = 'button'; resetTheme.className = 'options-reset'; resetTheme.textContent = 'Reset realm theme';
+    resetTheme.type = 'button'; resetTheme.className = 'options-reset'; resetTheme.textContent = 'Reset realm fonts';
     resetTheme.addEventListener('click', () => { resetRealmTheme(); buildAdmin(); });
-    adminPanel.appendChild(collapsibleSection('Realm theme', [
-      subheader('Houses'),
-      color('House colour', th.house, (v) => setRealmThemeValue('house', v)),
-      color('Roof colour', th.roof, (v) => setRealmThemeValue('roof', v)),
-      color('Door colour', th.door, (v) => setRealmThemeValue('door', v)),
-      subheader('Name labels'),
-      color('Label background', th.signBg, (v) => setRealmThemeValue('signBg', v)),
-      color('Label text', th.signColor, (v) => setRealmThemeValue('signColor', v)),
-      slider('Label text size', th.signSize, 6, 40, 1, (v) => setRealmThemeValue('signSize', v)),
-      subheader('Fonts'),
-      select('Realm font', th.font, fontOpts, (v) => setRealmThemeValue('font', v)),
-      slider('Font scale', th.fontScale, 0.4, 2.5, 0.05, (v) => setRealmThemeValue('fontScale', v)),
-      resetTheme,
-    ]));
+    const fontRows: HTMLElement[] = [
+      // Set every realm slot to one family at once.
+      select('Set all', '', [{ value: '', label: '— pick —' }, ...FONT_FAMILIES.map((f) => ({ value: f.id, label: f.label }))], (v) => {
+        if (!v) return;
+        ensureFontLoaded(v);
+        for (const s of REALM_FONT_SLOTS) setRealmThemeValue(s.fam, v);
+        buildAdmin();   // reflect the now-synced per-slot pickers
+      }),
+    ];
+    for (const s of REALM_FONT_SLOTS) {
+      fontRows.push(select(s.label, th[s.fam], fontOpts, (v) => { ensureFontLoaded(v); setRealmThemeValue(s.fam, v); }));
+      fontRows.push(slider(`${s.label} scale`, th[s.scale], 0.4, 2.5, 0.05, (v) => setRealmThemeValue(s.scale, v)));
+    }
+    fontRows.push(resetTheme);
+    adminPanel.appendChild(collapsibleSection('Realm fonts', fontRows));
   };
   buildPublic();
   buildAdmin();

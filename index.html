@@ -1008,8 +1008,7 @@
       #card-realm.realm-paused .cd-blob,
       #card-realm.realm-paused .cd-halo,
       #card-realm.realm-paused .cd-motes,
-      #card-realm.realm-paused .world-card,
-      #card-realm.realm-paused .sv-house.sv-active .sv-sign { animation-play-state: paused; }
+      #card-realm.realm-paused .world-card { animation-play-state: paused; }
       .options-flavor {
         margin-top: 6px;
         padding: 6px 4px 2px;
@@ -1968,8 +1967,10 @@
       }
       .wc-head { display: flex; justify-content: space-between; align-items: baseline; gap: 8px; margin-bottom: 6px; }
       .wc-name { font-family: var(--font-display); font-size: 16px; letter-spacing: 0.04em; }
+      /* The rarity tag pairs with the card name, so it follows the display
+         font (not mono) — both update together with the realm's display font. */
       .wc-tier {
-        font-family: var(--font-mono); font-size: 12px; color: var(--tier-c);
+        font-family: var(--font-display); font-size: 12px; color: var(--tier-c);
         text-transform: uppercase; letter-spacing: 0.12em;
       }
       .wc-prevs { display: flex; flex-direction: column; gap: 3px; }
@@ -2119,13 +2120,14 @@
          above a wrapping row of stalls; the player's hand persists below. */
       .ct-gathering-head {
         display: flex; flex-direction: column; align-items: center; gap: 2px;
-        margin-top: auto;
       }
       .ct-gathering-head .ct-back { align-self: center; }
+      /* Stalls spread evenly across a fixed-width band so a sparse gathering
+         (two traders) reads as a wide table, not a huddle in the middle. */
       .ct-stalls {
-        display: flex; flex-wrap: wrap; gap: 56px; justify-content: center;
-        align-items: flex-start; margin: 14px 0 26px;
-        max-width: 1240px;
+        display: flex; flex-wrap: wrap; gap: 40px; justify-content: space-evenly;
+        align-items: flex-start; margin: 4px 0 10px;
+        width: min(1080px, 92vw);
         transition: opacity 300ms ease;
       }
       /* A reshuffle fades only the stalls out (cards.ts then deals the fresh
@@ -2141,17 +2143,17 @@
          presence than the at-a-glance lines elsewhere. */
       .ct-stall .ct-creature-line {
         font-family: var(--font-dialogue, var(--font-display));
-        font-size: 15px; color: #5e5e6a; text-align: center;
+        font-size: 18px; color: #5e5e6a; text-align: center;
         /* Reserve two lines so the cards below never shift as the want is
            re-typed or swaps to the shorter "too many cards". */
         height: 2.6em; max-width: 22ch; overflow: hidden;
       }
-      .ct-stall .ct-creature-sprite { --csize: 76px; }
+      .ct-stall .ct-creature-sprite { --csize: 44px; }
       /* The trader's deck, face-up and a size down so a few stalls read on
          one screen. Wraps for the rare exchange's deeper hands. */
       .ct-stall-cards {
         display: flex; flex-wrap: wrap; gap: 10px; justify-content: center;
-        margin-top: 2px; padding: 14px 12px;
+        margin-top: 2px; padding: 6px 12px;
         background: linear-gradient(160deg, rgba(255, 255, 255, 0.32), rgba(255, 255, 255, 0.1));
         backdrop-filter: blur(10px) saturate(1.3);
         -webkit-backdrop-filter: blur(10px) saturate(1.3);
@@ -2159,7 +2161,7 @@
         border-radius: 16px;
         box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.7), 0 10px 28px -10px rgba(88, 88, 150, 0.22);
       }
-      .ct-stall-cards .world-card { width: 132px; }
+      .ct-stall-cards .world-card { width: 124px; }
       .ct-creature-sprite {
         --csize: 110px;
         --crow: 4;
@@ -2181,7 +2183,6 @@
         0%, 100% { filter: brightness(0) invert(0.83) drop-shadow(0 4px 12px rgba(168, 150, 235, 0.5)); }
         50%      { filter: brightness(0) invert(0.86) drop-shadow(0 4px 20px rgba(130, 180, 240, 0.8)); }
       }
-      .ct-creature-name { font-family: var(--font-display); font-size: 16px; color: #44444c; letter-spacing: 0.06em; }
       .ct-creature-line { font-family: var(--font-mono); font-size: 13px; color: #9a9aa2; }
       /* The stall's give-button: greyed until the player's hand selection
          exactly satisfies this trader's want, then a clickable green pulse —
@@ -2212,16 +2213,16 @@
       /* "choose cards to trade" — floats above the hand whenever nothing is
          picked, fading gently to draw the eye downward. */
       .ct-choose-prompt {
-        font-family: var(--font-display); font-size: 32px; letter-spacing: 0.14em;
+        font-family: var(--font-display); font-size: 26px; letter-spacing: 0.14em;
         color: #6a6a86; text-shadow: 0 0 18px rgba(255, 255, 255, 0.95);
-        margin-bottom: 6px; pointer-events: none;
+        margin: 0 0 4px; pointer-events: none;
         animation: ct-choose-pulse 2.4s ease-in-out infinite;
       }
       @keyframes ct-choose-pulse { 0%, 100% { opacity: 0.55; } 50% { opacity: 1; } }
       /* The reshuffle button, pinned to the gathering's top-right corner
          (the stage is the positioned ancestor). */
       .ct-wait-corner {
-        position: absolute; top: 12px; right: 16px; margin: 0; z-index: 5;
+        position: absolute; top: 12px; left: 16px; margin: 0; z-index: 5;
       }
       /* The player's hand: its own layer pinned to the realm's bottom edge,
          outside #card-stage, so view swaps never fade or re-deal it. Empty
@@ -2245,11 +2246,10 @@
         outline-offset: 2px;
         box-shadow: 0 0 18px rgba(80, 190, 110, 0.45);
       }
-      /* The gathering packs all the stalls plus the hand on one screen — the
-         auto-margin header floats the block down toward the hand rather than
-         hugging the top. (Auto margins collapse once the stage scrolls, so
-         short screens degrade gracefully.) */
-      #card-stage.gathering-view { padding-top: 2vh; gap: 6px; }
+      /* The gathering packs the stalls plus the hand on one screen as a single
+         vertically-centred block. `safe center` keeps it top-aligned (and so
+         scrollable) when a deep gathering overflows the viewport. */
+      #card-stage.gathering-view { padding: 0.3vh 16px 0.3vh; gap: 2px; justify-content: safe center; }
       /* The table view gets the same treatment: its content floats down to
          sit just above the hand. */
       #card-stage.table-view > .ct-caption:first-child { margin-top: auto; }
@@ -2260,13 +2260,13 @@
       #card-stage.gathering-view + #card-hand { display: none; }
       .ct-hand-inline {
         display: flex; flex-direction: column; align-items: center; gap: 6px;
-        margin-top: 12px;
+        margin-top: 2px;
       }
       .ct-hand-inline .ct-cards {
         display: flex; flex-wrap: wrap; gap: 14px; justify-content: center;
         max-width: 1100px;
       }
-      .ct-hand-inline .world-card { width: 150px; }
+      .ct-hand-inline .world-card { width: 144px; }
       .ct-hand-inline .world-card.selected {
         outline: 2px solid rgba(110, 190, 130, 0.9); outline-offset: 2px;
         box-shadow: 0 0 18px rgba(80, 190, 110, 0.45);
@@ -2276,177 +2276,73 @@
         50% { box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.9), 0 0 26px 4px rgba(80, 190, 110, 0.5); }
       }
 
-      /* ───────── The 3-D street of gatherings (cards.ts showStreet) ─────────
-         A perspective box holds one preserve-3d world; cards.ts moves the
-         camera by transforming .sv-camera. Houses are plain divs (walls,
-         gable, roof) shaded by face so they read as solid white volumes over
-         the pastel dream. */
-      #card-stage.street-view {
-        padding: 0; overflow: hidden; display: block;
+
+      /* ───────── Tier doors + the gatekeeper's key (cards.ts showGathering) ──
+         The locked door up to the next tier sits top-right of the gathering,
+         turned on its side. Trade the gatekeeper for that gathering's key,
+         then click the door to spend it; without the key it just rattles. A
+         key card shows the key glyph where a world preview would be. The
+         glyphs are CSS masks (game-icons.net), tinted via background-color. */
+      .ct-door {
+        position: absolute; top: 14px; right: 16px; z-index: 6;
+        display: flex; flex-direction: column; align-items: center; gap: 5px;
+        cursor: pointer; user-select: none; -webkit-user-select: none;
+        padding: 6px 10px; transition: transform 160ms ease;
       }
-      .sv-scene {
-        position: absolute; inset: 0;
-        perspective-origin: 50% 42%;
-        overflow: hidden;
+      .ct-door:hover { transform: translateY(-2px); }
+      .ct-door-glyph {
+        width: 116px; height: 188px;   /* tall, upright — a proper door */
+        background-color: #7b7698;
+        -webkit-mask: var(--door-img) center / contain no-repeat;
+        mask: var(--door-img) center / contain no-repeat;
+        filter: drop-shadow(0 6px 14px rgba(80, 70, 140, 0.3));
+        transition: background-color 200ms ease;
       }
-      .sv-camera {
-        position: absolute; left: 50%; top: 50%; width: 0; height: 0;
-        transform-style: preserve-3d;
-        will-change: transform;
+      .ct-door-fwd .ct-door-glyph { --door-img: url('assets/realm/locked-door.svg'); }
+      .ct-door-fwd.open .ct-door-glyph { --door-img: url('assets/realm/door.svg'); background-color: #6fae7a; }
+      .ct-door:hover .ct-door-glyph { background-color: #56527a; }
+      .ct-door.open:hover .ct-door-glyph { background-color: #4f9a5e; }
+      .ct-door-label {
+        font-family: var(--font-display); font-size: 10px; letter-spacing: 0.18em;
+        text-transform: uppercase; color: #7b7698;
+        text-shadow: 0 1px 6px rgba(255, 255, 255, 0.85);
       }
-      .sv-face {
-        position: absolute; left: 0; top: 0;
-        transform-style: preserve-3d;
-        backface-visibility: hidden;
-        outline: 1px solid rgba(150, 150, 180, 0.06); /* hairline seams hide AA gaps */
+      .ct-door.open .ct-door-label { color: #5a9568; }
+      /* "locked" isn't a permanent label — it floats up and fades on a
+         key-less tug. */
+      .ct-door-float {
+        position: absolute; left: 50%; top: 42%;
+        font-family: var(--font-display); font-size: 18px; font-weight: 700;
+        letter-spacing: 0.22em; text-transform: uppercase; color: #9c1f33;
+        white-space: nowrap; pointer-events: none;
+        /* A crisp white casing so the word reads over the busy pastel scene. */
+        text-shadow:
+          0 0 2px #fff, 0 0 2px #fff, 0 0 4px #fff,
+          0 0 10px rgba(255, 255, 255, 0.95), 0 2px 6px rgba(120, 30, 50, 0.35);
+        animation: ct-door-float 950ms cubic-bezier(0.3, 0, 0.4, 1) forwards;
       }
-      /* House volume: front brightest, sides stepped darker, roof palest, so a
-         flat-white house still reads as 3-D. A soft lilac shadow grounds it. */
-      .sv-house { position: absolute; transform-style: preserve-3d; transition: opacity 360ms ease; }
-      .sv-wall { background: var(--sv-wall-bg, linear-gradient(180deg, #ffffff 0%, #efefef 100%)); }
-      .sv-front { background: var(--sv-front-bg, linear-gradient(180deg, #ffffff 0%, #f8f8f8 100%)); }
-      .sv-back { background: var(--sv-back-bg, #e9e9e9); }
-      .sv-left { background: var(--sv-left-bg, linear-gradient(90deg, #dedede 0%, #f0f0f0 100%)); }
-      .sv-right { background: var(--sv-right-bg, linear-gradient(90deg, #f0f0f0 0%, #dedede 100%)); }
-      .sv-gable { background: var(--sv-gable-bg, linear-gradient(180deg, #f5f5f5 0%, #e7e7e7 100%)); }
-      .sv-roof {
-        background: var(--sv-roof-bg, linear-gradient(180deg, #fbfbfb 0%, #ededed 100%));
-        box-shadow: inset 0 0 30px rgba(180, 180, 180, 0.18);
+      @keyframes ct-door-float {
+        0% { opacity: 0; transform: translate(-50%, -10%); }
+        18% { opacity: 1; }
+        100% { opacity: 0; transform: translate(-50%, -150%); }
       }
-      /* The door + sign sit on the front wall's own 2-D plane. */
-      .sv-door {
-        position: absolute; left: 50%; bottom: 0;
-        width: 34%; height: 52%; margin-left: -17%;
-        background: var(--sv-door-bg, linear-gradient(180deg, #ffffff 0%, #c7c7c7 100%));
-        border-radius: 6px 6px 0 0;
-        box-shadow: inset 0 0 0 2px rgba(255, 255, 255, 0.5), inset 0 8px 16px rgba(0, 0, 0, 0.18);
+      .ct-door.shake { animation: ct-door-shake 400ms cubic-bezier(0.36, 0.07, 0.19, 0.97); }
+      @keyframes ct-door-shake {
+        10%, 90% { transform: translateX(-2px); }
+        20%, 80% { transform: translateX(4px); }
+        30%, 50%, 70% { transform: translateX(-7px); }
+        40%, 60% { transform: translateX(7px); }
       }
-      .sv-door::after { /* doorknob */
-        content: ""; position: absolute; right: 16%; top: 50%;
-        width: 5px; height: 5px; margin-top: -2px; border-radius: 50%;
-        background: #f3edc0; box-shadow: 0 0 5px rgba(243, 237, 192, 0.8);
+      /* A key card: the key glyph stands in for the world preview panes. */
+      .wc-key-art {
+        flex: 1; min-height: 132px; margin: 8px 6px 4px;
+        background-color: #c8a23a;
+        -webkit-mask: url('assets/realm/key.svg') center / 72% no-repeat;
+        mask: url('assets/realm/key.svg') center / 72% no-repeat;
+        filter: drop-shadow(0 3px 8px rgba(180, 150, 40, 0.35));
       }
-      .sv-sign {
-        position: absolute; left: 50%; top: 8%; transform: translateX(-50%);
-        max-width: 92%; padding: 5px 9px; border-radius: 8px;
-        font-family: var(--font-display); font-size: var(--sv-sign-size, 12px); letter-spacing: 0.04em;
-        line-height: 1.15; text-align: center; white-space: normal;
-        color: var(--sv-sign-color, #4a4658);
-        background: var(--sv-sign-bg, rgba(255, 255, 255, 0.92));
-        border: 1px solid var(--tier-c, #c7c2e6);
-        box-shadow: 0 3px 10px rgba(70, 66, 110, 0.22), 0 0 0 3px rgba(255, 255, 255, 0.35);
-      }
-      .sv-house.t-common { --tier-c: #9aa6bd; }
-      .sv-house.t-uncommon { --tier-c: #7aa8e2; }
-      .sv-house.t-rare { --tier-c: #e2c064; }
-      .sv-home-sign { color: #6a6580; --tier-c: #cdc8e8; }
-      /* The active (walkable) gathering glows and lifts its sign; dimmed ones
-         recede. The whole house is the click target. */
-      .sv-house.sv-active { cursor: pointer; }
-      .sv-house.sv-active .sv-front { background: linear-gradient(180deg, #ffffff 0%, #fafafa 100%); }
-      .sv-house.sv-active .sv-sign {
-        color: var(--sv-sign-color, #322e44);
-        background: var(--sv-sign-bg, #fff);
-        box-shadow: 0 4px 16px rgba(120, 110, 200, 0.4), 0 0 18px 3px var(--tier-c, #c7c2e6);
-        animation: sv-sign-glow 2.4s ease-in-out infinite;
-      }
-      @keyframes sv-sign-glow {
-        0%, 100% { box-shadow: 0 4px 16px rgba(120, 110, 200, 0.35), 0 0 14px 2px var(--tier-c, #c7c2e6); }
-        50% { box-shadow: 0 5px 20px rgba(120, 110, 200, 0.5), 0 0 26px 6px var(--tier-c, #c7c2e6); }
-      }
-      .sv-house.sv-dim { opacity: 0.82; filter: saturate(0.9) brightness(0.98); pointer-events: none; }
-      /* Locked-house nudge: flash the front + sign rather than the house
-         transform (which carries the inline 3-D placement). */
-      .sv-house.sv-shake .sv-front { animation: sv-shake-flash 360ms ease; }
-      @keyframes sv-shake-flash {
-        0%, 100% { background: linear-gradient(180deg, #ffffff 0%, #f8f8f8 100%); }
-        50% { background: linear-gradient(180deg, #ffe0e0 0%, #f7dcdc 100%); }
-      }
-      /* Ground: one big plane hinged at the camera origin and laid flat so it
-         recedes to a soft horizon, with a paler crowned road down the middle. */
-      .sv-ground {
-        position: absolute; left: 50%; top: 50%;
-        width: 6400px; height: 5600px; margin-left: -3200px; margin-top: -2800px;
-        transform-origin: 50% 50%;
-        transform: translate3d(0, 78px, -2520px) rotateX(90deg);
-        background:
-          radial-gradient(72% 86% at 50% 72%, rgba(233, 234, 248, 0.96) 0%, rgba(224, 225, 242, 0.9) 48%, rgba(220, 221, 239, 0.5) 82%, rgba(220, 221, 239, 0) 100%);
-      }
-      .sv-shadow {
-        position: absolute; left: 0; top: 0;
-        border-radius: 50%;
-        background: radial-gradient(50% 50% at 50% 50%, rgba(120, 112, 168, 0.32) 0%, rgba(120, 112, 168, 0) 70%);
-      }
-      .sv-road {
-        position: absolute; left: 50%; top: 0; width: 920px; height: 100%;
-        margin-left: -460px;
-        background: linear-gradient(90deg, rgba(206, 205, 228, 0) 0%, rgba(199, 197, 224, 0.6) 16%, rgba(212, 210, 234, 0.82) 50%, rgba(199, 197, 224, 0.6) 84%, rgba(206, 205, 228, 0) 100%);
-      }
-      /* The walk controls + row counter: a fixed strip, never tipped by the
-         3-D world. */
-      .sv-controls {
-        position: absolute; left: 50%; top: 20px; transform: translateX(-50%);
-        display: flex; align-items: center; gap: 14px; z-index: 6;
-        pointer-events: none;
-        transition: opacity 600ms ease;
-      }
-      .sv-controls.sv-hidden { opacity: 0; pointer-events: none; }
-      .sv-step {
-        pointer-events: auto;
-        background: rgba(255, 255, 255, 0.72); color: #46435a;
-        backdrop-filter: blur(8px) saturate(1.3); -webkit-backdrop-filter: blur(8px) saturate(1.3);
-        border: 1px solid rgba(255, 255, 255, 0.9); border-radius: 11px;
-        font-family: var(--font-display); font-size: 12px; letter-spacing: 0.16em;
-        padding: 9px 16px; cursor: pointer;
-        box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.9), 0 5px 16px rgba(80, 76, 130, 0.18);
-        transition: transform 160ms ease, box-shadow 200ms ease, opacity 200ms ease;
-      }
-      .sv-step span { font-size: 14px; opacity: 0.8; }
-      .sv-step:hover:not(:disabled) { transform: translateY(-2px); box-shadow: inset 0 1px 0 #fff, 0 7px 20px rgba(80, 76, 130, 0.28); }
-      .sv-step:disabled { opacity: 0.34; cursor: default; }
-      .sv-row-label {
-        pointer-events: none;
-        font-family: var(--font-display); font-size: 11px; letter-spacing: 0.22em;
-        text-transform: uppercase; color: #6a6580; min-width: 116px; text-align: center;
-        text-shadow: 0 1px 6px rgba(255, 255, 255, 0.8);
-      }
-      /* On the street the hand is a slim "your worlds" tray along the bottom —
-         a size down so the houses keep the stage. */
-      #card-stage.street-view + #card-hand {
-        padding-bottom: 6px; gap: 4px;
-        background: linear-gradient(0deg, rgba(244, 243, 252, 0.78) 0%, rgba(244, 243, 252, 0) 100%);
-      }
-      #card-stage.street-view + #card-hand .world-card { width: 96px; opacity: 0.94; }
-      #card-stage.street-view + #card-hand .ct-caption {
-        font-size: 9px; letter-spacing: 0.2em; text-transform: uppercase; opacity: 0.7;
-      }
-      /* The card we were holding, laid over the scene during the reveal. */
-      .sv-reveal-card {
-        position: absolute; left: 50%; top: 50%; z-index: 7;
-        transform: translate(-50%, -50%);
-        transition: transform 1500ms cubic-bezier(0.4, 0, 0.3, 1), opacity 1300ms ease 200ms;
-        pointer-events: none;
-        filter: drop-shadow(0 20px 50px rgba(80, 70, 140, 0.35));
-      }
-      /* Pushing through the door: the screen whites out from the centre as we
-         cross the threshold, fully covering the cut to the gathering. */
-      #card-stage.street-view.sv-entering::after {
-        content: ""; position: absolute; inset: 0; z-index: 5; pointer-events: none;
-        background: radial-gradient(75% 75% at 50% 50%, #fff 38%, rgba(255, 255, 255, 0) 80%);
-        animation: sv-door-wash 1000ms cubic-bezier(0.6, 0, 0.9, 0.5) both;
-      }
-      @keyframes sv-door-wash { 0% { opacity: 0; } 60% { opacity: 0.4; } 100% { opacity: 1; } }
-      /* Leaving a gathering reverses the fly-in: the screen starts white (we're
-         still in the doorway) and clears as the camera draws back out. */
-      #card-stage.street-view.sv-exiting::after {
-        content: ""; position: absolute; inset: 0; z-index: 5; pointer-events: none;
-        background: radial-gradient(75% 75% at 50% 50%, #fff 38%, rgba(255, 255, 255, 0) 80%);
-        animation: sv-door-wash-out 820ms cubic-bezier(0.4, 0, 0.7, 1) both;
-      }
-      @keyframes sv-door-wash-out { 0% { opacity: 1; } 100% { opacity: 0; } }
       @media (prefers-reduced-motion: reduce) {
-        .sv-house.sv-active .sv-sign { animation: none; }
-        .sv-reveal-card { transition: opacity 600ms ease; }
+        .ct-door.shake { animation: none; }
       }
 
       /* ── Legacy move arrows (kept for the dive/trade animations' DOM) ── */

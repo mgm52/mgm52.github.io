@@ -27,13 +27,10 @@ import { clearSave, getRawSave, saveGame, setRawSave } from './save';
 import { GameState, computePlayBounds, isInPlayCell } from './state';
 import { ALL_TASK_IDS } from './ui';
 import {
-  CardMeta, CardResources, CardTier, Creature, FRAME_BASE, ManualWorld,
-  TradeEvent, Want, WorldCard, cardPower, decodeWorld, encodeWorld, generateEvents,
-  makeCard, mulberry32, regenerateEvent, sceneStructureCounts,
-  WantSeg, wantSatisfiableBy, wantSatisfiedBy, wantSegments,
-  STREET, StreetCam, StreetHouse, StreetSide, gatheringRowCount, gatheringSlot,
-  streetDollyPose, streetDoor, streetEnterPose, streetFocusPose, streetHouse, streetViewSpace,
-  STREET_TUNABLES, streetTunable, resetStreet,
+  CardMeta, CardResources, CardTier, Creature, EVENT_NAMES, FRAME_BASE, ManualWorld,
+  TradeEvent, TIER_ABOVE, Want, WorldCard, cardPower, decodeWorld, encodeWorld,
+  generateEvents, makeCard, makeKeyCard, mulberry32, regenerateEvent,
+  sceneStructureCounts, WantSeg, wantSatisfiedBy, wantSegments,
 } from './cards-core';
 
 const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
@@ -263,58 +260,6 @@ export function devDealFreeCard(): void {
   refreshRealmView();
 }
 
-// ─── Dev street-geometry tuning ──────────────────────────────────────
-// The realm dev cog's sliders (options-ui.ts) write STREET fields through
-// these helpers. Values persist in localStorage so a tuned framing survives a
-// reload, and re-apply at module load below. Rebuilds are coalesced into one
-// per frame so dragging a slider doesn't thrash the DOM.
-const STREET_GEOM_KEY = 'gs.realm.streetGeom';
-
-function saveStreetGeom(): void {
-  try {
-    const out: Record<string, number> = {};
-    for (const t of STREET_TUNABLES) if (t.get() !== t.def) out[t.key] = t.get();
-    if (Object.keys(out).length) localStorage.setItem(STREET_GEOM_KEY, JSON.stringify(out));
-    else localStorage.removeItem(STREET_GEOM_KEY);
-  } catch { /* storage blocked — tuning just won't persist */ }
-}
-
-function loadStreetGeom(): void {
-  try {
-    const raw = localStorage.getItem(STREET_GEOM_KEY);
-    if (!raw) return;
-    const saved = JSON.parse(raw) as Record<string, number>;
-    for (const [key, v] of Object.entries(saved)) {
-      if (typeof v === 'number') streetTunable(key)?.set(v);
-    }
-  } catch { /* malformed — ignore and keep defaults */ }
-}
-// Re-apply any persisted tuning before the realm ever builds a street.
-loadStreetGeom();
-
-let streetRebuildQueued = false;
-function queueStreetRebuild(): void {
-  if (streetRebuildQueued) return;
-  streetRebuildQueued = true;
-  requestAnimationFrame(() => { streetRebuildQueued = false; refreshRealmView(); });
-}
-
-// Dev tool (realm dev cog): set one street tunable, persist it, and rebuild.
-export function devSetStreetParam(key: string, value: number): void {
-  const t = streetTunable(key);
-  if (!t) return;
-  t.set(value);
-  saveStreetGeom();
-  queueStreetRebuild();
-}
-
-// Dev tool (realm dev cog): restore the shipped street framing.
-export function devResetStreet(): void {
-  resetStreet();
-  saveStreetGeom();
-  queueStreetRebuild();
-}
-
 // Dev cheat (options cog): wipe ONLY the trading-section metagame and
 // reload. If the player is currently inside (or spectating) a card world,
 // the stashed outer save is put back first, so the main game survives the
@@ -507,12 +452,10 @@ async function leaveWorld(state: GameState): Promise<void> {
     };
   }
   meta.activeCardId = null;
-  // Leaving the very first (traded) world graduates the metagame: the street
-  // of gatherings opens, and the next realm boot plays the one-shot reveal
-  // that pulls back out of the house onto that street.
+  // Leaving the very first (traded) world graduates the metagame: the
+  // gatherings open and the realm now lands on the soft border.
   if (meta.phase === 'firstworld') {
     meta.phase = 'free';
-    meta.revealPending = true;
   }
   saveMeta(meta);
   const outer = localStorage.getItem(OUTER_KEY);
@@ -917,6 +860,25 @@ type CardElOpts = {
 };
 
 function buildCardEl(card: WorldCard, opts: CardElOpts = {}): HTMLElement {
+  // A key card has no world behind it — just the key glyph and a label. It
+  // can be selected (so it sits in the hand like any card) but never entered,
+  // and it carries no preview panes or resource line.
+  if (card.key) {
+    const keyEl = document.createElement('div');
+    keyEl.className = `world-card wc-keycard${opts.big ? ' big' : ''}`;
+    keyEl.dataset.cardId = String(card.id);
+    const head = document.createElement('div');
+    head.className = 'wc-head';
+    head.innerHTML = '<span class="wc-name"></span><span class="wc-tier">key</span>';
+    (head.querySelector('.wc-name') as HTMLElement).textContent = card.name;
+    keyEl.appendChild(head);
+    keyEl.appendChild(div('wc-key-art'));
+    if (opts.onClick) {
+      keyEl.classList.add('clickable');
+      keyEl.addEventListener('click', () => opts.onClick?.(keyEl));
+    }
+    return keyEl;
+  }
   const root = document.createElement('div');
   root.className = `world-card t-${card.tier}${opts.big ? ' big' : ''}${card.origin ? ' origin' : ''}`;
   // The trade animations find a card's element by its id. Every card wears the
@@ -1192,11 +1154,31 @@ async function runRealm(): Promise<void> {
 }
 
 // Where the realm lands after the (possible) intro: the lone traded card
-// awaiting its first dive, the one-shot street reveal, or the street itself.
+// awaiting its first dive, or the home gathering (the soft border).
 function routeRealmView(meta: CardMeta): void {
   if (meta.phase === 'firstworld') { showFirstCard(meta); return; }
-  if (meta.revealPending) { void runStreetReveal(meta); return; }
-  showStreet(meta);
+  showHomeGathering(meta);
+}
+
+// The gatherings, generated on demand. The intro seeds them, but a dev hop
+// straight into the 'free' phase might land here without them.
+function ensureEvents(meta: CardMeta): TradeEvent[] {
+  if (!meta.events) {
+    meta.events = generateEvents(meta, null, ALL_TASK_IDS, loadManualWorlds());
+    saveMeta(meta);
+  }
+  return meta.events;
+}
+function eventForTier(meta: CardMeta, tier: CardTier): TradeEvent | undefined {
+  return ensureEvents(meta).find((e) => e.tier === tier);
+}
+
+// The realm's home view: the soft-border (common) gathering. Its locked door
+// leads up to the salon, the salon's up to the rare exchange — each opened
+// once that gathering's key has been traded for and spent.
+function showHomeGathering(meta: CardMeta): void {
+  const ev = eventForTier(meta, 'common');
+  if (ev) showGathering(meta, ev);
 }
 
 // The held-on big-card view: after the swindle (and on any reload while the
@@ -1208,7 +1190,7 @@ function showFirstCard(meta: CardMeta): void {
   stage.innerHTML = '';
   stage.className = 'intro-view firstcard-view';
   const card = meta.cards[0];
-  if (!card) { showStreet(meta); return; }
+  if (!card) { showHomeGathering(meta); return; }
   const cardEl = buildCardEl(card, {
     big: true,
     enterLabel: 'ENTER',
@@ -1354,383 +1336,6 @@ function renderHand(meta: CardMeta, opts: HandOpts = {}): void {
   if (stage) stage.style.paddingBottom = hand.offsetHeight > 0 ? `${hand.offsetHeight + 8}px` : '';
 }
 
-// ─── The street of gatherings (the 'free'-phase home view) ───────────
-// The flat list of gatherings became a street: each gathering is a little
-// white house lining a road that recedes into the dream. The player walks it
-// row by row (a forward / back control) and steps through a door to enter a
-// gathering. It's all CSS-3D — a perspective box (#sv-scene) holds a preserve-
-// 3d world (.sv-camera) that we move by applying the INVERSE of the camera
-// pose, so "moving the camera" is one transform on one element.
-
-// The street's geometry + camera maths live DOM-free in cards-core (STREET,
-// streetHouse, streetDoor, streetEnterPose, streetFocusPose) so the unit tests
-// can prove the fly-in lands square on a door. This module is the DOM half.
-
-// The .sv-camera transform — the INVERSE of the camera pose, applied to the
-// world group — kept exactly in step with cards-core's streetViewSpace so the
-// tested maths and the rendered scene agree.
-function camTransform(p: StreetCam): string {
-  return `rotateX(${(p.pitch ?? STREET.pitch)}deg) rotateY(${-p.yaw}deg) translate3d(${(-p.x).toFixed(1)}px, ${(-p.y).toFixed(1)}px, ${(-p.z).toFixed(1)}px)`;
-}
-
-// One simple white house: four walls, a gabled roof, a door and (for a
-// gathering) a lit sign over it. `face` rotates the whole house so its door
-// looks the way we want; the door/sign live on the front face's 2-D plane.
-function buildHouse(opts: { tier?: CardTier; name?: string; sign?: string; plain?: boolean }): HTMLElement {
-  const { w, h, d, rh } = STREET.house;
-  const house = div(`sv-house${opts.plain ? ' plain' : ''}${opts.tier ? ` t-${opts.tier}` : ''}`);
-  const slant = Math.hypot(w / 2, rh);
-  const lean = Math.atan2(w / 2, rh) * 180 / Math.PI;
-  const face = (cls: string, wpx: number, hpx: number, t: string): HTMLElement => {
-    const f = div(`sv-face ${cls}`);
-    f.style.width = `${wpx}px`;
-    f.style.height = `${hpx}px`;
-    f.style.marginLeft = `${-wpx / 2}px`;
-    f.style.marginTop = `${-hpx / 2}px`;
-    f.style.transform = t;
-    house.appendChild(f);
-    return f;
-  };
-  // Walls (front carries the door + sign in its own 2-D plane).
-  const front = face('sv-wall sv-front', w, h, `translate3d(0,${-h / 2}px,${d / 2}px)`);
-  face('sv-wall sv-back', w, h, `translate3d(0,${-h / 2}px,${-d / 2}px) rotateY(180deg)`);
-  face('sv-wall sv-left', d, h, `translate3d(${-w / 2}px,${-h / 2}px,0) rotateY(-90deg)`);
-  face('sv-wall sv-right', d, h, `translate3d(${w / 2}px,${-h / 2}px,0) rotateY(90deg)`);
-  // Gable triangles (front/back) + the two roof slopes (left/right).
-  const gableFront = face('sv-gable', w, rh, `translate3d(0,${-h - rh / 2}px,${d / 2}px)`);
-  gableFront.style.clipPath = 'polygon(0 100%, 50% 0, 100% 100%)';
-  const gableBack = face('sv-gable', w, rh, `translate3d(0,${-h - rh / 2}px,${-d / 2}px) rotateY(180deg)`);
-  gableBack.style.clipPath = 'polygon(0 100%, 50% 0, 100% 100%)';
-  face('sv-roof', d, slant, `translate3d(${w / 4}px,${-h - rh / 2}px,0) rotateZ(${-lean}deg) rotateY(90deg)`);
-  face('sv-roof', d, slant, `translate3d(${-w / 4}px,${-h - rh / 2}px,0) rotateZ(${lean}deg) rotateY(-90deg)`);
-  // A soft contact shadow laid flat on the ground, so the house sits rather
-  // than floats.
-  const shadow = div('sv-shadow');
-  shadow.style.width = `${w * 1.5}px`;
-  shadow.style.height = `${d * 1.5}px`;
-  shadow.style.marginLeft = `${-w * 0.75}px`;
-  shadow.style.marginTop = `${-d * 0.75}px`;
-  shadow.style.transform = 'translateY(-1px) rotateX(90deg)';
-  house.appendChild(shadow);
-  // Door on the front plane.
-  const door = div('sv-door');
-  front.appendChild(door);
-  // A gathering hangs a lit sign with its name over the door.
-  if (opts.sign) {
-    const sign = div('sv-sign');
-    sign.textContent = opts.sign;
-    front.appendChild(sign);
-  }
-  return house;
-}
-
-// A gathering's house on the street, plus its focus row (= the plot it sits at).
-type StreetSlot = { ev: TradeEvent; row: number; side: StreetSide; house: ReturnType<typeof streetHouse>; el?: HTMLElement };
-
-// The player's own house, parked at the head of the street (a plot in FRONT of
-// the first gathering, on the right line) — the one the reveal pulls out of,
-// and just scenery thereafter. It's a normal street house: same lane and
-// angled door as the residences, so it sits flush with the street instead of
-// facing flat across it. Derived live so the dev sliders move it too.
-function revealHome(): StreetHouse { return streetHouse(-1, 'R'); }
-
-// Lay the gatherings into two lines (pairs of left/right plots) and fill every
-// other plot — plus a couple beyond — with plain residences, so both sides read
-// as a continuous street rather than a sparse handful of houses.
-function streetLayout(meta: CardMeta): { gatherings: StreetSlot[]; residences: ReturnType<typeof streetHouse>[]; rows: number } {
-  const evs = meta.events ?? [];
-  const rows = gatheringRowCount(evs.length);
-  const gatherings: StreetSlot[] = [];
-  const taken = new Set<string>();
-  evs.forEach((ev, i) => {
-    const { plot, side } = gatheringSlot(i);
-    taken.add(`${plot},${side}`);
-    gatherings.push({ ev, row: plot, side, house: streetHouse(plot, side) });
-  });
-  const residences: ReturnType<typeof streetHouse>[] = [];
-  for (let plot = 0; plot <= rows + 1; plot++) {
-    for (const side of ['L', 'R'] as StreetSide[]) {
-      if (!taken.has(`${plot},${side}`)) residences.push(streetHouse(plot, side));
-    }
-  }
-  return { gatherings, residences, rows };
-}
-
-// The last row the player stood at, so backing out of a gathering returns the
-// camera where it was rather than snapping to the top of the street.
-let streetRow = 0;
-// The gathering house last stepped into, so leaving it can reverse the fly-in
-// (emerge back out through that same door) rather than cut to the street.
-let enteredFrom: { row: number; side: StreetSide } | null = null;
-
-// Build the 3-D street into #card-stage and return its moving parts. Interactivity
-// is wired by `focusRow`; the reveal drives the camera itself before calling it.
-function buildStreetScene(meta: CardMeta): {
-  scene: HTMLElement; camera: HTMLElement; home: HTMLElement; gatherings: StreetSlot[]; rows: number;
-  setCam: (p: StreetCam, ms: number, ease?: string, cull?: 'cull' | HTMLElement) => Promise<void>;
-  focusRow: (row: number) => void;
-} {
-  const stage = realmEl('card-stage');
-  clearSpeech();
-  stage.innerHTML = '';
-  stage.className = 'street-view';
-
-  if (!meta.events) {
-    meta.events = generateEvents(meta, null, ALL_TASK_IDS, loadManualWorlds());
-    saveMeta(meta);
-  }
-
-  const scene = div('sv-scene');
-  scene.style.perspective = `${STREET.persp}px`;
-  const camera = div('sv-camera');
-  scene.appendChild(camera);
-  stage.appendChild(scene);
-
-  // Ground: one big plane laid flat, with a paler road strip down the middle.
-  // Pin its Y to STREET.groundY (overriding the CSS fallback) so the dev
-  // ground-depth slider moves the road with the houses' bases.
-  const ground = div('sv-ground');
-  ground.style.transform = `translate3d(0, ${STREET.groundY}px, -2520px) rotateX(90deg)`;
-  ground.appendChild(div('sv-road'));
-  camera.appendChild(ground);
-
-  // Every house, with its world centre — so a pose can hide any that have
-  // crossed behind the eye (where CSS perspective would blow them up into
-  // screen-filling junk) and the fly-in can keep only its target on screen.
-  const houses: { el: HTMLElement; cx: number; cz: number }[] = [];
-  const place = (el: HTMLElement, h: { x: number; z: number; faceYaw: number }) => {
-    el.style.transform = `translate3d(${h.x}px,${STREET.groundY}px,${h.z}px) rotateY(${h.faceYaw}deg)`;
-    camera.appendChild(el);
-    houses.push({ el, cx: h.x, cz: h.z });
-  };
-
-  // The player's own house at the street's head — the one the reveal pulls out
-  // of, scenery thereafter.
-  const home = buildHouse({ plain: true });
-  home.classList.add('sv-home');
-  place(home, revealHome());
-  const homeSign = div('sv-sign sv-home-sign');
-  homeSign.textContent = 'home';
-  (home.querySelector('.sv-front') as HTMLElement)?.appendChild(homeSign);
-
-  const { gatherings, residences, rows } = streetLayout(meta);
-  // Plain residences flesh the two lines out into a real street.
-  for (const h of residences) place(buildHouse({ plain: true }), h);
-  // The gatherings themselves, each a signed, enterable house.
-  for (const slot of gatherings) {
-    const el = buildHouse({ tier: slot.ev.tier, sign: slot.ev.name });
-    slot.el = el;
-    place(el, slot.house);
-  }
-
-  // Cull mode for a pose. The interactive street hides any house at/behind the
-  // eye plane ('cull') — the ones CSS would magnify into the frame from the
-  // side — and the fly-in keeps only its target on screen (an element). The
-  // hand-choreographed reveal frames home up close on purpose, so it culls
-  // nothing (undefined). CULL_Z gives a small in-front tolerance.
-  const CULL_Z = 40;
-  type Cull = 'cull' | HTMLElement | undefined;
-  const show = (el: HTMLElement): void => { el.style.visibility = ''; el.style.opacity = ''; };
-  const hide = (el: HTMLElement): void => { el.style.visibility = 'hidden'; el.style.opacity = ''; };
-  const applyCull = (p: StreetCam, mode: Cull): void => {
-    if (!mode) { for (const h of houses) show(h.el); return; }
-    for (const h of houses) {
-      const v = streetViewSpace({ x: h.cx, y: STREET.groundY - STREET.house.h / 2, z: h.cz }, p);
-      const behind = v.z > CULL_Z;
-      // Walking the street ('cull') just hides whatever has slipped behind the
-      // eye. A fly-in (mode = the target house) keeps the target solid and
-      // fades the rest to STREET.cullFade — but anything behind the eye is
-      // still hidden outright, or CSS perspective magnifies it into junk.
-      if (mode === 'cull') { behind ? hide(h.el) : show(h.el); continue; }
-      if (h.el === mode) { show(h.el); continue; }
-      if (behind) { hide(h.el); continue; }
-      h.el.style.visibility = '';
-      h.el.style.opacity = STREET.cullFade >= 1 ? '' : String(STREET.cullFade);
-    }
-  };
-
-  const setCam = (p: StreetCam, ms: number, ease = 'cubic-bezier(0.66,0,0.34,1)', cull?: Cull): Promise<void> => {
-    camera.style.transition = ms > 0 ? `transform ${ms}ms ${ease}` : 'none';
-    camera.style.transform = camTransform(p);
-    applyCull(p, cull);
-    return sleep(ms);
-  };
-
-  // Controls (forward / back along the street) + the hint line, in a fixed
-  // overlay so they never tip with the 3-D world.
-  const controls = div('sv-controls');
-  const back = document.createElement('button');
-  back.type = 'button'; back.className = 'sv-step sv-step-back';
-  back.innerHTML = '<span>↓</span> back';
-  const label = div('sv-row-label');
-  const fwd = document.createElement('button');
-  fwd.type = 'button'; fwd.className = 'sv-step sv-step-fwd';
-  fwd.innerHTML = 'further <span>↑</span>';
-  controls.append(back, label, fwd);
-  controls.classList.add('sv-hidden');   // shown when control is handed over
-  stage.appendChild(controls);
-
-  let active = false;
-  const focusRow = (row: number): void => {
-    controls.classList.remove('sv-hidden');
-    streetRow = Math.max(0, Math.min(rows - 1, row));
-    label.textContent = rows > 1 ? `street · ${streetRow + 1} / ${rows}` : 'the street';
-    back.disabled = streetRow === 0;
-    fwd.disabled = streetRow >= rows - 1;
-    // Only the focused row's gatherings light up and take clicks.
-    for (const slot of gatherings) {
-      slot.el?.classList.toggle('sv-active', slot.row === streetRow);
-      slot.el?.classList.toggle('sv-dim', slot.row !== streetRow);
-    }
-    if (active) void setCam(streetFocusPose(streetRow), 900, undefined, 'cull');
-  };
-
-  const stepTo = (row: number): void => {
-    if (!active || row < 0 || row >= rows || row === streetRow) return;
-    realmSound('click', 0.7, 1);
-    focusRow(row);
-  };
-  back.addEventListener('click', () => stepTo(streetRow - 1));
-  fwd.addEventListener('click', () => stepTo(streetRow + 1));
-
-  // Clicking a focused gathering flies the camera straight into its door, then
-  // hands off to the gathering view.
-  for (const slot of gatherings) {
-    slot.el?.addEventListener('click', () => {
-      if (!active || slot.row !== streetRow) return;
-      const locked = meta.cards.length === 0
-        || !slot.ev.creatures.some((cr) => wantSatisfiableBy(cr.want, meta.cards));
-      if (locked) {
-        realmSound('error', 0.7);
-        slot.el?.classList.remove('sv-shake');
-        void slot.el?.offsetWidth;
-        slot.el?.classList.add('sv-shake');
-        return;
-      }
-      active = false;
-      realmSound('ritual', 0.8, 0.8);
-      void enterGatheringHouse(meta, slot, setCam);
-    });
-  }
-
-  return {
-    scene, camera, home, gatherings, rows, setCam,
-    focusRow: (row: number) => { active = true; focusRow(row); },
-  };
-}
-
-// The interactive street: build it, drop the camera onto the saved row, and
-// let the player walk and enter. (renderHand keeps "your worlds" along the
-// bottom, exactly as the old table did.)
-function showStreet(meta: CardMeta, opts: { row?: number; fromCam?: StreetCam; reverse?: { row: number; side: StreetSide } } = {}): void {
-  const s = buildStreetScene(meta);
-  const row = Math.max(0, Math.min(s.rows - 1, opts.row ?? streetRow));
-  renderHand(meta);
-  // Leaving a gathering: reverse the fly-in out of that same door.
-  const from = opts.reverse && s.gatherings.find((g) => g.row === opts.reverse!.row && g.side === opts.reverse!.side);
-  if (from) { void reverseOutOfHouse(s, from, row); return; }
-  // Snap to a starting pose, then ease into the focus pose so the street
-  // "arrives" with a touch of motion rather than a hard cut.
-  void s.setCam(opts.fromCam ?? streetFocusPose(row), 0, undefined, 'cull');
-  requestAnimationFrame(() => requestAnimationFrame(() => s.focusRow(row)));
-}
-
-// The fly-in, played backwards: start nose-deep past the door (white-washed,
-// only that house on screen), draw back out through the threshold and onto the
-// road, then turn down the street as the rest of the houses fade back in.
-async function reverseOutOfHouse(
-  s: { setCam: (p: StreetCam, ms: number, ease?: string, cull?: 'cull' | HTMLElement) => Promise<void>; focusRow: (row: number) => void },
-  slot: StreetSlot, row: number,
-): Promise<void> {
-  const stage = realmEl('card-stage');
-  const target = slot.el;
-  stage.classList.add('sv-exiting');   // a white wash, full → fading, mirrors the door-wash
-  await s.setCam(streetDollyPose(slot.house, -640), 0, undefined, target);
-  await s.setCam(streetEnterPose(slot.house), 460, 'cubic-bezier(0.4,0.4,0.6,1)', target);
-  await s.setCam(streetDollyPose(slot.house, 240), 540, 'cubic-bezier(0.3,0,0.5,1)', target);
-  stage.classList.remove('sv-exiting');
-  // Turn back onto the street; 'cull' un-hides the rest of the houses.
-  await s.setCam(streetFocusPose(row), 720, 'cubic-bezier(0.5,0,0.3,1)', 'cull');
-  s.focusRow(row);
-}
-
-// Dive from the street into a gathering: with only the target house on screen,
-// turn to face its door head-on, fly square at it (streetEnterPose — door
-// dead-centre, a nose away) and push on THROUGH the threshold, then swap to the
-// gathering under the door-wash + cross-fade.
-async function enterGatheringHouse(meta: CardMeta, slot: StreetSlot, setCam: (p: StreetCam, ms: number, ease?: string, cull?: 'cull' | HTMLElement) => Promise<void>): Promise<void> {
-  streetRow = slot.row;
-  enteredFrom = { row: slot.row, side: slot.side };
-  const target = slot.el;
-  // Square up out on the road in front of the door (only the target visible, so
-  // nothing else crowds the frame).
-  await setCam(streetDollyPose(slot.house, 240), 720, 'cubic-bezier(0.4,0,0.5,1)', target);
-  realmEl('card-stage').classList.add('sv-entering');
-  // Fly to the threshold (the door dead-centre), then push on through it: the
-  // door swells past the eye as the wash whites out, reading as stepping in.
-  await setCam(streetEnterPose(slot.house), 540, 'cubic-bezier(0.5,0,0.8,0.5)', target);
-  await setCam(streetDollyPose(slot.house, -640), 460, 'cubic-bezier(0.55,0,0.95,0.7)', target);
-  swapView(() => showGathering(meta, slot.ev));
-}
-
-// The one-shot reveal, played the first time the player leaves the traded
-// world: we start nose-to-the-card "inside" the house, pull back through its
-// front to show it as a little white house, hold a beat, then turn ninety
-// degrees and draw back to look down the whole street of gatherings.
-async function runStreetReveal(meta: CardMeta): Promise<void> {
-  // Consume the flag up front so a reload mid-reveal just lands on the street.
-  meta.revealPending = false;
-  saveMeta(meta);
-
-  const s = buildStreetScene(meta);
-  const stage = realmEl('card-stage');
-  // The flat card we were holding, laid over the scene, "inside" the house.
-  const card = meta.cards[0];
-  let cardEl: HTMLElement | null = null;
-  if (card) {
-    cardEl = buildCardEl(card, { big: true });
-    cardEl.classList.add('sv-reveal-card');
-    // Inline transition so the shrink-into-the-house still plays even when the
-    // page is in reduced-motion (the realm's ambient drift parks, but this
-    // one-shot beat shouldn't).
-    cardEl.style.transition = 'transform 1500ms cubic-bezier(0.4,0,0.3,1), opacity 1300ms ease 200ms';
-    stage.appendChild(cardEl);
-  }
-
-  // Looking square at the home's door, the card laid over it. The poses sit
-  // out along the door's own normal (streetDollyPose), so they stay framed on
-  // the door whatever angle the home faces; the later turn swings from here
-  // onto the street, which runs down -Z.
-  const hh = revealHome();
-  const insidePose: StreetCam = { ...streetDollyPose(hh, 70), pitch: 3 };
-  const exteriorPose: StreetCam = { ...streetDollyPose(hh, 540), pitch: 7 };
-  void s.setCam(insidePose, 0);
-  await sleep(1000);
-
-  // Pull back out of the house; the card shrinks INTO the home (toward its real
-  // on-screen spot, not just the screen centre) and fades as the house emerges.
-  if (cardEl) {
-    const homeR = s.home.getBoundingClientRect();
-    const dx = (homeR.left + homeR.width / 2) - window.innerWidth / 2;
-    const dy = (homeR.top + homeR.height / 2) - window.innerHeight / 2;
-    cardEl.style.transform = `translate(calc(-50% + ${dx.toFixed(0)}px), calc(-50% + ${dy.toFixed(0)}px)) scale(0.05)`;
-    cardEl.style.opacity = '0';
-  }
-  realmSound('ritual', 0.7, 0.7);
-  await s.setCam(exteriorPose, 1800, 'cubic-bezier(0.4,0,0.3,1)');
-  cardEl?.remove();
-  await sleep(850);
-
-  // The ninety-degree turn (yaw 90 → 0), drawing back to look down the street.
-  realmSound('online', 0.4, 0.7);
-  await s.setCam({ x: 0, y: STREET.eyeY, z: STREET.plotZ0 + STREET.camBack + 240, yaw: 0, pitch: STREET.pitch }, 2100, 'cubic-bezier(0.5,0,0.25,1)');
-  await sleep(450);
-
-  // Settle onto the first row (a gentle dolly in) and hand control over.
-  s.focusRow(0);
-  renderHand(meta);
-}
-
 function backButton(label: string, onBack: () => void): HTMLElement {
   const btn = document.createElement('button');
   btn.type = 'button';
@@ -1774,8 +1379,17 @@ function showGathering(meta: CardMeta, ev: TradeEvent): void {
   stage.innerHTML = '';
   stage.className = 'gathering-view';
 
+  // Swap to another tier's gathering (a door, or the back button).
+  const goToTier = (tier: CardTier): void => {
+    const target = eventForTier(meta, tier);
+    if (target) swapView(() => showGathering(meta, target));
+  };
+
   const head = div('ct-gathering-head');
-  head.appendChild(backButton('← back to the street', () => swapView(() => showStreet(meta, { row: streetRow, reverse: enteredFrom ?? undefined }))));
+  // Climbing UP a tier is the gated move (the locked door, added below);
+  // stepping back DOWN is mundane, so it's a plain back button.
+  const below: CardTier | null = ev.tier === 'rare' ? 'uncommon' : ev.tier === 'uncommon' ? 'common' : null;
+  if (below) head.appendChild(backButton(`← back to ${EVENT_NAMES[below]}`, () => goToTier(below)));
   head.appendChild(div(`ct-caption ct-event-title t-${ev.tier}`, ev.name));
   stage.appendChild(head);
 
@@ -1843,16 +1457,30 @@ function showGathering(meta: CardMeta, ev: TradeEvent): void {
     })();
   };
 
+  // A trade must never strip the player of every tradeable world — handing
+  // your last world to the gatekeeper for a key (which can't be traded back)
+  // would soft-lock the realm. So a trade is only allowed if, once the given
+  // cards leave and the trader's deck arrives, at least one non-key world
+  // remains in hand.
+  const keepsAWorld = (cr: Creature, given: WorldCard[]): boolean => {
+    const givenIds = new Set(given.map((c) => c.id));
+    return meta.cards.filter((c) => !givenIds.has(c.id)).concat(cr.deck).some((c) => !c.key);
+  };
+
   // What a trader says for the current selection:
   //  - nothing / too few picked → its want, restated
   //  - more cards than it asked  → "too many cards."
-  //  - the right count, wrong worlds → "no."; the right count and a match → "yes!"
+  //  - the right count, wrong worlds → "no."
+  //  - a match it will take → "yes!"; a match that would leave you with no
+  //    world at all (the gatekeeper's key for your last world) → it refuses
   const lineFor = (cr: Creature): WantSeg[] => {
     if (cr.deck.length === 0) return [{ t: 'traded out. it is content.' }];
     const picked = minePicked();
     if (picked.length > cr.want.count) return [{ t: 'too many cards.' }];
     if (picked.length === cr.want.count) {
-      return wantSatisfiedBy(cr.want, picked) ? [{ t: 'yes!' }] : [{ t: 'no.' }];
+      if (!wantSatisfiedBy(cr.want, picked)) return [{ t: 'no.' }];
+      if (!keepsAWorld(cr, picked)) return [{ t: 'keep a world for yourself.' }];
+      return [{ t: 'yes!' }];
     }
     return wantSegments(cr.want);
   };
@@ -1864,14 +1492,18 @@ function showGathering(meta: CardMeta, ev: TradeEvent): void {
     for (const cr of ev.creatures) {
       const ref = stalls.get(cr.id);
       if (!ref?.giveBtn) continue;
-      const ready = cr.deck.length > 0 && !tradeAnimating && wantSatisfiedBy(cr.want, picked);
+      const ready = cr.deck.length > 0 && !tradeAnimating
+        && wantSatisfiedBy(cr.want, picked) && keepsAWorld(cr, picked);
       ref.giveBtn.classList.toggle('ok', ready);
       ref.giveBtn.disabled = !ready;
       // Hidden (not removed) so its row of space stays reserved — the cards
       // box never jumps as the button comes and goes.
       ref.giveBtn.style.visibility = ready ? 'visible' : 'hidden';
     }
-    choosePrompt.style.display = picked.length === 0 ? '' : 'none';
+    // Toggle visibility (not display) so the prompt keeps reserving its space
+    // — otherwise the height change would jolt the vertically-centred view as
+    // a card is picked/dropped.
+    choosePrompt.style.visibility = picked.length === 0 ? '' : 'hidden';
     const handRow = gatherHandRow();
     if (handRow) {
       for (const el of [...handRow.children] as HTMLElement[]) {
@@ -1899,6 +1531,7 @@ function showGathering(meta: CardMeta, ev: TradeEvent): void {
     if (tradeAnimating) return;
     const picked = minePicked();
     if (!wantSatisfiedBy(cr.want, picked)) return;
+    if (!keepsAWorld(cr, picked)) return;   // never empty the hand of worlds
     tradeAnimating = true;
     refreshButtons();
     const received = cr.deck;
@@ -2021,10 +1654,10 @@ function showGathering(meta: CardMeta, ev: TradeEvent): void {
       const spent = cr.deck.length === 0;
       const stall = div(`ct-stall${spent ? ' spent' : ''}`);
       stall.dataset.creatureId = String(cr.id);
-      stall.appendChild(creatureAvatar());
-      stall.appendChild(div('ct-creature-name', cr.name));
+      // The trader's dialogue floats ABOVE the goblin; no name beneath it.
       const lineEl = div('ct-creature-line');
       stall.appendChild(lineEl);
+      stall.appendChild(creatureAvatar());
 
       const cards = div('ct-stall-cards');
       for (const tc of cr.deck) {
@@ -2065,6 +1698,52 @@ function showGathering(meta: CardMeta, ev: TradeEvent): void {
     firstDeal = false;
     refreshButtons();
   };
+
+  // The locked door to the next tier, pinned top-right and turned on its side.
+  // Trade the gatekeeper for this gathering's key, then click the door to spend
+  // it and pass up to the salon / rare exchange; without the key it just
+  // rattles. Once spent the door stays open (meta.unlockedTiers).
+  const above = TIER_ABOVE[ev.tier];
+  if (above) {
+    const isOpen = (): boolean => (meta.unlockedTiers ?? []).includes(above);
+    const door = div('ct-door ct-door-fwd');
+    door.appendChild(div('ct-door-glyph'));
+    const label = div('ct-door-label');
+    door.appendChild(label);
+    const sync = (): void => {
+      door.classList.toggle('open', isOpen());
+      door.classList.toggle('locked', !isOpen());
+      // Open doors point to where they lead; a locked door stays bare (its
+      // "locked" only floats up on a key-less tug).
+      label.textContent = isOpen() ? `${above} →` : '';
+    };
+    sync();
+    door.addEventListener('click', () => {
+      if (tradeAnimating) return;
+      if (isOpen()) { realmSound('online', 0.7, 0.9); goToTier(above); return; }
+      // Spend a key minted at this gathering (its tier) to open the door.
+      const keyIdx = meta.cards.findIndex((c) => c.key && c.tier === ev.tier);
+      if (keyIdx >= 0) {
+        meta.cards.splice(keyIdx, 1);
+        meta.unlockedTiers = [...(meta.unlockedTiers ?? []), above];
+        saveMeta(meta);
+        realmSound('online', 0.85, 0.95);   // the key turns
+        sync();
+        goToTier(above);
+      } else {
+        realmSound('door_locked', 0.95, 1);
+        door.classList.remove('shake');
+        void door.offsetWidth;             // restart the shake animation
+        door.classList.add('shake');
+        // A transient "locked" that floats up and fades, rather than a label
+        // that's always sitting there.
+        const float = div('ct-door-float', 'locked');
+        door.appendChild(float);
+        float.addEventListener('animationend', () => float.remove());
+      }
+    });
+    stage.appendChild(door);
+  }
 
   renderGatherHand();
   buildStalls();

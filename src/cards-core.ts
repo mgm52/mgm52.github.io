@@ -43,6 +43,11 @@ export type WorldCard = {
   // where a card came from reads at a glance; player-minted cards (the
   // origin, the junk replacement) carry none and keep the plain frame.
   frame?: number;
+  // The gatekeeper's wares: a key card (a picture of a key, no world behind
+  // it — `data` is empty). `tier` is the gathering it was minted at, i.e. the
+  // locked door it opens. Key cards never satisfy a normal want, so they can
+  // only ever be spent on the door.
+  key?: boolean;
 };
 
 // ─── Trader wants ────────────────────────────────────────────────────
@@ -67,6 +72,9 @@ export function wantResAmount(res: 'money' | 'blood' | 'dragonBone' | 'power', c
 
 // Does a single card qualify toward a want?
 export function cardQualifies(w: Want, card: WorldCard): boolean {
+  // A key isn't a world — it can't be handed to any trader (only spent on a
+  // door), so it never satisfies a want, not even an open "any one world".
+  if (card.key) return false;
   if (w.kind === 'any') return true;
   if (w.kind === 'tier') return card.tier === w.tier;
   return wantResAmount(w.res, card) >= w.amount;
@@ -164,12 +172,12 @@ export type CardMeta = {
   // 'firstworld' — the swindle is done; the player holds the one traded card
   //               and the realm holds them on its big-card view until they
   //               ENTER it (their first time inside a card world).
-  // 'free'      — the street of gatherings is open; normal play.
+  // 'free'      — the gatherings are open; normal play.
   phase: 'intro' | 'firstworld' | 'free';
-  // Set the moment the player first LEAVES the traded world, consumed by the
-  // realm to play the one-shot "your card lived inside a house on a street"
-  // reveal before the street view settles in.
-  revealPending?: boolean;
+  // Tiers the player has unlocked the locked door up to (by spending a key).
+  // 'common' is always home; opening the soft-border door adds 'uncommon',
+  // the salon door adds 'rare'. Absent on metas saved before doors existed.
+  unlockedTiers?: CardTier[];
   // Per-playthrough entropy mixed into every gathering roll. Without it the
   // event RNG keyed on nextId alone, and nextId is identical for every
   // player at the moment the tables are first dealt — so everyone met the
@@ -811,6 +819,22 @@ export const EVENT_NAMES: Record<CardTier, string> = {
   rare: 'the rare exchange',
 };
 
+// The gatekeeper's single ware: a key card. It carries no world (`data` is
+// empty); its `tier` names the gathering it was minted at, i.e. the locked
+// door it opens (common's key opens the door up to the uncommon salon). Key
+// cards never satisfy a want (cardQualifies), so they can only be spent on
+// the door, never re-traded.
+export function makeKeyCard(meta: CardMeta, tier: CardTier): WorldCard {
+  return {
+    id: meta.nextId++,
+    name: 'a key',
+    tier,
+    data: '',
+    resources: { money: 0, blood: 0, dragonBone: 0 },
+    key: true,
+  };
+}
+
 let creatureSeq = 1;
 // The tables grow with the tiers — one trader at the soft border, two at the
 // salon, three at the rare exchange — and stay small-handed so no view ever
@@ -829,7 +853,7 @@ export function rollCreatures(meta: CardMeta, tier: CardTier, rng: () => number,
     const j = Math.floor(rng() * (i + 1));
     [names[i], names[j]] = [names[j], names[i]];
   }
-  return CREATURE_SPECS[tier].map((deckSize, i) => {
+  const creatures: Creature[] = CREATURE_SPECS[tier].map((deckSize, i) => {
     const frame = FRAME_BASE[tier] + i;
     const deck: WorldCard[] = [];
     for (let k = 0; k < deckSize; k++) {
@@ -846,6 +870,18 @@ export function rollCreatures(meta: CardMeta, tier: CardTier, rng: () => number,
       frame,
     };
   });
+  // Every gathering below the top seats a gatekeeper too: it offers a single
+  // key card for any one world — the key that opens the locked door up to the
+  // next tier. (The rare exchange is the top; it has no door onward.)
+  if (TIER_ABOVE[tier]) {
+    creatures.push({
+      id: creatureSeq++,
+      name: 'the gatekeeper',
+      want: { kind: 'any', count: 1 },
+      deck: [makeKeyCard(meta, tier)],
+    });
+  }
+  return creatures;
 }
 
 export function generateEvents(meta: CardMeta, stolen: WorldCard | null, taskIds: string[], manualPool: ManualWorld[] = []): TradeEvent[] {
@@ -871,170 +907,4 @@ export function regenerateEvent(meta: CardMeta, ev: TradeEvent, taskIds: string[
   const rng = mulberry32((((meta.seed ?? 0) ^ (meta.nextId * 48271 + ev.id)) >>> 0));
   ev.creatures = rollCreatures(meta, ev.tier, rng, taskIds, manualPool);
   if (origin) ev.creatures[0].deck.unshift(origin);
-}
-
-// ─── The street-of-gatherings geometry (shared with cards.ts + the tests) ──
-// The gatherings live as little white houses lining a street: two lines of
-// them receding down −Z, the camera out on the road. Every bit of the camera
-// maths lives here, DOM-free, so the unit tests can prove the fly-in lands
-// square on a door — centred in view, a nose away — before any DOM exists.
-//
-// The camera maps to cards.ts's transform on .sv-camera (applied to the whole
-// world group): rotateX(pitch) rotateY(−yaw) translate3d(−x,−y,−z). So a world
-// point W lands in view space at V = Rx(pitch)·Ry(−yaw)·(W − cam). CSS then
-// projects V with the eye at +persp looking down −z, so a point is dead-centre
-// on screen exactly when its view-space x and y are zero, and "in front of the
-// camera, down the street" when its view-space z is negative.
-
-export type Vec3 = { x: number; y: number; z: number };
-export type StreetCam = { x: number; y: number; z: number; yaw: number; pitch: number };
-export type StreetSide = 'L' | 'R';
-export type StreetHouse = { x: number; z: number; faceYaw: number; side: StreetSide; plot: number };
-
-// Every length is a CSS-3D pixel; grouped so the whole street reframes from one
-// place. groundY and doorCenterY are echoed by .sv-ground / .sv-door in CSS.
-export const STREET = {
-  persp: 825,
-  laneX: 570,        // |x| of each line of houses from the road's centre — wide
-                     //   enough that the near pair spans to the screen edges
-  plotZ0: -540,      // depth of the nearest plot
-  plotGap: 570,      // spacing between plots down the street
-  groundY: 46,       // road height below the eye
-  eyeY: -4,          // eye height out on the road
-  pitch: -11,        // the street view tips gently down the road
-  camBack: 0,        // camera stands this close in front of its row, so the
-                     //   row's two houses loom and fill the left/right edges
-  doorStop: 26,      // the fly-in ends this far in front of the door
-  doorYaw: 73,       // door faces mostly across the street, angled to the walker
-  doorCenterY: 54,   // door centre above the base (matches the CSS door box)
-  // During a fly-in/out the non-target houses are pulled back: this is the
-  // opacity they fade to (0 = vanish entirely, as the scene shipped; 1 = stay
-  // fully solid). Houses that cross behind the eye are always hidden outright
-  // regardless, since CSS perspective would otherwise blow them up.
-  cullFade: 0,
-  house: { w: 300, h: 230, d: 370, rh: 140 },
-};
-
-// ─── Dev-tunable street geometry ────────────────────────────────────
-// The realm's dev cog exposes a slider per entry below, so the camera framing
-// and the houses' size/spacing can be dialled in live (cards.ts rebuilds the
-// scene on each change). Each tunable reads/writes a STREET field directly —
-// STREET is a const binding but its fields are plain mutable numbers — and
-// remembers its compile-time default so "reset" can restore the shipped look.
-export type StreetTunable = {
-  key: string; label: string; min: number; max: number; step: number;
-  def: number; get: () => number; set: (v: number) => void;
-};
-export const STREET_TUNABLES: StreetTunable[] = [
-  { key: 'laneX',    label: 'Lane width (house |x|)', min: 0,     max: 2000, step: 10,   def: STREET.laneX,    get: () => STREET.laneX,    set: (v) => { STREET.laneX = v; } },
-  { key: 'plotZ0',   label: 'Nearest plot depth',     min: -3000, max: 200,  step: 10,   def: STREET.plotZ0,   get: () => STREET.plotZ0,   set: (v) => { STREET.plotZ0 = v; } },
-  { key: 'plotGap',  label: 'Plot spacing',           min: 50,    max: 2000, step: 10,   def: STREET.plotGap,  get: () => STREET.plotGap,  set: (v) => { STREET.plotGap = v; } },
-  { key: 'groundY',  label: 'Ground depth below eye', min: -300,  max: 600,  step: 2,    def: STREET.groundY,  get: () => STREET.groundY,  set: (v) => { STREET.groundY = v; } },
-  { key: 'eyeY',     label: 'Eye height',             min: -500,  max: 500,  step: 2,    def: STREET.eyeY,     get: () => STREET.eyeY,     set: (v) => { STREET.eyeY = v; } },
-  { key: 'pitch',    label: 'Camera pitch (down°)',   min: -90,   max: 90,   step: 1,    def: STREET.pitch,    get: () => STREET.pitch,    set: (v) => { STREET.pitch = v; } },
-  { key: 'camBack',  label: 'Camera stand-back',      min: -1000, max: 3000, step: 10,   def: STREET.camBack,  get: () => STREET.camBack,  set: (v) => { STREET.camBack = v; } },
-  { key: 'persp',    label: 'Perspective strength',   min: 100,   max: 6000, step: 25,   def: STREET.persp,    get: () => STREET.persp,    set: (v) => { STREET.persp = v; } },
-  { key: 'doorStop', label: 'Door fly-in stop',       min: -400,  max: 600,  step: 2,    def: STREET.doorStop, get: () => STREET.doorStop, set: (v) => { STREET.doorStop = v; } },
-  { key: 'doorYaw',  label: 'Door facing angle (°)',  min: -180,  max: 180,  step: 1,    def: STREET.doorYaw,  get: () => STREET.doorYaw,  set: (v) => { STREET.doorYaw = v; } },
-  { key: 'cullFade', label: 'Other houses fade (0–1)',min: 0,     max: 1,    step: 0.05, def: STREET.cullFade, get: () => STREET.cullFade, set: (v) => { STREET.cullFade = v; } },
-  { key: 'houseW',   label: 'House width',            min: 20,    max: 1600, step: 10,   def: STREET.house.w,  get: () => STREET.house.w,  set: (v) => { STREET.house.w = v; } },
-  { key: 'houseH',   label: 'House wall height',      min: 20,    max: 1200, step: 10,   def: STREET.house.h,  get: () => STREET.house.h,  set: (v) => { STREET.house.h = v; } },
-  { key: 'houseD',   label: 'House depth',            min: 20,    max: 1600, step: 10,   def: STREET.house.d,  get: () => STREET.house.d,  set: (v) => { STREET.house.d = v; } },
-  { key: 'houseRh',  label: 'Roof height',            min: -200,  max: 900,  step: 10,   def: STREET.house.rh, get: () => STREET.house.rh, set: (v) => { STREET.house.rh = v; } },
-];
-
-// Find a tunable by key (the persistence/UI layers address them by key).
-export function streetTunable(key: string): StreetTunable | undefined {
-  return STREET_TUNABLES.find((t) => t.key === key);
-}
-
-// Restore every street tunable to its shipped default.
-export function resetStreet(): void {
-  for (const t of STREET_TUNABLES) t.set(t.def);
-}
-
-const STREET_DEG = Math.PI / 180;
-
-// Where a house sits: a plot down the street, on the left or right line. Left
-// doors angle to +X (across + toward the walker), right doors mirror to −X.
-export function streetHouse(plot: number, side: StreetSide): StreetHouse {
-  return {
-    x: side === 'L' ? -STREET.laneX : STREET.laneX,
-    z: STREET.plotZ0 - plot * STREET.plotGap,
-    faceYaw: side === 'L' ? STREET.doorYaw : -STREET.doorYaw,
-    side,
-    plot,
-  };
-}
-
-// The door's centre + outward normal in world space. The door is on the front
-// (+Z local) face, centred across it, doorCenterY up from the base. The house's
-// own transform is translate3d(x,groundY,z) rotateY(faceYaw), so a local point
-// L lands at translate + Ry(faceYaw)·L.
-export function streetDoor(house: { x: number; z: number; faceYaw: number }): { pos: Vec3; normal: Vec3; faceYaw: number } {
-  const f = house.faceYaw * STREET_DEG;
-  const lz = STREET.house.d / 2;
-  return {
-    pos: {
-      x: house.x + Math.sin(f) * lz,
-      y: STREET.groundY - STREET.doorCenterY,
-      z: house.z + Math.cos(f) * lz,
-    },
-    normal: { x: Math.sin(f), y: 0, z: Math.cos(f) },
-    faceYaw: house.faceYaw,
-  };
-}
-
-// A pose `dist` along a door's outward normal, eye at the door's height and yaw
-// aligned with the normal so the door stays dead-centre. dist > 0 sits out in
-// front of the door (it reads small/far), dist < 0 is past the threshold,
-// inside — where the door swells past the eye. This single line IS the fly-in
-// path: large positive dist → doorStop → negative.
-export function streetDollyPose(house: { x: number; z: number; faceYaw: number }, dist: number): StreetCam {
-  const door = streetDoor(house);
-  return {
-    x: door.pos.x + door.normal.x * dist,
-    y: door.pos.y,
-    z: door.pos.z + door.normal.z * dist,
-    yaw: house.faceYaw,
-    pitch: 0,
-  };
-}
-
-// The pose that flies the camera square INTO a door: a nose (doorStop) in front
-// of it, the door projecting dead-centre.
-export function streetEnterPose(house: { x: number; z: number; faceYaw: number }): StreetCam {
-  return streetDollyPose(house, STREET.doorStop);
-}
-
-// Looking straight down the street from a given row (the nearest plot it owns).
-export function streetFocusPose(row: number): StreetCam {
-  return { x: 0, y: STREET.eyeY, z: STREET.plotZ0 - row * STREET.plotGap + STREET.camBack, yaw: 0, pitch: STREET.pitch };
-}
-
-// A world point in the camera's view space (see header): V = Rx(pitch)·Ry(−yaw)·(W − cam).
-export function streetViewSpace(w: Vec3, cam: StreetCam): Vec3 {
-  const dx = w.x - cam.x, dy = w.y - cam.y, dz = w.z - cam.z;
-  // rotateY(−yaw): x' = cos(yaw)·x − sin(yaw)·z ; z' = sin(yaw)·x + cos(yaw)·z
-  const cy = Math.cos(cam.yaw * STREET_DEG), sy = Math.sin(cam.yaw * STREET_DEG);
-  const x1 = cy * dx - sy * dz;
-  const z1 = sy * dx + cy * dz;
-  const y1 = dy;
-  // rotateX(pitch): y' = cos·y − sin·z ; z' = sin·y + cos·z
-  const cx = Math.cos(cam.pitch * STREET_DEG), sx = Math.sin(cam.pitch * STREET_DEG);
-  return { x: x1, y: cx * y1 - sx * z1, z: sx * y1 + cx * z1 };
-}
-
-// Straight-line distance from a camera to a world point.
-export function streetDist(cam: StreetCam, p: Vec3): number {
-  return Math.hypot(cam.x - p.x, cam.y - p.y, cam.z - p.z);
-}
-
-// How a flat list of gatherings fills the street: pairs of (left, right) down
-// the plots, so the focused row always offers "the two houses left and right".
-export function gatheringRowCount(n: number): number {
-  return Math.max(1, Math.ceil(n / 2));
-}
-export function gatheringSlot(i: number): { plot: number; side: StreetSide } {
-  return { plot: Math.floor(i / 2), side: i % 2 === 0 ? 'L' : 'R' };
 }
