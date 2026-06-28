@@ -37,3 +37,15 @@
 | File | Author |
 |---|---|
 | `blood-explosion.gif` | _TODO: source unknown_ |
+
+## Realm icons
+
+Trading-realm door/key glyphs from [game-icons.net](https://game-icons.net),
+licensed [CC BY 3.0](https://creativecommons.org/licenses/by/3.0/). Background
+square stripped and recoloured to the realm palette.
+
+| File | Icon | Author |
+|---|---|---|
+| `realm/key.svg` | "key" | Lorc |
+| `realm/door.svg` | "door" | Delapouite |
+| `realm/locked-door.svg` | "locked door" | Delapouite |
