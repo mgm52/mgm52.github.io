@@ -904,8 +904,7 @@ function buildCardEl(card: WorldCard, opts: CardElOpts = {}): HTMLElement {
     keyEl.dataset.cardId = String(card.id);
     const head = document.createElement('div');
     head.className = 'wc-head';
-    head.innerHTML = '<span class="wc-name"></span><span class="wc-tier">key</span>';
-    (head.querySelector('.wc-name') as HTMLElement).textContent = card.name;
+    head.innerHTML = '<span class="wc-tier">key</span>';
     keyEl.appendChild(head);
     keyEl.appendChild(div('wc-key-art'));
     // A key carries no world, so it's never entered or inspected — only its
@@ -919,10 +918,11 @@ function buildCardEl(card: WorldCard, opts: CardElOpts = {}): HTMLElement {
   // The trade animations find a card's element by its id. Every card wears the
   // same plain thin border now (no per-trader frame patterns).
   root.dataset.cardId = String(card.id);
+  // No card title — just a small rarity tag in the corner (the procedural
+  // world names read as bloat at card scale).
   const head = document.createElement('div');
   head.className = 'wc-head';
-  head.innerHTML = `<span class="wc-name"></span><span class="wc-tier">${card.tier}</span>`;
-  (head.querySelector('.wc-name') as HTMLElement).textContent = card.name;
+  head.innerHTML = `<span class="wc-tier">${card.tier}</span>`;
   root.appendChild(head);
 
   const st = decodedWorld(card);
