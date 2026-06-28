@@ -2017,7 +2017,10 @@ export function refreshUI(state: GameState) {
   // Minotaur (also rewarded around Phase 3), so a "needs Minotaur" banner covers
   // the row until one is summoned; see the dig-overlay below.
   const digUnlocked = phaseGasTurbine;
-  const ritualVisible = phaseRunPhoneFarm || phaseGasTurbine || minotaurTaskDone || state.lightningUnlocked;
+  // Card worlds can pre-roll autobuild on without ever revealing the
+  // run_phone_farm task — keep the ritual section open so the owned ability
+  // still shows rather than vanishing entirely.
+  const ritualVisible = phaseRunPhoneFarm || phaseGasTurbine || minotaurTaskDone || state.lightningUnlocked || state.autoAssignEnabled;
   const ritualSection = document.getElementById('ritual-section')!;
   ritualSection.style.display = ritualVisible ? '' : 'none';
   // Now that the panel renders as a bordered card, an empty container shows
@@ -2078,7 +2081,7 @@ export function refreshUI(state: GameState) {
   const autoWaterVisible = state.autoAssignEnabled && state.waterSources.size > 0;
   refreshRitualButton(
     'btn-buy-autoassign', 'cost-buy-autoassign',
-    phaseRunPhoneFarm && !autoWaterVisible,
+    (phaseRunPhoneFarm || state.autoAssignEnabled) && !autoWaterVisible,
     state.autoAssignEnabled, state.blood >= SUMMON_UPGRADES.autoAssign.bloodCost,
     `${SUMMON_UPGRADES.autoAssign.bloodCost} blood`,
   );
