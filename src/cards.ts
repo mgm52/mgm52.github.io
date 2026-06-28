@@ -21,7 +21,7 @@
 // reach them; this file is the presentation + persistence half.
 
 import { playSound, type SoundName } from './audio';
-import { BUILDING_DEFS, BuildingKind, CELL, HELL, SPACE, WORLD, formatPower } from './config';
+import { BUILDING_DEFS, BuildingKind, CELL, HELL, SPACE, WORLD } from './config';
 import { getOptions } from './options';
 import { clearSave, getRawSave, saveGame, setRawSave } from './save';
 import { GameState, computePlayBounds, isInPlayCell } from './state';
@@ -240,6 +240,10 @@ function refreshRealmView(): void {
   swapView(() => routeRealmView(meta));
 }
 
+// Which tier's gathering is currently on screen — set by showGathering, read
+// by the dev cog's "refresh current traders" so it re-rolls the right one.
+let currentGatheringTier: CardTier | null = null;
+
 // Dev tool (realm dev cog): reshuffle every gathering's traders + decks.
 export function devReshuffleGatherings(): void {
   const meta = loadMeta();
@@ -248,6 +252,20 @@ export function devReshuffleGatherings(): void {
   else for (const ev of meta.events) regenerateEvent(meta, ev, ALL_TASK_IDS, loadManualWorlds());
   saveMeta(meta);
   refreshRealmView();
+}
+
+// Dev tool (realm dev cog): re-roll only the gathering currently on screen —
+// the old in-gathering "wait for the next gathering" reshuffle, now a dev
+// control. Re-shows that same tier rather than routing home to the common one.
+export function devRefreshCurrentTraders(): void {
+  const meta = loadMeta();
+  if (!meta) return;
+  if (currentGatheringTier == null) { devReshuffleGatherings(); return; }
+  const ev = eventForTier(meta, currentGatheringTier);
+  if (!ev) return;
+  regenerateEvent(meta, ev, ALL_TASK_IDS, loadManualWorlds());
+  saveMeta(meta);
+  swapView(() => showGathering(meta, ev));
 }
 
 // Dev tool (realm dev cog): drop a fresh common card into the player's hand.
@@ -828,35 +846,52 @@ function drawHellPreview(cv: HTMLCanvasElement, st: GameState, seed: number): vo
 
 // ─── Card DOM ────────────────────────────────────────────────────────
 
-// The card's resource line: each resource in its own color (cash yellow,
-// blood red, power blue, bones grey), hidden at zero, and bold once it
-// crosses its "serious" threshold (Ƶ500k / 128 blood / 1 GW / 5 bones).
+// Compact magnitude for a card face: 240, 1.5k, 6.5M, 2.1G. Billions read as
+// "G" (giga), never "B" — so they can't be mistaken for blood's "B" suffix.
+function compactAmt(n: number): string {
+  const x = Math.floor(n);
+  if (x < 1000) return String(x);
+  for (const [v, u] of [[1e12, 'T'], [1e9, 'G'], [1e6, 'M'], [1e3, 'k']] as const) {
+    if (x >= v) {
+      const d = x / v;
+      return (d >= 100 ? String(Math.round(d)) : String(Math.round(d * 10) / 10)) + u;
+    }
+  }
+  return String(x);
+}
+// Energy on a card face — total gross output as W / kW / MW / GW.
+function compactPower(w: number): string {
+  if (w >= 1e9) return `${Math.round(w / 1e8) / 10}GW`;
+  if (w >= 1e6) return `${Math.round(w / 1e5) / 10}MW`;
+  if (w >= 1e3) return `${Math.round(w / 1e2) / 10}kW`;
+  return `${Math.floor(w)}W`;
+}
+
+// The card's resource line: only the resources that matter — cash (Ƶ), blood
+// (B), energy (W/MW/GW gross output) and bones (b) — and only at non-negligible
+// amounts, each in its own color. Tiny dust and zeros are omitted entirely.
 function resourcesEl(r: CardResources): HTMLElement {
-  const wrap = document.createElement('div');
-  wrap.className = 'wc-res';
-  const fmt = (n: number) => Math.floor(n).toLocaleString('en-US');
-  const add = (cls: string, text: string, strong: boolean) => {
+  const wrap = div('wc-res');
+  const add = (cls: string, text: string) => {
     const span = document.createElement('span');
-    span.className = `${cls}${strong ? ' strong' : ''}`;
+    span.className = cls;
     span.textContent = text;
     wrap.appendChild(span);
   };
   const power = r.power ?? 0;
-  const goblins = r.goblins ?? 0;
-  if (r.money > 0) add('res-cash', `Ƶ ${fmt(r.money)}`, r.money >= 500_000);
-  if (r.blood > 0) add('res-blood', `${fmt(r.blood)} blood`, r.blood >= 128);
-  if (power > 0) add('res-power', formatPower(power), power >= 1_000_000_000);
-  if (r.dragonBone > 0) add('res-bones', `${fmt(r.dragonBone)} bones`, r.dragonBone >= 5);
-  if (goblins > 0) add('res-goblins', `${fmt(goblins)} goblins`, goblins >= 25);
-  if (!wrap.firstChild) add('res-nothing', 'nothing', false);
+  if (r.money >= 100) add('res-cash', `Ƶ${compactAmt(r.money)}`);
+  if (r.blood >= 5) add('res-blood', `${compactAmt(r.blood)}B`);
+  if (power >= 1000) add('res-power', compactPower(power));
+  if (r.dragonBone >= 1) add('res-bones', `${compactAmt(r.dragonBone)}b`);
   return wrap;
 }
 
 type CardElOpts = {
   big?: boolean;
-  enterLabel?: string;       // when set, the card carries an enter button
+  enterLabel?: string;       // ENTER / INSPECT — the card's primary action button
   onEnter?: (cardEl: HTMLElement) => void;
-  onClick?: (cardEl: HTMLElement) => void;   // whole-card click (gathering selection)
+  onSelect?: (cardEl: HTMLElement) => void;  // own cards in a trade: the SELECT button
+  selectLabel?: string;
 };
 
 function buildCardEl(card: WorldCard, opts: CardElOpts = {}): HTMLElement {
@@ -873,10 +908,10 @@ function buildCardEl(card: WorldCard, opts: CardElOpts = {}): HTMLElement {
     (head.querySelector('.wc-name') as HTMLElement).textContent = card.name;
     keyEl.appendChild(head);
     keyEl.appendChild(div('wc-key-art'));
-    if (opts.onClick) {
-      keyEl.classList.add('clickable');
-      keyEl.addEventListener('click', () => opts.onClick?.(keyEl));
-    }
+    // A key carries no world, so it's never entered or inspected — only its
+    // SELECT button (when it's in the player's hand) ever applies.
+    const keyActs = cardActions({ onSelect: opts.onSelect, selectLabel: opts.selectLabel }, keyEl);
+    if (keyActs) keyEl.appendChild(keyActs);
     return keyEl;
   }
   const root = document.createElement('div');
@@ -934,21 +969,39 @@ function buildCardEl(card: WorldCard, opts: CardElOpts = {}): HTMLElement {
   }
   root.appendChild(panes);
 
+  // The compact resource read-out sits at the foot of the card (where the
+  // button used to be); the action buttons float in on hover (see cardActions).
   root.appendChild(resourcesEl(card.resources));
+  const acts = cardActions(opts, root);
+  if (acts) root.appendChild(acts);
+  return root;
+}
 
+// The card's action buttons, gathered into a `.wc-actions` group: a SELECT
+// button for the player's own cards in a trade, and the ENTER / INSPECT primary
+// button. In the gathering this group is hidden until the card is hovered, when
+// it fades in centred over the art; on the big single-card views it just sits at
+// the foot of the card. Returns null when the card has no actions at all.
+function cardActions(opts: CardElOpts, root: HTMLElement): HTMLElement | null {
+  if (!opts.enterLabel && !opts.onSelect) return null;
+  const actions = div('wc-actions');
+  if (opts.onSelect) {
+    const sel = document.createElement('button');
+    sel.type = 'button';
+    sel.className = 'wc-select';
+    sel.textContent = opts.selectLabel ?? 'SELECT';
+    sel.addEventListener('click', (e) => { e.stopPropagation(); opts.onSelect?.(root); });
+    actions.appendChild(sel);
+  }
   if (opts.enterLabel) {
     const btn = document.createElement('button');
     btn.type = 'button';
     btn.className = 'wc-enter';
     btn.textContent = opts.enterLabel;
     btn.addEventListener('click', (e) => { e.stopPropagation(); opts.onEnter?.(root); });
-    root.appendChild(btn);
+    actions.appendChild(btn);
   }
-  if (opts.onClick) {
-    root.classList.add('clickable');
-    root.addEventListener('click', () => opts.onClick?.(root));
-  }
-  return root;
+  return actions;
 }
 
 // ─── Persistent hand cards ───────────────────────────────────────────
@@ -963,23 +1016,30 @@ const handCardCache = new Map<number, HTMLElement>();
 
 type HandWiring = {
   onEnter: (cardEl: HTMLElement) => void;
-  onClick?: () => void;        // present only in the gathering (selection)
+  onSelect?: () => void;       // present only in the gathering (the SELECT button)
   selected?: boolean;
 };
 
 interface WiredCard extends HTMLElement {
   __onEnter?: (cardEl: HTMLElement) => void;
-  __onClick?: (() => void) | null;
+  __onSelect?: (() => void) | null;
 }
 
 function handCardEl(card: WorldCard, w: HandWiring): HTMLElement {
   let el = handCardCache.get(card.id) as WiredCard | undefined;
   if (!el) {
+    // Build the card ONCE with both a SELECT and an ENTER button delegating to
+    // per-node slots; `.selectable` (set below) decides whether SELECT shows,
+    // so the same cached node serves the inert table and the gathering.
     const created = buildCardEl(card, {
       enterLabel: 'ENTER',
       onEnter: (cardEl) => (cardEl as WiredCard).__onEnter?.(cardEl),
-      onClick: (cardEl) => (cardEl as WiredCard).__onClick?.(),
+      onSelect: (cardEl) => (cardEl as WiredCard).__onSelect?.(),
     }) as WiredCard;
+    // A selection badge that CSS reveals only while the card is .selected — a
+    // real child (not ::after) so it never clashes with the frame-pattern
+    // pseudo-elements traded cards carry.
+    created.appendChild(div('wc-check'));
     el = created;
     handCardCache.set(card.id, created);
   } else {
@@ -992,8 +1052,8 @@ function handCardEl(card: WorldCard, w: HandWiring): HTMLElement {
     el.style.pointerEvents = '';
   }
   el.__onEnter = w.onEnter;
-  el.__onClick = w.onClick ?? null;
-  el.classList.toggle('clickable', !!w.onClick);
+  el.__onSelect = w.onSelect ?? null;
+  el.classList.toggle('selectable', !!w.onSelect);
   el.classList.toggle('selected', !!w.selected);
   return el;
 }
@@ -1326,7 +1386,7 @@ function renderHand(meta: CardMeta, opts: HandOpts = {}): void {
     for (const c of meta.cards) {
       row.appendChild(handCardEl(c, {
         onEnter: (cardEl) => { void enterWorld(meta, c, cardEl); },
-        onClick: opts.onCardClick ? () => opts.onCardClick!(c) : undefined,
+        onSelect: opts.onCardClick ? () => opts.onCardClick!(c) : undefined,
       }));
     }
     hand.appendChild(row);
@@ -1385,35 +1445,20 @@ function showGathering(meta: CardMeta, ev: TradeEvent): void {
     if (target) swapView(() => showGathering(meta, target));
   };
 
+  // Remember which gathering is on screen, so the dev cog's "refresh current
+  // traders" knows which one to re-roll.
+  currentGatheringTier = ev.tier;
+
   const head = div('ct-gathering-head');
   // Climbing UP a tier is the gated move (the locked door, added below);
   // stepping back DOWN is mundane, so it's a plain back button.
   const below: CardTier | null = ev.tier === 'rare' ? 'uncommon' : ev.tier === 'uncommon' ? 'common' : null;
   if (below) head.appendChild(backButton(`← back to ${EVENT_NAMES[below]}`, () => goToTier(below)));
-  head.appendChild(div(`ct-caption ct-event-title t-${ev.tier}`, ev.name));
+  // The gathering's name, flanked by ornaments (CSS), with a soft subtitle
+  // beneath — the realm's own "TRADE / select cards" masthead.
+  head.appendChild(div(`ct-event-title t-${ev.tier}`, ev.name));
+  head.appendChild(div('ct-gathering-sub', 'offer your worlds to the entities'));
   stage.appendChild(head);
-
-  // The reshuffle, pinned to the gathering's top-right corner. Only the
-  // stalls shuffle — the player's hand (unchanged by a reshuffle) is left
-  // alone, so the cards below never flash or re-deal between gatherings.
-  const wait = document.createElement('button');
-  wait.type = 'button';
-  wait.className = 'ct-wait ct-wait-corner';
-  wait.textContent = 'wait for the next gathering ⟳';
-  wait.addEventListener('click', async () => {
-    if (tradeAnimating) return;
-    wait.disabled = true;
-    realmSound('online', 0.4, 0.7);
-    row.classList.add('swapping');
-    await sleep(320);
-    regenerateEvent(meta, ev, ALL_TASK_IDS, loadManualWorlds());
-    saveMeta(meta);
-    firstDeal = true;        // the fresh traders deal back in with a stagger
-    buildStalls();
-    row.classList.remove('swapping');
-    wait.disabled = false;
-  });
-  stage.appendChild(wait);
 
   const row = div('ct-stalls');
   stage.appendChild(row);
@@ -1422,8 +1467,8 @@ function showGathering(meta: CardMeta, ev: TradeEvent): void {
   const pickedMine = new Set<number>();
   const minePicked = (): WorldCard[] => meta.cards.filter((c) => pickedMine.has(c.id));
 
-  // "choose cards to trade", shown above the hand while nothing is picked.
-  const choosePrompt = div('ct-choose-prompt', 'choose cards to trade');
+  // The hand panel's subtitle, shown while nothing is picked yet.
+  const choosePrompt = div('ct-choose-prompt', 'select the cards you want to trade');
 
   // The player's hand lives INSIDE the scrollable stage (below the stalls), so
   // a big collection scrolls with the gathering instead of sitting in a fixed
@@ -1485,20 +1530,24 @@ function showGathering(meta: CardMeta, ev: TradeEvent): void {
     return wantSegments(cr.want);
   };
 
-  // Give-button visibility (HIDDEN unless the pick exactly satisfies the want),
-  // the choose-prompt, and the hand's selected outlines.
+  // Each trader carries its OWN "confirm trade" button (built in buildStalls),
+  // greyed until the current pick satisfies THAT trader's want — so when more
+  // than one trader would accept the same cards, the player chooses who to
+  // trade with by pressing that trader's button. This drives every button (and
+  // a matching-entity highlight), fades the prompt, and outlines the picked
+  // hand cards.
   const refreshButtons = (): void => {
     const picked = minePicked();
     for (const cr of ev.creatures) {
-      const ref = stalls.get(cr.id);
-      if (!ref?.giveBtn) continue;
       const ready = cr.deck.length > 0 && !tradeAnimating
         && wantSatisfiedBy(cr.want, picked) && keepsAWorld(cr, picked);
-      ref.giveBtn.classList.toggle('ok', ready);
-      ref.giveBtn.disabled = !ready;
-      // Hidden (not removed) so its row of space stays reserved — the cards
-      // box never jumps as the button comes and goes.
-      ref.giveBtn.style.visibility = ready ? 'visible' : 'hidden';
+      (row.querySelector(`[data-creature-id="${cr.id}"]`) as HTMLElement | null)
+        ?.classList.toggle('matches', ready);
+      const ref = stalls.get(cr.id);
+      if (ref?.giveBtn) {
+        ref.giveBtn.classList.toggle('ok', ready);
+        ref.giveBtn.disabled = !ready;
+      }
     }
     // Toggle visibility (not display) so the prompt keeps reserving its space
     // — otherwise the height change would jolt the vertically-centred view as
@@ -1618,12 +1667,12 @@ function showGathering(meta: CardMeta, ev: TradeEvent): void {
     refreshButtons();
   };
 
-  // One held card's element (reused across views via the hand cache): clicks
-  // toggle the shared selection, ENTER dives.
+  // One held card's element (reused across views via the hand cache): its
+  // SELECT button toggles the shared selection, ENTER dives.
   const buildHandCard = (c: WorldCard): HTMLElement =>
     handCardEl(c, {
       onEnter: (cardEl) => { void enterWorld(meta, c, cardEl); },
-      onClick: () => onMineClick(c),
+      onSelect: () => onMineClick(c),
       selected: pickedMine.has(c.id),
     });
 
@@ -1637,9 +1686,13 @@ function showGathering(meta: CardMeta, ev: TradeEvent): void {
   // cards.
   const renderGatherHand = (): void => {
     handWrap.innerHTML = '';
-    handWrap.appendChild(choosePrompt);
+    // Frame header: "your worlds" caption, then the prompt subtitle beneath it,
+    // then the cards — the screenshot's titled "YOUR CARDS" tray.
     if (meta.cards.length > 0) {
       handWrap.appendChild(div('ct-caption', meta.cards.length === 1 ? 'your world' : 'your worlds'));
+    }
+    handWrap.appendChild(choosePrompt);
+    if (meta.cards.length > 0) {
       const cardsRow = div('ct-cards');
       for (const c of meta.cards) cardsRow.appendChild(buildHandCard(c));
       handWrap.appendChild(cardsRow);
@@ -1654,10 +1707,13 @@ function showGathering(meta: CardMeta, ev: TradeEvent): void {
       const spent = cr.deck.length === 0;
       const stall = div(`ct-stall${spent ? ' spent' : ''}`);
       stall.dataset.creatureId = String(cr.id);
-      // The trader's dialogue floats ABOVE the goblin; no name beneath it.
+      // The entity, top to bottom: its glowing avatar, its name, the want it
+      // types out, an "offers" divider, then its deck face-up.
+      stall.appendChild(creatureAvatar());
+      stall.appendChild(div('ct-creature-name', cr.name));
       const lineEl = div('ct-creature-line');
       stall.appendChild(lineEl);
-      stall.appendChild(creatureAvatar());
+      if (!spent) stall.appendChild(div('ct-offers-label', 'offers'));
 
       const cards = div('ct-stall-cards');
       for (const tc of cr.deck) {
@@ -1669,13 +1725,16 @@ function showGathering(meta: CardMeta, ev: TradeEvent): void {
       }
       stall.appendChild(cards);
 
+      // This trader's own CONFIRM TRADE button — greyed until the pick
+      // satisfies its want, then a lit green primary. One per trader, so the
+      // player picks who to trade with when several would accept the cards.
       let giveBtn: HTMLButtonElement | null = null;
       if (!spent) {
         giveBtn = document.createElement('button');
         giveBtn.type = 'button';
-        giveBtn.className = 'ct-give';
-        giveBtn.textContent = '✓ trade';
-        giveBtn.style.visibility = 'hidden';
+        giveBtn.className = 'ct-confirm';
+        giveBtn.disabled = true;
+        giveBtn.append(div('ct-confirm-label', 'confirm trade'));
         const c = cr;
         giveBtn.addEventListener('click', () => {
           if (giveBtn!.disabled || tradeAnimating) return;

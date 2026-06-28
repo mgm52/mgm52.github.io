@@ -155,6 +155,7 @@ export type RealmOptionsCallbacks = {
   onResetRealm: () => void;
   onWorldDesigner: () => void;
   onReshuffleGatherings: () => void;
+  onRefreshTraders: () => void;
   onDealCard: () => void;
 };
 
@@ -224,6 +225,7 @@ export function setupRealmOptionsUI(root: HTMLElement, cb: RealmOptionsCallbacks
     adminPanel.innerHTML = '';
     adminPanel.appendChild(section('Trading realm', [
       realmBtn('Reshuffle all gatherings', cb.onReshuffleGatherings),
+      realmBtn('Refresh current traders', cb.onRefreshTraders),
       realmBtn('Deal a free card', cb.onDealCard),
       realmBtn('World Designer', cb.onWorldDesigner),
       realmBtn('Reset trading realm data', cb.onResetRealm),

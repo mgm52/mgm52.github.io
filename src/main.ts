@@ -15,7 +15,7 @@ import { ensureHellPortal, executeSkipToPreFinale, executeTaskSkip, refreshUI, s
 import { clearSave, formatRelativeTime, getLastSaveStats, loadGame, saveGame, saveGameInBackground } from './save';
 import {
   abandonCardWorldBoot, captureOriginWorld, cardWorldActive, clearCardData, consumeCardHop,
-  devDealFreeCard, devResetCardRealm, devReshuffleGatherings,
+  devDealFreeCard, devRefreshCurrentTraders, devResetCardRealm, devReshuffleGatherings,
   hasCardMeta, initBuiltinWorlds,
   isCardHopInProgress, isRealmReturnBoot, maybeStartCardRealm, onRealmShown, resetCardRealm,
   setupCardWorldChrome, spectateActive,
@@ -517,6 +517,7 @@ async function main() {
     onResetRealm: () => devResetCardRealm(),
     onWorldDesigner: () => openDesignerList(),
     onReshuffleGatherings: () => devReshuffleGatherings(),
+    onRefreshTraders: () => devRefreshCurrentTraders(),
     onDealCard: () => devDealFreeCard(),
   }));
 

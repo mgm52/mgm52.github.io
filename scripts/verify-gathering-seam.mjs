@@ -79,8 +79,14 @@ console.log(movedIn === tableHand && backOnTable === tableHand
   ? '✓ HAND NODES PERSIST across table ↔ gathering (cache hit, no re-render)'
   : '✗ HAND NODES REBUILT on a view swap');
 
-// Reshuffle.
-await page.click('.ct-wait-corner');
+// Reshuffle — now the dev cog's "refresh current traders" (the in-gathering
+// "wait for the next gathering" button moved there).
+await page.click('#realm-cog');
+await sleep(200);
+await page.$$eval('#realm-panel button', (btns) => {
+  const b = btns.find((x) => x.textContent.includes('Refresh current traders'));
+  if (b) b.click();
+});
 await sleep(900);
 await shot('2-after-reshuffle');
 

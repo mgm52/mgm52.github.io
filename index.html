@@ -1581,11 +1581,13 @@
          frosted-glass world-cards levitating over it. */
       #card-realm {
         position: fixed; inset: 0; z-index: 100001;
-        /* Still reads as the finale's white at first glance — the colour
-           lives in the aurora layer beneath the glass. */
+        /* A calm neutral silver hall: a darker grey at the top so the white
+           entities glow against it, brightening to a near-white reflective
+           floor at the bottom (the gathering's hand tray rests on the light). */
         background:
-          radial-gradient(120% 90% at 50% 40%, rgba(255, 255, 255, 0.88) 42%, rgba(236, 238, 248, 0.9) 100%),
-          linear-gradient(160deg, #f6f3fc 0%, #eef4fb 55%, #f7f1f7 100%);
+          linear-gradient(to bottom,
+            #b7bcc6 0%, #c3c8d1 26%, #d6dae1 50%,
+            #eceef2 72%, #f9fafb 88%, #ffffff 100%);
         color: #4a4a52;
         display: none;
         font-family: var(--font-body);
@@ -1598,7 +1600,9 @@
          light-motes rising at different speeds. The cards' backdrop blur
          samples all of it — that moving colour under the stock is what
          makes the frosted glass read as glass rather than grey. */
-      #card-dream { position: absolute; inset: 0; pointer-events: none; overflow: hidden; }
+      /* The pastel aurora is dialled right down and desaturated so the realm
+         reads as neutral silver — just a faint cool shimmer, not a rainbow. */
+      #card-dream { position: absolute; inset: 0; pointer-events: none; overflow: hidden; opacity: 0.3; filter: saturate(0.3); }
       .cd-blob { position: absolute; border-radius: 50%; filter: blur(60px); }
       .cd-b1 {
         width: 55vmax; height: 55vmax; left: -14vmax; top: -20vmax;
@@ -1839,26 +1843,26 @@
         /* Resting shadow as a var so the arrive/ascend flashes (and the
            selection glow) can return to or build on the same light. */
         --wc-shadow:
-          inset 0 1px 0 rgba(255, 255, 255, 0.95),
-          inset 0 -16px 30px -22px rgba(var(--tier-glow), 0.7),
-          0 18px 44px -10px rgba(88, 88, 150, 0.28),
-          0 0 28px -4px rgba(var(--tier-glow), 0.4);
+          inset 0 1px 0 rgba(255, 255, 255, 0.7),
+          0 8px 22px -12px rgba(80, 86, 110, 0.34);
         /* Frame-pattern metrics (see the .wcf-* rules below); the creature
            chips override these to draw the same patterns at chip scale. */
         --fr-thick: 5px; --fr-inset: 3px; --fr-inset2: 7px;
         --fr-r1: 12px; --fr-r2: 8px;
         position: relative;
         width: 200px; flex-shrink: 0;
-        /* Diagonal glass facets; oversized so hover can sweep the sheen. */
+        /* Diagonal glass facets; oversized so hover can sweep the sheen.
+           Kept very translucent — the entities and grey hall read through the
+           stock, as in the reference. */
         background:
           linear-gradient(125deg,
-            rgba(255, 255, 255, 0.66) 0%, rgba(255, 255, 255, 0.24) 36%,
-            rgba(255, 255, 255, 0.1) 52%, rgba(255, 255, 255, 0.36) 100%);
+            rgba(255, 255, 255, 0.4) 0%, rgba(255, 255, 255, 0.14) 36%,
+            rgba(255, 255, 255, 0.06) 52%, rgba(255, 255, 255, 0.22) 100%);
         background-size: 200% 100%;
         background-position: 0% 0;
-        backdrop-filter: blur(14px) saturate(1.5);
-        -webkit-backdrop-filter: blur(14px) saturate(1.5);
-        border: 2px solid var(--tier-b);
+        backdrop-filter: blur(10px) saturate(1.2);
+        -webkit-backdrop-filter: blur(10px) saturate(1.2);
+        border: 1px solid var(--tier-b);
         border-radius: 20px;
         box-shadow: var(--wc-shadow);
         padding: 10px 10px 12px;
@@ -1999,30 +2003,41 @@
         0%, 100% { box-shadow: 0 0 6px 0 rgba(var(--pane-glow), 0.35); }
         50% { box-shadow: 0 0 13px 2px rgba(var(--pane-glow), 0.6); }
       }
+      /* The compact resource read-out at the foot of the card: cash (Ƶ), blood
+         (B), energy (W/MW/GW) and bones (b), each in its own color. */
       .wc-res {
-        margin-top: 7px; font-family: var(--font-mono); font-size: 13.5px;
-        display: flex; flex-wrap: wrap; gap: 3px 10px;
+        margin-top: 7px; font-family: var(--font-mono); font-size: 13px;
+        display: flex; flex-wrap: wrap; gap: 2px 8px;
         justify-content: center;
       }
-      .wc-res .strong { font-weight: 700; }
       .wc-res .res-cash { color: #a8861d; }
       .wc-res .res-blood { color: #b8504d; }
       .wc-res .res-power { color: #3e7fc1; }
       .wc-res .res-bones { color: #84848c; }
-      .wc-res .res-goblins { color: #4f8a55; }
-      .wc-res .res-nothing { color: #b6b6bc; font-style: italic; }
-      .wc-enter {
-        width: 100%; margin-top: 8px;
-        background: rgba(255, 255, 255, 0.45); color: #45455a;
+      /* The card's action buttons. On the big single-card views they stack at
+         the foot of the card; in the gathering they become a hover overlay (see
+         the .ct-stall-cards / .ct-hand-inline rules far below). */
+      .wc-actions { margin-top: 8px; display: flex; flex-direction: column; gap: 6px; }
+      .wc-enter, .wc-select {
+        width: 100%;
         border: 1px solid rgba(255, 255, 255, 0.85); border-radius: 12px;
         font-family: var(--font-display); font-size: 13.5px; letter-spacing: 0.14em;
         padding: 7px 4px; cursor: pointer;
         box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.9), 0 3px 12px rgba(88, 88, 150, 0.16);
         transition: box-shadow 150ms ease, border-color 150ms ease, background 150ms ease;
       }
+      .wc-enter { background: rgba(255, 255, 255, 0.45); color: #45455a; }
       .wc-enter:hover {
         background: rgba(255, 255, 255, 0.78);
         box-shadow: inset 0 1px 0 #fff, 0 4px 16px rgba(88, 88, 150, 0.24), 0 0 16px rgba(168, 160, 240, 0.35);
+      }
+      /* SELECT — the player's own cards in a trade; a green accent so it reads
+         apart from ENTER. Only shown for selectable (gathering) hand cards. */
+      .wc-select { display: none; background: rgba(150, 205, 170, 0.5); color: #235636; border-color: rgba(120, 190, 140, 0.85); }
+      .world-card.selectable .wc-select { display: block; }
+      .wc-select:hover {
+        background: rgba(160, 214, 180, 0.72);
+        box-shadow: inset 0 1px 0 #fff, 0 4px 16px rgba(80, 150, 100, 0.28), 0 0 16px rgba(120, 200, 150, 0.45);
       }
       /* Each view deals its pieces in with a small stagger (cards.ts sets
          --deal-i per element). `backwards` keeps late items invisible until
@@ -2071,9 +2086,30 @@
       }
       .ct-event.t-uncommon { --tier-c: #7aa8e2; }
       .ct-event.t-rare { --tier-c: #e2c064; }
-      /* The gathering's title carries its tier color too. */
-      .ct-event-title.t-uncommon { color: #6f9fd8; }
-      .ct-event-title.t-rare { color: #c9a43e; }
+      /* The gathering's title — the realm's masthead, flanked by ornaments,
+         with a soft subtitle below it. Carries its tier color. */
+      .ct-event-title {
+        font-family: var(--font-display);
+        font-size: clamp(18px, 2.7vh, 26px);
+        letter-spacing: 0.24em; text-transform: uppercase;
+        color: #5e616c; text-align: center;
+        display: flex; align-items: center; justify-content: center; gap: 0.9em;
+        text-shadow: 0 0 16px rgba(255, 255, 255, 0.7);
+      }
+      /* Thin hairline rules flank the title — the reference's "——— TRADE ———". */
+      .ct-event-title::before, .ct-event-title::after {
+        content: ""; width: clamp(40px, 9vw, 100px); height: 1px;
+      }
+      .ct-event-title::before { background: linear-gradient(90deg, transparent, rgba(110, 114, 128, 0.55)); }
+      .ct-event-title::after { background: linear-gradient(90deg, rgba(110, 114, 128, 0.55), transparent); }
+      /* Tier hints stay, but muted to near-neutral so nothing shouts. */
+      .ct-event-title.t-uncommon { color: #5f7591; }
+      .ct-event-title.t-rare { color: #8c7f5e; }
+      .ct-gathering-sub {
+        font-family: var(--font-body); font-size: 13px; letter-spacing: 0.16em;
+        color: #82858f; margin-top: 4px; text-align: center;
+        text-shadow: 0 0 10px rgba(255, 255, 255, 0.7);
+      }
       .ct-event { transition: box-shadow 220ms ease, transform 240ms cubic-bezier(0.2, 0.9, 0.25, 1.08), opacity 240ms ease; }
       .ct-event:hover:not(.locked) {
         box-shadow: inset 0 1px 0 #fff, 0 18px 40px -8px rgba(88, 88, 150, 0.33), 0 0 26px rgba(168, 160, 240, 0.35);
@@ -2105,29 +2141,18 @@
         text-shadow: 0 0 10px rgba(255, 255, 255, 0.9);
       }
       .ct-back:hover { color: #4a4a52; }
-      .ct-wait {
-        margin-top: 18px;
-        background: rgba(255, 255, 255, 0.3);
-        backdrop-filter: blur(8px);
-        -webkit-backdrop-filter: blur(8px);
-        border: 1px dashed rgba(150, 150, 190, 0.55); border-radius: 10px;
-        color: #8a8aa0; font-family: var(--font-display); font-size: 12px;
-        letter-spacing: 0.14em; padding: 10px 18px; cursor: pointer;
-        transition: background 200ms ease, color 200ms ease, border-color 200ms ease;
-      }
-      .ct-wait:hover { color: #4a4a52; border-color: rgba(120, 120, 170, 0.8); background: rgba(255, 255, 255, 0.55); }
       /* The gathering shows EVERY trader at once. Header (back + title) sits
          above a wrapping row of stalls; the player's hand persists below. */
       .ct-gathering-head {
         display: flex; flex-direction: column; align-items: center; gap: 2px;
       }
       .ct-gathering-head .ct-back { align-self: center; }
-      /* Stalls spread evenly across a fixed-width band so a sparse gathering
-         (two traders) reads as a wide table, not a huddle in the middle. */
+      /* Stalls spread evenly across a wide band — the screenshot's row of
+         entities filling the top, however many there are. */
       .ct-stalls {
         display: flex; flex-wrap: wrap; gap: 40px; justify-content: space-evenly;
-        align-items: flex-start; margin: 4px 0 10px;
-        width: min(1080px, 92vw);
+        align-items: flex-start; margin: 10px 0;
+        width: min(1240px, 94vw);
         transition: opacity 300ms ease;
       }
       /* A reshuffle fades only the stalls out (cards.ts then deals the fresh
@@ -2136,32 +2161,126 @@
       /* One trader: avatar, name, the want line, its deck face-up, and a
          give-button. A spent stall (deck handed over) dims and goes inert. */
       .ct-stall {
-        display: flex; flex-direction: column; align-items: center; gap: 5px;
+        display: flex; flex-direction: column; align-items: center; gap: 4px;
       }
       .ct-stall.spent { opacity: 0.42; filter: saturate(0.6); pointer-events: none; }
-      /* The want line is the trader's whole pitch — give it a touch more
-         presence than the at-a-glance lines elsewhere. */
+      /* The entity's name, spaced display caps under its avatar — the
+         screenshot's LUMEN / AERIS / VYRA masthead, in the realm's own voice. */
+      .ct-creature-name {
+        position: relative; z-index: 2;
+        font-family: var(--font-display); font-size: 16px;
+        letter-spacing: 0.18em; text-transform: uppercase;
+        color: #50535e; text-align: center; margin-top: 2px;
+        text-shadow: 0 0 12px rgba(255, 255, 255, 0.95), 0 0 22px rgba(255, 255, 255, 0.8);
+      }
+      /* The want line: the entity's pitch, set a step quieter than its name so
+         the name leads. */
       .ct-stall .ct-creature-line {
+        position: relative; z-index: 2;
         font-family: var(--font-dialogue, var(--font-display));
-        font-size: 18px; color: #5e5e6a; text-align: center;
+        font-size: 14px; color: #75777f; text-align: center;
         /* Reserve two lines so the cards below never shift as the want is
            re-typed or swaps to the shorter "too many cards". */
-        height: 2.6em; max-width: 22ch; overflow: hidden;
+        height: 2.4em; max-width: 22ch; overflow: hidden;
       }
-      .ct-stall .ct-creature-sprite { --csize: 44px; }
+      /* "offers" — a thin-ruled divider between the entity and its deck, the
+         screenshot's OFFERS label. */
+      .ct-offers-label {
+        display: flex; align-items: center; gap: 9px;
+        font-family: var(--font-display); font-size: 10px;
+        letter-spacing: 0.32em; text-transform: uppercase;
+        color: #a2a2b8; margin: 1px 0 2px;
+        text-shadow: 0 0 8px rgba(255, 255, 255, 0.9);
+      }
+      .ct-offers-label::before, .ct-offers-label::after {
+        content: ""; width: 28px; height: 1px;
+      }
+      .ct-offers-label::before { background: linear-gradient(90deg, transparent, rgba(150, 150, 190, 0.7)); }
+      .ct-offers-label::after { background: linear-gradient(90deg, rgba(150, 150, 190, 0.7), transparent); }
+      /* The entities are the centrepiece: tall, luminous white figures that
+         tower over their offer cards (the cards overlap their lower bodies via
+         the negative margin below). Brighter + a wide glow halo so they pop
+         against the grey upper hall. */
+      .ct-stall .ct-creature-sprite {
+        --csize: 296px;
+        margin-bottom: -34px;   /* close the gap so the name sits at the feet */
+        animation:
+          card-goblin-idle 1.6s steps(8) infinite,
+          ct-entity-glow 3.6s ease-in-out infinite;
+      }
+      @keyframes ct-entity-glow {
+        0%, 100% { filter: brightness(0) invert(0.97) drop-shadow(0 0 30px rgba(196, 210, 255, 0.8)); }
+        50%      { filter: brightness(0) invert(1) drop-shadow(0 0 50px rgba(150, 192, 255, 1)); }
+      }
       /* The trader's deck, face-up and a size down so a few stalls read on
          one screen. Wraps for the rare exchange's deeper hands. */
+      /* No container — the offer cards float freely beneath their entity, as
+         in the reference, with a clear gap so each reads as its own card. */
       .ct-stall-cards {
-        display: flex; flex-wrap: wrap; gap: 10px; justify-content: center;
-        margin-top: 2px; padding: 6px 12px;
-        background: linear-gradient(160deg, rgba(255, 255, 255, 0.32), rgba(255, 255, 255, 0.1));
-        backdrop-filter: blur(10px) saturate(1.3);
-        -webkit-backdrop-filter: blur(10px) saturate(1.3);
-        border: 1px solid rgba(255, 255, 255, 0.55);
-        border-radius: 16px;
-        box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.7), 0 10px 28px -10px rgba(88, 88, 150, 0.22);
+        display: flex; flex-wrap: wrap; gap: 18px; justify-content: center;
+        align-items: flex-start; margin-top: 2px;
       }
-      .ct-stall-cards .world-card { width: 124px; }
+      .ct-stall-cards .world-card { width: 94px; }
+      /* Gathering cards stay sparse and UNIFORM: name, ONE preview window, and
+         a compact resource line at the foot. The other scene panes and the
+         action buttons live behind a hover overlay, so every card is the same
+         short size and the whole gathering fits one screen. */
+      .ct-stall-cards .wc-res,
+      .ct-hand-inline .wc-res { font-size: 10px; gap: 1px 6px; margin-top: 4px; }
+      .ct-stall-cards .wc-prev ~ .wc-prev,
+      .ct-hand-inline .wc-prev ~ .wc-prev { display: none; }
+      /* Every gathering card is the SAME fixed height — a flex column whose
+         preview (or the key glyph) flexes to fill the space left after the
+         name and any button. So a world card (name + art + INSPECT) and the
+         gatekeeper's key card (name + key, no button) stand exactly level. */
+      .ct-stall-cards .world-card,
+      .ct-hand-inline .world-card {
+        display: flex; flex-direction: column; height: 170px; box-sizing: border-box;
+      }
+      .ct-stall-cards .wc-prevs,
+      .ct-hand-inline .wc-prevs { flex: 1 1 auto; min-height: 0; }
+      .ct-stall-cards .wc-prev,
+      .ct-hand-inline .wc-prev { flex: 1 1 auto; height: 100%; min-height: 0; object-fit: cover; }
+      .ct-stall-cards .wc-key-art,
+      .ct-hand-inline .wc-key-art { min-height: 0; margin: 6px 6px 4px; }
+      /* Compact card chrome: a small two-line name, a small tier tag, and a
+         slim button — so the cards read short like the reference's, and a
+         long wrapping name doesn't tower over a short one. */
+      .ct-stall-cards .wc-name,
+      .ct-hand-inline .wc-name {
+        font-size: 12px; line-height: 1.14;
+        /* Two lines max, ellipsis on overflow — uniform height, never a
+           mid-word clip. */
+        display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical;
+        overflow: hidden; min-height: 2.3em;
+      }
+      .ct-stall-cards .wc-tier,
+      .ct-hand-inline .wc-tier { font-size: 9px; }
+      .ct-stall-cards .world-card,
+      .ct-hand-inline .world-card { padding: 6px 7px 7px; }
+      /* In the gathering the action buttons (ENTER / INSPECT / SELECT) hide
+         until the card is hovered, then fade in centred over the art — the card
+         itself is NOT dimmed or blurred; each button just carries its own drop
+         shadow so it reads over whatever is beneath it. */
+      .ct-stall-cards .wc-actions,
+      .ct-hand-inline .wc-actions {
+        position: absolute; inset: 0; margin: 0;
+        display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 6px;
+        padding: 8px;
+        opacity: 0; pointer-events: none;
+        transition: opacity 150ms ease;
+        z-index: 6;
+      }
+      .ct-stall-cards .world-card:hover .wc-actions,
+      .ct-hand-inline .world-card:hover .wc-actions { opacity: 1; pointer-events: auto; }
+      .ct-stall-cards .wc-enter, .ct-stall-cards .wc-select,
+      .ct-hand-inline .wc-enter, .ct-hand-inline .wc-select {
+        width: auto; min-width: 62px; margin-top: 0;
+        font-size: 11px; padding: 6px 12px; letter-spacing: 0.12em;
+        box-shadow: 0 4px 12px rgba(18, 22, 34, 0.5), 0 1px 4px rgba(18, 22, 34, 0.45), inset 0 1px 0 rgba(255, 255, 255, 0.9);
+      }
+      .ct-stall-cards .wc-enter, .ct-hand-inline .wc-enter { background: rgba(255, 255, 255, 0.92); }
+      .ct-stall-cards .wc-select, .ct-hand-inline .wc-select { background: rgba(151, 206, 171, 0.92); }
       .ct-creature-sprite {
         --csize: 110px;
         --crow: 4;
@@ -2184,24 +2303,6 @@
         50%      { filter: brightness(0) invert(0.86) drop-shadow(0 4px 20px rgba(130, 180, 240, 0.8)); }
       }
       .ct-creature-line { font-family: var(--font-mono); font-size: 13px; color: #9a9aa2; }
-      /* The stall's give-button: greyed until the player's hand selection
-         exactly satisfies this trader's want, then a clickable green pulse —
-         hand over the picked card(s), receive the trader's whole deck. */
-      .ct-give {
-        margin-top: 4px; width: 100%;
-        border-radius: 12px; border: 1px solid rgba(255, 255, 255, 0.6);
-        background: rgba(255, 255, 255, 0.3);
-        font-family: var(--font-display); font-size: 13px; letter-spacing: 0.1em;
-        padding: 8px 10px; color: #9a9aa2; cursor: not-allowed;
-        transition: opacity 200ms ease, background 200ms ease, border-color 200ms ease, color 200ms ease;
-      }
-      .ct-give.ok {
-        cursor: pointer; color: #2e7a40;
-        background: rgba(255, 255, 255, 0.6);
-        border-color: rgba(110, 190, 130, 0.85);
-        animation: ctv-pulse 1.6s ease-in-out infinite;
-      }
-      .ct-give.ok:hover { background: rgba(255, 255, 255, 0.85); }
       /* The requirement inside a trader's typed line — the rarity, count, or
          resource threshold — reads bold and a shade darker. */
       .ct-stall .ct-creature-line b { color: #3a3a48; font-weight: 700; }
@@ -2210,20 +2311,15 @@
         content: "▍"; margin-left: 2px; color: #8a8a94; opacity: 0.8;
         animation: intro-caret 0.9s steps(2, end) infinite;
       }
-      /* "choose cards to trade" — floats above the hand whenever nothing is
-         picked, fading gently to draw the eye downward. */
+      /* The hand tray's subtitle — sits under the "your worlds" caption while
+         nothing is picked, fading gently. */
       .ct-choose-prompt {
-        font-family: var(--font-display); font-size: 26px; letter-spacing: 0.14em;
-        color: #6a6a86; text-shadow: 0 0 18px rgba(255, 255, 255, 0.95);
+        font-family: var(--font-body); font-size: 13px; letter-spacing: 0.16em;
+        color: #9a9ab0; text-shadow: 0 0 12px rgba(255, 255, 255, 0.9);
         margin: 0 0 4px; pointer-events: none;
         animation: ct-choose-pulse 2.4s ease-in-out infinite;
       }
       @keyframes ct-choose-pulse { 0%, 100% { opacity: 0.55; } 50% { opacity: 1; } }
-      /* The reshuffle button, pinned to the gathering's top-right corner
-         (the stage is the positioned ancestor). */
-      .ct-wait-corner {
-        position: absolute; top: 12px; left: 16px; margin: 0; z-index: 5;
-      }
       /* The player's hand: its own layer pinned to the realm's bottom edge,
          outside #card-stage, so view swaps never fade or re-deal it. Empty
          space passes clicks through to the stage beneath. */
@@ -2246,10 +2342,12 @@
         outline-offset: 2px;
         box-shadow: 0 0 18px rgba(80, 190, 110, 0.45);
       }
-      /* The gathering packs the stalls plus the hand on one screen as a single
-         vertically-centred block. `safe center` keeps it top-aligned (and so
-         scrollable) when a deep gathering overflows the viewport. */
-      #card-stage.gathering-view { padding: 0.3vh 16px 0.3vh; gap: 2px; justify-content: safe center; }
+      /* The gathering as two horizontal bands (the screenshot's shape): the
+         masthead + entities fill the top, the hand tray is pushed to the
+         bottom (margin-top:auto below). Scrolls when a deep gathering
+         overflows. */
+      #card-stage.gathering-view { padding: 2.4vh 16px 2vh; gap: 4px; justify-content: flex-start; }
+      #card-stage.gathering-view > .ct-hand-inline { margin-top: auto; }
       /* The table view gets the same treatment: its content floats down to
          sit just above the hand. */
       #card-stage.table-view > .ct-caption:first-child { margin-top: auto; }
@@ -2258,19 +2356,86 @@
          collection scrolls with the traders instead of overlapping them), so
          the fixed bottom hand layer is hidden here. */
       #card-stage.gathering-view + #card-hand { display: none; }
+      /* The hand, framed as a titled tray — the screenshot's "YOUR CARDS"
+         panel: a pane of the same frosted glass holding the caption, the
+         subtitle, and the player's cards. */
       .ct-hand-inline {
-        display: flex; flex-direction: column; align-items: center; gap: 6px;
-        margin-top: 2px;
+        display: flex; flex-direction: column; align-items: center; gap: 4px;
+        margin-top: 6px; padding: 10px 32px 14px;
+        width: min(1040px, 82vw);
+        /* A single faint rounded outline on the bright floor — not a filled
+           panel (the reference's "YOUR CARDS" tray). */
+        background: rgba(255, 255, 255, 0.06);
+        border: 1px solid rgba(255, 255, 255, 0.55); border-radius: 20px;
+        box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.5);
+      }
+      /* The tray's "your worlds" header wears the same ornaments as the
+         gathering masthead. */
+      .ct-hand-inline .ct-caption { margin-top: 0; }
+      .ct-hand-inline .ct-caption::before, .ct-hand-inline .ct-caption::after {
+        content: "◇"; margin: 0 0.7em; font-size: 0.85em; color: #b0a0d6; opacity: 0.7;
       }
       .ct-hand-inline .ct-cards {
         display: flex; flex-wrap: wrap; gap: 14px; justify-content: center;
-        max-width: 1100px;
+        max-width: 1100px; margin-top: 2px;
       }
-      .ct-hand-inline .world-card { width: 144px; }
+      .ct-hand-inline .world-card { width: 94px; }
       .ct-hand-inline .world-card.selected {
         outline: 2px solid rgba(110, 190, 130, 0.9); outline-offset: 2px;
         box-shadow: 0 0 18px rgba(80, 190, 110, 0.45);
       }
+      /* The selection badge: a soft disc with a check, centered over a picked
+         card (the screenshot's tick). A real child element, hidden until the
+         card is .selected, so it never collides with the frame pseudo-elements
+         traded cards carry. */
+      .wc-check { display: none; }
+      .world-card.selected > .wc-check {
+        display: flex; align-items: center; justify-content: center;
+        position: absolute; top: 50%; left: 50%;
+        width: 46px; height: 46px; margin: -23px 0 0 -23px;
+        border-radius: 50%;
+        background: rgba(70, 92, 76, 0.86);
+        box-shadow: 0 6px 16px rgba(40, 60, 45, 0.4), inset 0 1px 0 rgba(255, 255, 255, 0.5);
+        z-index: 5; pointer-events: none;
+        animation: ct-check-pop 240ms cubic-bezier(0.2, 0.9, 0.3, 1.5);
+      }
+      .world-card.selected > .wc-check::before {
+        content: "✓"; color: #fff; font-size: 24px; line-height: 1;
+        font-family: var(--font-body); text-shadow: 0 1px 3px rgba(0, 0, 0, 0.25);
+      }
+      @keyframes ct-check-pop { from { opacity: 0; transform: scale(0.4); } }
+      /* Each trader's own CONFIRM TRADE button, beneath its offer cards. Inert
+         grey until the pick satisfies THAT trader's want, then a lit green
+         primary — one per trader, so the player picks who to trade with. */
+      .ct-confirm {
+        margin: 9px auto 0; width: 100%; max-width: 230px;
+        display: flex; justify-content: center; align-items: center;
+        padding: 8px 16px;
+        background: rgba(255, 255, 255, 0.14);
+        border: 1px solid rgba(255, 255, 255, 0.55); border-radius: 12px;
+        backdrop-filter: blur(8px); -webkit-backdrop-filter: blur(8px);
+        color: #80828c; cursor: not-allowed;
+        box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.5);
+        transition: background 200ms ease, border-color 200ms ease, box-shadow 200ms ease, color 200ms ease;
+      }
+      .ct-confirm.ok {
+        cursor: pointer; color: #2f6b42;
+        background: rgba(255, 255, 255, 0.42);
+        border-color: rgba(118, 192, 142, 0.85);
+        box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.7), 0 0 22px rgba(110, 190, 130, 0.4);
+        animation: ctv-pulse 1.8s ease-in-out infinite;
+      }
+      .ct-confirm.ok:hover { background: rgba(255, 255, 255, 0.62); }
+      .ct-confirm-label {
+        font-family: var(--font-display); font-size: 13px;
+        letter-spacing: 0.18em; text-transform: uppercase;
+      }
+      /* The matching trader also glows green — reinforcing who this button
+         trades with. */
+      .ct-stall.matches .ct-creature-name {
+        color: #2f6b42; text-shadow: 0 0 16px rgba(110, 190, 130, 0.65), 0 0 8px rgba(255, 255, 255, 0.9);
+      }
+      .ct-stall.matches .wc-prev { box-shadow: 0 0 0 2px rgba(110, 190, 130, 0.7), 0 1px 6px rgba(88, 88, 150, 0.25); }
       @keyframes ctv-pulse {
         0%, 100% { box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.9), 0 0 14px rgba(80, 190, 110, 0.25); }
         50% { box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.9), 0 0 26px 4px rgba(80, 190, 110, 0.5); }
@@ -2278,11 +2443,12 @@
 
 
       /* ───────── Tier doors + the gatekeeper's key (cards.ts showGathering) ──
-         The locked door up to the next tier sits top-right of the gathering,
-         turned on its side. Trade the gatekeeper for that gathering's key,
-         then click the door to spend it; without the key it just rattles. A
-         key card shows the key glyph where a world preview would be. The
-         glyphs are CSS masks (game-icons.net), tinted via background-color. */
+         The locked door up to the next tier sits top-right of the gathering.
+         Trade the gatekeeper for that gathering's key, then click the door to
+         spend it; without the key it just rattles. A wooden door wears a
+         padlock while locked — the lock lifts away and fades once it opens. A
+         key card shows the golden key where a world preview would be. (Door,
+         padlock and key art are Pixabay CC0 PNGs, see assets/CREDITS.md.) */
       .ct-door {
         position: absolute; top: 14px; right: 16px; z-index: 6;
         display: flex; flex-direction: column; align-items: center; gap: 5px;
@@ -2291,17 +2457,26 @@
       }
       .ct-door:hover { transform: translateY(-2px); }
       .ct-door-glyph {
+        position: relative;
         width: 116px; height: 188px;   /* tall, upright — a proper door */
-        background-color: #7b7698;
-        -webkit-mask: var(--door-img) center / contain no-repeat;
-        mask: var(--door-img) center / contain no-repeat;
+        background: url('assets/realm/door-wood.png') center / contain no-repeat;
         filter: drop-shadow(0 6px 14px rgba(80, 70, 140, 0.3));
-        transition: background-color 200ms ease;
+        transition: filter 200ms ease;
       }
-      .ct-door-fwd .ct-door-glyph { --door-img: url('assets/realm/locked-door.svg'); }
-      .ct-door-fwd.open .ct-door-glyph { --door-img: url('assets/realm/door.svg'); background-color: #6fae7a; }
-      .ct-door:hover .ct-door-glyph { background-color: #56527a; }
-      .ct-door.open:hover .ct-door-glyph { background-color: #4f9a5e; }
+      /* The padlock hangs large and centred on the door face while locked. */
+      .ct-door-glyph::after {
+        content: ''; position: absolute; left: 50%; top: 50%;
+        width: 84px; height: 84px; transform: translate(-50%, -50%);
+        background: url('assets/realm/padlock.png') center / contain no-repeat;
+        /* A grounded cast shadow pooled below the lock, on the door face. */
+        filter: drop-shadow(0 9px 7px rgba(20, 12, 4, 0.55));
+        transition: opacity 240ms ease, transform 240ms ease;
+      }
+      /* Once open, the padlock pops off and fades away. */
+      .ct-door-fwd.open .ct-door-glyph::after {
+        opacity: 0; transform: translate(-50%, -118%) scale(0.65) rotate(-14deg);
+      }
+      .ct-door:hover .ct-door-glyph { filter: drop-shadow(0 9px 18px rgba(80, 70, 140, 0.42)) brightness(1.04); }
       .ct-door-label {
         font-family: var(--font-display); font-size: 10px; letter-spacing: 0.18em;
         text-transform: uppercase; color: #7b7698;
@@ -2333,13 +2508,11 @@
         30%, 50%, 70% { transform: translateX(-7px); }
         40%, 60% { transform: translateX(7px); }
       }
-      /* A key card: the key glyph stands in for the world preview panes. */
+      /* A key card: the antique key stands in for the world preview panes. */
       .wc-key-art {
         flex: 1; min-height: 132px; margin: 8px 6px 4px;
-        background-color: #c8a23a;
-        -webkit-mask: url('assets/realm/key.svg') center / 72% no-repeat;
-        mask: url('assets/realm/key.svg') center / 72% no-repeat;
-        filter: drop-shadow(0 3px 8px rgba(180, 150, 40, 0.35));
+        background: url('assets/realm/key-antique.png') center / contain no-repeat;
+        filter: drop-shadow(0 3px 8px rgba(90, 70, 30, 0.35));
       }
       @media (prefers-reduced-motion: reduce) {
         .ct-door.shake { animation: none; }
@@ -2377,7 +2550,7 @@
       /* Finger-sized targets on touch. */
       @media (pointer: coarse) {
         .wc-enter { padding: 11px 4px; }
-        .ct-back, .ct-wait, .ct-give { padding: 12px 20px; }
+        .ct-back { padding: 12px 20px; }
       }
       /* Still the same dream, just a still one: park the ambient drift
          (auroras, motes, levitation) for motion-sensitive players. The

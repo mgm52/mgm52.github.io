@@ -38,14 +38,14 @@
 |---|---|
 | `blood-explosion.gif` | _TODO: source unknown_ |
 
-## Realm icons
+## Realm art
 
-Trading-realm door/key glyphs from [game-icons.net](https://game-icons.net),
-licensed [CC BY 3.0](https://creativecommons.org/licenses/by/3.0/). Background
-square stripped and recoloured to the realm palette.
+Trading-realm door, padlock and key art from [Pixabay](https://pixabay.com),
+licensed under the [Pixabay Content License](https://pixabay.com/service/license-summary/)
+(free for commercial use, no attribution required — credited here anyway).
 
-| File | Icon | Author |
+| File | Source | Author |
 |---|---|---|
-| `realm/key.svg` | "key" | Lorc |
-| `realm/door.svg` | "door" | Delapouite |
-| `realm/locked-door.svg` | "locked door" | Delapouite |
+| `realm/door-wood.png` | [Pixabay #2815723](https://pixabay.com/photos/door-front-door-old-wood-glass-2815723/) | Momentmal |
+| `realm/padlock.png` | [Pixabay #3064126](https://pixabay.com/photos/to-graduate-padlock-security-3064126/) | Momentmal |
+| `realm/key-antique.png` | [Pixabay #2706188](https://pixabay.com/photos/antique-key-vintage-key-key-2706188/) | Momentmal (rotated to vertical) |
