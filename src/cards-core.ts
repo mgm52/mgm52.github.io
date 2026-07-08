@@ -50,7 +50,54 @@ export type WorldCard = {
   // want, so they can only ever be spent on that one door.
   key?: boolean;
   keyDepth?: number;
+  // A charm card: a keepsake, not a world (`data` is empty, like a key). While
+  // it sits in the player's hand, every world they ENTER is blessed with its
+  // effect (applyCharms). Charms never satisfy a want, so once held they're
+  // held for good.
+  charm?: CharmKind;
 };
+
+// ─── Charms ──────────────────────────────────────────────────────────
+// Passive keepsakes that ride in the hand: entering any owned world applies
+// every held charm's blessing to it (idempotent sticky flags, so re-entry
+// never double-applies). They're minted into trader decks — sometimes
+// procedurally, once by hand at level 2 — and can never be traded away.
+export type CharmKind = 'gold' | 'hands' | 'rain' | 'storm' | 'tiny';
+export const CHARM_KINDS: CharmKind[] = ['gold', 'hands', 'rain', 'storm', 'tiny'];
+export const CHARM_DEFS: Record<CharmKind, { name: string; line: string; glyph: string }> = {
+  gold: { name: 'the gilded charm', line: 'spawns sometimes glitter', glyph: '✺' },
+  hands: { name: 'the busy charm', line: 'goblins find their own work', glyph: '✛' },
+  rain: { name: 'the wet charm', line: 'thirsty buildings water themselves', glyph: '☂' },
+  storm: { name: 'the storm charm', line: 'the sky answers', glyph: 'ϟ' },
+  tiny: { name: 'the little charm', line: 'minotaurs come out small', glyph: '♟' },
+};
+
+export function makeCharmCard(meta: CardMeta, tier: CardTier, kind: CharmKind): WorldCard {
+  return {
+    id: meta.nextId++,
+    name: CHARM_DEFS[kind].name,
+    tier,
+    data: '',
+    resources: { money: 0, blood: 0, dragonBone: 0 },
+    charm: kind,
+  };
+}
+
+// Bless a world with every charm in the hand. All effects are sticky unlock
+// flags the sim already understands (generated worlds set the same ones), so
+// applying them on every entry is safe.
+export function applyCharms(st: GameState, hand: WorldCard[]): void {
+  for (const c of hand) {
+    if (!c.charm) continue;
+    switch (c.charm) {
+      case 'gold': st.goldgoblinsEnabled = true; break;
+      case 'hands': st.autoAssignEnabled = true; break;
+      case 'rain': st.autoAssignEnabled = true; st.autoWaterEnabled = true; break;
+      case 'storm': st.lightningUnlocked = true; break;
+      case 'tiny': st.tinytaurUnlocked = true; break;
+    }
+  }
+}
 
 // ─── Trader wants ────────────────────────────────────────────────────
 // A creature advertises ONE want — the worlds it will take. Hand it the
@@ -76,7 +123,8 @@ export function wantResAmount(res: 'money' | 'blood' | 'dragonBone' | 'power', c
 export function cardQualifies(w: Want, card: WorldCard): boolean {
   // A key isn't a world — it can't be handed to any trader (only spent on a
   // door), so it never satisfies a want, not even an open "any one world".
-  if (card.key) return false;
+  // Charms are keepsakes, likewise never tradeable.
+  if (card.key || card.charm) return false;
   if (w.kind === 'any') return true;
   if (w.kind === 'tier') return card.tier === w.tier;
   return wantResAmount(w.res, card) >= w.amount;
@@ -94,6 +142,15 @@ export function wantSatisfiableBy(w: Want, hand: WorldCard[]): boolean {
 // must match — you hand over precisely the cards the want names, no more.
 export function wantSatisfiedBy(w: Want, offered: WorldCard[]): boolean {
   return offered.length === w.count && offered.every((c) => cardQualifies(w, c));
+}
+
+// A trade must never strip the player of every actual world — handing the
+// last one to a gatekeeper for a key (which can't be traded back) would
+// soft-lock the realm. Legal only if, once the given cards leave and the
+// trader's deck arrives, at least one non-key, non-charm world remains.
+export function tradeKeepsAWorld(hand: WorldCard[], given: WorldCard[], received: WorldCard[]): boolean {
+  const givenIds = new Set(given.map((c) => c.id));
+  return hand.filter((c) => !givenIds.has(c.id)).concat(received).some((c) => !c.key && !c.charm);
 }
 
 // The trader's advertised line, split into segments — the `b` (bold) ones are
@@ -184,6 +241,14 @@ export type CardMeta = {
   // border (home); spending the gatekeeper's key at salon d raises it to d+1.
   // Absent on metas saved before the chain went endless.
   unlockedDepth?: number;
+  // How many times the player has reset the chain back to level 1 (depth 0).
+  // 0/absent means the opening hand-authored chain is still up — levels 1–3
+  // pre-set, level 3 a deliberate dead end. From the first reset onward every
+  // salon rolls procedurally.
+  resets?: number;
+  // The reset sigil has been introduced (the player has stood in the level-3
+  // dead end). Once true it shows in every salon.
+  resetSeen?: boolean;
   // Per-playthrough entropy mixed into every gathering roll. Without it the
   // event RNG keyed on nextId alone, and nextId is identical for every
   // player at the moment the tables are first dealt — so everyone met the
@@ -815,14 +880,18 @@ export function makeSandboxWorld(taskIds: string[]): GameState {
 // A salon seats a few traders, all on screen at once; every trader advertises
 // ONE want and, satisfied, gives its WHOLE deck for the card(s) the want
 // names. The way the collection grows is finding a want you can meet. The
-// salons form an ENDLESS chain: salon 0 is the gentle soft border (home),
-// every salon after it is procedurally rolled, and each but the way you came
-// holds a gatekeeper whose key opens the locked door onward to the next,
-// freshly generated salon. Every salon's opener keeps an easy want so the
-// player is never hard-locked; for everything else there's the dev reshuffle.
+// salons form an ENDLESS chain: salon 0 is the gentle soft border (home,
+// level 1 — the player's level is depth + 1, climbing one per door), and each
+// salon but the way you came holds a gatekeeper whose key opens the locked
+// door onward to the next. Until the player's first reset the chain is
+// hand-authored (makeHardcodedSalon: levels 1–3, level 3 a dead end); after
+// it, every salon rolls procedurally. Every procedural salon's opener keeps
+// an easy want so the player is never hard-locked; for everything else
+// there's the reset (and the dev reshuffle).
 
 // The salon depth that holds the player's stolen origin world — the fixed
-// "win your world back" rung along the otherwise-endless chain.
+// "win your world back" rung along the otherwise-endless chain. Pre-reset
+// this is the level-3 dead end: the world sits there visible and unwinnable.
 export const STOLEN_DEPTH = 2;
 
 // Salons don't escalate (for now): the soft border is the gentle bootstrap
@@ -885,6 +954,14 @@ export function rollCreatures(meta: CardMeta, tier: CardTier, depth: number, rng
       card.frame = frame;
       deck.push(card);
     }
+    // A picky trader sometimes tucks a charm in with its worlds — a keepsake
+    // that blesses every world its holder enters (applyCharms) and can never
+    // be traded away.
+    if (i > 0 && rng() < 0.25) {
+      const charm = makeCharmCard(meta, tier, CHARM_KINDS[Math.floor(rng() * CHARM_KINDS.length)]);
+      charm.frame = frame;
+      deck.push(charm);
+    }
     const want = rollWant(tier, rng, i === 0);
     return {
       id: creatureSeq++,
@@ -906,8 +983,80 @@ export function rollCreatures(meta: CardMeta, tier: CardTier, depth: number, rng
   return creatures;
 }
 
+// ─── The opening chain (levels 1–3) ──────────────────────────────────
+// Until the player's first reset the chain is hand-authored. Levels 1 and 2
+// are a curated on-ramp (level 2's opener carries the charm that introduces
+// charms). Level 3 is a wall on purpose: every want there — the trillion, the
+// rare asks — is impossible before the first reset, because no rare ever
+// circulates in the opening chain (the only rare in existence, the stolen
+// origin world, sits in this very salon's opener deck: visible, unwinnable)
+// and nobody grinds to Ƶ1e12. The dead end is what introduces the reset.
+export const HARDCODED_LEVELS = 3;
+
+export function makeHardcodedSalon(meta: CardMeta, depth: number, rng: () => number, taskIds: string[], manualPool: ManualWorld[] = []): TradeEvent {
+  const tier = salonTierForDepth(depth);
+  const mint = (t: CardTier, frame: number, n: number): WorldCard[] => {
+    const deck: WorldCard[] = [];
+    for (let k = 0; k < n; k++) {
+      const card = mintDeckCard(meta, t, rng, taskIds, manualPool);
+      card.frame = frame;
+      deck.push(card);
+    }
+    return deck;
+  };
+  const gatekeeper = (want: Want): Creature => ({
+    id: creatureSeq++,
+    name: 'the gatekeeper',
+    want,
+    deck: [makeKeyCard(meta, tier, depth + 1)],
+  });
+  let creatures: Creature[];
+  if (depth === 0) {
+    // Level 1: the current soft border, pinned — the open-want doubler and a
+    // gatekeeper who takes any world.
+    creatures = [
+      { id: creatureSeq++, name: 'the pale one', want: { kind: 'any', count: 1 }, deck: mint('common', FRAME_BASE.common, 2), frame: FRAME_BASE.common },
+      gatekeeper({ kind: 'any', count: 1 }),
+    ];
+  } else if (depth === 1) {
+    // Level 2: a ladder the player climbs with the single common they arrive
+    // holding — tall friend turns it into an uncommon (plus the gilded charm,
+    // introducing charms), the collector doubles that uncommon, and the spare
+    // buys the gatekeeper's key. The collector MUST be the growing trade
+    // here: both gatekeepers cost a world, and the pale one's +1 alone can't
+    // fund them both (see the beatability test in tests/cards-core.test.ts —
+    // every legal trade order reaches level 3).
+    const openerDeck = mint('uncommon', FRAME_BASE.uncommon, 1);
+    const charm = makeCharmCard(meta, tier, 'gold');
+    charm.frame = FRAME_BASE.uncommon;
+    openerDeck.push(charm);
+    creatures = [
+      { id: creatureSeq++, name: 'tall friend', want: { kind: 'tier', tier: 'common', count: 1 }, deck: openerDeck, frame: FRAME_BASE.uncommon },
+      { id: creatureSeq++, name: 'the collector', want: { kind: 'tier', tier: 'uncommon', count: 1 }, deck: mint('uncommon', FRAME_BASE.uncommon + 1, 2), frame: FRAME_BASE.uncommon + 1 },
+      gatekeeper({ kind: 'any', count: 1 }),
+    ];
+  } else {
+    // Level 3: the wall. The magistrate holds the stolen origin world
+    // (generateEvents seats it in this opener's deck) behind a fortune nobody
+    // has; the others want rare worlds that don't circulate yet. Even the
+    // gatekeeper — so the door onward never opens, and the only way forward
+    // is the reset this room introduces.
+    creatures = [
+      { id: creatureSeq++, name: 'the magistrate', want: { kind: 'resource', res: 'money', amount: 1_000_000_000_000, count: 1 }, deck: mint('uncommon', FRAME_BASE.uncommon, 1), frame: FRAME_BASE.uncommon },
+      { id: creatureSeq++, name: 'the white knuckle', want: { kind: 'tier', tier: 'rare', count: 3 }, deck: mint('uncommon', FRAME_BASE.uncommon + 1, 2), frame: FRAME_BASE.uncommon + 1 },
+      gatekeeper({ kind: 'tier', tier: 'rare', count: 1 }),
+    ];
+  }
+  return { id: depth + 1, depth, name: salonName(meta.seed ?? 0, depth), tier, creatures };
+}
+
 // Roll a single salon at a given depth (its name, tier, traders + gatekeeper).
+// Before the first reset the opening levels come from the hand-authored chain;
+// after it (or past level 3) everything is procedural.
 export function makeSalon(meta: CardMeta, depth: number, rng: () => number, taskIds: string[], manualPool: ManualWorld[] = []): TradeEvent {
+  if ((meta.resets ?? 0) === 0 && depth < HARDCODED_LEVELS) {
+    return makeHardcodedSalon(meta, depth, rng, taskIds, manualPool);
+  }
   const tier = salonTierForDepth(depth);
   return {
     id: depth + 1,
@@ -927,10 +1076,24 @@ export function generateEvents(meta: CardMeta, stolen: WorldCard | null, taskIds
   for (let depth = 0; depth <= STOLEN_DEPTH; depth++) {
     events.push(makeSalon(meta, depth, rng, taskIds, manualPool));
   }
-  // The stolen origin card waits at the fixed stolen-world salon, on its
-  // easy-want opener so it's the gentlest rung to win the world back from.
+  // The stolen origin card waits at the fixed stolen-world salon, in its
+  // opener's deck. Pre-reset that opener is the level-3 magistrate and its
+  // want is impossible — the world is a taunt; after the first reset the
+  // procedural opener keeps the easy want, so it's winnable at last.
   if (stolen) events[STOLEN_DEPTH].creatures[0].deck.unshift(stolen);
   return events;
+}
+
+// The reset: back to level 1, every salon refreshed, every door locked again.
+// The player's hand is untouched — only the chain resets. Introduced by the
+// level-3 dead end; the first reset is also the moment the chain goes
+// properly procedural (resets leaves 0), so the wall never comes back. The
+// stolen origin world, if still untraded, rides into the fresh chain.
+export function resetChain(meta: CardMeta, taskIds: string[], manualPool: ManualWorld[] = []): void {
+  const origin = meta.events?.flatMap((e) => e.creatures).flatMap((c) => c.deck).find((c) => c.origin) ?? null;
+  meta.resets = (meta.resets ?? 0) + 1;
+  meta.unlockedDepth = 0;
+  meta.events = generateEvents(meta, origin, taskIds, manualPool);
 }
 
 // The reshuffle: this salon ends and a fresh one at the same depth arrives —

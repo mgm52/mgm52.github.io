@@ -111,6 +111,18 @@ function unlockAudio(): void {
   if (audioCtx && audioCtx.state !== 'running') void audioCtx.resume();
 }
 
+// A card-world hop reloads the page mid-session: the departing page had its
+// user gesture, but the fresh one hasn't. Optimistically ask for the context
+// back — Chrome grants it once the site has enough media engagement — so the
+// arrival cues can land; where the browser says no they simply stay silent
+// until the next real gesture.
+export function tryResumeAudioAfterHop(): void {
+  if (!audioCtx) return;
+  audioCtx.resume().then(() => {
+    if (audioCtx?.state === 'running') gestureSeen = true;
+  }).catch(() => { /* blocked — silent until a real gesture */ });
+}
+
 // ─── Ghostly reverb send ────────────────────────────────────────────
 // A shared effects bus for sounds that should read as coming from somewhere
 // far off in the underworld: input → lowpass (distance eats the highs) →

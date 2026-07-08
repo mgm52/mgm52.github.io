@@ -20,17 +20,18 @@
 // generation) live DOM-free in cards-core.ts, where the unit tests can
 // reach them; this file is the presentation + persistence half.
 
-import { playSound, type SoundName } from './audio';
+import { playSound, tryResumeAudioAfterHop, type SoundName } from './audio';
 import { BUILDING_DEFS, BuildingKind, CELL, HELL, SPACE, WORLD } from './config';
 import { getOptions } from './options';
 import { clearSave, getRawSave, saveGame, setRawSave } from './save';
 import { GameState, computePlayBounds, isInPlayCell } from './state';
 import { ALL_TASK_IDS } from './ui';
 import {
-  CardMeta, CardResources, CardTier, Creature, FRAME_BASE, ManualWorld,
-  TradeEvent, Want, WorldCard, cardPower, decodeWorld, encodeWorld,
-  generateEvents, makeCard, makeKeyCard, makeSalon, mulberry32, regenerateEvent,
-  salonName, sceneStructureCounts, WantSeg, wantSatisfiedBy, wantSegments,
+  CardMeta, CardResources, CardTier, CHARM_DEFS, Creature, FRAME_BASE,
+  HARDCODED_LEVELS, ManualWorld, TradeEvent, Want, WorldCard, applyCharms,
+  cardPower, decodeWorld, encodeWorld, generateEvents, makeCard, makeKeyCard,
+  makeSalon, mulberry32, regenerateEvent, resetChain, salonName,
+  sceneStructureCounts, tradeKeepsAWorld, WantSeg, wantSatisfiedBy, wantSegments,
 } from './cards-core';
 
 const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
@@ -381,6 +382,9 @@ function hopWhite(): HTMLElement {
 async function enterWorld(meta: CardMeta, card: WorldCard, cardEl?: HTMLElement): Promise<void> {
   const st = decodeWorld(card.data);
   if (!st) { realmSound('error'); return; }
+  // Every charm in the hand blesses the world on the way in (sticky flags, so
+  // repeat entries never stack). Spectated worlds are deliberately untouched.
+  applyCharms(st, meta.cards);
   // Stash the outer post-finale save verbatim, then write the card's world
   // into the slot. Only once the slot has verifiably changed does the meta
   // mark us inside the card — if the write silently failed (storage full),
@@ -462,8 +466,11 @@ async function leaveSpectate(): Promise<void> {
   const app = document.getElementById('app');
   const white = hopWhite();
   white.style.transition = 'opacity 680ms ease-in';
+  document.body.classList.add('card-hop-out');
   app?.classList.add('card-exit-zoom');
   requestAnimationFrame(() => { white.style.opacity = '1'; });
+  // The landing thunk as the white takes over — the exit cue's third beat.
+  window.setTimeout(() => realmSound('place', 0.7, 0.5), 500);
   await sleep(760);
   try { localStorage.removeItem(SPECTATE_KEY); } catch { /* no-op */ }
   const outer = localStorage.getItem(OUTER_KEY);
@@ -482,13 +489,18 @@ async function leaveWorld(state: GameState): Promise<void> {
   if (!meta || meta.activeCardId === null) return;
   markCardHop();
   // The pull-back: the whole world recedes to a point as the white takes
-  // over — the finale's own exit, in miniature. The state is serialized
-  // AFTER the zoom so the final second of play still makes it onto the card.
+  // over — the finale's own exit, in miniature. The fixed chrome (border,
+  // way-out button) dissolves alongside it (body.card-hop-out). The state is
+  // serialized AFTER the zoom so the final second of play still makes it
+  // onto the card.
   const app = document.getElementById('app');
   const white = hopWhite();
   white.style.transition = 'opacity 680ms ease-in';
+  document.body.classList.add('card-hop-out');
   app?.classList.add('card-exit-zoom');
   requestAnimationFrame(() => { white.style.opacity = '1'; });
+  // The landing thunk as the white takes over — the exit cue's third beat.
+  window.setTimeout(() => realmSound('place', 0.7, 0.5), 500);
   await sleep(760);
   const card = meta.cards.find((c) => c.id === meta.activeCardId);
   if (card) {
@@ -583,18 +595,43 @@ export function setupCardWorldChrome(state: GameState, arriving = false): void {
     white.style.transition = 'none';
     white.style.opacity = '1';
     app?.classList.add('card-enter-zoom');
-    // Two frames so the scaled-down start commits before the release.
-    requestAnimationFrame(() => {
+    // The element white now owns the screen — the pre-paint reload cover
+    // (html.hop, stamped by index.html's inline script) hands off to it.
+    document.documentElement.classList.remove('hop');
+    // The departing page carried the click; ask for the audio context back so
+    // the arrival cue below can land (silent where the browser declines).
+    tryResumeAudioAfterHop();
+    // Hold on white until the world has actually RENDERED — main.ts calls
+    // releaseCardWorldArrival() right after the first painted frame, so the
+    // zoom always reveals a live world, never a blank canvas mid-boot. The
+    // timer is a safety net: a stalled boot must not strand the player here.
+    pendingArrival = () => {
+      pendingArrival = null;
+      // The world exhales as it swells out of the white.
+      playSound('online', 0.4, 0.55, true);
+      window.setTimeout(() => playSound('place', 0.5, 0.6, true), 620);
+      // Two frames so the scaled-down start commits before the release.
       requestAnimationFrame(() => {
-        app?.classList.add('card-enter-zoom-go');
-        white.style.transition = 'opacity 900ms ease-out';
-        white.style.opacity = '0';
+        requestAnimationFrame(() => {
+          app?.classList.add('card-enter-zoom-go');
+          white.style.transition = 'opacity 1050ms ease-out 80ms';
+          white.style.opacity = '0';
+        });
       });
-    });
-    window.setTimeout(() => {
-      app?.classList.remove('card-enter-zoom', 'card-enter-zoom-go');
-    }, 1000);
+      window.setTimeout(() => {
+        app?.classList.remove('card-enter-zoom', 'card-enter-zoom-go');
+      }, 1600);
+    };
+    window.setTimeout(releaseCardWorldArrival, 4000);
   }
+}
+
+// The arrival zoom, parked until the destination world has painted its first
+// frame (setupCardWorldChrome arms it; main.ts fires it right after the first
+// render). Idempotent — the safety timeout and the frame hook can both call.
+let pendingArrival: (() => void) | null = null;
+export function releaseCardWorldArrival(): void {
+  pendingArrival?.();
 }
 
 // ─── Card previews ───────────────────────────────────────────────────
@@ -945,6 +982,25 @@ function buildCardEl(card: WorldCard, opts: CardElOpts = {}): HTMLElement {
     if (keyActs) keyEl.appendChild(keyActs);
     return keyEl;
   }
+  // A charm card: an amulet in place of the world panes. It can't be entered,
+  // selected, or traded — it just sits in the hand, blessing every world the
+  // player dives into — so it carries no action buttons at all.
+  if (card.charm) {
+    const def = CHARM_DEFS[card.charm];
+    const charmEl = document.createElement('div');
+    charmEl.className = `world-card wc-charmcard charm-${card.charm}`;
+    charmEl.dataset.cardId = String(card.id);
+    const chead = document.createElement('div');
+    chead.className = 'wc-head';
+    chead.innerHTML = '<span class="wc-tier">charm</span>';
+    charmEl.appendChild(chead);
+    const art = div('wc-charm-art');
+    art.appendChild(div('wc-charm-glyph', def.glyph));
+    charmEl.appendChild(art);
+    charmEl.appendChild(div('wc-charm-name', def.name));
+    charmEl.appendChild(div('wc-charm-line', def.line));
+    return charmEl;
+  }
   const root = document.createElement('div');
   root.className = `world-card t-${card.tier}${card.origin ? ' origin' : ''}`;
   // The trade animations find a card's element by its id. Every card wears the
@@ -1219,11 +1275,18 @@ async function runRealm(): Promise<void> {
   const realm = document.getElementById('card-realm');
   if (!realm) return;
   let meta = loadMeta();
-  // Held on white a couple of seconds before anything appears — longer for
-  // the very first arrival, shorter when returning from a card world.
-  await sleep(meta && meta.phase === 'free' ? 1200 : 2600);
+  // Held on white a beat before anything appears — long for the very first
+  // arrival, short when returning from a card world (dead white reads as a
+  // hang, not a breath).
+  await sleep(meta && meta.phase === 'free' ? 600 : 2600);
   realm.classList.add('visible');
   realmShown?.(realm);
+  // Returning from a hop the audio context is often resumable without a
+  // fresh gesture — ask, then let the realm breathe in audibly when allowed.
+  if (meta && meta.phase === 'free') {
+    tryResumeAudioAfterHop();
+    window.setTimeout(() => realmSound('online', 0.35, 0.5), 250);
+  }
   if (!meta) {
     meta = {
       v: 1,
@@ -1269,7 +1332,9 @@ function salonAtDepth(meta: CardMeta, depth: number): TradeEvent {
   const events = ensureEvents(meta);
   if (depth < events.length) return events[depth];
   for (let d = events.length; d <= depth; d++) {
-    const rng = mulberry32((((meta.seed ?? 0) ^ (d * 2246822519)) >>> 0));
+    // The reset count rides the seed so each pass down the chain deals fresh
+    // tables instead of replaying the previous cycle's salons.
+    const rng = mulberry32((((meta.seed ?? 0) ^ (d * 2246822519) ^ ((meta.resets ?? 0) * 0x85ebca6b)) >>> 0));
     events.push(makeSalon(meta, d, rng, ALL_TASK_IDS, loadManualWorlds()));
   }
   saveMeta(meta);
@@ -1482,9 +1547,11 @@ function showGathering(meta: CardMeta, ev: TradeEvent): void {
   currentGatheringDepth = ev.depth;
 
   const head = div('ct-gathering-head');
-  // The salon's name, flanked by ornaments (CSS), with a soft subtitle beneath
-  // — the realm's own "TRADE / select cards" masthead. (Navigation between
-  // salons is the pair of doors, added below, not a header button.)
+  // The salon's name, flanked by ornaments (CSS), with the player's level
+  // above it (one level per door climbed — depth + 1) and a soft subtitle
+  // beneath — the realm's own "TRADE / select cards" masthead. (Navigation
+  // between salons is the pair of doors, added below, not a header button.)
+  head.appendChild(div('ct-level', `level ${ev.depth + 1}`));
   head.appendChild(div(`ct-event-title t-${ev.tier}`, ev.name));
   head.appendChild(div('ct-gathering-sub', 'offer your worlds to the entities'));
   stage.appendChild(head);
@@ -1496,8 +1563,13 @@ function showGathering(meta: CardMeta, ev: TradeEvent): void {
   const pickedMine = new Set<number>();
   const minePicked = (): WorldCard[] => meta.cards.filter((c) => pickedMine.has(c.id));
 
-  // The hand panel's subtitle, shown while nothing is picked yet.
-  const choosePrompt = div('ct-choose-prompt', 'select the cards you want to trade');
+  // While nothing is picked the per-stall confirm buttons are all inert, so
+  // instead of a row of greyed buttons we show one big prompt floating in the
+  // gap between the traders and the hand. It's a stage child (not inside the
+  // stalls) so it centres in that gap; refreshButtons toggles it via the
+  // stage's `choosing` class.
+  const tradePrompt = div('ct-trade-prompt', 'select your cards to trade');
+  stage.appendChild(tradePrompt);
 
   // The player's hand lives INSIDE the scrollable stage (below the stalls), so
   // a big collection scrolls with the gathering instead of sitting in a fixed
@@ -1531,15 +1603,10 @@ function showGathering(meta: CardMeta, ev: TradeEvent): void {
     })();
   };
 
-  // A trade must never strip the player of every tradeable world — handing
-  // your last world to the gatekeeper for a key (which can't be traded back)
-  // would soft-lock the realm. So a trade is only allowed if, once the given
-  // cards leave and the trader's deck arrives, at least one non-key world
-  // remains in hand.
-  const keepsAWorld = (cr: Creature, given: WorldCard[]): boolean => {
-    const givenIds = new Set(given.map((c) => c.id));
-    return meta.cards.filter((c) => !givenIds.has(c.id)).concat(cr.deck).some((c) => !c.key);
-  };
+  // Never let a trade strip the player of every actual world (the rule lives
+  // DOM-free in cards-core so the beatability test exercises the real thing).
+  const keepsAWorld = (cr: Creature, given: WorldCard[]): boolean =>
+    tradeKeepsAWorld(meta.cards, given, cr.deck);
 
   // What a trader says for the current selection:
   //  - nothing / too few picked → its want, restated
@@ -1578,10 +1645,10 @@ function showGathering(meta: CardMeta, ev: TradeEvent): void {
         ref.giveBtn.disabled = !ready;
       }
     }
-    // Toggle visibility (not display) so the prompt keeps reserving its space
-    // — otherwise the height change would jolt the vertically-centred view as
-    // a card is picked/dropped.
-    choosePrompt.style.visibility = picked.length === 0 ? '' : 'hidden';
+    // Nothing picked → hide the inert confirm buttons and float the big prompt
+    // in the gap instead. The trader cards are top-anchored, so the buttons
+    // reappearing on the first pick doesn't shove them around.
+    stage.classList.toggle('choosing', picked.length === 0);
     const handRow = gatherHandRow();
     if (handRow) {
       for (const el of [...handRow.children] as HTMLElement[]) {
@@ -1715,12 +1782,12 @@ function showGathering(meta: CardMeta, ev: TradeEvent): void {
   // cards.
   const renderGatherHand = (): void => {
     handWrap.innerHTML = '';
-    // Frame header: "your worlds" caption, then the prompt subtitle beneath it,
-    // then the cards — the screenshot's titled "YOUR CARDS" tray.
+    // Frame header: a "your worlds" caption, then the cards — the screenshot's
+    // titled "YOUR CARDS" tray. (The "select your cards" call lives up in the
+    // trade band now, not here.)
     if (meta.cards.length > 0) {
       handWrap.appendChild(div('ct-caption', meta.cards.length === 1 ? 'your world' : 'your worlds'));
     }
-    handWrap.appendChild(choosePrompt);
     if (meta.cards.length > 0) {
       const cardsRow = div('ct-cards');
       for (const c of meta.cards) cardsRow.appendChild(buildHandCard(c));
@@ -1857,6 +1924,45 @@ function showGathering(meta: CardMeta, ev: TradeEvent): void {
       goToSalon(ev.depth - 1);
     });
     stage.appendChild(back);
+  }
+
+  // The reset sigil. Standing in the level-3 dead end introduces it; from
+  // then on it hangs in every salon, unexplained. Two clicks — one arms it
+  // ("sure?"), the next sends the player back to level 1 with every salon
+  // refreshed and every door locked again. The hand is kept; the first reset
+  // is also what flips the chain from the authored opening to procedural.
+  if (ev.depth >= HARDCODED_LEVELS - 1 && (meta.resets ?? 0) === 0 && !meta.resetSeen) {
+    meta.resetSeen = true;
+    saveMeta(meta);
+  }
+  if (meta.resetSeen || (meta.resets ?? 0) > 0) {
+    const sigil = div('ct-reset');
+    sigil.appendChild(div('ct-reset-glyph', '⟲'));
+    const label = div('ct-door-label', 'begin again');
+    sigil.appendChild(label);
+    let armed = false;
+    let disarm = 0;
+    sigil.addEventListener('click', () => {
+      if (tradeAnimating) return;
+      if (!armed) {
+        armed = true;
+        sigil.classList.add('arming');
+        label.textContent = 'sure?';
+        realmSound('click', 0.7, 0.8);
+        disarm = window.setTimeout(() => {
+          armed = false;
+          sigil.classList.remove('arming');
+          label.textContent = 'begin again';
+        }, 3500);
+        return;
+      }
+      window.clearTimeout(disarm);
+      realmSound('ritual', 1, 0.8);
+      resetChain(meta, ALL_TASK_IDS, loadManualWorlds());
+      saveMeta(meta);
+      swapView(() => showGathering(meta, salonAtDepth(meta, 0)));
+    });
+    stage.appendChild(sigil);
   }
 
   renderGatherHand();

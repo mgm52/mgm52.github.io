@@ -17,8 +17,8 @@ import {
   abandonCardWorldBoot, captureOriginWorld, cardWorldActive, clearCardData, consumeCardHop,
   devDealFreeCard, devRefreshCurrentTraders, devResetCardRealm, devReshuffleGatherings,
   hasCardMeta, initBuiltinWorlds,
-  isCardHopInProgress, isRealmReturnBoot, maybeStartCardRealm, onRealmShown, resetCardRealm,
-  setupCardWorldChrome, spectateActive,
+  isCardHopInProgress, isRealmReturnBoot, maybeStartCardRealm, onRealmShown,
+  releaseCardWorldArrival, resetCardRealm, setupCardWorldChrome, spectateActive,
 } from './cards';
 import { designerActive, openDesignerList, setupDesignerChrome } from './designer';
 
@@ -235,6 +235,9 @@ async function main() {
     w.style.transition = 'none';
     w.style.opacity = '1';
     document.getElementById('app')?.classList.add('finale-zoom');
+    // The white-out now owns the screen; the pre-paint reload cover
+    // (html.hop, stamped by index.html's inline script) hands off to it.
+    document.documentElement.classList.remove('hop');
   }
 
   // Start downloading/decoding the sprite sheets + building art right away,
@@ -421,6 +424,10 @@ async function main() {
     w.style.opacity = '1';
     document.getElementById('app')?.classList.add('finale-zoom');
   }
+  // Whatever branch ran, its own white owns the screen by now (or no hop was
+  // in flight at all) — drop the pre-paint reload cover if it's still up
+  // (e.g. an abandoned card-world boot falling back to a normal one).
+  document.documentElement.classList.remove('hop');
   // Dev shortcut: ?cardrealm mounts the trading-card realm immediately,
   // without playing the finale first. Flush the just-booted world into the
   // save slot first — entering a card stashes the slot as the outer world,
@@ -1721,6 +1728,10 @@ async function main() {
     requestAnimationFrame(frame);
   }
   requestAnimationFrame(frame);
+  // A card-world arrival holds on white until the world has painted; the
+  // first frame is queued now, so release the zoom right behind it (no-op on
+  // every other kind of boot).
+  requestAnimationFrame(() => requestAnimationFrame(() => releaseCardWorldArrival()));
 }
 
 main().catch((e) => {

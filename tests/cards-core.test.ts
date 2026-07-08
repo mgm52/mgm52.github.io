@@ -6,12 +6,13 @@
 
 import { describe, expect, it } from 'vitest';
 import {
-  CardMeta, CardTier, ManualWorld, MAIN_TRACK, TIER_ABOVE, TIER_RANK,
-  Want, WorldCard, cardFromManual, cardPower, cardQualifies, countQualifying,
-  decodeWorld, encodeWorld, generateEvents, generateJunkWorld, generateWeirdWorld,
-  makeCard, mintDeckCard, mulberry32, regenerateEvent, rollWant, sceneStructureCounts,
-  spicyAmount, wantLine, wantSatisfiableBy, wantSatisfiedBy, worldName,
-  makeKeyCard, makeSalon, salonName, salonTierForDepth, STOLEN_DEPTH,
+  CardMeta, CardTier, HARDCODED_LEVELS, ManualWorld, MAIN_TRACK, TIER_ABOVE,
+  TIER_RANK, Want, WorldCard, applyCharms, cardFromManual, cardPower,
+  cardQualifies, countQualifying, decodeWorld, encodeWorld, generateEvents,
+  generateJunkWorld, generateWeirdWorld, makeCard, makeCharmCard, mintDeckCard,
+  mulberry32, regenerateEvent, resetChain, rollWant, sceneStructureCounts,
+  spicyAmount, tradeKeepsAWorld, wantLine, wantSatisfiableBy, wantSatisfiedBy,
+  worldName, makeKeyCard, makeSalon, salonName, salonTierForDepth, STOLEN_DEPTH,
 } from '../src/cards-core';
 import { BUILDING_DEFS, SOUL_SIGIL } from '../src/config';
 import { GameState, cellKey, isInPlayCell } from '../src/state';
@@ -19,8 +20,10 @@ import { GameState, cellKey, isInPlayCell } from '../src/state';
 const TASK_IDS = ['earn_100', 'run_phone_farm', 'collect_blood'];
 const TIERS: CardTier[] = ['common', 'uncommon', 'rare'];
 
+// resets: 1 puts the meta past the first reset, on the procedural chain most
+// tests exercise; tests of the opening hand-authored chain set resets: 0.
 function freshMeta(): CardMeta {
-  return { v: 1, phase: 'free', nextId: 1, cards: [], events: null, activeCardId: null };
+  return { v: 1, phase: 'free', nextId: 1, cards: [], events: null, activeCardId: null, resets: 1 };
 }
 
 function card(tier: CardTier, over: Partial<WorldCard> = {}): WorldCard {
@@ -334,7 +337,7 @@ describe('world serialization', () => {
 
 describe('wantLine', () => {
   it('reads naturally for each kind of want', () => {
-    expect(wantLine({ kind: 'any', count: 1 })).toBe('i will take any one world.');
+    expect(wantLine({ kind: 'any', count: 1 })).toBe('i will take any world.');
     expect(wantLine({ kind: 'any', count: 2 })).toBe('i want any two worlds.');
     expect(wantLine({ kind: 'tier', tier: 'common', count: 1 })).toBe('i want any common world.');
     expect(wantLine({ kind: 'tier', tier: 'uncommon', count: 3 })).toBe('i want three uncommon worlds.');
@@ -416,20 +419,16 @@ describe('makeCard', () => {
     expect(junk.resources.money).toBe(3);
   });
 
-  it('records the standing generators\' potential power on a never-run card', () => {
+  it('reads no power off a never-run card: dormant generators don\'t count', () => {
     const meta = freshMeta();
     for (let seed = 0; seed < 8; seed++) {
       const c = makeCard(meta, 'common', mulberry32(seed), TASK_IDS);
       const st = decodeWorld(c.data)!;
-      // A never-run world reports what its placed generators COULD make —
-      // a card with a lone "bad power source" reads 1 W, not "nothing".
+      // The card reports the world's real output, not the theoretical sum of
+      // every generator placed — and a generated common's buildings all sit
+      // dormant (walls, the only active kind, make nothing).
       expect(c.resources.power).toBe(cardPower(st));
-      let potential = 0;
-      for (const b of st.buildings.values()) {
-        const out = BUILDING_DEFS[b.kind].powerOutput;
-        if (out > 0) potential += out;
-      }
-      expect(c.resources.power).toBe(potential);
+      expect(c.resources.power).toBe(0);
     }
   });
 
@@ -604,6 +603,7 @@ describe('endless salon chain', () => {
 describe('progression sanity (trade-only, fixed tiers)', () => {
   it('the opener\'s easy want is satisfiable from the junk hand — the first trade is never hard-locked', () => {
     const meta = freshMeta();
+    meta.resets = 0; // the intro deals the opening hand-authored chain
     const rng = mulberry32(77);
     // The goblin's trade: player holds the junk common; origin waits at III.
     const junk = makeCard(meta, 'common', rng, TASK_IDS, true);
@@ -611,8 +611,8 @@ describe('progression sanity (trade-only, fixed tiers)', () => {
     const origin = card('rare', { id: meta.nextId++, origin: true });
     meta.events = generateEvents(meta, origin, TASK_IDS);
 
-    // The common gathering's opener wants "any one world" — the lone junk
-    // common satisfies it, and handing it over yields the trader's two cards.
+    // Level 1's opener wants "any one world" — the lone junk common satisfies
+    // it, and handing it over yields the trader's two cards.
     const opener = meta.events[0].creatures[0];
     expect(wantSatisfiableBy(opener.want, meta.cards)).toBe(true);
     expect(wantSatisfiedBy(opener.want, [junk])).toBe(true);
@@ -621,17 +621,231 @@ describe('progression sanity (trade-only, fixed tiers)', () => {
     expect(junk.tier).toBe('common');
   });
 
-  it('winning the origin back: a common in hand satisfies the stolen-world opener\'s want', () => {
+  it('winning the origin back: after the first reset, a common in hand satisfies the stolen-world opener\'s want', () => {
     const meta = freshMeta();
     const stolen = card('uncommon', { id: meta.nextId++, origin: true });
     meta.events = generateEvents(meta, stolen, TASK_IDS);
     const holder = meta.events[STOLEN_DEPTH].creatures[0];
-    // The stolen-world salon's opener keeps the easy rung — a single common —
-    // so the world is always winnable back.
+    // The procedural stolen-world salon's opener keeps the easy rung — a
+    // single common — so the world is always winnable back post-reset.
     expect(holder.want).toEqual({ kind: 'tier', tier: 'common', count: 1 });
     const mine = [card('common', { id: 999 })];
     expect(wantSatisfiedBy(holder.want, mine)).toBe(true);
     expect(holder.deck.find((c) => c.origin)).toBeTruthy();
+  });
+});
+
+// ─── The opening hand-authored chain ─────────────────────────────────
+
+describe('the opening chain (levels 1–3, pre-reset)', () => {
+  function openingEvents(stolen: WorldCard | null = null): { meta: CardMeta; events: ReturnType<typeof generateEvents> } {
+    const meta = freshMeta();
+    meta.resets = 0;
+    const events = generateEvents(meta, stolen, TASK_IDS);
+    return { meta, events };
+  }
+
+  it('levels 1 and 2 are the curated on-ramp, and level 2\'s opener deals the gilded charm', () => {
+    const { events } = openingEvents();
+    expect(events.length).toBe(HARDCODED_LEVELS);
+    // Level 1: the open-want doubler plus a gatekeeper who takes anything.
+    expect(events[0].creatures[0].want).toEqual({ kind: 'any', count: 1 });
+    expect(events[0].creatures[0].deck.length).toBe(2);
+    const gate1 = events[0].creatures.find((c) => c.deck.some((d) => d.key))!;
+    expect(gate1.want).toEqual({ kind: 'any', count: 1 });
+    expect(gate1.deck[0].keyDepth).toBe(1);
+    // Level 2: the ladder — the opener turns the arriving common into an
+    // uncommon (its deck introduces charms), the collector doubles it.
+    expect(events[1].creatures[0].want).toEqual({ kind: 'tier', tier: 'common', count: 1 });
+    expect(events[1].creatures[0].deck.some((c) => c.charm === 'gold')).toBe(true);
+    expect(events[1].creatures[1].want).toEqual({ kind: 'tier', tier: 'uncommon', count: 1 });
+    expect(events[1].creatures[1].deck.filter((c) => !c.key && !c.charm).length).toBe(2);
+    const gate2 = events[1].creatures.find((c) => c.deck.some((d) => d.key))!;
+    expect(gate2.want).toEqual({ kind: 'any', count: 1 });
+    expect(gate2.deck[0].keyDepth).toBe(2);
+  });
+
+  it('is beatable from the junk hand under EVERY legal trade order — level 3 stays reachable from all states', () => {
+    const meta = freshMeta();
+    meta.resets = 0;
+    const junk = makeCard(meta, 'common', mulberry32(5), TASK_IDS, true);
+    const origin = card('rare', { id: meta.nextId++, origin: true });
+    const events = generateEvents(meta, origin, TASK_IDS);
+
+    // The realm modelled exactly as the UI enforces it: an exact-offer trade
+    // with any unspent creature in a reachable salon (want satisfied, the
+    // keep-a-world guard honoured, the whole deck received), or spending a
+    // held key on the next locked door.
+    type St = { hand: WorldCard[]; spent: number[]; unlocked: number };
+    const kindOf = (c: WorldCard) => (c.key ? `k${c.keyDepth}` : c.charm ? 'charm' : c.tier);
+    const sig = (s: St) => JSON.stringify([
+      s.hand.map(kindOf).sort(), [...s.spent].sort((a, b) => a - b), s.unlocked,
+    ]);
+    const choose = (cards: WorldCard[], n: number): WorldCard[][] => {
+      if (n === 0) return [[]];
+      if (cards.length < n) return [];
+      const [head, ...rest] = cards;
+      return [...choose(rest, n - 1).map((c) => [head, ...c]), ...choose(rest, n)];
+    };
+    const moves = (s: St): St[] => {
+      const out: St[] = [];
+      for (const ev of events) {
+        if (ev.depth > s.unlocked) continue;
+        for (const cr of ev.creatures) {
+          if (s.spent.includes(cr.id)) continue;
+          for (const given of choose(s.hand.filter((c) => cardQualifies(cr.want, c)), cr.want.count)) {
+            if (!tradeKeepsAWorld(s.hand, given, cr.deck)) continue;
+            out.push({
+              hand: [...s.hand.filter((c) => !given.includes(c)), ...cr.deck],
+              spent: [...s.spent, cr.id],
+              unlocked: s.unlocked,
+            });
+          }
+        }
+      }
+      const key = s.hand.find((c) => c.key && c.keyDepth === s.unlocked + 1);
+      if (key) out.push({ hand: s.hand.filter((c) => c !== key), spent: s.spent, unlocked: s.unlocked + 1 });
+      return out;
+    };
+
+    // Walk the ENTIRE reachable state space from the swindle's aftermath.
+    const start: St = { hand: [junk], spent: [], unlocked: 0 };
+    const seen = new Map<string, St>([[sig(start), start]]);
+    const queue = [start];
+    while (queue.length > 0) {
+      const s = queue.shift()!;
+      for (const n of moves(s)) {
+        const k = sig(n);
+        if (!seen.has(k)) { seen.set(k, n); queue.push(n); }
+      }
+    }
+
+    // Level 3 is reachable at all…
+    expect([...seen.values()].some((s) => s.unlocked >= 2)).toBe(true);
+    // …the level-3 wall never trades, whatever the player does…
+    const wallIds = new Set(events[2].creatures.map((c) => c.id));
+    for (const s of seen.values()) {
+      expect(s.spent.some((id) => wallIds.has(id))).toBe(false);
+    }
+    // …and from EVERY reachable state level 3 is still reachable: the opening
+    // chain has no dead ends, no matter the trade order.
+    const winnable = new Map<string, boolean>();
+    const canWin = (s: St): boolean => {
+      if (s.unlocked >= 2) return true;
+      const k = sig(s);
+      const hit = winnable.get(k);
+      if (hit !== undefined) return hit;
+      winnable.set(k, false); // guard (the trade graph is a DAG anyway)
+      const ok = moves(s).some(canWin);
+      winnable.set(k, ok);
+      return ok;
+    };
+    for (const s of seen.values()) {
+      expect(canWin(s)).toBe(true);
+    }
+  });
+
+  it('level 3 is the wall: no want there — the gatekeeper\'s included — is satisfiable by any pre-reset hand', () => {
+    const stolen = card('rare', { id: 1, origin: true });
+    const { events } = openingEvents(stolen);
+    const wall = events[HARDCODED_LEVELS - 1];
+    // The origin sits in the wall's opener deck: visible, unwinnable.
+    expect(wall.creatures[0].deck[0].origin).toBe(true);
+    // The best hand the opening chain could conceivably deal: a fat stack of
+    // commons and uncommons with absurdly maxed resources (no rare ever
+    // circulates before the first reset). Nothing at the wall takes any of it.
+    const best = (['common', 'uncommon'] as CardTier[]).flatMap((t, i) =>
+      Array.from({ length: 5 }, (_, k) => card(t, {
+        id: 800 + i * 10 + k,
+        resources: { money: 500_000_000, blood: 1_000_000, dragonBone: 1_000, power: 10_000_000_000 },
+      })));
+    for (const cr of wall.creatures) {
+      expect(wantSatisfiableBy(cr.want, best)).toBe(false);
+    }
+  });
+});
+
+// ─── The reset ───────────────────────────────────────────────────────
+
+describe('resetChain (begin again)', () => {
+  it('locks the doors, refreshes every salon, keeps the hand, and goes procedural', () => {
+    const meta = freshMeta();
+    meta.resets = 0;
+    meta.unlockedDepth = 2;
+    const held = [card('common', { id: 501 }), makeKeyCard(meta, 'common', 9)];
+    meta.cards = [...held];
+    const stolen = card('rare', { id: meta.nextId++, origin: true });
+    meta.events = generateEvents(meta, stolen, TASK_IDS);
+    resetChain(meta, TASK_IDS);
+    expect(meta.resets).toBe(1);
+    expect(meta.unlockedDepth).toBe(0);
+    expect(meta.cards).toEqual(held); // the hand is untouched
+    // The fresh chain is procedural — its stolen-world opener keeps the easy
+    // rung (the impossible magistrate is gone) — and still carries the origin.
+    const holder = meta.events![STOLEN_DEPTH].creatures[0];
+    expect(holder.want).toEqual({ kind: 'tier', tier: 'common', count: 1 });
+    expect(meta.events!.flatMap((e) => e.creatures).flatMap((c) => c.deck).filter((c) => c.origin).length).toBe(1);
+    // Resetting again keeps counting and keeps carrying the origin.
+    resetChain(meta, TASK_IDS);
+    expect(meta.resets).toBe(2);
+    expect(meta.events!.flatMap((e) => e.creatures).flatMap((c) => c.deck).filter((c) => c.origin).length).toBe(1);
+  });
+
+  it('an origin already won stays won — it never re-enters the refreshed chain', () => {
+    const meta = freshMeta();
+    meta.events = generateEvents(meta, null, TASK_IDS);
+    meta.cards = [card('rare', { id: 700, origin: true })];
+    resetChain(meta, TASK_IDS);
+    expect(meta.cards.length).toBe(1); // still in hand
+    const all = meta.events!.flatMap((e) => e.creatures).flatMap((c) => c.deck);
+    expect(all.some((c) => c.origin)).toBe(false);
+  });
+});
+
+// ─── Charms ──────────────────────────────────────────────────────────
+
+describe('charms', () => {
+  it('a charm is a keepsake: no world behind it, and it never satisfies any want', () => {
+    const meta = freshMeta();
+    const charm = makeCharmCard(meta, 'uncommon', 'gold');
+    expect(charm.charm).toBe('gold');
+    expect(charm.data).toBe('');
+    expect(cardQualifies({ kind: 'any', count: 1 }, charm)).toBe(false);
+    expect(cardQualifies({ kind: 'tier', tier: 'uncommon', count: 1 }, charm)).toBe(false);
+    expect(cardQualifies({ kind: 'resource', res: 'money', amount: 0, count: 1 }, charm)).toBe(false);
+  });
+
+  it('applyCharms blesses a world with every held charm\'s flag (worlds in hand ride along untouched)', () => {
+    const meta = freshMeta();
+    // A balanced common: every charm flag starts false.
+    const st = generateWeirdWorld(11, 'common', TASK_IDS, 'balanced');
+    expect(st.goldgoblinsEnabled).toBe(false);
+    applyCharms(st, [
+      card('common', { id: 1 }),
+      makeCharmCard(meta, 'common', 'gold'),
+      makeCharmCard(meta, 'common', 'rain'),
+      makeCharmCard(meta, 'common', 'storm'),
+      makeCharmCard(meta, 'common', 'tiny'),
+    ]);
+    expect(st.goldgoblinsEnabled).toBe(true);
+    expect(st.autoAssignEnabled).toBe(true); // rain implies the busy hands too
+    expect(st.autoWaterEnabled).toBe(true);
+    expect(st.lightningUnlocked).toBe(true);
+    expect(st.tinytaurUnlocked).toBe(true);
+    // And a plain hand blesses nothing.
+    const st2 = generateWeirdWorld(11, 'common', TASK_IDS, 'balanced');
+    applyCharms(st2, [card('common', { id: 2 })]);
+    expect(st2.goldgoblinsEnabled).toBe(false);
+  });
+
+  it('procedural picky traders sometimes tuck a charm into their deck', () => {
+    const meta = freshMeta(); // resets: 1 — the procedural chain
+    let found = false;
+    for (let seed = 1; seed <= 40 && !found; seed++) {
+      const salon = makeSalon(meta, 1, mulberry32(seed * 313), TASK_IDS);
+      found = salon.creatures.some((c) => c.deck.some((d) => d.charm));
+    }
+    expect(found).toBe(true);
   });
 });
 

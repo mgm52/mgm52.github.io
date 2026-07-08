@@ -2134,6 +2134,13 @@
       /* Tier hints stay, but muted to near-neutral so nothing shouts. */
       .ct-event-title.t-uncommon { color: #5f7591; }
       .ct-event-title.t-rare { color: #8c7f5e; }
+      /* The level counter — one level per door climbed (depth + 1). */
+      .ct-level {
+        font-family: var(--font-display); font-size: 10px; letter-spacing: 0.3em;
+        text-transform: uppercase; color: #928ca8;
+        text-shadow: 0 1px 6px rgba(255, 255, 255, 0.85);
+        margin-bottom: 1px;
+      }
       .ct-gathering-sub {
         font-family: var(--font-body); font-size: 13px; letter-spacing: 0.16em;
         color: #82858f; margin-top: 4px; text-align: center;
@@ -2332,13 +2339,25 @@
       }
       /* The hand tray's subtitle — sits under the "your worlds" caption while
          nothing is picked, fading gently. */
-      .ct-choose-prompt {
-        font-family: var(--font-body); font-size: 13px; letter-spacing: 0.16em;
-        color: #9a9ab0; text-shadow: 0 0 12px rgba(255, 255, 255, 0.9);
-        margin: 0 0 4px; pointer-events: none;
+      /* While nothing is picked, the row of greyed confirm buttons is replaced
+         by one big prompt floating in the gap between the traders and the hand.
+         It's a stage child, so `margin-top: auto` (paired with the hand's own
+         auto margin) splits the free space evenly and centres it in that gap. */
+      .ct-trade-prompt {
+        display: none;
+        text-align: center; padding: 4px 16px;
+        font-family: var(--font-display); font-size: clamp(18px, 2.8vw, 30px);
+        letter-spacing: 0.16em; text-transform: uppercase;
+        color: #8a8aa2;
+        text-shadow: 0 0 16px rgba(255, 255, 255, 0.95), 0 0 30px rgba(255, 255, 255, 0.7);
+        pointer-events: none;
         animation: ct-choose-pulse 2.4s ease-in-out infinite;
       }
-      @keyframes ct-choose-pulse { 0%, 100% { opacity: 0.55; } 50% { opacity: 1; } }
+      #card-stage.choosing .ct-trade-prompt { display: block; margin-top: auto; }
+      /* The inert buttons go (the trader cards are top-anchored, so the buttons
+         returning on the first pick doesn't shift them). */
+      #card-stage.choosing .ct-confirm { display: none; }
+      @keyframes ct-choose-pulse { 0%, 100% { opacity: 0.6; } 50% { opacity: 1; } }
       /* The player's hand: its own layer pinned to the realm's bottom edge,
          outside #card-stage, so view swaps never fade or re-deal it. Empty
          space passes clicks through to the stage beneath. */
@@ -2588,11 +2607,73 @@
         background: url('assets/realm/key-antique.png') center / contain no-repeat;
         filter: drop-shadow(0 3px 8px rgba(90, 70, 30, 0.35));
       }
+      /* A charm card: an amulet in place of the world panes — a keepsake that
+         blesses every world its holder enters. No actions, ever. */
+      .wc-charm-art {
+        position: relative; flex: 1; min-height: 96px; margin: 10px 12px 6px;
+        display: flex; align-items: center; justify-content: center;
+      }
+      .wc-charm-art::before {
+        content: ''; position: absolute; inset: 6px;
+        border-radius: 50%;
+        background: radial-gradient(circle at 38% 32%,
+          rgba(255, 255, 255, 0.95), rgba(220, 213, 240, 0.6) 55%, rgba(160, 150, 200, 0.4) 100%);
+        border: 1px solid rgba(125, 115, 165, 0.55);
+        box-shadow: inset 0 2px 6px rgba(255, 255, 255, 0.85), 0 3px 10px rgba(90, 80, 140, 0.28);
+      }
+      .wc-charm-glyph {
+        position: relative; font-size: 38px; line-height: 1;
+        color: var(--charm-c, #7a6fa0);
+        text-shadow: 0 1px 0 rgba(255, 255, 255, 0.85), 0 0 14px rgba(255, 255, 255, 0.9);
+      }
+      .charm-gold { --charm-c: #b8912e; }
+      .charm-hands { --charm-c: #567a4e; }
+      .charm-rain { --charm-c: #3d6d9c; }
+      .charm-storm { --charm-c: #8a6ec2; }
+      .charm-tiny { --charm-c: #a04e4e; }
+      .wc-charm-name {
+        text-align: center; font-family: var(--font-display); font-size: 10px;
+        letter-spacing: 0.14em; text-transform: uppercase; color: #6d6786;
+      }
+      .wc-charm-line {
+        text-align: center; font-size: 9px; font-style: italic; color: #8f89a6;
+        margin: 2px 6px 5px;
+      }
+      /* The reset sigil: hangs below the forward door once the level-3 dead
+         end has introduced it. First click arms it ("sure?"), a second sends
+         the player back to level 1 — salons refreshed, doors locked, hand
+         kept. Deliberately unexplained beyond its two words. */
+      .ct-reset {
+        position: absolute; top: 250px; right: 26px; z-index: 6;
+        display: flex; flex-direction: column; align-items: center; gap: 4px;
+        cursor: pointer; user-select: none; -webkit-user-select: none;
+        padding: 6px 10px; transition: transform 160ms ease;
+      }
+      .ct-reset:hover { transform: translateY(-2px); }
+      .ct-reset-glyph {
+        width: 52px; height: 52px; border-radius: 50%;
+        display: flex; align-items: center; justify-content: center;
+        font-size: 30px; line-height: 1; color: #7b7698;
+        background: radial-gradient(circle at 40% 32%,
+          rgba(255, 255, 255, 0.96), rgba(228, 224, 240, 0.65));
+        border: 1px solid rgba(130, 122, 165, 0.5);
+        box-shadow: 0 4px 12px rgba(80, 70, 140, 0.25), inset 0 1px 0 rgba(255, 255, 255, 0.9);
+        transition: filter 200ms ease, color 200ms ease;
+      }
+      .ct-reset:hover .ct-reset-glyph {
+        filter: brightness(1.05) drop-shadow(0 6px 14px rgba(80, 70, 140, 0.35));
+      }
+      .ct-reset.arming .ct-reset-glyph {
+        color: #9c1f33;
+        animation: ct-choose-pulse 1.2s ease-in-out infinite;
+      }
+      .ct-reset.arming .ct-door-label { color: #9c1f33; }
       @media (prefers-reduced-motion: reduce) {
         .ct-door.shake { animation: none; }
         .ct-door.unlocking .ct-door-glyph,
         .ct-door.unlocking .ct-door-glyph::before,
         .ct-door.unlocking .ct-door-glyph::after { animation: none; }
+        .ct-reset.arming .ct-reset-glyph { animation: none; }
       }
 
       /* ── Legacy move arrows (kept for the dive/trade animations' DOM) ── */
@@ -2649,6 +2730,16 @@
         background: radial-gradient(circle at 50% 47%, #ffffff 0%, #ffffff 52%, #f1eeff 100%);
         opacity: 0; pointer-events: none; z-index: 100002;
       }
+      /* The reload-bridge cover: stamped on <html> before first paint (the
+         inline script at the top of <body>) whenever a hop is mid-flight, so
+         the destination page never flashes its bare self between the departing
+         white and the arriving one. Boot removes it once its own white owns
+         the screen. Same bloom as #card-hop-white so the two are seamless. */
+      html.hop::before {
+        content: ''; position: fixed; inset: 0; z-index: 2147483647;
+        background: radial-gradient(circle at 50% 47%, #ffffff 0%, #ffffff 52%, #f1eeff 100%);
+        pointer-events: none;
+      }
       #app.card-exit-zoom {
         transform: scale(0.04) rotate(6deg);
         transition: transform 680ms cubic-bezier(0.6, 0, 0.85, 0.2);
@@ -2660,7 +2751,7 @@
       }
       #app.card-enter-zoom.card-enter-zoom-go {
         transform: none;
-        transition: transform 900ms cubic-bezier(0.16, 1, 0.3, 1);
+        transition: transform 1200ms cubic-bezier(0.16, 1, 0.3, 1);
       }
       /* The chosen card rushes toward the viewer as the white takes over — a
          touch of spin and blur sells the speed of the plunge. */
@@ -2683,6 +2774,17 @@
           inset 0 0 0 5px rgba(255, 255, 255, 0.96),
           inset 0 0 46px 8px rgba(255, 255, 255, 0.5),
           inset 0 0 90px 24px rgba(178, 162, 250, 0.18);
+        transition: opacity 480ms ease;
+      }
+      /* Leaving: the fixed chrome (border vignette, the way-out button) is
+         not of the world, so it dissolves as the world recedes — otherwise it
+         sits full-size over the shrinking #app and the pull-back reads torn. */
+      body.card-hop-out::after { opacity: 0; }
+      body.card-hop-out #leave-world-btn {
+        opacity: 0; transform: translateX(-50%) translateY(14px);
+        transition: opacity 300ms ease, transform 300ms ease;
+        pointer-events: none;
+        animation: none;
       }
       #leave-world-btn {
         position: fixed; bottom: 14px; left: 50%; transform: translateX(-50%);
@@ -2994,6 +3096,17 @@
       if (location.hostname === 'localhost' || location.hostname.startsWith('127.')) {
         document.documentElement.classList.add('dev');
       }
+      // A card-world hop bridges two page loads on solid white. Stamp the
+      // cover class before ANYTHING paints so the reload can never flash the
+      // bare page (or the black title cover) between the two whites. Boot
+      // removes it the moment its own white takes over; the timer is a
+      // safety net so a dead boot can't strand the player on white.
+      try {
+        if (sessionStorage.getItem('rts.cardhop') === '1') {
+          document.documentElement.classList.add('hop');
+          setTimeout(function () { document.documentElement.classList.remove('hop'); }, 12000);
+        }
+      } catch (e) { /* no sessionStorage — no hop to cover */ }
       // When a new deploy ships, any browser still on the previous index.html
       // points at hashed chunks (e.g. pixi.js's dynamically-imported
       // WebGLRenderer-*.js) that no longer exist. Vite fires vite:preloadError
