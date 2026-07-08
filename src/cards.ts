@@ -20,7 +20,7 @@
 // generation) live DOM-free in cards-core.ts, where the unit tests can
 // reach them; this file is the presentation + persistence half.
 
-import { playSound, tryResumeAudioAfterHop, type SoundName } from './audio';
+import { fadeOutForHop, playSound, tryResumeAudioAfterHop, type SoundName } from './audio';
 import { BUILDING_DEFS, BuildingKind, CELL, HELL, SPACE, WORLD } from './config';
 import { getOptions } from './options';
 import { clearSave, getRawSave, saveGame, setRawSave } from './save';
@@ -414,8 +414,12 @@ async function enterWorld(meta: CardMeta, card: WorldCard, cardEl?: HTMLElement)
   white.style.transition = 'opacity 520ms ease-in';
   cardEl?.classList.add('dived');
   requestAnimationFrame(() => { white.style.opacity = '1'; });
-  // Hold until the white fully lands so the reload cuts on a clean frame.
-  await sleep(700);
+  // The white lands at ~520ms; ride the cue's slow swell out on it, then take
+  // the whole mix down so the reload cuts on silence — a chopped ringing tail
+  // reads as a glitch, a fade reads as passing through.
+  await sleep(950);
+  fadeOutForHop(260);
+  await sleep(280);
   location.reload();
 }
 
@@ -455,7 +459,11 @@ async function spectateWorld(card: WorldCard, cardEl?: HTMLElement): Promise<voi
   white.style.transition = 'opacity 520ms ease-in';
   cardEl?.classList.add('dived');
   requestAnimationFrame(() => { white.style.opacity = '1'; });
-  await sleep(700);
+  // Same ride-out + fade as enterWorld: the cue completes on the white and
+  // the reload lands on quiet.
+  await sleep(950);
+  fadeOutForHop(260);
+  await sleep(280);
   location.reload();
 }
 
@@ -469,9 +477,12 @@ async function leaveSpectate(): Promise<void> {
   document.body.classList.add('card-hop-out');
   app?.classList.add('card-exit-zoom');
   requestAnimationFrame(() => { white.style.opacity = '1'; });
-  // The landing thunk as the white takes over — the exit cue's third beat.
+  // The landing thunk as the white takes over — the exit cue's third beat —
+  // then the ride-out + fade so the reload never chops the ringing tail.
   window.setTimeout(() => realmSound('place', 0.7, 0.5), 500);
-  await sleep(760);
+  await sleep(1000);
+  fadeOutForHop(260);
+  await sleep(280);
   try { localStorage.removeItem(SPECTATE_KEY); } catch { /* no-op */ }
   const outer = localStorage.getItem(OUTER_KEY);
   if (outer) {
@@ -499,9 +510,12 @@ async function leaveWorld(state: GameState): Promise<void> {
   document.body.classList.add('card-hop-out');
   app?.classList.add('card-exit-zoom');
   requestAnimationFrame(() => { white.style.opacity = '1'; });
-  // The landing thunk as the white takes over — the exit cue's third beat.
+  // The landing thunk as the white takes over — the exit cue's third beat —
+  // then the ride-out + fade so the reload never chops the ringing tail.
   window.setTimeout(() => realmSound('place', 0.7, 0.5), 500);
-  await sleep(760);
+  await sleep(1000);
+  fadeOutForHop(260);
+  await sleep(280);
   const card = meta.cards.find((c) => c.id === meta.activeCardId);
   if (card) {
     // The card remembers everything the player just did inside it.

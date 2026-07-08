@@ -123,6 +123,41 @@ export function tryResumeAudioAfterHop(): void {
   }).catch(() => { /* blocked — silent until a real gesture */ });
 }
 
+// ─── The master SFX bus ─────────────────────────────────────────────
+// Every voice (dry, ghost-bus wet tail, reversed one-shots) reaches the
+// speakers through this single gain, so the whole mix can be ramped as one —
+// which is what lets a page hop fade the audio out instead of beheading it.
+let masterBus: GainNode | null = null;
+function getMasterBus(ctx: AudioContext): GainNode {
+  if (!masterBus) {
+    masterBus = ctx.createGain();
+    masterBus.connect(ctx.destination);
+  }
+  return masterBus;
+}
+
+// The reload that carries a world hop kills the AudioContext wherever it
+// stands — a slowed swell chopped mid-ring reads as a glitch. Instead the hop
+// rides the cue out on the white and calls this just before the cut: the
+// whole SFX mix ramps to silence over `ms` (the crackle bed too), so the
+// reload lands on quiet. No un-fade needed — the next page builds fresh.
+export function fadeOutForHop(ms: number): void {
+  const ctx = audioCtx;
+  if (ctx && masterBus) {
+    const t = ctx.currentTime;
+    masterBus.gain.setValueAtTime(masterBus.gain.value, t);
+    masterBus.gain.linearRampToValueAtTime(0.0001, t + ms / 1000);
+  }
+  for (const el of [musicEl, crackleEl]) {
+    if (!el || el.paused) continue;
+    const v0 = el.volume;
+    const steps = 8;
+    for (let i = 1; i <= steps; i++) {
+      window.setTimeout(() => { el.volume = v0 * (1 - i / steps); }, (ms * i) / steps);
+    }
+  }
+}
+
 // ─── Ghostly reverb send ────────────────────────────────────────────
 // A shared effects bus for sounds that should read as coming from somewhere
 // far off in the underworld: input → lowpass (distance eats the highs) →
@@ -173,11 +208,11 @@ function getGhostBus(ctx: AudioContext): GainNode {
   const convolver = ctx.createConvolver();
   convolver.buffer = buildGhostImpulse(ctx);
   lowpass.connect(convolver);
-  convolver.connect(ctx.destination);
+  convolver.connect(getMasterBus(ctx));
   const dry = ctx.createGain();
   dry.gain.value = GHOST_DRY_TAP;
   lowpass.connect(dry);
-  dry.connect(ctx.destination);
+  dry.connect(getMasterBus(ctx));
   ghostBusInput = input;
   return input;
 }
@@ -204,7 +239,7 @@ export function playSound(name: SoundName, volume = 1, playbackRate?: number, gh
   const gain = ctx.createGain();
   gain.gain.value = Math.max(0, Math.min(1, masterVolume * volume));
   src.connect(gain);
-  gain.connect(ghostly ? getGhostBus(ctx) : ctx.destination);
+  gain.connect(ghostly ? getGhostBus(ctx) : getMasterBus(ctx));
   let voices = activeVoices.get(name);
   if (!voices) { voices = []; activeVoices.set(name, voices); }
   if (voices.length >= MAX_VOICES) {
@@ -261,7 +296,7 @@ export function playSoundReversed(name: SoundName, volume = 1, playbackRate = 1)
   const gain = ctx.createGain();
   gain.gain.value = Math.max(0, Math.min(1, masterVolume * volume));
   src.connect(gain);
-  gain.connect(ctx.destination);
+  gain.connect(getMasterBus(ctx));
   src.onended = () => { src.disconnect(); gain.disconnect(); };
   src.start();
 }
