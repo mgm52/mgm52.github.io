@@ -358,6 +358,10 @@ export type Options = {
   goblinDisperseOnSpawn: boolean; // fresh spawns walk a few cells off the hole
   goblinDisperseRadius: number;   // cells from the hole a fresh spawn aims for
   goblinIdleYield: boolean;       // idle goblins step aside for a blocked mover
+  // Debug overlay: tint a goblin red once it has somewhere to go but hasn't
+  // gained a cell in a couple of seconds — makes crowd-strangled units
+  // visible at a glance instead of inferred from downstream symptoms.
+  goblinStuckIndicator: boolean;
   // The endgame finale (Lolly's moon). The camera eases to follow her flight,
   // and a speed dial lets a tester run the whole cinematic fast.
   finaleAutoFollow: boolean;     // ease the camera to keep Lolly framed
@@ -569,6 +573,7 @@ export const DEFAULT_OPTIONS: Options = {
   goblinDisperseOnSpawn: false,
   goblinDisperseRadius: 4,
   goblinIdleYield: false,
+  goblinStuckIndicator: false,
   finaleAutoFollow: true,
   finaleSpeedMult: 1,
 };

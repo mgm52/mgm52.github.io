@@ -3561,9 +3561,16 @@ export function render(state: GameState, ctx: RenderContext) {
     }
     for (const s of v.outline) s.visible = opts.goblinOutline;
     let tint = 0xffffff;
+    // Dev stuck indicator outranks every other tint: a goblin with somewhere
+    // to be that hasn't gained a cell in 2s flashes red, whatever its job.
+    // (goal && !target ⇒ it's waiting on a path, not mid-step.)
+    if (opts.goblinStuckIndicator && g.goal !== null && !g.target
+        && state.now - g.lastCellChangedAt > 2) {
+      tint = Math.sin(state.now * 8) > 0 ? 0xff2828 : 0xff9090;
+    }
     // Robots are always their flat grey — the chassis doesn't blush for
     // water duty or anything else. Terminators carry their own tint dial.
-    if (g.robot) tint = g.terminator ? opts.terminatorTint : opts.robotTint;
+    else if (g.robot) tint = g.terminator ? opts.terminatorTint : opts.robotTint;
     // Water carriers tint blue only while actually hauling water back to the
     // DC (phase to_dc). On the outbound walk to the source they look normal.
     else if (g.state.kind === 'fetching_water' && g.state.phase === 'to_dc') tint = opts.waterGoblinColor;

@@ -3993,6 +3993,7 @@ function findDispersalCell(
   let frontier: Cell[] = [start];
   let best: Cell | null = null;
   let bestD = -1;
+  let bestTies = 0;
   for (let depth = 0; depth < maxSteps && frontier.length > 0; depth++) {
     const nextFrontier: Cell[] = [];
     for (const c of frontier) {
@@ -4005,7 +4006,11 @@ function findDispersalCell(
         if (!canStep(state, c.cx, c.cy, nx, ny, gid, undefined)) continue;
         nextFrontier.push({ cx: nx, cy: ny });
         const dist = Math.max(Math.abs(nx - hole.cx), Math.abs(ny - hole.cy));
-        if (dist > bestD) { bestD = dist; best = { cx: nx, cy: ny }; }
+        // Reservoir-sample among equally-far cells: keeping the first max
+        // would bias every birth toward the same compass arc (the fixed
+        // ALL_DIRS walk order), stacking spawns instead of ringing the hole.
+        if (dist > bestD) { bestD = dist; best = { cx: nx, cy: ny }; bestTies = 1; }
+        else if (dist === bestD && Math.random() * ++bestTies < 1) best = { cx: nx, cy: ny };
       }
     }
     frontier = nextFrontier;

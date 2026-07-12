@@ -417,6 +417,7 @@ function rebuildPanel(panel: HTMLElement, callbacks: OptionsUICallbacks, refresh
     toggle('Disperse on spawn', o.goblinDisperseOnSpawn, (v) => setOption('goblinDisperseOnSpawn', v)),
     slider('Disperse radius', o.goblinDisperseRadius, 1, 12, 1, (v) => setOption('goblinDisperseRadius', v)),
     toggle('Idle goblins yield', o.goblinIdleYield, (v) => setOption('goblinIdleYield', v)),
+    toggle('Stuck indicator (red)', o.goblinStuckIndicator, (v) => setOption('goblinStuckIndicator', v)),
   ]));
 
   panel.appendChild(collapsibleSection('Minotaurs', [
