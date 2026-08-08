@@ -6,13 +6,14 @@
 
 import { describe, expect, it } from 'vitest';
 import {
-  CardMeta, CardTier, HARDCODED_LEVELS, ManualWorld, MAIN_TRACK, TIER_ABOVE,
-  TIER_RANK, Want, WorldCard, applyCharms, cardFromManual, cardPower,
-  cardQualifies, countQualifying, decodeWorld, encodeWorld, generateEvents,
-  generateJunkWorld, generateWeirdWorld, makeCard, makeCharmCard, mintDeckCard,
-  mulberry32, regenerateEvent, resetChain, rollWant, sceneStructureCounts,
-  spicyAmount, tradeKeepsAWorld, wantLine, wantSatisfiableBy, wantSatisfiedBy,
-  worldName, makeKeyCard, makeSalon, salonName, salonTierForDepth, STOLEN_DEPTH,
+  CardMeta, CardTier, HARDCODED_LEVELS, ManualWorld, MAIN_TRACK, RARE_DEPTH,
+  TIER_ABOVE, TIER_RANK, Want, WorldCard, applyCharms, cardFromManual, cardPower,
+  cardQualifies, countQualifying, decodeWorld, encodeWorld, ensureBranches,
+  generateEvents, generateJunkWorld, generateWeirdWorld, makeCard, makeCharmCard,
+  mintDeckCard, mulberry32, pathName, regenerateEvent, resetChain, rollWant,
+  sceneStructureCounts, spicyAmount, tradeKeepsAWorld, wantLine, wantSatisfiableBy,
+  wantSatisfiedBy, worldName, makeKeyCard, makeSalon, salonName, salonTierForDepth,
+  STOLEN_DEPTH,
 } from '../src/cards-core';
 import { BUILDING_DEFS, SOUL_SIGIL } from '../src/config';
 import { GameState, cellKey, isInPlayCell } from '../src/state';
@@ -576,25 +577,95 @@ describe('generateEvents', () => {
   });
 });
 
-// ─── The endless chain ───────────────────────────────────────────────
+// ─── The endless chains behind the hall of doors ─────────────────────
 
-describe('endless salon chain', () => {
-  it('maps every depth to a non-escalating tier and a stable name', () => {
+describe('endless salon chains', () => {
+  it('escalates every chain the same way: common threshold, uncommon salons, rare from RARE_DEPTH down', () => {
     expect(salonTierForDepth(0)).toBe('common');
-    for (let d = 1; d < 20; d++) expect(salonTierForDepth(d)).toBe('uncommon');
+    for (let d = 1; d < RARE_DEPTH; d++) expect(salonTierForDepth(d)).toBe('uncommon');
+    for (let d = RARE_DEPTH; d < 20; d++) expect(salonTierForDepth(d)).toBe('rare');
+  });
+
+  it('names branch 0 the soft border, later doors their own thresholds, deeper salons stably', () => {
     expect(salonName(123, 0)).toBe('gathering at the soft border');
     for (let d = 1; d < 20; d++) expect(salonName(123, d)).toMatch(/^the [a-z]+ salon$/);
-    // Names are stable per (seed, depth) so a revisited salon reads the same.
+    // Names are stable per (seed, branch, depth) so a revisited salon reads
+    // the same — and each branch's chain names itself.
     expect(salonName(123, 7)).toBe(salonName(123, 7));
+    expect(salonName(123, 7, 2)).toBe(salonName(123, 7, 2));
+    // Each branch's chain names itself: a single depth can coincide across
+    // branches (the adjective pool is small), but the runs don't.
+    const run = (branch: number) =>
+      Array.from({ length: 12 }, (_, d) => salonName(123, d + 1, branch)).join('|');
+    expect(run(2)).not.toBe(run(3));
+    // Every later door's threshold gets its own name; the first score of
+    // doors never repeat one.
+    expect(pathName(123, 0)).toBe('the soft border');
+    const names = Array.from({ length: 20 }, (_, b) => pathName(123, b + 1));
+    for (const n of names) expect(n).toMatch(/^the [a-z]+ threshold$/);
+    expect(new Set(names).size).toBe(20);
+    expect(salonName(123, 0, 3)).toBe(`gathering at ${pathName(123, 3)}`);
   });
 
   it('rolls a fresh salon at any depth, its gatekeeper keyed to the door onward', () => {
     const meta = freshMeta();
-    const deep = makeSalon(meta, 9, mulberry32(999), TASK_IDS);
+    const deep = makeSalon(meta, 0, 9, mulberry32(999), TASK_IDS);
     expect(deep.depth).toBe(9);
-    expect(deep.tier).toBe('uncommon');
+    expect(deep.tier).toBe('rare');
     const gate = deep.creatures.find((c) => c.deck.some((d) => d.key))!;
     expect(gate.deck[0].keyDepth).toBe(10);
+    expect(gate.deck[0].keyBranch).toBe(0);
+  });
+
+  it('a later door\'s threshold is the same gentle bootstrap: an open want over two commons, keys stamped to its own branch', () => {
+    const meta = freshMeta();
+    const threshold = makeSalon(meta, 3, 0, mulberry32(555), TASK_IDS);
+    expect(threshold.branch).toBe(3);
+    expect(threshold.tier).toBe('common');
+    // Even pre-reset, only branch 0 deals the hand-authored chain — a fresh
+    // door's threshold rolls procedurally, under its own threshold name.
+    const preReset = { ...freshMeta(), resets: 0 };
+    expect(makeSalon(preReset, 3, 0, mulberry32(555), TASK_IDS).name)
+      .not.toBe('gathering at the soft border');
+    expect(threshold.creatures[0].want).toEqual({ kind: 'any', count: 1 });
+    expect(threshold.creatures[0].deck.filter((c) => !c.key && !c.charm).length).toBe(2);
+    const gate = threshold.creatures.find((c) => c.deck.some((d) => d.key))!;
+    expect(gate.deck[0].keyDepth).toBe(1);
+    expect(gate.deck[0].keyBranch).toBe(3);
+  });
+
+  it('a rare exchange deals rare decks behind an uncommon-rung opener', () => {
+    const meta = freshMeta();
+    const rare = makeSalon(meta, 1, RARE_DEPTH, mulberry32(777), TASK_IDS);
+    expect(rare.tier).toBe('rare');
+    expect(rare.creatures[0].want).toEqual({ kind: 'tier', tier: 'uncommon', count: 1 });
+    for (const cr of rare.creatures) {
+      expect(cr.deck.every((c) => c.key || c.charm || c.tier === 'rare')).toBe(true);
+    }
+  });
+});
+
+// ─── The hall of doors ───────────────────────────────────────────────
+
+describe('ensureBranches (the hall migration)', () => {
+  it('adopts a legacy single-chain meta as branch 0, chain and unlock depth intact', () => {
+    const meta = freshMeta();
+    meta.events = generateEvents(meta, null, TASK_IDS);
+    meta.unlockedDepth = 2;
+    const legacyEvents = meta.events;
+    const branches = ensureBranches(meta);
+    expect(branches.length).toBe(1);
+    expect(branches[0].events).toBe(legacyEvents);
+    expect(branches[0].unlockedDepth).toBe(2);
+    expect(branches[0].events.every((e) => e.branch === 0)).toBe(true);
+    expect(meta.events).toBeNull();
+    // Idempotent: a second call changes nothing.
+    expect(ensureBranches(meta)).toBe(branches);
+  });
+
+  it('a meta with no chain at all migrates to an empty hall', () => {
+    const meta = freshMeta();
+    expect(ensureBranches(meta)).toEqual([]);
   });
 });
 
@@ -768,7 +839,10 @@ describe('the opening chain (levels 1–3, pre-reset)', () => {
 // ─── The reset ───────────────────────────────────────────────────────
 
 describe('resetChain (begin again)', () => {
-  it('locks the doors, refreshes every salon, keeps the hand, and goes procedural', () => {
+  const hallDecks = (meta: CardMeta) =>
+    meta.branches!.flatMap((b) => b.events).flatMap((e) => e.creatures).flatMap((c) => c.deck);
+
+  it('seals the hall back to one door, refreshes every salon, keeps the hand, and goes procedural', () => {
     const meta = freshMeta();
     meta.resets = 0;
     meta.unlockedDepth = 2;
@@ -776,29 +850,47 @@ describe('resetChain (begin again)', () => {
     meta.cards = [...held];
     const stolen = card('rare', { id: meta.nextId++, origin: true });
     meta.events = generateEvents(meta, stolen, TASK_IDS);
+    // The player also unsealed a second door and climbed it a little.
+    ensureBranches(meta).push({
+      events: [makeSalon(meta, 1, 0, mulberry32(9), TASK_IDS)],
+      unlockedDepth: 1,
+    });
     resetChain(meta, TASK_IDS);
     expect(meta.resets).toBe(1);
-    expect(meta.unlockedDepth).toBe(0);
+    expect(meta.branches!.length).toBe(1);     // the hall seals back to one door
+    expect(meta.branches![0].unlockedDepth).toBe(0);
     expect(meta.cards).toEqual(held); // the hand is untouched
     // The fresh chain is procedural — its stolen-world opener keeps the easy
     // rung (the impossible magistrate is gone) — and still carries the origin.
-    const holder = meta.events![STOLEN_DEPTH].creatures[0];
+    const holder = meta.branches![0].events[STOLEN_DEPTH].creatures[0];
     expect(holder.want).toEqual({ kind: 'tier', tier: 'common', count: 1 });
-    expect(meta.events!.flatMap((e) => e.creatures).flatMap((c) => c.deck).filter((c) => c.origin).length).toBe(1);
+    expect(hallDecks(meta).filter((c) => c.origin).length).toBe(1);
     // Resetting again keeps counting and keeps carrying the origin.
     resetChain(meta, TASK_IDS);
     expect(meta.resets).toBe(2);
-    expect(meta.events!.flatMap((e) => e.creatures).flatMap((c) => c.deck).filter((c) => c.origin).length).toBe(1);
+    expect(hallDecks(meta).filter((c) => c.origin).length).toBe(1);
   });
 
-  it('an origin already won stays won — it never re-enters the refreshed chain', () => {
+  it('carries the origin home even when it waits behind a later door', () => {
+    const meta = freshMeta();
+    meta.events = generateEvents(meta, null, TASK_IDS);
+    const branches = ensureBranches(meta);
+    const stolen = card('rare', { id: 900, origin: true });
+    const side = makeSalon(meta, 2, 0, mulberry32(4), TASK_IDS);
+    side.creatures[0].deck.unshift(stolen);
+    branches.push({ events: [side], unlockedDepth: 0 });
+    resetChain(meta, TASK_IDS);
+    expect(meta.branches!.length).toBe(1);
+    expect(hallDecks(meta).filter((c) => c.origin).length).toBe(1);
+  });
+
+  it('an origin already won stays won — it never re-enters the refreshed hall', () => {
     const meta = freshMeta();
     meta.events = generateEvents(meta, null, TASK_IDS);
     meta.cards = [card('rare', { id: 700, origin: true })];
     resetChain(meta, TASK_IDS);
     expect(meta.cards.length).toBe(1); // still in hand
-    const all = meta.events!.flatMap((e) => e.creatures).flatMap((c) => c.deck);
-    expect(all.some((c) => c.origin)).toBe(false);
+    expect(hallDecks(meta).some((c) => c.origin)).toBe(false);
   });
 });
 
@@ -842,7 +934,7 @@ describe('charms', () => {
     const meta = freshMeta(); // resets: 1 — the procedural chain
     let found = false;
     for (let seed = 1; seed <= 40 && !found; seed++) {
-      const salon = makeSalon(meta, 1, mulberry32(seed * 313), TASK_IDS);
+      const salon = makeSalon(meta, 0, 1, mulberry32(seed * 313), TASK_IDS);
       found = salon.creatures.some((c) => c.deck.some((d) => d.charm));
     }
     expect(found).toBe(true);

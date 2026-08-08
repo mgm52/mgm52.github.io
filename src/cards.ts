@@ -27,11 +27,12 @@ import { clearSave, getRawSave, saveGame, setRawSave } from './save';
 import { GameState, computePlayBounds, isInPlayCell } from './state';
 import { ALL_TASK_IDS } from './ui';
 import {
-  CardMeta, CardResources, CardTier, CHARM_DEFS, Creature, FRAME_BASE,
+  BranchState, CardMeta, CardResources, CardTier, CHARM_DEFS, Creature, FRAME_BASE,
   HARDCODED_LEVELS, ManualWorld, TradeEvent, Want, WorldCard, applyCharms,
-  cardPower, decodeWorld, encodeWorld, generateEvents, makeCard, makeKeyCard,
-  makeSalon, mulberry32, regenerateEvent, resetChain, salonName,
-  sceneStructureCounts, tradeKeepsAWorld, WantSeg, wantSatisfiedBy, wantSegments,
+  cardPower, decodeWorld, encodeWorld, ensureBranches, generateEvents, makeCard,
+  makeKeyCard, makeSalon, mulberry32, pathName, regenerateEvent, resetChain,
+  salonName, salonTierForDepth, sceneStructureCounts, tradeKeepsAWorld, WantSeg,
+  wantSatisfiedBy, wantSegments,
 } from './cards-core';
 
 const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
@@ -263,28 +264,32 @@ function refreshRealmView(): void {
   swapView(() => routeRealmView(meta));
 }
 
-// Which salon (by depth) is currently on screen — set by showGathering, read
-// by the dev cog's "refresh current traders" so it re-rolls the right one.
-let currentGatheringDepth: number | null = null;
+// Which salon (branch + depth) is currently on screen — set by showGathering
+// (null while the hall of doors is up), read by the dev cog's "refresh current
+// traders" so it re-rolls the right one.
+let currentGathering: { branch: number; depth: number } | null = null;
 
-// Dev tool (realm dev cog): reshuffle every gathering's traders + decks.
+// Dev tool (realm dev cog): reshuffle every gathering's traders + decks,
+// behind every door in the hall.
 export function devReshuffleGatherings(): void {
   const meta = loadMeta();
   if (!meta) return;
-  if (!meta.events) meta.events = generateEvents(meta, null, ALL_TASK_IDS, loadManualWorlds());
-  else for (const ev of meta.events) regenerateEvent(meta, ev, ALL_TASK_IDS, loadManualWorlds());
+  const branches = ensureHall(meta);
+  for (const ev of branches.flatMap((b) => b.events)) {
+    regenerateEvent(meta, ev, ALL_TASK_IDS, loadManualWorlds());
+  }
   saveMeta(meta);
   refreshRealmView();
 }
 
 // Dev tool (realm dev cog): re-roll only the salon currently on screen — the
 // old in-gathering "wait for the next gathering" reshuffle, now a dev control.
-// Re-shows that same salon rather than routing home to the soft border.
+// Re-shows that same salon rather than routing home to the hall.
 export function devRefreshCurrentTraders(): void {
   const meta = loadMeta();
   if (!meta) return;
-  if (currentGatheringDepth == null) { devReshuffleGatherings(); return; }
-  const ev = salonAtDepth(meta, currentGatheringDepth);
+  if (currentGathering == null) { devReshuffleGatherings(); return; }
+  const ev = salonAt(meta, currentGathering.branch, currentGathering.depth);
   if (!ev) return;
   regenerateEvent(meta, ev, ALL_TASK_IDS, loadManualWorlds());
   saveMeta(meta);
@@ -990,6 +995,11 @@ function buildCardEl(card: WorldCard, opts: CardElOpts = {}): HTMLElement {
     head.innerHTML = '<span class="wc-tier">key</span>';
     keyEl.appendChild(head);
     keyEl.appendChild(div('wc-key-art'));
+    // With a whole hall of chains, a loose key must say which lock it fits:
+    // the door (branch) it belongs to and the level it opens.
+    if (card.keyDepth !== undefined) {
+      keyEl.appendChild(div('wc-key-line', `door ${(card.keyBranch ?? 0) + 1} · level ${card.keyDepth + 1}`));
+    }
     // A key carries no world, so it's never entered or inspected — only its
     // SELECT button (when it's in the player's hand) ever applies.
     const keyActs = cardActions({ onSelect: opts.onSelect, selectLabel: opts.selectLabel }, keyEl);
@@ -1323,43 +1333,45 @@ async function runRealm(): Promise<void> {
 }
 
 // Where the realm lands after the (possible) intro: the lone traded card
-// awaiting its first dive, or the home gathering (the soft border).
+// awaiting its first dive, or the hall of doors (the base level).
 function routeRealmView(meta: CardMeta): void {
   if (meta.phase === 'firstworld') { showFirstCard(meta); return; }
-  showHomeGathering(meta);
+  showHub(meta);
 }
 
-// The salon chain, generated on demand. The intro seeds the opening salons,
-// but a dev hop straight into the 'free' phase might land here without them.
-function ensureEvents(meta: CardMeta): TradeEvent[] {
-  if (!meta.events) {
-    meta.events = generateEvents(meta, null, ALL_TASK_IDS, loadManualWorlds());
+// The hall of doors, generated on demand: migrates a legacy single-chain meta
+// into branches[0] and seeds branch 0 when it's missing entirely (the intro
+// normally seeds it, but a dev hop straight into the 'free' phase might land
+// here without it).
+function ensureHall(meta: CardMeta): BranchState[] {
+  const branches = ensureBranches(meta);
+  if (branches.length === 0) {
+    branches.push({ events: generateEvents(meta, null, ALL_TASK_IDS, loadManualWorlds()), unlockedDepth: 0 });
     saveMeta(meta);
   }
-  return meta.events;
+  return branches;
 }
 
-// The salon at a given depth, rolled (and appended) the first time the player
-// reaches it. Deeper salons each get a stable per-depth seed, so walking back
-// down the chain and forward again lands on the same table until a reshuffle.
-function salonAtDepth(meta: CardMeta, depth: number): TradeEvent {
-  const events = ensureEvents(meta);
-  if (depth < events.length) return events[depth];
-  for (let d = events.length; d <= depth; d++) {
-    // The reset count rides the seed so each pass down the chain deals fresh
-    // tables instead of replaying the previous cycle's salons.
-    const rng = mulberry32((((meta.seed ?? 0) ^ (d * 2246822519) ^ ((meta.resets ?? 0) * 0x85ebca6b)) >>> 0));
-    events.push(makeSalon(meta, d, rng, ALL_TASK_IDS, loadManualWorlds()));
+// The salon at a given branch + depth, rolled (and appended) the first time
+// the player reaches it. Each salon gets a stable per-(branch, depth) seed,
+// so walking back down a chain and forward again lands on the same table
+// until a reshuffle.
+function salonAt(meta: CardMeta, branch: number, depth: number): TradeEvent {
+  const branches = ensureHall(meta);
+  // Branches are unsealed one at a time from the hub; the loop is a guard for
+  // a truncated saved meta, not a normal path.
+  while (branches.length <= branch) branches.push({ events: [], unlockedDepth: 0 });
+  const b = branches[branch];
+  if (depth < b.events.length) return b.events[depth];
+  for (let d = b.events.length; d <= depth; d++) {
+    // The reset count rides the seed so each pass through the hall deals
+    // fresh tables instead of replaying the previous cycle's salons; the
+    // branch rides it so every door's chain is its own.
+    const rng = mulberry32((((meta.seed ?? 0) ^ (d * 2246822519) ^ (branch * 0x9e3779b1) ^ ((meta.resets ?? 0) * 0x85ebca6b)) >>> 0));
+    b.events.push(makeSalon(meta, branch, d, rng, ALL_TASK_IDS, loadManualWorlds()));
   }
   saveMeta(meta);
-  return events[depth];
-}
-
-// The realm's home view: the soft-border salon (depth 0). Its locked door leads
-// onward to the next salon, and so on without end — each door opened once that
-// salon's gatekeeper key has been traded for and spent.
-function showHomeGathering(meta: CardMeta): void {
-  showGathering(meta, salonAtDepth(meta, 0));
+  return b.events[depth];
 }
 
 // The held-on big-card view: after the swindle (and on any reload while the
@@ -1371,7 +1383,7 @@ function showFirstCard(meta: CardMeta): void {
   stage.innerHTML = '';
   stage.className = 'intro-view firstcard-view';
   const card = meta.cards[0];
-  if (!card) { showHomeGathering(meta); return; }
+  if (!card) { showHub(meta); return; }
   const cardEl = buildCardEl(card, {
     enterLabel: 'ENTER',
     onEnter: (el) => { void enterWorld(meta, card, el); },
@@ -1463,9 +1475,10 @@ async function runTradeIntro(meta: CardMeta): Promise<void> {
   // The books: origin gone (seeded into gathering III), junk card in hand.
   // Phase holds at 'firstworld' — the realm now keeps the player on the big
   // single-card view (showFirstCard) with nothing to do but ENTER it; the
-  // street of gatherings only opens once they've been inside and come back.
+  // hall of doors only opens once they've been inside and come back.
   meta.cards = [junk];
-  meta.events = generateEvents(meta, origin, ALL_TASK_IDS, loadManualWorlds());
+  meta.events = null;
+  meta.branches = [{ events: generateEvents(meta, origin, ALL_TASK_IDS, loadManualWorlds()), unlockedDepth: 0 }];
   meta.phase = 'firstworld';
   saveMeta(meta);
   await sleep(400);
@@ -1543,29 +1556,137 @@ function renderSegs(segs: WantSeg[], count: number): string {
 
 const LINE_TYPE_MS = 22;
 
+// ─── The hall of doors ───────────────────────────────────────────────
+// The realm's base level: every starter door the player has unsealed, side
+// by side, each opening onto its own endless chain of salons (common
+// threshold → uncommon salons → rare exchanges). One more door always waits
+// sealed at the end of the row — click it and it's unsealed on the spot, no
+// key: the price of a fresh chain is climbing it from commons again. Each
+// open door wears its chain's progress — a run of pips, one per level
+// climbed, coloured by that salon's tier, with the deepest level beneath —
+// so how far each path has been explored reads at a glance. The row wraps
+// and the stage scrolls, so the hall keeps working however many doors the
+// player collects.
+function showHub(meta: CardMeta): void {
+  const stage = realmEl('card-stage');
+  clearSpeech();
+  stage.innerHTML = '';
+  stage.className = 'gathering-view hub-view';
+  currentGathering = null;
+
+  const branches = ensureHall(meta);
+
+  const head = div('ct-gathering-head');
+  head.appendChild(div('ct-level', `${branches.length} ${branches.length === 1 ? 'door' : 'doors'} unsealed`));
+  head.appendChild(div('ct-event-title', 'the hall of doors'));
+  head.appendChild(div('ct-gathering-sub', 'every door keeps its own chain of salons — if one runs dry, unseal another'));
+  stage.appendChild(head);
+
+  const row = div('ct-hub-doors');
+  stage.appendChild(row);
+
+  let hubBusy = false;   // latched through the unseal beat so clicks can't double-fire
+  const enterBranch = (b: number): void => {
+    swapView(() => showGathering(meta, salonAt(meta, b, 0)));
+  };
+
+  branches.forEach((bs, b) => {
+    const deepest = bs.unlockedDepth;
+    const door = div(`ct-door ct-hub-door open t-${salonTierForDepth(deepest)}`);
+    door.appendChild(div('ct-door-glyph'));
+    // The chain's progress, worn on the door: one pip per level climbed,
+    // coloured by that salon's tier, capped with an ellipsis for the truly
+    // deep runs (the level line below always carries the exact figure).
+    const pips = div('ct-hub-pips');
+    const shown = Math.min(deepest + 1, 12);
+    for (let d = 0; d < shown; d++) pips.appendChild(div(`ct-pip pip-${salonTierForDepth(d)}`));
+    if (deepest + 1 > shown) pips.appendChild(div('ct-pip-more', '…'));
+    door.appendChild(pips);
+    door.appendChild(div('ct-door-label', pathName(meta.seed ?? 0, b)));
+    door.appendChild(div('ct-hub-lvl', `level ${deepest + 1}`));
+    door.addEventListener('click', () => {
+      if (hubBusy) return;
+      realmSound('online', 0.7, 0.9);
+      enterBranch(b);
+    });
+    row.appendChild(door);
+  });
+
+  // The next door, still sealed — and behind it, the faint shape of another:
+  // the hall goes on for as long as the player keeps unsealing.
+  {
+    const sealed = div('ct-door ct-hub-door ct-hub-sealed locked');
+    sealed.appendChild(div('ct-door-glyph'));
+    const label = div('ct-door-label', 'unseal');
+    sealed.appendChild(label);
+    sealed.addEventListener('click', () => {
+      if (hubBusy) return;
+      hubBusy = true;
+      const b = branches.length;
+      branches.push({ events: [], unlockedDepth: 0 });
+      saveMeta(meta);
+      // The same beat of payoff as a salon door: the seal gives with a
+      // ka-chunk, the padlock tumbles, the doorway blooms (CSS .unlocking),
+      // then the door swings us into the fresh chain's threshold.
+      sealed.classList.remove('locked');
+      sealed.classList.add('open', 'unlocking');
+      label.textContent = pathName(meta.seed ?? 0, b);
+      realmSound('click', 0.8, 0.7);                                          // the seal turns
+      window.setTimeout(() => realmSound('place', 1.1, 0.7), 110);            // the bolt drops — clunk
+      window.setTimeout(() => realmSound('task_complete', 0.85, 0.95), 300);  // it gives; light spills
+      window.setTimeout(() => { realmSound('online', 0.7, 0.7); enterBranch(b); }, 740); // swing through
+    });
+    row.appendChild(sealed);
+    const ghost = div('ct-door ct-hub-door ct-hub-ghost locked');
+    ghost.appendChild(div('ct-door-glyph'));
+    row.appendChild(ghost);
+  }
+
+  // The player's hand, inline at the foot of the hall like in a gathering —
+  // nothing to select here, but every world can still be entered.
+  const handWrap = div('ct-hand-inline');
+  stage.appendChild(handWrap);
+  if (meta.cards.length > 0) {
+    handWrap.appendChild(div('ct-caption', meta.cards.length === 1 ? 'your world' : 'your worlds'));
+    const cardsRow = div('ct-cards');
+    for (const c of meta.cards) {
+      cardsRow.appendChild(handCardEl(c, {
+        onEnter: (cardEl) => { void enterWorld(meta, c, cardEl); },
+      }));
+    }
+    handWrap.appendChild(cardsRow);
+  }
+}
+
 function showGathering(meta: CardMeta, ev: TradeEvent): void {
   const stage = realmEl('card-stage');
   clearSpeech();
   stage.innerHTML = '';
   stage.className = 'gathering-view';
 
-  // Swap to another salon (via a door — the forward door up, or the back door
-  // down). The target salon is rolled the first time it's reached.
+  const branch = ev.branch ?? 0;
+  const branches = ensureHall(meta);
+  const branchState = branches[branch] ?? branches[0];
+
+  // Swap to another salon on this branch (via a door — the forward door up,
+  // or the back door down). The target salon is rolled the first time it's
+  // reached.
   const goToSalon = (depth: number): void => {
-    const target = salonAtDepth(meta, depth);
+    const target = salonAt(meta, branch, depth);
     swapView(() => showGathering(meta, target));
   };
 
   // Remember which salon is on screen, so the dev cog's "refresh current
   // traders" knows which one to re-roll.
-  currentGatheringDepth = ev.depth;
+  currentGathering = { branch, depth: ev.depth };
 
   const head = div('ct-gathering-head');
-  // The salon's name, flanked by ornaments (CSS), with the player's level
-  // above it (one level per door climbed — depth + 1) and a soft subtitle
-  // beneath — the realm's own "TRADE / select cards" masthead. (Navigation
-  // between salons is the pair of doors, added below, not a header button.)
-  head.appendChild(div('ct-level', `level ${ev.depth + 1}`));
+  // The salon's name, flanked by ornaments (CSS), with where-you-are above it
+  // (which door in the hall, and the level — one per door climbed, depth + 1)
+  // and a soft subtitle beneath — the realm's own "TRADE / select cards"
+  // masthead. (Navigation between salons is the pair of doors, added below,
+  // not a header button.)
+  head.appendChild(div('ct-level', `door ${branch + 1} · level ${ev.depth + 1}`));
   head.appendChild(div(`ct-event-title t-${ev.tier}`, ev.name));
   head.appendChild(div('ct-gathering-sub', 'offer your worlds to the entities'));
   stage.appendChild(head);
@@ -1868,13 +1989,14 @@ function showGathering(meta: CardMeta, ev: TradeEvent): void {
     refreshButtons();
   };
 
-  // The forward door: the locked door UP to the NEXT salon, pinned top-right.
-  // Trade the gatekeeper for this salon's key, then click the door to spend it
-  // and pass onward; without the key it just rattles. Once spent the door stays
-  // open (meta.unlockedDepth). The chain is endless — there's always a next.
+  // The forward door: the locked door UP to the NEXT salon on this branch,
+  // pinned top-right. Trade the gatekeeper for this salon's key, then click
+  // the door to spend it and pass onward; without the key it just rattles.
+  // Once spent the door stays open (the branch's unlockedDepth). Every chain
+  // is endless — there's always a next.
   const above = ev.depth + 1;
   {
-    const isOpen = (): boolean => (meta.unlockedDepth ?? 0) >= above;
+    const isOpen = (): boolean => branchState.unlockedDepth >= above;
     const door = div('ct-door ct-door-fwd');
     door.appendChild(div('ct-door-glyph'));
     const label = div('ct-door-label');
@@ -1884,26 +2006,27 @@ function showGathering(meta: CardMeta, ev: TradeEvent): void {
       door.classList.toggle('locked', !isOpen());
       // An open door names where it leads; a locked one stays bare (it doesn't
       // give the next salon's name away until you've opened it).
-      label.textContent = isOpen() ? `${salonName(meta.seed ?? 0, above)} →` : '';
+      label.textContent = isOpen() ? `${salonName(meta.seed ?? 0, above, branch)} →` : '';
     };
     sync();
     let doorBusy = false;   // latched through the unlock beat so clicks can't double-fire
     door.addEventListener('click', () => {
       if (tradeAnimating || doorBusy) return;
       if (isOpen()) { realmSound('online', 0.7, 0.9); goToSalon(above); return; }
-      // Spend this salon's key (its keyDepth opens this one door, no other).
-      const keyIdx = meta.cards.findIndex((c) => c.key && c.keyDepth === above);
+      // Spend this salon's key (its keyDepth + keyBranch open this one door,
+      // no other — legacy keys with no branch stamp belong to branch 0).
+      const keyIdx = meta.cards.findIndex((c) => c.key && c.keyDepth === above && (c.keyBranch ?? 0) === branch);
       if (keyIdx >= 0) {
         doorBusy = true;
         meta.cards.splice(keyIdx, 1);
-        meta.unlockedDepth = Math.max(meta.unlockedDepth ?? 0, above);
+        branchState.unlockedDepth = Math.max(branchState.unlockedDepth, above);
         saveMeta(meta);
         // A beat of payoff before we pass through: the key turns with a
         // ka-chunk, the padlock springs and tumbles off, the doorway blooms
         // with light (CSS .unlocking), then the door swings us onward.
         door.classList.remove('locked');
         door.classList.add('open', 'unlocking');
-        label.textContent = `${salonName(meta.seed ?? 0, above)} →`;
+        label.textContent = `${salonName(meta.seed ?? 0, above, branch)} →`;
         realmSound('click', 0.8, 0.7);                                          // the key turns
         window.setTimeout(() => realmSound('place', 1.1, 0.7), 110);            // the bolt drops — clunk
         window.setTimeout(() => realmSound('task_complete', 0.85, 0.95), 300);  // it gives; light spills
@@ -1923,29 +2046,33 @@ function showGathering(meta: CardMeta, ev: TradeEvent): void {
     stage.appendChild(door);
   }
 
-  // The back door: a black door pinned top-LEFT, the way DOWN to the salon you
-  // came from. Stepping back is free — no key, always open — so it's a plain
-  // click that walks one salon down the chain. Hidden at the soft border (0).
-  if (ev.depth > 0) {
+  // The back door: a black door pinned top-LEFT, the way DOWN — to the
+  // previous salon on this branch, or, from a threshold (depth 0), back out
+  // into the hall of doors. Stepping back is free — no key, always open.
+  {
     const back = div('ct-door ct-door-back');
     back.appendChild(div('ct-door-glyph'));
     const label = div('ct-door-label');
-    label.textContent = `← ${salonName(meta.seed ?? 0, ev.depth - 1)}`;
+    label.textContent = ev.depth > 0
+      ? `← ${salonName(meta.seed ?? 0, ev.depth - 1, branch)}`
+      : '← the hall of doors';
     back.appendChild(label);
     back.addEventListener('click', () => {
       if (tradeAnimating) return;
       realmSound('online', 0.7, 0.8);
-      goToSalon(ev.depth - 1);
+      if (ev.depth > 0) goToSalon(ev.depth - 1);
+      else swapView(() => showHub(meta));
     });
     stage.appendChild(back);
   }
 
-  // The reset sigil. Standing in the level-3 dead end introduces it; from
-  // then on it hangs in every salon, unexplained. Two clicks — one arms it
-  // ("sure?"), the next sends the player back to level 1 with every salon
-  // refreshed and every door locked again. The hand is kept; the first reset
-  // is also what flips the chain from the authored opening to procedural.
-  if (ev.depth >= HARDCODED_LEVELS - 1 && (meta.resets ?? 0) === 0 && !meta.resetSeen) {
+  // The reset sigil. Standing in branch 0's level-3 dead end introduces it;
+  // from then on it hangs in every salon, unexplained. Two clicks — one arms
+  // it ("sure?"), the next seals the hall back to a single door with every
+  // salon refreshed and every door locked again. The hand is kept; the first
+  // reset is also what flips the salons from the authored opening to
+  // procedural.
+  if (branch === 0 && ev.depth >= HARDCODED_LEVELS - 1 && (meta.resets ?? 0) === 0 && !meta.resetSeen) {
     meta.resetSeen = true;
     saveMeta(meta);
   }
@@ -1974,7 +2101,7 @@ function showGathering(meta: CardMeta, ev: TradeEvent): void {
       realmSound('ritual', 1, 0.8);
       resetChain(meta, ALL_TASK_IDS, loadManualWorlds());
       saveMeta(meta);
-      swapView(() => showGathering(meta, salonAtDepth(meta, 0)));
+      swapView(() => showHub(meta));
     });
     stage.appendChild(sigil);
   }
