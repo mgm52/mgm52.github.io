@@ -254,6 +254,10 @@ export type CardMeta = {
   // end. Absent until ensureBranches migrates the legacy single chain (or
   // the intro seeds branch 0).
   branches?: BranchState[];
+  // When the last starter door was unsealed (ms epoch). A fresh seal takes a
+  // while to give — the hub holds the next door on a countdown from this
+  // stamp (cards.ts UNSEAL_COOLDOWN_MS). Absent until the first unsealing.
+  lastUnsealAt?: number;
   // How many times the player has reset the realm back to a single door.
   // 0/absent means the opening hand-authored chain is still up — branch 0's
   // levels 1–3 pre-set, level 3 a deliberate wall. From the first reset

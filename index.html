@@ -2661,6 +2661,11 @@
         filter: brightness(0.7) saturate(0.8) drop-shadow(0 9px 18px rgba(60, 50, 110, 0.42));
       }
       .ct-hub-sealed .ct-door-label { color: #7d7590; }
+      /* Mid-cooldown the seal is still setting: the label is the seconds
+         counting down, and the door only rattles when tugged. */
+      .ct-hub-sealed.cooling .ct-door-label {
+        color: #9c8a5a; font-variant-numeric: tabular-nums; letter-spacing: 0.24em;
+      }
       /* The faint door beyond the sealed one: the hall goes on. */
       .ct-hub-ghost { pointer-events: none; opacity: 0.22; }
       .ct-hub-ghost .ct-door-glyph { filter: brightness(0.3) grayscale(0.6); }

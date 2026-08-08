@@ -1556,6 +1556,10 @@ function renderSegs(segs: WantSeg[], count: number): string {
 
 const LINE_TYPE_MS = 22;
 
+// How long a fresh seal takes to set after each unsealing — the hub's next
+// door spends this long counting down before it can be opened.
+const UNSEAL_COOLDOWN_MS = 90_000;
+
 // ─── The hall of doors ───────────────────────────────────────────────
 // The realm's base level: every starter door the player has unsealed, side
 // by side, each opening onto its own endless chain of salons (common
@@ -1612,17 +1616,52 @@ function showHub(meta: CardMeta): void {
   });
 
   // The next door, still sealed — and behind it, the faint shape of another:
-  // the hall goes on for as long as the player keeps unsealing.
+  // the hall goes on for as long as the player keeps unsealing. A fresh seal
+  // takes a while to set, though: for a spell after each unsealing the next
+  // door only counts the seconds down under itself, and rattles if tugged.
   {
     const sealed = div('ct-door ct-hub-door ct-hub-sealed locked');
     sealed.appendChild(div('ct-door-glyph'));
     const label = div('ct-door-label', 'unseal');
     sealed.appendChild(label);
+    const readyAt = (meta.lastUnsealAt ?? 0) + UNSEAL_COOLDOWN_MS;
+    // Clamped both ways so a clock jumped into the future can't hold the
+    // door longer than one full cooldown.
+    const remaining = (): number => Math.max(0, Math.min(UNSEAL_COOLDOWN_MS, readyAt - Date.now()));
+    let timer = 0;
+    const syncCooldown = (): void => {
+      // The view swapped away — the stage owns fresh DOM now; let go.
+      if (!sealed.isConnected && timer) { window.clearInterval(timer); return; }
+      const ms = remaining();
+      if (ms > 0) {
+        sealed.classList.add('cooling');
+        label.textContent = String(Math.ceil(ms / 1000));
+        return;
+      }
+      if (timer) { window.clearInterval(timer); timer = 0; }
+      if (sealed.classList.contains('cooling')) {
+        sealed.classList.remove('cooling');
+        label.textContent = 'unseal';
+        realmSound('online', 0.35, 0.8);   // the seal settles — ready
+      }
+    };
+    if (remaining() > 0) {
+      syncCooldown();
+      timer = window.setInterval(syncCooldown, 500);
+    }
     sealed.addEventListener('click', () => {
       if (hubBusy) return;
+      if (remaining() > 0) {
+        realmSound('door_locked', 0.95, 1);
+        sealed.classList.remove('shake');
+        void sealed.offsetWidth;             // restart the shake animation
+        sealed.classList.add('shake');
+        return;
+      }
       hubBusy = true;
       const b = branches.length;
       branches.push({ events: [], unlockedDepth: 0 });
+      meta.lastUnsealAt = Date.now();
       saveMeta(meta);
       // The same beat of payoff as a salon door: the seal gives with a
       // ka-chunk, the padlock tumbles, the doorway blooms (CSS .unlocking),

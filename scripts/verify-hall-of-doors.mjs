@@ -82,10 +82,19 @@ const hall2 = await page.evaluate(() => ({
   sealed: document.querySelectorAll('.ct-hub-sealed').length,
   counter: document.querySelector('.ct-level')?.textContent,
   labels: [...document.querySelectorAll('.ct-hub-door.open .ct-door-label')].map((el) => el.textContent),
+  coolLabel: document.querySelector('.ct-hub-sealed.cooling .ct-door-label')?.textContent,
 }));
 console.log('hall (2 doors):', JSON.stringify(hall2));
 if (hall2.open !== 2 || hall2.sealed !== 1) fail('hall should now show 2 open doors + 1 sealed');
 if (hall2.counter !== '2 doors unsealed') fail(`hall counter: ${hall2.counter}`);
+// The seal we just broke restarts the clock: the next door counts down from
+// 90 and only rattles when clicked.
+if (!/^\d+$/.test(hall2.coolLabel ?? '') || Number(hall2.coolLabel) > 90) fail(`cooldown label: ${hall2.coolLabel}`);
+const openBefore = hall2.open;
+await page.click('.ct-hub-sealed');
+await sleep(600);
+const openAfter = await page.evaluate(() => document.querySelectorAll('.ct-hub-door.open').length);
+if (openAfter !== openBefore) fail('a cooling seal should not unseal on click');
 await shot('4-hall-two-doors');
 
 // 4. Door 1 still leads to the hand-authored soft border (pre-reset).
