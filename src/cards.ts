@@ -1157,7 +1157,7 @@ function handCardEl(card: WorldCard, w: HandWiring): HTMLElement {
   } else {
     // A reused node: shed any transient animation/selection state and the
     // inline styles a trade fly-out may have left on it.
-    el.classList.remove('selected', 'dealt', 'trade-arrived', 'trade-given', 'trade-received', 'dived', 'grayed');
+    el.classList.remove('selected', 'dealt', 'trade-arrived', 'trade-slot', 'trade-landed', 'trade-given', 'trade-received', 'dived', 'grayed');
     el.style.transition = '';
     el.style.transform = '';
     el.style.opacity = '';
@@ -1843,83 +1843,182 @@ function showGathering(meta: CardMeta, ev: TradeEvent): void {
     }
   };
 
-  // The exchange, in motion: the picked cards lift toward the stall while its
-  // whole deck drops into the hand. Once both halves land the swap re-renders.
+  // The exchange, in motion — one continuous gesture with no layout snaps:
+  //  - the given cards LIFT out of the hand into fixed-position flight
+  //    (reparented to <body>, so their painted canvases ride along) and rise
+  //    to the trader, while the hand row closes the gaps under them with a
+  //    FLIP slide instead of snapping shut;
+  //  - the trader's whole deck lifts into flight the same way and glides down
+  //    onto the EXACT spots where those cards will live in the hand
+  //    (invisible placeholders, appended up front, hold the spots), each one
+  //    revealing with a tier flash the moment its flight lands on it;
+  //  - the stall, emptied mid-air, eases into its spent dimming while its
+  //    card box folds shut and the confirm button fades.
+  // Only after the last landing does the trade commit to the meta — by then
+  // the DOM is already correct, so nothing re-renders or flashes.
   const executeTrade = (cr: Creature): void => {
     if (tradeAnimating) return;
     const picked = minePicked();
     if (!wantSatisfiedBy(cr.want, picked)) return;
     if (!keepsAWorld(cr, picked)) return;   // never empty the hand of worlds
-    tradeAnimating = true;
-    refreshButtons();
     const received = cr.deck;
-    // Fly a card toward a target rect's centre — the given cards rise into the
-    // trader's stall, the received cards fall toward the hand, each tracking
-    // the actual on-screen direction of where it's headed.
-    const flyTo = (el: HTMLElement | null | undefined, target: DOMRect | undefined, scale: number): void => {
-      if (!el || !target) return;
-      const r = el.getBoundingClientRect();
-      const dx = (target.left + target.width / 2) - (r.left + r.width / 2);
-      const dy = (target.top + target.height / 2) - (r.top + r.height / 2);
-      el.style.transition = 'transform 640ms cubic-bezier(0.5, 0, 0.75, 0.4), opacity 560ms ease';
-      el.style.transform = `translate(${dx}px, ${dy}px) scale(${scale})`;
-      el.style.opacity = '0';
-      el.style.pointerEvents = 'none';
-    };
     const stallEl = row.querySelector(`[data-creature-id="${cr.id}"]`) as HTMLElement | null;
-    const stallRect = stallEl?.querySelector('.ct-stall-cards')?.getBoundingClientRect()
-      ?? stallEl?.getBoundingClientRect();
-    const handRect = handWrap.getBoundingClientRect();
-    for (const m of picked) {
-      flyTo(gatherHandRow()?.querySelector(`[data-card-id="${m.id}"]`) as HTMLElement | null, stallRect, 0.6);
-    }
-    for (const t of received) {
-      flyTo(stallEl?.querySelector(`[data-card-id="${t.id}"]`) as HTMLElement | null, handRect, 0.85);
-    }
-    realmSound('select', 0.9, 0.8);
+    const handRow = gatherHandRow();
     const wonOrigin = received.some((t) => t.origin);
-    window.setTimeout(() => {
+
+    // The books — shared by the animated path and the degraded fallback.
+    const commit = (): void => {
       tradeAnimating = false;
       meta.cards = meta.cards.filter((c) => !pickedMine.has(c.id));
       meta.cards.push(...received);
       cr.deck = [];
       pickedMine.clear();
       saveMeta(meta);
-      // Update only the traded stall in place — mark it spent and empty its
-      // card box — so the other traders never flash or re-deal. Then rebuild
-      // just the hand and pop the arrivals in.
       const ref = stalls.get(cr.id);
       if (stallEl) {
         stallEl.classList.add('spent');
-        const box = stallEl.querySelector('.ct-stall-cards');
-        if (box) box.innerHTML = '';
+        stallEl.classList.remove('spending');
+        // The fold + fades finished under .spending; make their end states
+        // structural so dropping the class can't blink anything back.
+        const box = stallEl.querySelector('.ct-stall-cards') as HTMLElement | null;
+        if (box) { box.innerHTML = ''; box.style.height = ''; box.style.transition = ''; box.style.overflow = ''; }
+        stallEl.querySelector('.ct-offers-label')?.remove();
         ref?.giveBtn?.remove();
         if (ref) ref.giveBtn = null;
       }
-      // Surgically update the hand: drop the cards that flew to the trader,
-      // pop the arrivals in — the cards the player kept are never re-rendered,
-      // so they don't flash. (Falls back to a full build if the row is gone.)
-      const handRow = gatherHandRow();
-      if (handRow) {
-        for (const m of picked) handRow.querySelector(`[data-card-id="${m.id}"]`)?.remove();
-        for (const t of received) {
-          const el = buildHandCard(t);
-          el.classList.add('trade-arrived');
-          handRow.appendChild(el);
-        }
-        refreshHandCaption();
-      } else {
-        renderGatherHand();
-        for (const t of received) {
-          gatherHandRow()?.querySelector(`[data-card-id="${t.id}"]`)?.classList.add('trade-arrived');
-        }
-      }
+      refreshHandCaption();
       // Selection is cleared — every stall re-states (the traded one now reads
       // "traded out", the rest revert to their want, dropping any "yes!"/"no.").
       restateAll();
       refreshButtons();
       realmSound(wonOrigin ? 'task_complete' : 'ritual', wonOrigin ? 0.9 : 1, wonOrigin ? 1 : 0.9);
-    }, 680);
+    };
+
+    tradeAnimating = true;
+    refreshButtons();
+
+    // Degraded path (the row rebuilt mid-interaction): no motion, just the swap.
+    if (!stallEl || !handRow) {
+      window.setTimeout(() => { commit(); renderGatherHand(); }, 200);
+      return;
+    }
+
+    realmSound('select', 0.9, 0.8);
+
+    // Geometry read before anything moves.
+    const stallBox = stallEl.querySelector('.ct-stall-cards') as HTMLElement | null;
+    const stallRect = (stallBox ?? stallEl).getBoundingClientRect();
+    const boxHeight = stallBox?.getBoundingClientRect().height ?? 0;
+    const before = new Map<HTMLElement, DOMRect>();
+    for (const el of [...handRow.children] as HTMLElement[]) before.set(el, el.getBoundingClientRect());
+
+    // Lift a card out of the layout into fixed-position flight at its exact
+    // current spot. Returns where it stood.
+    const lift = (el: HTMLElement): DOMRect => {
+      const r = el.getBoundingClientRect();
+      el.classList.remove('selected');
+      el.style.transition = 'none';
+      el.style.transform = '';
+      el.style.position = 'fixed';
+      el.style.left = `${r.left}px`;
+      el.style.top = `${r.top}px`;
+      el.style.width = `${r.width}px`;
+      el.style.height = `${r.height}px`;
+      el.style.margin = '0';
+      // Above the realm (100001, appended later in the body), below the hop
+      // white (100002) — the flight must never cover a dive already leaving.
+      el.style.zIndex = '100001';
+      el.style.pointerEvents = 'none';
+      document.body.appendChild(el);
+      return r;
+    };
+    // Send a lifted card so its centre lands on the target's centre, scaled
+    // to the destination's width.
+    const flight = (el: HTMLElement, from: DOMRect, to: DOMRect,
+      o: { delay: number; dur: number; ease: string; scale?: number; rot?: number; fadeOut?: boolean }): void => {
+      const dx = (to.left + to.width / 2) - (from.left + from.width / 2);
+      const dy = (to.top + to.height / 2) - (from.top + from.height / 2);
+      const scale = o.scale ?? (from.width > 0 ? to.width / from.width : 1);
+      el.style.transition = `transform ${o.dur}ms ${o.ease} ${o.delay}ms`
+        + (o.fadeOut ? `, opacity ${Math.round(o.dur * 0.7)}ms ease ${o.delay + Math.round(o.dur * 0.3)}ms` : '');
+      void el.offsetWidth;   // commit the lifted start before the flight transition arms
+      el.style.transform = `translate(${dx}px, ${dy}px) rotate(${o.rot ?? 0}deg) scale(${scale})`;
+      if (o.fadeOut) el.style.opacity = '0';
+    };
+
+    // The given cards rise to the trader and shrink away into its stall.
+    for (const m of picked) {
+      const el = handRow.querySelector(`[data-card-id="${m.id}"]`) as HTMLElement | null;
+      if (!el) continue;
+      const from = lift(el);
+      // The node leaves the game with the trader — never let the hand cache
+      // hand its flown, fixed-position styles to a future rebuild.
+      handCardCache.delete(m.id);
+      flight(el, from, stallRect, { delay: 0, dur: 560, ease: 'cubic-bezier(0.55, 0, 0.8, 0.45)', scale: 0.55, rot: 5, fadeOut: true });
+      window.setTimeout(() => el.remove(), 700);
+    }
+
+    // The received cards lift out of the stall, each aimed at the invisible
+    // placeholder now holding its future spot in the hand.
+    const arrivals: { el: HTMLElement | null; from: DOMRect | null; slot: HTMLElement }[] = [];
+    for (const t of received) {
+      const src = stallEl.querySelector(`[data-card-id="${t.id}"]`) as HTMLElement | null;
+      const slot = buildHandCard(t);
+      slot.classList.add('trade-slot');
+      handRow.appendChild(slot);
+      arrivals.push(src ? { el: src, from: lift(src), slot } : { el: null, from: null, slot });
+    }
+
+    // The stall dims toward spent and its emptied card box folds shut.
+    stallEl.classList.add('spending');
+    if (stallBox) {
+      stallBox.style.height = `${boxHeight}px`;
+      stallBox.style.overflow = 'hidden';
+      void stallBox.offsetWidth;
+      stallBox.style.transition = 'height 460ms cubic-bezier(0.3, 0.6, 0.3, 1) 200ms';
+      stallBox.style.height = '0px';
+    }
+
+    // FLIP the hand row: everything that survived slides into its new place.
+    for (const el of [...handRow.children] as HTMLElement[]) {
+      const a = before.get(el);
+      if (!a) continue;   // a fresh placeholder — it reveals on landing instead
+      const b = el.getBoundingClientRect();
+      const dx = a.left - b.left, dy = a.top - b.top;
+      if (!dx && !dy) continue;
+      el.style.transition = 'none';
+      el.style.transform = `translate(${dx}px, ${dy}px)`;
+    }
+    requestAnimationFrame(() => {
+      requestAnimationFrame(() => {
+        for (const el of [...handRow.children] as HTMLElement[]) {
+          if (!before.has(el) || !el.style.transform) continue;
+          el.style.transition = 'transform 380ms cubic-bezier(0.25, 0.7, 0.3, 1)';
+          el.style.transform = '';
+          window.setTimeout(() => { el.style.transition = ''; }, 430);
+        }
+      });
+    });
+
+    // Launch the arrivals with a soft stagger; each lands with a tier flash
+    // and a little thunk exactly where its flight ends.
+    let lastLanding = 0;
+    arrivals.forEach((a, i) => {
+      const delay = 90 + i * 90;
+      const landAt = delay + 620;
+      lastLanding = Math.max(lastLanding, landAt);
+      const reveal = (): void => {
+        a.slot.classList.remove('trade-slot');
+        a.slot.classList.add('trade-landed');
+        realmSound('place', 0.4, 0.85 + i * 0.06);
+      };
+      if (!a.el || !a.from) { window.setTimeout(reveal, landAt); return; }
+      flight(a.el, a.from, a.slot.getBoundingClientRect(), { delay, dur: 620, ease: 'cubic-bezier(0.22, 0.75, 0.25, 1)' });
+      const el = a.el;
+      window.setTimeout(() => { reveal(); el.remove(); }, landAt);
+    });
+
+    window.setTimeout(commit, Math.max(720, lastLanding + 60));
   };
 
   // Clicks on the player's hand toggle the shared selection — every trader

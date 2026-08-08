@@ -1995,6 +1995,21 @@
         55% { box-shadow: var(--wc-shadow), 0 0 30px 8px var(--tier-c); }
         100% { opacity: 1; box-shadow: var(--wc-shadow); }
       }
+      /* A trade in flight (executeTrade): a placeholder holds the arriving
+         card's spot in the hand, invisible, while the trader's card glides
+         down onto it; on landing it reveals in place with the tier flash —
+         no drop-in from elsewhere, the flight IS the drop. */
+      .world-card.trade-slot { opacity: 0; pointer-events: none; }
+      .world-card.trade-landed {
+        animation:
+          wc-land 520ms cubic-bezier(0.2, 0.9, 0.25, 1) backwards,
+          wc-float 7s ease-in-out infinite;
+      }
+      @keyframes wc-land {
+        0% { opacity: 0.55; transform: scale(0.965); box-shadow: var(--wc-shadow), 0 0 30px 8px var(--tier-c); }
+        60% { box-shadow: var(--wc-shadow), 0 0 22px 4px var(--tier-c); }
+        100% { opacity: 1; box-shadow: var(--wc-shadow); }
+      }
       .world-card.taken {
         transform: translateY(-130vh) rotate(9deg) scale(0.7);
         opacity: 0;
@@ -2200,6 +2215,16 @@
         display: flex; flex-direction: column; align-items: center; gap: 4px;
       }
       .ct-stall.spent { opacity: 0.42; filter: saturate(0.6); pointer-events: none; }
+      /* Mid-trade (executeTrade): the stall eases toward the spent dimming
+         while its lifted-out deck flies, its confirm button and "offers"
+         divider fading under it. Same end values as .spent, so the class
+         handoff at commit is invisible. */
+      .ct-stall.spending {
+        opacity: 0.42; filter: saturate(0.6); pointer-events: none;
+        transition: opacity 760ms ease 160ms, filter 760ms ease 160ms;
+      }
+      .ct-stall.spending .ct-confirm,
+      .ct-stall.spending .ct-offers-label { opacity: 0; transition: opacity 300ms ease; }
       /* The entity's name, spaced display caps under its avatar — the
          screenshot's LUMEN / AERIS / VYRA masthead, in the realm's own voice. */
       .ct-creature-name {
@@ -2789,10 +2814,12 @@
          functional one-shots (deals, trades, dives) keep moving. */
       @media (prefers-reduced-motion: reduce) {
         .cd-blob, .cd-halo, .cd-motes { animation: none; }
-        .world-card, .world-card.dealt, .world-card.trade-arrived {
+        .world-card, .world-card.dealt, .world-card.trade-arrived, .world-card.trade-landed {
           animation-name: none;
         }
         .world-card.dealt { animation: ct-dealt 480ms cubic-bezier(0.2, 0.9, 0.25, 1) backwards; }
+        /* The landing flash stays (a one-shot), only the levitation goes. */
+        .world-card.trade-landed { animation: wc-land 520ms cubic-bezier(0.2, 0.9, 0.25, 1) backwards; }
       }
 
       /* ── Entering / leaving a card world: the finale's pull-back language.
