@@ -1579,7 +1579,6 @@ function showHub(meta: CardMeta): void {
   const head = div('ct-gathering-head');
   head.appendChild(div('ct-level', `${branches.length} ${branches.length === 1 ? 'door' : 'doors'} unsealed`));
   head.appendChild(div('ct-event-title', 'the hall of doors'));
-  head.appendChild(div('ct-gathering-sub', 'every door keeps its own chain of salons — if one runs dry, unseal another'));
   stage.appendChild(head);
 
   const row = div('ct-hub-doors');
