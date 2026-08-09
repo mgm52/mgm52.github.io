@@ -74,15 +74,15 @@ export const CHARM_NOTE = 'Applies to all worlds in hand.';
 export const CHARM_DEFS: Record<CharmKind, { name: string; glyph: string; desc: string }> = {
   gold: {
     name: 'the gilded charm', glyph: '✺',
-    desc: '1 in 5 goblins spawned is a Goldblin, worth +Ƶ250 on death.',
+    desc: 'Every goblin spawned is a Goldblin, worth +Ƶ250 on death.',
   },
   hands: {
     name: 'the busy charm', glyph: '✛',
-    desc: 'Idle goblins assign themselves to whatever needs staffing.',
+    desc: 'Autobuild: idle goblins assign themselves to whatever needs staffing.',
   },
   rain: {
     name: 'the wet charm', glyph: '☂',
-    desc: 'Thirsty buildings are watered automatically. Includes the busy charm\'s effect.',
+    desc: 'Autowater: thirsty buildings are watered automatically. Includes Autobuild.',
   },
   storm: {
     name: 'the storm charm', glyph: 'ϟ',
@@ -90,7 +90,7 @@ export const CHARM_DEFS: Record<CharmKind, { name: string; glyph: string; desc: 
   },
   tiny: {
     name: 'the little charm', glyph: '♟',
-    desc: 'Unlocks the Tinytaur summon — four Minotaurs become one small, far faster one.',
+    desc: 'All new minotaurs spawn as Tinytaurs.',
   },
 };
 
@@ -112,11 +112,16 @@ export function applyCharms(st: GameState, hand: WorldCard[]): void {
   for (const c of hand) {
     if (!c.charm) continue;
     switch (c.charm) {
-      case 'gold': st.goldgoblinsEnabled = true; break;
+      // Gilded: every spawn a Goldblin (Enabled rides along so the sidebar's
+      // Goldgoblins upgrade reads as owned rather than for sale).
+      case 'gold': st.goldgoblinsEnabled = true; st.goldgoblinsAlways = true; break;
       case 'hands': st.autoAssignEnabled = true; break;
       case 'rain': st.autoAssignEnabled = true; st.autoWaterEnabled = true; break;
       case 'storm': st.lightningUnlocked = true; break;
-      case 'tiny': st.tinytaurUnlocked = true; break;
+      // Little: every minotaur summon arrives a Tinytaur. (The 4-for-1
+      // Tinytaur ritual isn't granted — under this charm there are never
+      // four full Minotaurs to feed it.)
+      case 'tiny': st.minotaursSpawnTiny = true; break;
     }
   }
 }

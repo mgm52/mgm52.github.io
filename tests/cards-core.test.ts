@@ -934,14 +934,17 @@ describe('charms', () => {
       makeCharmCard(meta, 'common', 'tiny'),
     ]);
     expect(st.goldgoblinsEnabled).toBe(true);
+    expect(st.goldgoblinsAlways).toBe(true);  // gilded: EVERY spawn, not the 1-in-5 roll
     expect(st.autoAssignEnabled).toBe(true); // rain implies the busy hands too
     expect(st.autoWaterEnabled).toBe(true);
     expect(st.lightningUnlocked).toBe(true);
-    expect(st.tinytaurUnlocked).toBe(true);
+    expect(st.minotaursSpawnTiny).toBe(true); // little: all summons arrive tiny
     // And a plain hand blesses nothing.
     const st2 = generateWeirdWorld(11, 'common', TASK_IDS, 'balanced');
     applyCharms(st2, [card('common', { id: 2 })]);
     expect(st2.goldgoblinsEnabled).toBe(false);
+    expect(st2.goldgoblinsAlways).toBeUndefined();
+    expect(st2.minotaursSpawnTiny).toBeUndefined();
   });
 
   it('procedural picky traders sometimes tuck a charm into their deck', () => {

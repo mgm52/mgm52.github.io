@@ -953,7 +953,8 @@ function spawnGoblin(state: GameState, forceGold = false) {
     return;
   }
   const id = state.nextId++;
-  const isGold = forceGold || (state.goldgoblinsEnabled && Math.random() < GOLD_GOBLIN_CHANCE);
+  const isGold = forceGold || state.goldgoblinsAlways === true
+    || (state.goldgoblinsEnabled && Math.random() < GOLD_GOBLIN_CHANCE);
   const g: Goblin = {
     id, pos: cellCenter(cell), cell,
     target: null, goal: null,
@@ -1263,13 +1264,17 @@ function makeMinotaur(state: GameState, cell: Cell, tiny: boolean): Minotaur {
 export function spawnMinotaur(state: GameState, tiny = false): boolean {
   const cell = pickMinotaurSpawnCell(state);
   if (!cell) return false;
-  const t = makeMinotaur(state, cell, tiny);
+  // The little charm: whatever was asked for, every minotaur comes out of
+  // the hole a Tinytaur. The ritual itself still counts as performed, so the
+  // Summon-2-Minotaurs task can't be stranded by the blessing.
+  const arrivesTiny = tiny || state.minotaursSpawnTiny === true;
+  const t = makeMinotaur(state, cell, arrivesTiny);
   state.minotaurs.set(t.id, t);
   // The Summon-2-Minotaurs task counts rituals that actually finished, not
   // purchases — this is the moment the minotaur exists.
   if (!tiny) state.minotaursSummoned++;
-  appendLog(state, tiny ? `Tinytaur #${t.id} skitters out of the hole.` : `Minotaur #${t.id} crawls out of the hole.`);
-  playSound('goblin_spawn', tiny ? 2.2 : 1.4, 0.3);
+  appendLog(state, arrivesTiny ? `Tinytaur #${t.id} skitters out of the hole.` : `Minotaur #${t.id} crawls out of the hole.`);
+  playSound('goblin_spawn', arrivesTiny ? 2.2 : 1.4, 0.3);
   return true;
 }
 

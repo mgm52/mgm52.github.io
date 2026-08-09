@@ -802,9 +802,16 @@ export type GameState = {
   // watering duty for thirsty buildings. Requires autoAssignEnabled.
   autoWaterEnabled: boolean;
   goldgoblinsEnabled: boolean;
+  // The gilded charm (cards-core applyCharms): EVERY spawn is a Goldblin,
+  // not the upgrade's 1-in-5 roll. Optional — absent on saves from before
+  // the charm granted it.
+  goldgoblinsAlways?: boolean;
   // Secret summon: flips true once the player has fielded TINYTAUR.minotaurCost
   // Minotaurs at once (checked in the sim tick). Sticky.
   tinytaurUnlocked: boolean;
+  // The little charm (cards-core applyCharms): every minotaur summoned comes
+  // out of the hole a Tinytaur. Optional — absent on saves from before it.
+  minotaursSpawnTiny?: boolean;
   // Stat: the most units ever killed by a single Lightning Strike. Sticky
   // (only ever increases).
   maxStruckAtOnce: number;
