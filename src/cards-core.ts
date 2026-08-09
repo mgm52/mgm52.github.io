@@ -254,6 +254,14 @@ export type CardMeta = {
   // end. Absent until ensureBranches migrates the legacy single chain (or
   // the intro seeds branch 0).
   branches?: BranchState[];
+  // How many of the hall's doors stand unsealed. Doors unseal in order, so
+  // the first `doorsUnsealed` branches are open and everything past them
+  // waits sealed — the realm STARTS at 0, every door shut, the first
+  // unsealing the player's own act. A branch's chain can exist seeded while
+  // its door is still shut (the intro deals branch 0 a home for the stolen
+  // origin). Absent on metas from before the hall started sealed: those
+  // count every existing branch as unsealed.
+  doorsUnsealed?: number;
   // When the last starter door was unsealed (ms epoch). A fresh seal takes a
   // while to give — the hub holds the next door on a countdown from this
   // stamp (cards.ts UNSEAL_COOLDOWN_MS). Absent until the first unsealing.
@@ -1162,6 +1170,10 @@ export function resetChain(meta: CardMeta, taskIds: string[], manualPool: Manual
   meta.resets = (meta.resets ?? 0) + 1;
   meta.unlockedDepth = 0;
   meta.branches = [{ events: generateEvents(meta, origin, taskIds, manualPool), unlockedDepth: 0 }];
+  // The hall seals all the way back up — even door 1 — and the seal is dry:
+  // beginning again never leaves the player staring at a countdown.
+  meta.doorsUnsealed = 0;
+  delete meta.lastUnsealAt;
 }
 
 // The reshuffle: this salon ends and a fresh one at the same depth arrives —

@@ -1479,6 +1479,9 @@ async function runTradeIntro(meta: CardMeta): Promise<void> {
   meta.cards = [junk];
   meta.events = null;
   meta.branches = [{ events: generateEvents(meta, origin, ALL_TASK_IDS, loadManualWorlds()), unlockedDepth: 0 }];
+  // The chain exists (the origin needs its home) but its door does not stand
+  // open: the hall starts fully sealed, the first unsealing the player's own.
+  meta.doorsUnsealed = 0;
   meta.phase = 'firstworld';
   saveMeta(meta);
   await sleep(400);
@@ -1563,14 +1566,16 @@ const UNSEAL_COOLDOWN_MS = 90_000;
 // ─── The hall of doors ───────────────────────────────────────────────
 // The realm's base level: every starter door the player has unsealed, side
 // by side, each opening onto its own endless chain of salons (common
-// threshold → uncommon salons → rare exchanges). One more door always waits
-// sealed at the end of the row — click it and it's unsealed on the spot, no
-// key: the price of a fresh chain is climbing it from commons again. Each
-// open door wears its chain's progress — a run of pips, one per level
-// climbed, coloured by that salon's tier, with the deepest level beneath —
-// so how far each path has been explored reads at a glance. The row wraps
-// and the stage scrolls, so the hall keeps working however many doors the
-// player collects.
+// threshold → uncommon salons → rare exchanges). The hall STARTS with every
+// door shut — even the first unsealing is the player's own act. One more
+// door always waits sealed at the end of the row; click it and it swings
+// open IN PLACE (no key, no walking through — entering is a deliberate
+// second click), while the seal re-forms one door along and starts its
+// countdown. Each open door wears its chain's progress — a run of pips, one
+// per level climbed, coloured by that salon's tier, with the deepest level
+// beneath — so how far each path has been explored reads at a glance. The
+// row wraps and the stage scrolls, so the hall keeps working however many
+// doors the player collects.
 function showHub(meta: CardMeta): void {
   const stage = realmEl('card-stage');
   clearSpeech();
@@ -1579,9 +1584,14 @@ function showHub(meta: CardMeta): void {
   currentGathering = null;
 
   const branches = ensureHall(meta);
+  const unsealed = meta.doorsUnsealed ?? branches.length;
+  // Guard for a truncated saved meta: every unsealed door owns a branch.
+  while (branches.length < unsealed) branches.push({ events: [], unlockedDepth: 0 });
 
+  const doorCountLine = (n: number): string => `${n} ${n === 1 ? 'door' : 'doors'} unsealed`;
   const head = div('ct-gathering-head');
-  head.appendChild(div('ct-level', `${branches.length} ${branches.length === 1 ? 'door' : 'doors'} unsealed`));
+  const counter = div('ct-level', doorCountLine(unsealed));
+  head.appendChild(counter);
   head.appendChild(div('ct-event-title', 'the hall of doors'));
   stage.appendChild(head);
 
@@ -1593,8 +1603,8 @@ function showHub(meta: CardMeta): void {
     swapView(() => showGathering(meta, salonAt(meta, b, 0)));
   };
 
-  branches.forEach((bs, b) => {
-    const deepest = bs.unlockedDepth;
+  const buildOpenDoor = (b: number): HTMLElement => {
+    const deepest = branches[b]?.unlockedDepth ?? 0;
     const door = div(`ct-door ct-hub-door open t-${salonTierForDepth(deepest)}`);
     door.appendChild(div('ct-door-glyph'));
     // The chain's progress, worn on the door: one pip per level climbed,
@@ -1612,14 +1622,21 @@ function showHub(meta: CardMeta): void {
       realmSound('online', 0.7, 0.9);
       enterBranch(b);
     });
-    row.appendChild(door);
-  });
+    return door;
+  };
+  for (let b = 0; b < unsealed; b++) row.appendChild(buildOpenDoor(b));
 
-  // The next door, still sealed — and behind it, the faint shape of another:
-  // the hall goes on for as long as the player keeps unsealing. A fresh seal
-  // takes a while to set, though: for a spell after each unsealing the next
-  // door only counts the seconds down under itself, and rattles if tugged.
-  {
+  // The faint shape at the row's end: the hall goes on for as long as the
+  // player keeps unsealing.
+  const ghost = div('ct-door ct-hub-door ct-hub-ghost locked');
+  ghost.appendChild(div('ct-door-glyph'));
+
+  // The next door, still sealed. A fresh seal takes a while to set: for a
+  // spell after each unsealing it only counts the seconds down under itself
+  // and rattles if tugged. Unsealing swings it open where it stands — the
+  // fresh chain waits for a deliberate click — and the seal re-forms on the
+  // next door along, countdown running.
+  const buildSealedDoor = (): HTMLElement => {
     const sealed = div('ct-door ct-hub-door ct-hub-sealed locked');
     sealed.appendChild(div('ct-door-glyph'));
     const label = div('ct-door-label', 'unseal');
@@ -1649,8 +1666,10 @@ function showHub(meta: CardMeta): void {
       syncCooldown();
       timer = window.setInterval(syncCooldown, 500);
     }
+    let openedAs = -1;   // ≥ 0 once this node has swung open as that branch's door
     sealed.addEventListener('click', () => {
       if (hubBusy) return;
+      if (openedAs >= 0) { realmSound('online', 0.7, 0.9); enterBranch(openedAs); return; }
       if (remaining() > 0) {
         realmSound('door_locked', 0.95, 1);
         sealed.classList.remove('shake');
@@ -1659,26 +1678,40 @@ function showHub(meta: CardMeta): void {
         return;
       }
       hubBusy = true;
-      const b = branches.length;
-      branches.push({ events: [], unlockedDepth: 0 });
+      const b = meta.doorsUnsealed ?? branches.length;
+      while (branches.length <= b) branches.push({ events: [], unlockedDepth: 0 });
+      meta.doorsUnsealed = b + 1;
       meta.lastUnsealAt = Date.now();
       saveMeta(meta);
       // The same beat of payoff as a salon door: the seal gives with a
-      // ka-chunk, the padlock tumbles, the doorway blooms (CSS .unlocking),
-      // then the door swings us into the fresh chain's threshold.
+      // ka-chunk, the padlock tumbles, the doorway blooms (CSS .unlocking) —
+      // but nobody walks through. The door settles open where it stands.
       sealed.classList.remove('locked');
       sealed.classList.add('open', 'unlocking');
       label.textContent = pathName(meta.seed ?? 0, b);
       realmSound('click', 0.8, 0.7);                                          // the seal turns
       window.setTimeout(() => realmSound('place', 1.1, 0.7), 110);            // the bolt drops — clunk
       window.setTimeout(() => realmSound('task_complete', 0.85, 0.95), 300);  // it gives; light spills
-      window.setTimeout(() => { realmSound('online', 0.7, 0.7); enterBranch(b); }, 740); // swing through
+      window.setTimeout(() => {
+        // Settled open: this node becomes the branch's door (pips, level,
+        // enter-on-click), and the seal re-forms one door along with its
+        // countdown already running off the stamp above.
+        openedAs = b;
+        sealed.classList.remove('unlocking', 'ct-hub-sealed');
+        sealed.classList.add('t-common');
+        const pips = div('ct-hub-pips');
+        pips.appendChild(div('ct-pip pip-common'));
+        sealed.insertBefore(pips, label);
+        sealed.appendChild(div('ct-hub-lvl', 'level 1'));
+        counter.textContent = doorCountLine(b + 1);
+        row.insertBefore(buildSealedDoor(), ghost);
+        hubBusy = false;
+      }, 1000);
     });
-    row.appendChild(sealed);
-    const ghost = div('ct-door ct-hub-door ct-hub-ghost locked');
-    ghost.appendChild(div('ct-door-glyph'));
-    row.appendChild(ghost);
-  }
+    return sealed;
+  };
+  row.appendChild(buildSealedDoor());
+  row.appendChild(ghost);
 
   // The player's hand, inline at the foot of the hall like in a gathering —
   // nothing to select here, but every world can still be entered.

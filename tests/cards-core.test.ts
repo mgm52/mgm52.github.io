@@ -855,10 +855,14 @@ describe('resetChain (begin again)', () => {
       events: [makeSalon(meta, 1, 0, mulberry32(9), TASK_IDS)],
       unlockedDepth: 1,
     });
+    meta.doorsUnsealed = 2;
+    meta.lastUnsealAt = 123456;
     resetChain(meta, TASK_IDS);
     expect(meta.resets).toBe(1);
-    expect(meta.branches!.length).toBe(1);     // the hall seals back to one door
+    expect(meta.branches!.length).toBe(1);     // the hall seals back to one chain
     expect(meta.branches![0].unlockedDepth).toBe(0);
+    expect(meta.doorsUnsealed).toBe(0);        // ...with even door 1 sealed again
+    expect(meta.lastUnsealAt).toBeUndefined(); // ...and no countdown in the way
     expect(meta.cards).toEqual(held); // the hand is untouched
     // The fresh chain is procedural — its stolen-world opener keeps the easy
     // rung (the impossible magistrate is gone) — and still carries the origin.
