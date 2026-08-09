@@ -932,7 +932,7 @@ describe('charms', () => {
     expect(cardQualifies({ kind: 'resource', res: 'money', amount: 0, count: 1 }, charm)).toBe(false);
   });
 
-  it('applyCharms blesses a world with every held charm\'s flag (worlds in hand ride along untouched)', () => {
+  it('applyCharms stamps the hand\'s charm layer beside the world\'s own flags', () => {
     const meta = freshMeta();
     // A balanced common: every charm flag starts false.
     const st = generateWeirdWorld(11, 'common', TASK_IDS, 'balanced');
@@ -944,18 +944,51 @@ describe('charms', () => {
       makeCharmCard(meta, 'common', 'storm'),
       makeCharmCard(meta, 'common', 'tiny'),
     ]);
-    expect(st.goldgoblinsEnabled).toBe(true);
     expect(st.goldgoblinsAlways).toBe(true);  // gilded: EVERY spawn, not the 1-in-5 roll
-    expect(st.autoAssignEnabled).toBe(true); // rain implies the busy hands too
-    expect(st.autoWaterEnabled).toBe(true);
-    expect(st.lightningUnlocked).toBe(true);
+    expect(st.charmAutoWork).toBe(true);      // busy/wet: Autobuild + Autowater
+    expect(st.charmLightning).toBe(true);
     expect(st.minotaursSpawnTiny).toBe(true); // little: all summons arrive tiny
+    // The world's OWN flags are never touched — the blessing is a layer.
+    expect(st.goldgoblinsEnabled).toBe(false);
+    expect(st.autoAssignEnabled).toBe(false);
+    expect(st.autoWaterEnabled).toBe(false);
+    expect(st.lightningUnlocked).toBe(false);
     // And a plain hand blesses nothing.
     const st2 = generateWeirdWorld(11, 'common', TASK_IDS, 'balanced');
     applyCharms(st2, [card('common', { id: 2 })]);
     expect(st2.goldgoblinsEnabled).toBe(false);
     expect(st2.goldgoblinsAlways).toBeUndefined();
     expect(st2.minotaursSpawnTiny).toBeUndefined();
+  });
+
+  it('a sold charm takes its blessing with it — while the world\'s earned upgrades survive', () => {
+    const meta = freshMeta();
+    const st = generateWeirdWorld(13, 'common', TASK_IDS, 'balanced');
+    // The world earned Autobuild for itself; the hand blesses the rest.
+    st.autoAssignEnabled = true;
+    applyCharms(st, [
+      card('common', { id: 1 }),
+      makeCharmCard(meta, 'common', 'gold'),
+      makeCharmCard(meta, 'common', 'storm'),
+      makeCharmCard(meta, 'common', 'deft'),
+      makeCharmCard(meta, 'common', 'deft'),
+      makeCharmCard(meta, 'common', 'fleet'),
+      makeCharmCard(meta, 'common', 'unmake'),
+    ]);
+    expect(st.goldgoblinsAlways).toBe(true);
+    expect(st.charmLightning).toBe(true);
+    expect(st.charmBuildSpeed).toBe(16);  // two deft charms stack: 4^2
+    expect(st.charmMoveSpeed).toBe(2);
+    expect(st.charmFreeDemolish).toBe(true);
+    // Every charm traded away to seekers; re-entry strips the whole layer...
+    applyCharms(st, [card('common', { id: 1 })]);
+    expect(st.goldgoblinsAlways).toBeUndefined();
+    expect(st.charmLightning).toBeUndefined();
+    expect(st.charmBuildSpeed).toBeUndefined();
+    expect(st.charmMoveSpeed).toBeUndefined();
+    expect(st.charmFreeDemolish).toBeUndefined();
+    // ...but what the world earned for itself stays earned.
+    expect(st.autoAssignEnabled).toBe(true);
   });
 
   it('procedural picky traders sometimes tuck a charm into their deck', () => {

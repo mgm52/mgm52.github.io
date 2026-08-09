@@ -9,7 +9,7 @@ import {
   getSpawnCapacity, holeBlockedByBuilding, holeCenter, isCellBlocked, isCellInBuilding, isCellInWaterSource,
   isInBounds, maintainerCount, markBuildingsChanged, nearestCellInWaterSource, occupyCell, pushDeathEffect, pushFloater,
   hellMirrorCenter, hellToWorld, pruneSoulChairs, pushLaserBeam, pushLightningBolt, recordGhost, releaseCell, removeDragon, removeGoblin,
-  spaceCentreMaintained, waterCarrierCount,
+  spaceCentreMaintained, waterCarrierCount, autoAssignActive, autoWaterActive,
 } from './state';
 
 // Auto-assign normally only runs on discrete events (a spawn, a manual command,
@@ -42,7 +42,7 @@ export function tick(state: GameState) {
     appendLog(state, 'Hint: demons parlay with talking goblins.');
   }
 
-  if (state.autoAssignEnabled && state.now >= nextAutoAssignAt) {
+  if (autoAssignActive(state) && state.now >= nextAutoAssignAt) {
     autoAssignAllIdle(state);
     nextAutoAssignAt = state.now + AUTO_ASSIGN_INTERVAL;
   }
@@ -982,7 +982,7 @@ function spawnGoblin(state: GameState, forceGold = false) {
   // (±4%) stops a burst of spawns sounding like one machine-gun tone.
   playDecayingGoblinSpawn(0.96 + Math.random() * 0.08);
   appendLog(state, isGold ? `Gold Goblin #${id} hatched!` : `Goblin #${id} hatched.`);
-  if (state.autoAssignEnabled) autoAssignAllIdle(state);
+  if (autoAssignActive(state)) autoAssignAllIdle(state);
 }
 
 // Seat Bob (the cutscene-summoned goblin) at the chosen hole. Bypasses the
@@ -1011,7 +1011,7 @@ export function spawnBob(state: GameState, holeCell: Cell): boolean {
   state.spawnsCompleted++;
   playDecayingGoblinSpawn(0.85);
   appendLog(state, 'Bob has joined the crew.');
-  if (state.autoAssignEnabled) autoAssignAllIdle(state);
+  if (autoAssignActive(state)) autoAssignAllIdle(state);
   return true;
 }
 
@@ -1055,7 +1055,7 @@ export function spawnRobot(state: GameState, terminator = false): boolean {
   appendLog(state, terminator
     ? `Terminator #${id} online. It begins scanning for targets.`
     : `Robot #${id} whirrs to life.`);
-  if (state.autoAssignEnabled) autoAssignAllIdle(state);
+  if (autoAssignActive(state)) autoAssignAllIdle(state);
   return true;
 }
 
@@ -1120,7 +1120,7 @@ function waterCarrierTarget(state: GameState, b: Building): number {
 // > active-short-on-maintainers; within a tier, fewer-currently-assigned wins
 // the next pick (so two equally-needy buildings get filled evenly).
 export function autoAssignAllIdle(state: GameState) {
-  if (!state.autoAssignEnabled) return;
+  if (!autoAssignActive(state)) return;
 
   type Need = { b: Building; tier: number; slots: number; center: { x: number; y: number } };
   const needs: Need[] = [];
@@ -1150,7 +1150,7 @@ export function autoAssignAllIdle(state: GameState) {
   // topped up to its (distance-scaled) carrier target, driest building first so
   // scarce idle goblins shore up whichever is closest to running dry. Gated on
   // the Autowater ritual; manual right-click ignores these caps.
-  if (state.autoWaterEnabled && state.waterSources.size > 0) {
+  if (autoWaterActive(state) && state.waterSources.size > 0) {
     type Drinker = { b: Building; target: number; meter: number };
     const drinkers: Drinker[] = [];
     for (const b of state.buildings.values()) {

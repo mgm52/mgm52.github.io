@@ -61,11 +61,11 @@ export type WorldCard = {
 };
 
 // ─── Charms ──────────────────────────────────────────────────────────
-// Passive keepsakes that ride in the hand: entering any owned world applies
-// every held charm's blessing to it (idempotent sticky flags, so re-entry
-// never double-applies). They're minted into trader decks — sometimes
-// procedurally, once by hand at level 2 — and leave the hand only through a
-// charm-seeker's want (worlds already blessed keep their blessings).
+// Passive keepsakes that ride in the hand: entering any owned world stamps
+// the hand's whole charm layer onto it (absolutely — a blessing lasts only
+// as long as its charm is held). They're minted into trader decks —
+// sometimes procedurally, once by hand at level 2 — and leave the hand only
+// through a charm-seeker's want, which takes their blessings with them.
 export type CharmKind = 'gold' | 'hands' | 'rain' | 'storm' | 'tiny' | 'deft' | 'fleet' | 'unmake';
 // The minting pool (rollCreatures tucks these into decks). 'rain' is absent:
 // the busy charm absorbed Autowater, so the wet charm is no longer dealt —
@@ -121,37 +121,38 @@ export function makeCharmCard(meta: CardMeta, tier: CardTier, kind: CharmKind): 
   };
 }
 
-// Bless a world with every charm in the hand. All effects are sticky unlock
-// flags the sim already understands (generated worlds set the same ones), so
-// applying them on every entry is safe.
+// Stamp the hand's charm layer onto a world on the way in. Every charm
+// effect lives in its own field BESIDE the world's earned flags (never
+// touching them), and the whole layer is written absolutely from the current
+// hand — hold the charm and the blessing is on; sell it to a charm-seeker
+// and the next entry takes the blessing away again, while anything the
+// world earned for itself (purchased upgrades, task unlocks) survives.
+// (Worlds blessed before this layer existed had the earned flags set
+// directly; those legacy blessings can't be told apart, so they stay.)
 export function applyCharms(st: GameState, hand: WorldCard[]): void {
-  let deft = 0, fleet = 0;
+  const counts = new Map<CharmKind, number>();
   for (const c of hand) {
-    if (!c.charm) continue;
-    switch (c.charm) {
-      // Gilded: every spawn a Goldblin (Enabled rides along so the sidebar's
-      // Goldgoblins upgrade reads as owned rather than for sale).
-      case 'gold': st.goldgoblinsEnabled = true; st.goldgoblinsAlways = true; break;
-      // Busy absorbed the wet charm's blessing — both grant Autobuild AND
-      // Autowater (the wet charm is no longer minted; held ones still work).
-      case 'hands':
-      case 'rain': st.autoAssignEnabled = true; st.autoWaterEnabled = true; break;
-      case 'storm': st.lightningUnlocked = true; break;
-      // Little: every minotaur summon arrives a Tinytaur. (The 4-for-1
-      // Tinytaur ritual isn't granted — under this charm there are never
-      // four full Minotaurs to feed it.)
-      case 'tiny': st.minotaursSpawnTiny = true; break;
-      case 'deft': deft++; break;
-      case 'fleet': fleet++; break;
-      case 'unmake': st.charmFreeDemolish = true; break;
-    }
+    if (c.charm) counts.set(c.charm, (counts.get(c.charm) ?? 0) + 1);
   }
-  // The stackable charms: multipliers computed from the whole hand and
-  // stamped ABSOLUTELY, never compounded — so re-entering a world with the
-  // same hand is idempotent, and a hand that has grown another copy simply
-  // stamps the larger figure.
-  if (deft > 0) st.charmBuildSpeed = 4 ** deft;
-  if (fleet > 0) st.charmMoveSpeed = 2 ** fleet;
+  const held = (k: CharmKind): boolean => (counts.get(k) ?? 0) > 0;
+  // Gilded: every spawn a Goldblin.
+  st.goldgoblinsAlways = held('gold') || undefined;
+  // Busy absorbed the wet charm's blessing — both grant Autobuild AND
+  // Autowater (the wet charm is no longer minted; held ones still work).
+  st.charmAutoWork = (held('hands') || held('rain')) || undefined;
+  st.charmLightning = held('storm') || undefined;
+  // Little: every minotaur summon arrives a Tinytaur. (The 4-for-1 Tinytaur
+  // ritual isn't granted — under this charm there are never four full
+  // Minotaurs to feed it.)
+  st.minotaursSpawnTiny = held('tiny') || undefined;
+  // The stackable charms: multipliers computed from the whole hand, so
+  // re-entry is idempotent and a grown (or sold-down) hand simply stamps
+  // the new figure.
+  const deft = counts.get('deft') ?? 0;
+  const fleet = counts.get('fleet') ?? 0;
+  st.charmBuildSpeed = deft > 0 ? 4 ** deft : undefined;
+  st.charmMoveSpeed = fleet > 0 ? 2 ** fleet : undefined;
+  st.charmFreeDemolish = held('unmake') || undefined;
 }
 
 // ─── Trader wants ────────────────────────────────────────────────────

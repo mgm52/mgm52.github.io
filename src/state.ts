@@ -812,6 +812,14 @@ export type GameState = {
   // The little charm (cards-core applyCharms): every minotaur summoned comes
   // out of the hole a Tinytaur. Optional — absent on saves from before it.
   minotaursSpawnTiny?: boolean;
+  // The busy charm's layer: auto-assign AND auto-water, beside (never
+  // touching) the world's own purchased upgrades. Like every charm field
+  // it's stamped absolutely from the hand on entry — sell the charm and the
+  // next entry takes the blessing with it.
+  charmAutoWork?: boolean;
+  // The storm charm's layer: Lightning Strike stands ready without the
+  // world's own lightningUnlocked ever being set.
+  charmLightning?: boolean;
   // The stackable charms (cards-core applyCharms): construction-speed and
   // unit-speed multipliers, computed from the hand and stamped absolutely on
   // every world entry (4^n deft charms / 2^n fleet charms). Optional —
@@ -1184,6 +1192,22 @@ function buildingIndex(state: GameState): Map<number, Building> {
   biState = state;
   biVersion = state.buildingsVersion;
   return idx;
+}
+
+// ─── Charm-aware ability checks ──────────────────────────────────────
+// A blessing behaves like the owned upgrade while its charm rides in the
+// hand, without ever setting the world's own flag — behaviour sites read
+// these; purchase guards and "owned" displays keep reading the raw flags,
+// so buying the real upgrade under a charm still means something (it makes
+// the ability permanent).
+export function autoAssignActive(state: GameState): boolean {
+  return state.autoAssignEnabled || state.charmAutoWork === true;
+}
+export function autoWaterActive(state: GameState): boolean {
+  return state.autoWaterEnabled || state.charmAutoWork === true;
+}
+export function lightningActive(state: GameState): boolean {
+  return state.lightningUnlocked || state.charmLightning === true;
 }
 
 export function buildingAtCell(state: GameState, cx: number, cy: number): Building | null {

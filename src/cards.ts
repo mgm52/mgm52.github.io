@@ -387,8 +387,9 @@ function hopWhite(): HTMLElement {
 async function enterWorld(meta: CardMeta, card: WorldCard, cardEl?: HTMLElement): Promise<void> {
   const st = decodeWorld(card.data);
   if (!st) { realmSound('error'); return; }
-  // Every charm in the hand blesses the world on the way in (sticky flags, so
-  // repeat entries never stack). Spectated worlds are deliberately untouched.
+  // The hand's charm layer stamps onto the world on the way in — absolutely,
+  // so a charm sold since the last visit takes its blessing with it.
+  // Spectated worlds are deliberately untouched.
   applyCharms(st, meta.cards);
   // Stash the outer post-finale save verbatim, then write the card's world
   // into the slot. Only once the slot has verifiably changed does the meta

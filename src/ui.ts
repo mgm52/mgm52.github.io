@@ -8,7 +8,7 @@ import {
   Building, Cell, Demon, DragonState, GameState, Ghost, Goblin, GoblinState, SoulChair, SpaceBuilding, SpaceUnit, Vec2, WaterSource,
   anySpawnHole, appendLog, buildingAtCell, buildingCenter, buildingLabel, buildingMoneyCost, cellCenter, cellKey, chairSoulSnapshot, countHypercentres, countIdle, countSpaceCentres, defOf, digDirection, dragonsAtCap,
   earnDragonBone, findHoleEmergenceCell, getSpawnCapacity, goblinSpawningBlocked, hellMirrorCenter, holeBlockedByBuilding, holeCells, isCellBlocked, isCellInBuilding, isInBounds,
-  maintainerCount, markBuildingsChanged, maxOverworldDragons, nextBuildingDisplayNum, occupyCell, spaceCentreMaintainerCount, spaceStructureOverlapAt, waterCarrierCount,
+  maintainerCount, markBuildingsChanged, maxOverworldDragons, nextBuildingDisplayNum, occupyCell, spaceCentreMaintainerCount, spaceStructureOverlapAt, waterCarrierCount, lightningActive,
 } from './state';
 import { spawnDragon, spawnMinotaur, spawnRobot, unseatSoulFromChair } from './sim';
 import { isModalDialogueActive } from './demon-dialogue';
@@ -2005,7 +2005,7 @@ export function refreshUI(state: GameState) {
   // Disabled when the player can't cover the blood cost; lit while armed.
   if (revealedTaskIds.has('run_datacentre')) state.lightningUnlocked = true;
   const lightningBtn = document.getElementById('btn-lightning-strike') as HTMLButtonElement;
-  if (state.lightningUnlocked) {
+  if (lightningActive(state)) {
     lightningBtn.style.display = '';
     applyFadeInOnFirstShow('btn-lightning-strike');
     const canAffordLightning = state.blood >= LIGHTNING.bloodCost;
@@ -2031,7 +2031,7 @@ export function refreshUI(state: GameState) {
   // Card worlds can pre-roll autobuild on without ever revealing the
   // run_phone_farm task — keep the ritual section open so the owned ability
   // still shows rather than vanishing entirely.
-  const ritualVisible = phaseRunPhoneFarm || phaseGasTurbine || minotaurTaskDone || state.lightningUnlocked || state.autoAssignEnabled;
+  const ritualVisible = phaseRunPhoneFarm || phaseGasTurbine || minotaurTaskDone || lightningActive(state) || state.autoAssignEnabled;
   const ritualSection = document.getElementById('ritual-section')!;
   ritualSection.style.display = ritualVisible ? '' : 'none';
   // Now that the panel renders as a bordered card, an empty container shows
@@ -2391,8 +2391,8 @@ export function refreshUI(state: GameState) {
     for (const el of Array.from(ritualListEl.children)) {
       if (el.id !== 'btn-lightning-strike') (el as HTMLElement).style.display = 'none';
     }
-    ritualSection.style.display = state.lightningUnlocked ? '' : 'none';
-    panelBuild.style.display = state.lightningUnlocked ? '' : 'none';
+    ritualSection.style.display = lightningActive(state) ? '' : 'none';
+    panelBuild.style.display = lightningActive(state) ? '' : 'none';
   }
 
   // Hide separators that mark a task boundary the player hasn't crossed yet.
