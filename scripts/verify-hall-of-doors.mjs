@@ -80,9 +80,14 @@ if (hall2.door1 !== 'the soft border' || hall2.door1Lvl !== 'level 1') fail(`doo
 if (!/^\d+$/.test(hall2.coolLabel ?? '') || Number(hall2.coolLabel) > 90) fail(`fresh seal countdown: ${hall2.coolLabel}`);
 await shot('2-door1-open-seal-cooling');
 
-// 3. A cooling seal only rattles.
+// 3. A cooling seal only rattles — and floats a "wait Ns" explainer.
 await page.click('.ct-hub-sealed');
-await sleep(600);
+await sleep(250);
+const coolFloat = await page.evaluate(() =>
+  document.querySelector('.ct-hub-sealed .ct-door-float.hint')?.textContent ?? null);
+console.log('cooling click float:', JSON.stringify(coolFloat));
+if (!/^wait \d+s$/.test(coolFloat ?? '')) fail(`cooling click should float 'wait Ns', got ${coolFloat}`);
+await sleep(400);
 const stillOne = await page.evaluate(() => document.querySelectorAll('.ct-hub-door.open').length);
 if (stillOne !== 1) fail('a cooling seal must not unseal on click');
 
@@ -102,6 +107,14 @@ if (salon1.level !== 'door 1 · level 1') fail(`soft border head: ${salon1.level
 if (salon1.title !== 'gathering at the soft border') fail(`soft border title: ${salon1.title}`);
 if (!salon1.names?.includes('the pale one')) fail('door 1 pre-reset should seat the pale one');
 if (salon1.backLabel !== '← the hall of doors') fail(`back door label: ${salon1.backLabel}`);
+// The keyless forward door floats its own explainer instead of a bare
+// "locked".
+await page.click('.ct-door-fwd');
+await sleep(250);
+const keyFloat = await page.evaluate(() =>
+  document.querySelector('.ct-door-fwd .ct-door-float.hint')?.textContent ?? null);
+console.log('locked door float:', JSON.stringify(keyFloat));
+if (keyFloat !== 'the gatekeeper holds the key') fail(`locked door float: ${keyFloat}`);
 await shot('3-soft-border');
 
 // 5. The countdown flips back to 'unseal' when it runs dry: rewind the stamp

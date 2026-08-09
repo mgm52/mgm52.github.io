@@ -1703,6 +1703,10 @@ function showHub(meta: CardMeta): void {
         sealed.classList.remove('shake');
         void sealed.offsetWidth;             // restart the shake animation
         sealed.classList.add('shake');
+        // The floaty explainer: this one just needs time.
+        const float = div('ct-door-float hint', `wait ${Math.ceil(remaining() / 1000)}s`);
+        sealed.appendChild(float);
+        float.addEventListener('animationend', () => float.remove());
         return;
       }
       hubBusy = true;
@@ -2234,9 +2238,11 @@ function showGathering(meta: CardMeta, ev: TradeEvent): void {
         door.classList.remove('shake');
         void door.offsetWidth;             // restart the shake animation
         door.classList.add('shake');
-        // A transient "locked" that floats up and fades, rather than a label
-        // that's always sitting there.
-        const float = div('ct-door-float', 'locked');
+        // A transient explainer that floats up and fades — what the door
+        // actually needs, rather than a bare "locked". (The gatekeeper always
+        // holds this salon's key until it's traded for; a traded key opens
+        // the door on the spot, so a locked door means the key is still his.)
+        const float = div('ct-door-float hint', 'the gatekeeper holds the key');
         door.appendChild(float);
         float.addEventListener('animationend', () => float.remove());
       }
