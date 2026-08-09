@@ -4131,6 +4131,10 @@ function updateConstruction(state: GameState, b: Building) {
   b.buildProgress += TICK_S / buildTime;
   if (b.buildProgress >= 1) {
     b.buildProgress = 1;
+    // The main game opens hell at portal PLACEMENT (input.ts), so this only
+    // matters for a card world's generated half-built portal — the descent
+    // opens the moment the site is finished.
+    if (b.kind === 'hell_portal') state.hellUnlocked = true;
     const keep = def.maintainersRequired;
     const newAssigned: number[] = [];
     let kept = 0;

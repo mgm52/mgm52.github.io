@@ -694,11 +694,20 @@ export function generateWeirdWorld(seed: number, tier: CardTier, taskIds: string
   }
 
   // Scattered, unstaffed buildings — they wake (or stay dormant) under the
-  // normal sim rules once the player starts assigning goblins.
+  // normal sim rules once the player starts assigning goblins. Some arrive
+  // as half-finished CONSTRUCTION SITES (somebody left mid-build): card
+  // worlds can't place anything new, so these are the only construction a
+  // card ever offers — staff them and they finish under the normal rules
+  // (which is also what the deft charm is for). An unfinished portal opens
+  // hell only once it's completed (updateConstruction).
   for (let i = 0; i < buildingCount; i++) {
     const kind = pool[Math.floor(rng() * pool.length)];
     const placed = tryPlaceBuilding(st, kind, rng);
-    if (placed?.kind === 'hell_portal') st.hellUnlocked = true;
+    if (placed && placed.kind !== 'wall' && rng() < 0.15) {
+      placed.state = 'constructing';
+      placed.buildProgress = 0.1 + rng() * 0.7;
+    }
+    if (placed?.kind === 'hell_portal' && placed.state !== 'constructing') st.hellUnlocked = true;
   }
   if (forcePortal && !st.hellUnlocked) {
     const portal = tryPlaceBuilding(st, 'hell_portal', rng);

@@ -139,12 +139,31 @@ describe('generateWeirdWorld', () => {
     expect(rare.dragonBoneUnlocked).toBe(true);
   });
 
-  it('only unlocks hell when a portal actually exists', () => {
+  it('only unlocks hell when a FINISHED portal exists — a half-built one waits', () => {
     for (let seed = 1; seed <= 30; seed++) {
       const st = generateWeirdWorld(seed, 'rare', TASK_IDS);
-      const hasPortal = [...st.buildings.values()].some((b) => b.kind === 'hell_portal');
-      expect(st.hellUnlocked).toBe(hasPortal);
+      const hasBuiltPortal = [...st.buildings.values()]
+        .some((b) => b.kind === 'hell_portal' && b.state !== 'constructing');
+      expect(st.hellUnlocked).toBe(hasBuiltPortal);
     }
+  });
+
+  it('deals the occasional half-built construction site (never a wall)', () => {
+    let sites = 0, total = 0;
+    for (let seed = 1; seed <= 30; seed++) {
+      const st = generateWeirdWorld(seed * 11, 'uncommon', TASK_IDS);
+      for (const b of st.buildings.values()) {
+        total++;
+        if (b.state !== 'constructing') continue;
+        sites++;
+        expect(b.kind).not.toBe('wall');
+        // Partial, staffable progress — a real site, not a phantom.
+        expect(b.buildProgress).toBeGreaterThan(0);
+        expect(b.buildProgress).toBeLessThan(1);
+      }
+    }
+    expect(sites).toBeGreaterThan(0);
+    expect(sites).toBeLessThan(total / 2); // texture, not a ruin
   });
 });
 
@@ -404,7 +423,7 @@ describe('rollWant', () => {
         expect(w.tier).toBe('common');
         expect(w.count).toBeGreaterThanOrEqual(1);
         expect(w.count).toBeLessThanOrEqual(3);
-      } else {
+      } else if (w.kind === 'resource') {
         // Common's resource bands: cash 1k–15k, blood 50–800.
         expect(['money', 'blood']).toContain(w.res);
         if (w.res === 'money') { expect(w.amount).toBeGreaterThanOrEqual(1_000); expect(w.amount).toBeLessThanOrEqual(15_000); }
