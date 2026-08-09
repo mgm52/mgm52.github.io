@@ -902,15 +902,12 @@ describe('resetChain (begin again)', () => {
 // ─── Charms ──────────────────────────────────────────────────────────
 
 describe('charms', () => {
-  it('every charm carries a full reading: name, line, glyph and a real description', () => {
+  it('every charm carries a full reading: name, glyph and a real description', () => {
     for (const kind of CHARM_KINDS) {
       const def = CHARM_DEFS[kind];
       expect(def.name.length).toBeGreaterThan(0);
-      expect(def.line.length).toBeGreaterThan(0);
       expect(def.glyph.length).toBeGreaterThan(0);
-      // The READ text should be a proper reading, not a repeat of the line.
-      expect(def.desc.length).toBeGreaterThan(def.line.length);
-      expect(def.desc).not.toBe(def.line);
+      expect(def.desc.length).toBeGreaterThan(20);
     }
   });
 

@@ -27,7 +27,7 @@ import { clearSave, getRawSave, saveGame, setRawSave } from './save';
 import { GameState, computePlayBounds, isInPlayCell } from './state';
 import { ALL_TASK_IDS } from './ui';
 import {
-  BranchState, CardMeta, CardResources, CardTier, CHARM_DEFS, CharmKind, Creature, FRAME_BASE,
+  BranchState, CardMeta, CardResources, CardTier, CHARM_DEFS, CHARM_NOTE, CharmKind, Creature, FRAME_BASE,
   HARDCODED_LEVELS, ManualWorld, TradeEvent, Want, WorldCard, applyCharms,
   cardPower, decodeWorld, encodeWorld, ensureBranches, generateEvents, makeCard,
   makeKeyCard, makeSalon, mulberry32, pathName, regenerateEvent, resetChain,
@@ -975,9 +975,9 @@ function resourcesEl(r: CardResources): HTMLElement {
   return wrap;
 }
 
-// The charm reading: a plaque held up over the realm with the charm's full
-// text — glyph, name, the card's one-liner, and the long description of what
-// the blessing actually does. One per screen; a click anywhere puts it down.
+// The charm reading: a plaque held up over the realm with the charm's glyph,
+// name, what the blessing does, and the shared holding note. One per screen;
+// a click anywhere puts it down.
 function showCharmRead(kind: CharmKind): void {
   document.getElementById('charm-read')?.remove();
   const def = CHARM_DEFS[kind];
@@ -986,8 +986,8 @@ function showCharmRead(kind: CharmKind): void {
   const plaque = div(`charm-read-plaque charm-${kind}`);
   plaque.appendChild(div('wc-charm-glyph', def.glyph));
   plaque.appendChild(div('charm-read-name', def.name));
-  plaque.appendChild(div('charm-read-line', def.line));
   plaque.appendChild(div('charm-read-desc', def.desc));
+  plaque.appendChild(div('charm-read-note', CHARM_NOTE));
   plaque.appendChild(div('charm-read-hint', 'click to put it down'));
   veil.appendChild(plaque);
   document.body.appendChild(veil);
@@ -1049,7 +1049,6 @@ function buildCardEl(card: WorldCard, opts: CardElOpts = {}): HTMLElement {
     art.appendChild(div('wc-charm-glyph', def.glyph));
     charmEl.appendChild(art);
     charmEl.appendChild(div('wc-charm-name', def.name));
-    charmEl.appendChild(div('wc-charm-line', def.line));
     const charmActs = cardActions({ enterLabel: 'READ', onEnter: () => showCharmRead(kind) }, charmEl);
     if (charmActs) charmEl.appendChild(charmActs);
     return charmEl;

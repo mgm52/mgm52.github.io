@@ -58,11 +58,13 @@ const reading = await page.evaluate(() => ({
   visible: !!document.querySelector('#charm-read.visible'),
   name: document.querySelector('.charm-read-name')?.textContent,
   desc: document.querySelector('.charm-read-desc')?.textContent ?? '',
+  note: document.querySelector('.charm-read-note')?.textContent,
 }));
 console.log('charm read:', JSON.stringify({ ...reading, desc: `${reading.desc.slice(0, 40)}…` }));
 if (!reading.visible) fail('READ should hold the charm plaque up');
 if (reading.name !== 'the gilded charm') fail(`plaque name: ${reading.name}`);
-if (!reading.desc.includes('golden goblin')) fail('plaque should carry the full description');
+if (!reading.desc.includes('Goldblin')) fail('plaque should carry the full description');
+if (reading.note !== 'Applies to all worlds in hand.') fail(`plaque note: ${reading.note}`);
 await shot('0-charm-read');
 await page.click('#charm-read');
 await sleep(400);

@@ -67,29 +67,30 @@ export type WorldCard = {
 // procedurally, once by hand at level 2 — and can never be traded away.
 export type CharmKind = 'gold' | 'hands' | 'rain' | 'storm' | 'tiny';
 export const CHARM_KINDS: CharmKind[] = ['gold', 'hands', 'rain', 'storm', 'tiny'];
-// `line` is the one-liner on the card face; `desc` is the full reading,
-// shown by the card's READ button (cards.ts showCharmRead) — it should spell
-// out what the blessing actually does, in the realm's own voice.
-export const CHARM_DEFS: Record<CharmKind, { name: string; line: string; glyph: string; desc: string }> = {
+// `desc` is the reading shown by the card's READ button (cards.ts
+// showCharmRead): a plain statement of what the blessing does. The plaque
+// appends the shared CHARM_NOTE beneath it.
+export const CHARM_NOTE = 'Applies to all worlds in hand.';
+export const CHARM_DEFS: Record<CharmKind, { name: string; glyph: string; desc: string }> = {
   gold: {
-    name: 'the gilded charm', line: 'spawns sometimes glitter', glyph: '✺',
-    desc: 'carry it into a world and the hole starts minting the occasional golden goblin. gold goblins live like any other, but their heads come off worth a clean Ƶ250. the charm does not ask how you feel about that.',
+    name: 'the gilded charm', glyph: '✺',
+    desc: '1 in 5 goblins spawned is a Goldblin, worth +Ƶ250 on death.',
   },
   hands: {
-    name: 'the busy charm', line: 'goblins find their own work', glyph: '✛',
-    desc: 'carry it into a world and idle goblins stop waiting to be told: fresh hands walk themselves to whatever needs staffing. the overseers it replaces are said to feel ornamental.',
+    name: 'the busy charm', glyph: '✛',
+    desc: 'Idle goblins assign themselves to whatever needs staffing.',
   },
   rain: {
-    name: 'the wet charm', line: 'thirsty buildings water themselves', glyph: '☂',
-    desc: 'carry it into a world and nothing under it runs dry: carriers fetch water for thirsty buildings without being asked, and busy hands come folded in — the rain insists on them.',
+    name: 'the wet charm', glyph: '☂',
+    desc: 'Thirsty buildings are watered automatically. Includes the busy charm\'s effect.',
   },
   storm: {
-    name: 'the storm charm', line: 'the sky answers', glyph: 'ϟ',
-    desc: 'carry it into a world and the sky is yours to point: the lightning strike stands ready, no ritual owed. mind where you aim it — reactors remember being struck.',
+    name: 'the storm charm', glyph: 'ϟ',
+    desc: 'Unlocks the Lightning Strike ability.',
   },
   tiny: {
-    name: 'the little charm', line: 'minotaurs come out small', glyph: '♟',
-    desc: 'carry it into a world and its minotaurs arrive small — same temper, same appetite for work, a fraction of the stature. they do not like being called cute.',
+    name: 'the little charm', glyph: '♟',
+    desc: 'Unlocks the Tinytaur summon — four Minotaurs become one small, far faster one.',
   },
 };
 
