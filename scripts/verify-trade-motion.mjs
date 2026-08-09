@@ -33,7 +33,10 @@ await page.evaluate(() => {
   sessionStorage.clear();
   localStorage.setItem('rts.cards.v1', JSON.stringify({
     v: 1, phase: 'free', seed: 12345, nextId: 500, resets: 0,
-    cards: [{ id: 1, name: 'test world', tier: 'common', data: '', resources: { money: 0, blood: 0, dragonBone: 0 } }],
+    cards: [
+      { id: 1, name: 'test world', tier: 'common', data: '', resources: { money: 0, blood: 0, dragonBone: 0 } },
+      { id: 2, name: 'the gilded charm', tier: 'common', data: '', resources: { money: 0, blood: 0, dragonBone: 0 }, charm: 'gold' },
+    ],
     events: null, activeCardId: null,
   }));
 });
@@ -46,10 +49,29 @@ await page.click('.ct-hub-door.open');
 await page.waitForSelector('.ct-stall', { timeout: 15000 });
 await sleep(1500);
 
-// Select the held card (its SELECT button reveals on hover), confirm with the
-// pale one.
-await page.hover('.ct-hand-inline .world-card');
-await page.click('.ct-hand-inline .world-card .wc-select');
+// The charm rides in the hand beside the world: its READ button holds the
+// full reading up on a plaque, and a click puts it down.
+await page.hover('.ct-hand-inline .wc-charmcard');
+await page.click('.ct-hand-inline .wc-charmcard .wc-enter');
+await sleep(500);
+const reading = await page.evaluate(() => ({
+  visible: !!document.querySelector('#charm-read.visible'),
+  name: document.querySelector('.charm-read-name')?.textContent,
+  desc: document.querySelector('.charm-read-desc')?.textContent ?? '',
+}));
+console.log('charm read:', JSON.stringify({ ...reading, desc: `${reading.desc.slice(0, 40)}…` }));
+if (!reading.visible) fail('READ should hold the charm plaque up');
+if (reading.name !== 'the gilded charm') fail(`plaque name: ${reading.name}`);
+if (!reading.desc.includes('golden goblin')) fail('plaque should carry the full description');
+await shot('0-charm-read');
+await page.click('#charm-read');
+await sleep(400);
+if (await page.$('#charm-read')) fail('a click should put the reading down');
+
+// Select the held world (its SELECT button reveals on hover), confirm with
+// the pale one.
+await page.hover('.ct-hand-inline .world-card[data-card-id="1"]');
+await page.click('.ct-hand-inline .world-card[data-card-id="1"] .wc-select');
 await sleep(400);
 await shot('1-selected');
 const confirm = await page.$('.ct-stall .ct-confirm.ok');
@@ -84,12 +106,12 @@ const after = await page.evaluate(() => ({
   held: JSON.parse(localStorage.getItem('rts.cards.v1')).cards.length,
 }));
 console.log('settled:', JSON.stringify(after));
-if (after.hand !== 2) fail(`hand should hold the 2 received cards, got ${after.hand}`);
+if (after.hand !== 3) fail(`hand should hold the charm + 2 received cards, got ${after.hand}`);
 if (after.slots !== 0) fail('no placeholder should survive the landing');
 if (after.landed !== 2) fail(`both arrivals should wear the landing flash, got ${after.landed}`);
 if (after.strays !== 0) fail(`no flown card should be left on <body>, got ${after.strays}`);
 if (!after.spent || after.spending) fail('stall should have settled from spending into spent');
-if (after.held !== 2) fail(`meta should hold 2 cards, got ${after.held}`);
+if (after.held !== 3) fail(`meta should hold 3 cards, got ${after.held}`);
 await shot('3-settled');
 
 await browser.close();

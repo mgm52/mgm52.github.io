@@ -6,7 +6,8 @@
 
 import { describe, expect, it } from 'vitest';
 import {
-  CardMeta, CardTier, HARDCODED_LEVELS, ManualWorld, MAIN_TRACK, RARE_DEPTH,
+  CardMeta, CardTier, CHARM_DEFS, CHARM_KINDS, HARDCODED_LEVELS, ManualWorld,
+  MAIN_TRACK, RARE_DEPTH,
   TIER_ABOVE, TIER_RANK, Want, WorldCard, applyCharms, cardFromManual, cardPower,
   cardQualifies, countQualifying, decodeWorld, encodeWorld, ensureBranches,
   generateEvents, generateJunkWorld, generateWeirdWorld, makeCard, makeCharmCard,
@@ -901,6 +902,18 @@ describe('resetChain (begin again)', () => {
 // ─── Charms ──────────────────────────────────────────────────────────
 
 describe('charms', () => {
+  it('every charm carries a full reading: name, line, glyph and a real description', () => {
+    for (const kind of CHARM_KINDS) {
+      const def = CHARM_DEFS[kind];
+      expect(def.name.length).toBeGreaterThan(0);
+      expect(def.line.length).toBeGreaterThan(0);
+      expect(def.glyph.length).toBeGreaterThan(0);
+      // The READ text should be a proper reading, not a repeat of the line.
+      expect(def.desc.length).toBeGreaterThan(def.line.length);
+      expect(def.desc).not.toBe(def.line);
+    }
+  });
+
   it('a charm is a keepsake: no world behind it, and it never satisfies any want', () => {
     const meta = freshMeta();
     const charm = makeCharmCard(meta, 'uncommon', 'gold');

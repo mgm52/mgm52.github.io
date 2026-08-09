@@ -27,7 +27,7 @@ import { clearSave, getRawSave, saveGame, setRawSave } from './save';
 import { GameState, computePlayBounds, isInPlayCell } from './state';
 import { ALL_TASK_IDS } from './ui';
 import {
-  BranchState, CardMeta, CardResources, CardTier, CHARM_DEFS, Creature, FRAME_BASE,
+  BranchState, CardMeta, CardResources, CardTier, CHARM_DEFS, CharmKind, Creature, FRAME_BASE,
   HARDCODED_LEVELS, ManualWorld, TradeEvent, Want, WorldCard, applyCharms,
   cardPower, decodeWorld, encodeWorld, ensureBranches, generateEvents, makeCard,
   makeKeyCard, makeSalon, mulberry32, pathName, regenerateEvent, resetChain,
@@ -975,6 +975,31 @@ function resourcesEl(r: CardResources): HTMLElement {
   return wrap;
 }
 
+// The charm reading: a plaque held up over the realm with the charm's full
+// text — glyph, name, the card's one-liner, and the long description of what
+// the blessing actually does. One per screen; a click anywhere puts it down.
+function showCharmRead(kind: CharmKind): void {
+  document.getElementById('charm-read')?.remove();
+  const def = CHARM_DEFS[kind];
+  const veil = div('');
+  veil.id = 'charm-read';
+  const plaque = div(`charm-read-plaque charm-${kind}`);
+  plaque.appendChild(div('wc-charm-glyph', def.glyph));
+  plaque.appendChild(div('charm-read-name', def.name));
+  plaque.appendChild(div('charm-read-line', def.line));
+  plaque.appendChild(div('charm-read-desc', def.desc));
+  plaque.appendChild(div('charm-read-hint', 'click to put it down'));
+  veil.appendChild(plaque);
+  document.body.appendChild(veil);
+  realmSound('select', 0.5, 1.15);
+  requestAnimationFrame(() => veil.classList.add('visible'));
+  veil.addEventListener('click', () => {
+    veil.classList.remove('visible');
+    realmSound('click', 0.4, 0.85);
+    window.setTimeout(() => veil.remove(), 260);
+  }, { once: true });
+}
+
 type CardElOpts = {
   enterLabel?: string;       // ENTER / INSPECT — the card's primary action button
   onEnter?: (cardEl: HTMLElement) => void;
@@ -1008,11 +1033,13 @@ function buildCardEl(card: WorldCard, opts: CardElOpts = {}): HTMLElement {
   }
   // A charm card: an amulet in place of the world panes. It can't be entered,
   // selected, or traded — it just sits in the hand, blessing every world the
-  // player dives into — so it carries no action buttons at all.
+  // player dives into — so its one action is READ: the full text of what the
+  // blessing does, held up on a plaque.
   if (card.charm) {
-    const def = CHARM_DEFS[card.charm];
+    const kind = card.charm;
+    const def = CHARM_DEFS[kind];
     const charmEl = document.createElement('div');
-    charmEl.className = `world-card wc-charmcard charm-${card.charm}`;
+    charmEl.className = `world-card wc-charmcard charm-${kind}`;
     charmEl.dataset.cardId = String(card.id);
     const chead = document.createElement('div');
     chead.className = 'wc-head';
@@ -1023,6 +1050,8 @@ function buildCardEl(card: WorldCard, opts: CardElOpts = {}): HTMLElement {
     charmEl.appendChild(art);
     charmEl.appendChild(div('wc-charm-name', def.name));
     charmEl.appendChild(div('wc-charm-line', def.line));
+    const charmActs = cardActions({ enterLabel: 'READ', onEnter: () => showCharmRead(kind) }, charmEl);
+    if (charmActs) charmEl.appendChild(charmActs);
     return charmEl;
   }
   const root = document.createElement('div');
