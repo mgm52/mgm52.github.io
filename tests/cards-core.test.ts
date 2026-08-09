@@ -395,10 +395,11 @@ describe('rollWant', () => {
     }
   });
 
-  it('the picky slots ask for the table\'s own tier or a resource threshold in band', () => {
+  it('the picky slots ask for the table\'s own tier, a resource threshold in band, or a charm', () => {
     for (let seed = 0; seed < 200; seed++) {
       const w = rollWant('common', mulberry32(seed), false);
-      expect(w.kind === 'tier' || w.kind === 'resource').toBe(true);
+      expect(w.kind === 'tier' || w.kind === 'resource' || w.kind === 'charm').toBe(true);
+      if (w.kind === 'charm') expect(w.count).toBe(1);
       if (w.kind === 'tier') {
         expect(w.tier).toBe('common');
         expect(w.count).toBeGreaterThanOrEqual(1);
@@ -519,10 +520,12 @@ describe('generateEvents', () => {
     for (const ev of events) {
       for (const cr of ev.creatures) {
         // Every creature advertises a want, and its non-key deck is the salon's
-        // own tier (keys carry no tier rung).
+        // own tier (keys carry no tier rung; a charm-seeker's sweetener is the
+        // one card allowed a tier above).
         expect(cr.want).toBeTruthy();
         expect(wantLine(cr.want)).toBeTruthy();
-        expect(cr.deck.every((c) => c.key || c.tier === ev.tier)).toBe(true);
+        expect(cr.deck.every((c) => c.key || c.tier === ev.tier
+          || (cr.want.kind === 'charm' && c.tier === TIER_ABOVE[ev.tier]))).toBe(true);
       }
     }
     // The opener everywhere keeps the easy rung (any world at the border, a
@@ -573,7 +576,10 @@ describe('generateEvents', () => {
       const all = ev.creatures.flatMap((c) => c.deck);
       expect(all.filter((c) => c.origin).length).toBe(1);
       expect(all.some((c) => c.id === strayId)).toBe(false);
-      expect(all.every((c) => c.origin || c.key || c.tier === ev.tier)).toBe(true);
+      for (const cr of ev.creatures) {
+        expect(cr.deck.every((c) => c.origin || c.key || c.tier === ev.tier
+          || (cr.want.kind === 'charm' && c.tier === TIER_ABOVE[ev.tier]))).toBe(true);
+      }
     }
   });
 });
@@ -960,6 +966,44 @@ describe('charms', () => {
       found = salon.creatures.some((c) => c.deck.some((d) => d.charm));
     }
     expect(found).toBe(true);
+  });
+});
+
+// ─── Charm-seekers ───────────────────────────────────────────────────
+
+describe('charm-seekers (traders who want charms)', () => {
+  it('a charm satisfies exactly a charm want — worlds and keys never do', () => {
+    const meta = freshMeta();
+    const charm = makeCharmCard(meta, 'uncommon', 'gold');
+    const charmWant: Want = { kind: 'charm', count: 1 };
+    expect(cardQualifies(charmWant, charm)).toBe(true);
+    expect(cardQualifies(charmWant, card('rare'))).toBe(false);
+    expect(cardQualifies(charmWant, makeKeyCard(meta, 'common', 1, 0))).toBe(false);
+    expect(wantSatisfiedBy(charmWant, [charm])).toBe(true);
+    expect(wantLine(charmWant)).toBe('i want a charm.');
+    expect(wantLine({ kind: 'charm', count: 2 })).toBe('i want two charms.');
+  });
+
+  it('picky slots sometimes roll a charm want; the opener never does', () => {
+    let seekers = 0;
+    for (let seed = 0; seed < 300; seed++) {
+      expect(rollWant('uncommon', mulberry32(seed), true).kind).not.toBe('charm');
+      if (rollWant('uncommon', mulberry32(seed * 7 + 1), false).kind === 'charm') seekers++;
+    }
+    expect(seekers).toBeGreaterThan(10);
+  });
+
+  it('a charm-seeker\'s deck carries a sweetener of the tier above its salon', () => {
+    const meta = freshMeta();
+    for (let seed = 1; seed <= 80; seed++) {
+      const salon = makeSalon(meta, 0, 1, mulberry32(seed * 131), TASK_IDS);
+      const seeker = salon.creatures.find((c) => c.want.kind === 'charm');
+      if (!seeker) continue;
+      // An uncommon salon's seeker holds a rare — treasure worth a keepsake.
+      expect(seeker.deck.some((c) => !c.key && !c.charm && c.tier === 'rare')).toBe(true);
+      return;
+    }
+    throw new Error('no charm-seeker rolled in 80 salons');
   });
 });
 

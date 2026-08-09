@@ -1031,10 +1031,10 @@ function buildCardEl(card: WorldCard, opts: CardElOpts = {}): HTMLElement {
     if (keyActs) keyEl.appendChild(keyActs);
     return keyEl;
   }
-  // A charm card: an amulet in place of the world panes. It can't be entered,
-  // selected, or traded — it just sits in the hand, blessing every world the
-  // player dives into — so its one action is READ: the full text of what the
-  // blessing does, held up on a plaque.
+  // A charm card: an amulet in place of the world panes. It can't be entered
+  // — no world behind it — so its primary action is READ: the full text of
+  // what the blessing does, held up on a plaque. In the hand it can also be
+  // SELECTed, though only a charm-seeker's want will ever take it.
   if (card.charm) {
     const kind = card.charm;
     const def = CHARM_DEFS[kind];
@@ -1049,7 +1049,12 @@ function buildCardEl(card: WorldCard, opts: CardElOpts = {}): HTMLElement {
     art.appendChild(div('wc-charm-glyph', def.glyph));
     charmEl.appendChild(art);
     charmEl.appendChild(div('wc-charm-name', def.name));
-    const charmActs = cardActions({ enterLabel: 'READ', onEnter: () => showCharmRead(kind) }, charmEl);
+    const charmActs = cardActions({
+      enterLabel: 'READ',
+      onEnter: () => showCharmRead(kind),
+      onSelect: opts.onSelect,
+      selectLabel: opts.selectLabel,
+    }, charmEl);
     if (charmActs) charmEl.appendChild(charmActs);
     return charmEl;
   }

@@ -55,8 +55,8 @@ export type WorldCard = {
   keyBranch?: number;
   // A charm card: a keepsake, not a world (`data` is empty, like a key). While
   // it sits in the player's hand, every world they ENTER is blessed with its
-  // effect (applyCharms). Charms never satisfy a want, so once held they're
-  // held for good.
+  // effect (applyCharms). The only want a charm satisfies is a charm-seeker's
+  // — the one trade it can leave the hand in.
   charm?: CharmKind;
 };
 
@@ -64,7 +64,8 @@ export type WorldCard = {
 // Passive keepsakes that ride in the hand: entering any owned world applies
 // every held charm's blessing to it (idempotent sticky flags, so re-entry
 // never double-applies). They're minted into trader decks — sometimes
-// procedurally, once by hand at level 2 — and can never be traded away.
+// procedurally, once by hand at level 2 — and leave the hand only through a
+// charm-seeker's want (worlds already blessed keep their blessings).
 export type CharmKind = 'gold' | 'hands' | 'rain' | 'storm' | 'tiny' | 'deft' | 'fleet' | 'unmake';
 // The minting pool (rollCreatures tucks these into decks). 'rain' is absent:
 // the busy charm absorbed Autowater, so the wet charm is no longer dealt —
@@ -162,7 +163,10 @@ export function applyCharms(st: GameState, hand: WorldCard[]): void {
 export type Want =
   | { kind: 'any'; count: number }
   | { kind: 'tier'; tier: CardTier; count: number }
-  | { kind: 'resource'; res: 'money' | 'blood' | 'dragonBone' | 'power'; amount: number; count: number };
+  | { kind: 'resource'; res: 'money' | 'blood' | 'dragonBone' | 'power'; amount: number; count: number }
+  // The charm-seekers: the one want a charm card can satisfy — and the only
+  // way a charm ever leaves the hand.
+  | { kind: 'charm'; count: number };
 
 const COUNT_WORDS = ['zero', 'one', 'two', 'three', 'four', 'five', 'six', 'seven', 'eight', 'nine', 'ten'];
 function countWord(n: number): string { return COUNT_WORDS[n] ?? String(n); }
@@ -177,8 +181,12 @@ export function wantResAmount(res: 'money' | 'blood' | 'dragonBone' | 'power', c
 export function cardQualifies(w: Want, card: WorldCard): boolean {
   // A key isn't a world — it can't be handed to any trader (only spent on a
   // door), so it never satisfies a want, not even an open "any one world".
-  // Charms are keepsakes, likewise never tradeable.
-  if (card.key || card.charm) return false;
+  if (card.key) return false;
+  // Charms are keepsakes with one exception: a charm-seeker's want takes
+  // them — the only trade a charm can ever leave the hand in. No other want
+  // touches them, and a charm-seeker takes nothing else.
+  if (w.kind === 'charm') return !!card.charm;
+  if (card.charm) return false;
   if (w.kind === 'any') return true;
   if (w.kind === 'tier') return card.tier === w.tier;
   return wantResAmount(w.res, card) >= w.amount;
@@ -221,6 +229,11 @@ export function wantSegments(w: Want): WantSeg[] {
       ? [{ t: 'i want any ' }, { t: w.tier, b: true }, { t: ' world.' }]
       : [{ t: 'i want ' }, { t: `${countWord(w.count)} ${w.tier}`, b: true }, { t: ` ${worldsWord(w.count)}.` }];
   }
+  if (w.kind === 'charm') {
+    return w.count === 1
+      ? [{ t: 'i want a ' }, { t: 'charm', b: true }, { t: '.' }]
+      : [{ t: 'i want ' }, { t: `${countWord(w.count)} charms`, b: true }, { t: '.' }];
+  }
   const amt = Math.floor(w.amount).toLocaleString('en-US');
   const desc = w.res === 'money' ? `worth Ƶ${amt}+`
     : w.res === 'blood' ? `with ${amt}+ blood`
@@ -252,6 +265,10 @@ export function rollWant(tier: CardTier, rng: () => number, firstSlot: boolean):
     const below = tier === 'uncommon' ? 'common' : 'uncommon';
     return { kind: 'tier', tier: below, count: 1 };
   }
+  // The occasional charm-seeker: a picky slot that wants a charm and nothing
+  // else. rollCreatures sweetens its deck with a card of the tier above —
+  // the price of a keepsake.
+  if (rng() < 0.12) return { kind: 'charm', count: 1 };
   // Some traders want more than one card, all meeting the same condition.
   const count = rng() < 0.55 ? 1 : rng() < 0.7 ? 2 : 3;
   if (rng() < 0.5) return { kind: 'tier', tier, count };
@@ -1073,14 +1090,22 @@ export function rollCreatures(meta: CardMeta, tier: CardTier, branch: number, de
       deck.push(card);
     }
     // A picky trader sometimes tucks a charm in with its worlds — a keepsake
-    // that blesses every world its holder enters (applyCharms) and can never
-    // be traded away.
+    // that blesses every world its holder enters (applyCharms) and leaves
+    // the hand only for a charm-seeker's want.
     if (i > 0 && rng() < 0.25) {
       const charm = makeCharmCard(meta, tier, CHARM_KINDS[Math.floor(rng() * CHARM_KINDS.length)]);
       charm.frame = frame;
       deck.push(charm);
     }
     const want = rollWant(tier, rng, i === 0);
+    // A charm-seeker pays for the keepsake: its deck carries one card of the
+    // tier ABOVE its salon (rares keep to rare) — treasure worth parting
+    // with a charm for, and a way for a higher tier to trickle down early.
+    if (want.kind === 'charm') {
+      const prize = mintDeckCard(meta, TIER_ABOVE[tier] ?? tier, rng, taskIds, manualPool);
+      prize.frame = frame;
+      deck.push(prize);
+    }
     return {
       id: creatureSeq++,
       name: names.pop() ?? 'the other one',
