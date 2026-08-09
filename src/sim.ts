@@ -2228,7 +2228,7 @@ function finaleGrabMoon(state: GameState, F: Finale): void {
 
 function updateMinotaur(state: GameState, t: Minotaur, autoTargets: Map<number, number>) {
   // Tinytaurs move and attack much faster; everything else is shared.
-  const speed = t.tiny ? TINYTAUR.speed : MINOTAUR.speed;
+  const speed = (t.tiny ? TINYTAUR.speed : MINOTAUR.speed) * (state.charmMoveSpeed ?? 1);
   const windup = t.tiny ? TINYTAUR.attackWindup : MINOTAUR.attackWindup;
   // Mid-step pixel lerp (shared with goblin movement model).
   if (t.target) {
@@ -2819,7 +2819,7 @@ function updateDragon(state: GameState, d: Dragon) {
   const k = d.state.kind;
   const isManualOrder = k === 'moving_to' || k === 'going_to_kill'
     || k === 'going_to_building' || k === 'delivering' || k === 'going_to_unit';
-  const speed = isManualOrder ? DRAGON.manualSpeed : DRAGON.speed;
+  const speed = (isManualOrder ? DRAGON.manualSpeed : DRAGON.speed) * (state.charmMoveSpeed ?? 1);
   switch (d.state.kind) {
     case 'carrying': {
       // Climb straight up; once high enough the load enters space.
@@ -3205,7 +3205,7 @@ function advanceOrbitalPlatforms(state: GameState) {
       if (Math.hypot(su.pos.x - sb.pos.x, su.pos.y - sb.pos.y) <= def.size / 2 + ROBOT.buildRange) workers++;
     }
     if (workers < def.buildersRequired) continue;
-    b.buildProgress += TICK_S / (def.buildTime * Math.pow(ROBOT.buildTimeMult, workers));
+    b.buildProgress += TICK_S / (def.buildTime * Math.pow(ROBOT.buildTimeMult, workers) / (state.charmBuildSpeed ?? 1));
     if (b.buildProgress >= 1) {
       b.buildProgress = 1;
       b.activatedAt = state.now;
@@ -3351,7 +3351,7 @@ function updateGoblin(state: GameState, g: Goblin) {
     const dx = tc.x - g.pos.x;
     const dy = tc.y - g.pos.y;
     const d = Math.hypot(dx, dy);
-    const step = (g.robot ? ROBOT.speed : GOBLIN.speed) * TICK_S;
+    const step = (g.robot ? ROBOT.speed : GOBLIN.speed) * (state.charmMoveSpeed ?? 1) * TICK_S;
     if (d <= step + GOBLIN.arriveDist) {
       releaseCell(state, g.cell.cx, g.cell.cy, g.id);
       g.cell = g.target;
@@ -4126,7 +4126,8 @@ function updateConstruction(state: GameState, b: Building) {
   if (workers < def.buildersRequired) return;
   // Each robot on the site compounds a ROBOT.buildTimeMult (0.7×) cut to the
   // build time — announced by the "fast build" floater when it set to work.
-  const buildTime = def.buildTime * Math.pow(ROBOT.buildTimeMult, robotWorkers);
+  // Deft charms divide it again (4× per charm held).
+  const buildTime = def.buildTime * Math.pow(ROBOT.buildTimeMult, robotWorkers) / (state.charmBuildSpeed ?? 1);
   b.buildProgress += TICK_S / buildTime;
   if (b.buildProgress >= 1) {
     b.buildProgress = 1;

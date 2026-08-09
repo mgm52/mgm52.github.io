@@ -65,8 +65,11 @@ export type WorldCard = {
 // every held charm's blessing to it (idempotent sticky flags, so re-entry
 // never double-applies). They're minted into trader decks — sometimes
 // procedurally, once by hand at level 2 — and can never be traded away.
-export type CharmKind = 'gold' | 'hands' | 'rain' | 'storm' | 'tiny';
-export const CHARM_KINDS: CharmKind[] = ['gold', 'hands', 'rain', 'storm', 'tiny'];
+export type CharmKind = 'gold' | 'hands' | 'rain' | 'storm' | 'tiny' | 'deft' | 'fleet' | 'unmake';
+// The minting pool (rollCreatures tucks these into decks). 'rain' is absent:
+// the busy charm absorbed Autowater, so the wet charm is no longer dealt —
+// its def stays below only so hands that already hold one keep working.
+export const CHARM_KINDS: CharmKind[] = ['gold', 'hands', 'storm', 'tiny', 'deft', 'fleet', 'unmake'];
 // `desc` is the reading shown by the card's READ button (cards.ts
 // showCharmRead): a plain statement of what the blessing does. The plaque
 // appends the shared CHARM_NOTE beneath it.
@@ -78,11 +81,11 @@ export const CHARM_DEFS: Record<CharmKind, { name: string; glyph: string; desc: 
   },
   hands: {
     name: 'the busy charm', glyph: '✛',
-    desc: 'Autobuild: idle goblins assign themselves to whatever needs staffing.',
+    desc: 'Autobuild + Autowater: idle goblins staff and water whatever needs it.',
   },
   rain: {
     name: 'the wet charm', glyph: '☂',
-    desc: 'Autowater: thirsty buildings are watered automatically. Includes Autobuild.',
+    desc: 'Autobuild + Autowater: idle goblins staff and water whatever needs it.',
   },
   storm: {
     name: 'the storm charm', glyph: 'ϟ',
@@ -91,6 +94,18 @@ export const CHARM_DEFS: Record<CharmKind, { name: string; glyph: string; desc: 
   tiny: {
     name: 'the little charm', glyph: '♟',
     desc: 'All new minotaurs spawn as Tinytaurs.',
+  },
+  deft: {
+    name: 'the deft charm', glyph: '⚒',
+    desc: 'Buildings are built 4× faster. Stackable.',
+  },
+  fleet: {
+    name: 'the fleet charm', glyph: '➳',
+    desc: 'All units move 2× faster. Stackable.',
+  },
+  unmake: {
+    name: 'the unmaking charm', glyph: '✕',
+    desc: 'Destroy buildings instantly for a full refund — no Minotaur needed.',
   },
 };
 
@@ -109,21 +124,33 @@ export function makeCharmCard(meta: CardMeta, tier: CardTier, kind: CharmKind): 
 // flags the sim already understands (generated worlds set the same ones), so
 // applying them on every entry is safe.
 export function applyCharms(st: GameState, hand: WorldCard[]): void {
+  let deft = 0, fleet = 0;
   for (const c of hand) {
     if (!c.charm) continue;
     switch (c.charm) {
       // Gilded: every spawn a Goldblin (Enabled rides along so the sidebar's
       // Goldgoblins upgrade reads as owned rather than for sale).
       case 'gold': st.goldgoblinsEnabled = true; st.goldgoblinsAlways = true; break;
-      case 'hands': st.autoAssignEnabled = true; break;
+      // Busy absorbed the wet charm's blessing — both grant Autobuild AND
+      // Autowater (the wet charm is no longer minted; held ones still work).
+      case 'hands':
       case 'rain': st.autoAssignEnabled = true; st.autoWaterEnabled = true; break;
       case 'storm': st.lightningUnlocked = true; break;
       // Little: every minotaur summon arrives a Tinytaur. (The 4-for-1
       // Tinytaur ritual isn't granted — under this charm there are never
       // four full Minotaurs to feed it.)
       case 'tiny': st.minotaursSpawnTiny = true; break;
+      case 'deft': deft++; break;
+      case 'fleet': fleet++; break;
+      case 'unmake': st.charmFreeDemolish = true; break;
     }
   }
+  // The stackable charms: multipliers computed from the whole hand and
+  // stamped ABSOLUTELY, never compounded — so re-entering a world with the
+  // same hand is idempotent, and a hand that has grown another copy simply
+  // stamps the larger figure.
+  if (deft > 0) st.charmBuildSpeed = 4 ** deft;
+  if (fleet > 0) st.charmMoveSpeed = 2 ** fleet;
 }
 
 // ─── Trader wants ────────────────────────────────────────────────────

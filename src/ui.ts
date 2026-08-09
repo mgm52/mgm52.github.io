@@ -1329,6 +1329,17 @@ export function setupUI(state: GameState, callbacks: UICallbacks) {
       callbacks.onDestroyBuilding(target.id);
       return;
     }
+    // The unmaking charm: no minotaur, no wait — the building comes down at
+    // a click and its full build price flows back.
+    if (state.charmFreeDemolish) {
+      const def = defOf(target);
+      state.money += def.cost;
+      if (def.bloodCost) state.blood += def.bloodCost;
+      if (def.dragonBoneCost) state.dragonBone += def.dragonBoneCost;
+      appendLog(state, `${def.name} #${target.displayNum} unmade — its price returned.`);
+      callbacks.onDestroyBuilding(target.id);
+      return;
+    }
     const minotaurs = [...state.minotaurs.values()];
     const warn = document.getElementById('info-destroy-warning')!;
     if (minotaurs.length === 0) {

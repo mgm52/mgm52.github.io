@@ -903,12 +903,17 @@ describe('resetChain (begin again)', () => {
 
 describe('charms', () => {
   it('every charm carries a full reading: name, glyph and a real description', () => {
-    for (const kind of CHARM_KINDS) {
+    for (const kind of Object.keys(CHARM_DEFS) as (keyof typeof CHARM_DEFS)[]) {
       const def = CHARM_DEFS[kind];
       expect(def.name.length).toBeGreaterThan(0);
       expect(def.glyph.length).toBeGreaterThan(0);
       expect(def.desc.length).toBeGreaterThan(20);
     }
+  });
+
+  it('the wet charm is retired from the minting pool but keeps its def for old hands', () => {
+    expect(CHARM_KINDS).not.toContain('rain');
+    expect(CHARM_DEFS.rain.name).toBe('the wet charm');
   });
 
   it('a charm is a keepsake: no world behind it, and it never satisfies any want', () => {

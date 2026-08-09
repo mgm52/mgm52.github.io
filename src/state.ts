@@ -812,6 +812,15 @@ export type GameState = {
   // The little charm (cards-core applyCharms): every minotaur summoned comes
   // out of the hole a Tinytaur. Optional — absent on saves from before it.
   minotaursSpawnTiny?: boolean;
+  // The stackable charms (cards-core applyCharms): construction-speed and
+  // unit-speed multipliers, computed from the hand and stamped absolutely on
+  // every world entry (4^n deft charms / 2^n fleet charms). Optional —
+  // absent (=1×) on unblessed worlds.
+  charmBuildSpeed?: number;
+  charmMoveSpeed?: number;
+  // The unmaking charm: the info panel's Destroy tears the building down
+  // instantly, no minotaur, refunding its full build price.
+  charmFreeDemolish?: boolean;
   // Stat: the most units ever killed by a single Lightning Strike. Sticky
   // (only ever increases).
   maxStruckAtOnce: number;
