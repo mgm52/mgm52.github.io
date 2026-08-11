@@ -45,31 +45,69 @@ export type WorldCard = {
   frame?: number;
   // The gatekeeper's wares: a key card (a picture of a key, no world behind
   // it — `data` is empty). `tier` is the gathering it was minted at (for the
-  // card's look); `keyDepth` is the salon depth the key actually opens — the
-  // door up out of the salon that minted it. Key cards never satisfy a normal
-  // want, so they can only ever be spent on that one door.
+  // card's look); `keyDepth` + `keyBranch` name the one salon the key actually
+  // opens — the door up out of the salon that minted it, on that salon's own
+  // branch. Key cards never satisfy a normal want, so they can only ever be
+  // spent on that one door. `keyBranch` is absent on keys minted before the
+  // hall of doors existed (they all belong to branch 0).
   key?: boolean;
   keyDepth?: number;
+  keyBranch?: number;
   // A charm card: a keepsake, not a world (`data` is empty, like a key). While
   // it sits in the player's hand, every world they ENTER is blessed with its
-  // effect (applyCharms). Charms never satisfy a want, so once held they're
-  // held for good.
+  // effect (applyCharms). The only want a charm satisfies is a charm-seeker's
+  // — the one trade it can leave the hand in.
   charm?: CharmKind;
 };
 
 // ─── Charms ──────────────────────────────────────────────────────────
-// Passive keepsakes that ride in the hand: entering any owned world applies
-// every held charm's blessing to it (idempotent sticky flags, so re-entry
-// never double-applies). They're minted into trader decks — sometimes
-// procedurally, once by hand at level 2 — and can never be traded away.
-export type CharmKind = 'gold' | 'hands' | 'rain' | 'storm' | 'tiny';
-export const CHARM_KINDS: CharmKind[] = ['gold', 'hands', 'rain', 'storm', 'tiny'];
-export const CHARM_DEFS: Record<CharmKind, { name: string; line: string; glyph: string }> = {
-  gold: { name: 'the gilded charm', line: 'spawns sometimes glitter', glyph: '✺' },
-  hands: { name: 'the busy charm', line: 'goblins find their own work', glyph: '✛' },
-  rain: { name: 'the wet charm', line: 'thirsty buildings water themselves', glyph: '☂' },
-  storm: { name: 'the storm charm', line: 'the sky answers', glyph: 'ϟ' },
-  tiny: { name: 'the little charm', line: 'minotaurs come out small', glyph: '♟' },
+// Passive keepsakes that ride in the hand: entering any owned world stamps
+// the hand's whole charm layer onto it (absolutely — a blessing lasts only
+// as long as its charm is held). They're minted into trader decks —
+// sometimes procedurally, once by hand at level 2 — and leave the hand only
+// through a charm-seeker's want, which takes their blessings with them.
+export type CharmKind = 'gold' | 'hands' | 'rain' | 'storm' | 'tiny' | 'deft' | 'fleet' | 'unmake';
+// The minting pool (rollCreatures tucks these into decks). 'rain' is absent:
+// the busy charm absorbed Autowater, so the wet charm is no longer dealt —
+// its def stays below only so hands that already hold one keep working.
+export const CHARM_KINDS: CharmKind[] = ['gold', 'hands', 'storm', 'tiny', 'deft', 'fleet', 'unmake'];
+// `desc` is the reading shown by the card's READ button (cards.ts
+// showCharmRead): a plain statement of what the blessing does. The plaque
+// appends the shared CHARM_NOTE beneath it.
+export const CHARM_NOTE = 'Applies to all worlds in hand.';
+export const CHARM_DEFS: Record<CharmKind, { name: string; glyph: string; desc: string }> = {
+  gold: {
+    name: 'the gilded charm', glyph: '✺',
+    desc: 'Every goblin spawned is a Goldblin, worth +Ƶ250 on death.',
+  },
+  hands: {
+    name: 'the busy charm', glyph: '✛',
+    desc: 'Autobuild + Autowater: idle goblins staff and water whatever needs it.',
+  },
+  rain: {
+    name: 'the wet charm', glyph: '☂',
+    desc: 'Autobuild + Autowater: idle goblins staff and water whatever needs it.',
+  },
+  storm: {
+    name: 'the storm charm', glyph: 'ϟ',
+    desc: 'Unlocks the Lightning Strike ability.',
+  },
+  tiny: {
+    name: 'the little charm', glyph: '♟',
+    desc: 'All new minotaurs spawn as Tinytaurs.',
+  },
+  deft: {
+    name: 'the deft charm', glyph: '⚒',
+    desc: 'Buildings are built 4× faster. Stackable.',
+  },
+  fleet: {
+    name: 'the fleet charm', glyph: '➳',
+    desc: 'All units move 2× faster. Stackable.',
+  },
+  unmake: {
+    name: 'the unmaking charm', glyph: '✕',
+    desc: 'Destroy buildings instantly for a full refund — no Minotaur needed.',
+  },
 };
 
 export function makeCharmCard(meta: CardMeta, tier: CardTier, kind: CharmKind): WorldCard {
@@ -83,20 +121,38 @@ export function makeCharmCard(meta: CardMeta, tier: CardTier, kind: CharmKind): 
   };
 }
 
-// Bless a world with every charm in the hand. All effects are sticky unlock
-// flags the sim already understands (generated worlds set the same ones), so
-// applying them on every entry is safe.
+// Stamp the hand's charm layer onto a world on the way in. Every charm
+// effect lives in its own field BESIDE the world's earned flags (never
+// touching them), and the whole layer is written absolutely from the current
+// hand — hold the charm and the blessing is on; sell it to a charm-seeker
+// and the next entry takes the blessing away again, while anything the
+// world earned for itself (purchased upgrades, task unlocks) survives.
+// (Worlds blessed before this layer existed had the earned flags set
+// directly; those legacy blessings can't be told apart, so they stay.)
 export function applyCharms(st: GameState, hand: WorldCard[]): void {
+  const counts = new Map<CharmKind, number>();
   for (const c of hand) {
-    if (!c.charm) continue;
-    switch (c.charm) {
-      case 'gold': st.goldgoblinsEnabled = true; break;
-      case 'hands': st.autoAssignEnabled = true; break;
-      case 'rain': st.autoAssignEnabled = true; st.autoWaterEnabled = true; break;
-      case 'storm': st.lightningUnlocked = true; break;
-      case 'tiny': st.tinytaurUnlocked = true; break;
-    }
+    if (c.charm) counts.set(c.charm, (counts.get(c.charm) ?? 0) + 1);
   }
+  const held = (k: CharmKind): boolean => (counts.get(k) ?? 0) > 0;
+  // Gilded: every spawn a Goldblin.
+  st.goldgoblinsAlways = held('gold') || undefined;
+  // Busy absorbed the wet charm's blessing — both grant Autobuild AND
+  // Autowater (the wet charm is no longer minted; held ones still work).
+  st.charmAutoWork = (held('hands') || held('rain')) || undefined;
+  st.charmLightning = held('storm') || undefined;
+  // Little: every minotaur summon arrives a Tinytaur. (The 4-for-1 Tinytaur
+  // ritual isn't granted — under this charm there are never four full
+  // Minotaurs to feed it.)
+  st.minotaursSpawnTiny = held('tiny') || undefined;
+  // The stackable charms: multipliers computed from the whole hand, so
+  // re-entry is idempotent and a grown (or sold-down) hand simply stamps
+  // the new figure.
+  const deft = counts.get('deft') ?? 0;
+  const fleet = counts.get('fleet') ?? 0;
+  st.charmBuildSpeed = deft > 0 ? 4 ** deft : undefined;
+  st.charmMoveSpeed = fleet > 0 ? 2 ** fleet : undefined;
+  st.charmFreeDemolish = held('unmake') || undefined;
 }
 
 // ─── Trader wants ────────────────────────────────────────────────────
@@ -108,7 +164,10 @@ export function applyCharms(st: GameState, hand: WorldCard[]): void {
 export type Want =
   | { kind: 'any'; count: number }
   | { kind: 'tier'; tier: CardTier; count: number }
-  | { kind: 'resource'; res: 'money' | 'blood' | 'dragonBone' | 'power'; amount: number; count: number };
+  | { kind: 'resource'; res: 'money' | 'blood' | 'dragonBone' | 'power'; amount: number; count: number }
+  // The charm-seekers: the one want a charm card can satisfy — and the only
+  // way a charm ever leaves the hand.
+  | { kind: 'charm'; count: number };
 
 const COUNT_WORDS = ['zero', 'one', 'two', 'three', 'four', 'five', 'six', 'seven', 'eight', 'nine', 'ten'];
 function countWord(n: number): string { return COUNT_WORDS[n] ?? String(n); }
@@ -123,8 +182,12 @@ export function wantResAmount(res: 'money' | 'blood' | 'dragonBone' | 'power', c
 export function cardQualifies(w: Want, card: WorldCard): boolean {
   // A key isn't a world — it can't be handed to any trader (only spent on a
   // door), so it never satisfies a want, not even an open "any one world".
-  // Charms are keepsakes, likewise never tradeable.
-  if (card.key || card.charm) return false;
+  if (card.key) return false;
+  // Charms are keepsakes with one exception: a charm-seeker's want takes
+  // them — the only trade a charm can ever leave the hand in. No other want
+  // touches them, and a charm-seeker takes nothing else.
+  if (w.kind === 'charm') return !!card.charm;
+  if (card.charm) return false;
   if (w.kind === 'any') return true;
   if (w.kind === 'tier') return card.tier === w.tier;
   return wantResAmount(w.res, card) >= w.amount;
@@ -167,6 +230,11 @@ export function wantSegments(w: Want): WantSeg[] {
       ? [{ t: 'i want any ' }, { t: w.tier, b: true }, { t: ' world.' }]
       : [{ t: 'i want ' }, { t: `${countWord(w.count)} ${w.tier}`, b: true }, { t: ` ${worldsWord(w.count)}.` }];
   }
+  if (w.kind === 'charm') {
+    return w.count === 1
+      ? [{ t: 'i want a ' }, { t: 'charm', b: true }, { t: '.' }]
+      : [{ t: 'i want ' }, { t: `${countWord(w.count)} charms`, b: true }, { t: '.' }];
+  }
   const amt = Math.floor(w.amount).toLocaleString('en-US');
   const desc = w.res === 'money' ? `worth Ƶ${amt}+`
     : w.res === 'blood' ? `with ${amt}+ blood`
@@ -198,6 +266,10 @@ export function rollWant(tier: CardTier, rng: () => number, firstSlot: boolean):
     const below = tier === 'uncommon' ? 'common' : 'uncommon';
     return { kind: 'tier', tier: below, count: 1 };
   }
+  // The occasional charm-seeker: a picky slot that wants a charm and nothing
+  // else. rollCreatures sweetens its deck with a card of the tier above —
+  // the price of a keepsake.
+  if (rng() < 0.12) return { kind: 'charm', count: 1 };
   // Some traders want more than one card, all meeting the same condition.
   const count = rng() < 0.55 ? 1 : rng() < 0.7 ? 2 : 3;
   if (rng() < 0.5) return { kind: 'tier', tier, count };
@@ -222,8 +294,14 @@ export const FRAME_BASE: Record<CardTier, number> = { common: 0, uncommon: 1, ra
 // Each gathering trades one tier only — creatures there hold cards of that
 // tier and accept cards of that tier. Entry needs a card of the tier (or one
 // tier above, breakable into two) in hand. Two-for-one breakdowns are the
-// only way the collection grows.
-export type TradeEvent = { id: number; name: string; tier: CardTier; depth: number; creatures: Creature[] };
+// only way the collection grows. `branch` is which door in the hall this
+// salon's chain hangs behind (absent on salons saved before the hall of
+// doors existed — those are all branch 0).
+export type TradeEvent = { id: number; name: string; tier: CardTier; depth: number; branch?: number; creatures: Creature[] };
+
+// One door in the hall: its own chain of salons (grown lazily, like the
+// original single chain) and how far down it the player has opened doors.
+export type BranchState = { events: TradeEvent[]; unlockedDepth: number };
 
 export type CardMeta = {
   v: 1;
@@ -236,15 +314,31 @@ export type CardMeta = {
   // Legacy: tiers the player had unlocked the door up to. Superseded by
   // unlockedDepth (loadMeta migrates it); kept only so old saves still read.
   unlockedTiers?: CardTier[];
-  // How far down the endless salon chain the player has opened doors: the
-  // highest salon depth they can reach without a key. 0 means only the soft
-  // border (home); spending the gatekeeper's key at salon d raises it to d+1.
-  // Absent on metas saved before the chain went endless.
+  // Legacy: the single chain's unlock counter, from before the hall of doors.
+  // ensureBranches migrates it into branches[0].unlockedDepth; kept only so
+  // old saves still read.
   unlockedDepth?: number;
-  // How many times the player has reset the chain back to level 1 (depth 0).
-  // 0/absent means the opening hand-authored chain is still up — levels 1–3
-  // pre-set, level 3 a deliberate dead end. From the first reset onward every
-  // salon rolls procedurally.
+  // The hall of doors: every starter door the player has unsealed, each with
+  // its own chain of salons. Grown one door at a time from the hub, without
+  // end. Absent until ensureBranches migrates the legacy single chain (or
+  // the intro seeds branch 0).
+  branches?: BranchState[];
+  // How many of the hall's doors stand unsealed. Doors unseal in order, so
+  // the first `doorsUnsealed` branches are open and everything past them
+  // waits sealed — the realm STARTS at 0, every door shut, the first
+  // unsealing the player's own act. A branch's chain can exist seeded while
+  // its door is still shut (the intro deals branch 0 a home for the stolen
+  // origin). Absent on metas from before the hall started sealed: those
+  // count every existing branch as unsealed.
+  doorsUnsealed?: number;
+  // When the last starter door was unsealed (ms epoch). A fresh seal takes a
+  // while to give — the hub holds the next door on a countdown from this
+  // stamp (cards.ts UNSEAL_COOLDOWN_MS). Absent until the first unsealing.
+  lastUnsealAt?: number;
+  // How many times the player has reset the realm back to a single door.
+  // 0/absent means the opening hand-authored chain is still up — branch 0's
+  // levels 1–3 pre-set, level 3 a deliberate wall. From the first reset
+  // onward every salon rolls procedurally.
   resets?: number;
   // The reset sigil has been introduced (the player has stood in the level-3
   // dead end). Once true it shows in every salon.
@@ -257,9 +351,9 @@ export type CardMeta = {
   seed?: number;
   nextId: number;
   cards: WorldCard[];
-  // The endless salon chain, indexed by depth and grown on demand: the intro
-  // seeds salons 0..STOLEN_DEPTH (so the stolen origin world has a home), and
-  // deeper salons are appended as the player reaches them. Null until the intro.
+  // Legacy: the single endless chain, from before the hall of doors. Null
+  // until the intro; ensureBranches migrates it into branches[0] and leaves
+  // this null. Kept only so old saves still read.
   events: TradeEvent[] | null;
   // Card the player is currently inside (boot resumes into it). Null on the table.
   activeCardId: number | null;
@@ -600,11 +694,20 @@ export function generateWeirdWorld(seed: number, tier: CardTier, taskIds: string
   }
 
   // Scattered, unstaffed buildings — they wake (or stay dormant) under the
-  // normal sim rules once the player starts assigning goblins.
+  // normal sim rules once the player starts assigning goblins. Some arrive
+  // as half-finished CONSTRUCTION SITES (somebody left mid-build): card
+  // worlds can't place anything new, so these are the only construction a
+  // card ever offers — staff them and they finish under the normal rules
+  // (which is also what the deft charm is for). An unfinished portal opens
+  // hell only once it's completed (updateConstruction).
   for (let i = 0; i < buildingCount; i++) {
     const kind = pool[Math.floor(rng() * pool.length)];
     const placed = tryPlaceBuilding(st, kind, rng);
-    if (placed?.kind === 'hell_portal') st.hellUnlocked = true;
+    if (placed && placed.kind !== 'wall' && rng() < 0.15) {
+      placed.state = 'constructing';
+      placed.buildProgress = 0.1 + rng() * 0.7;
+    }
+    if (placed?.kind === 'hell_portal' && placed.state !== 'constructing') st.hellUnlocked = true;
   }
   if (forcePortal && !st.hellUnlocked) {
     const portal = tryPlaceBuilding(st, 'hell_portal', rng);
@@ -879,44 +982,85 @@ export function makeSandboxWorld(taskIds: string[]): GameState {
 // ─── The salons ──────────────────────────────────────────────────────
 // A salon seats a few traders, all on screen at once; every trader advertises
 // ONE want and, satisfied, gives its WHOLE deck for the card(s) the want
-// names. The way the collection grows is finding a want you can meet. The
-// salons form an ENDLESS chain: salon 0 is the gentle soft border (home,
-// level 1 — the player's level is depth + 1, climbing one per door), and each
-// salon but the way you came holds a gatekeeper whose key opens the locked
-// door onward to the next. Until the player's first reset the chain is
-// hand-authored (makeHardcodedSalon: levels 1–3, level 3 a dead end); after
-// it, every salon rolls procedurally. Every procedural salon's opener keeps
-// an easy want so the player is never hard-locked; for everything else
-// there's the reset (and the dev reshuffle).
+// names. The way the collection grows is finding a want you can meet.
+//
+// The salons hang behind the HALL OF DOORS: a base-level hub of starter
+// doors, unsealed one at a time without end. Each door opens onto its own
+// endless chain — salon 0 the gentle common threshold (level 1; the player's
+// level is depth + 1, climbing one per door), the next few uncommon, and
+// everything from RARE_DEPTH down a rare exchange — and each salon but the
+// way you came holds a gatekeeper whose key opens the locked door onward to
+// the next. A chain that runs dry is not the end: walk back down to the hall,
+// unseal the next starter door, and climb again from commons. Until the
+// player's first reset branch 0's chain is hand-authored (makeHardcodedSalon:
+// levels 1–3, level 3 a deliberate wall — its rare asks are only meetable by
+// carrying rares home from ANOTHER door's deep salons); after it, every salon
+// rolls procedurally. Every procedural salon's opener keeps an easy want so a
+// chain is never hard-locked at the door; for everything else there's the
+// next door in the hall, the reset, and the dev reshuffle.
 
-// The salon depth that holds the player's stolen origin world — the fixed
-// "win your world back" rung along the otherwise-endless chain. Pre-reset
-// this is the level-3 dead end: the world sits there visible and unwinnable.
-export const STOLEN_DEPTH = 2;
-
-// Salons don't escalate (for now): the soft border is the gentle bootstrap
-// (its lone trader holds two cards, doubling the first trade), and every salon
-// past it trades at the uncommon tier.
-export function salonTierForDepth(depth: number): CardTier {
-  return depth <= 0 ? 'common' : 'uncommon';
+// Migrate the legacy single chain into the hall: branches[0] adopts the old
+// events + unlockedDepth verbatim (so a pre-hall save resumes exactly where
+// it was, its chain now hanging behind door 1). Returns the branches array —
+// empty until the intro has seeded branch 0.
+export function ensureBranches(meta: CardMeta): BranchState[] {
+  if (!meta.branches) {
+    meta.branches = meta.events
+      ? [{ events: meta.events, unlockedDepth: meta.unlockedDepth ?? 0 }]
+      : [];
+    for (const ev of meta.branches[0]?.events ?? []) ev.branch = 0;
+    meta.events = null;
+  }
+  return meta.branches;
 }
 
-// The endless chain needs a name per salon. Depth 0 is always the soft border;
-// deeper salons get a stable procedural name seeded by the playthrough seed and
-// the depth, so revisiting one reads the same name every time.
+// The salon depth that holds the player's stolen origin world — the fixed
+// "win your world back" rung along branch 0. Pre-reset this is the level-3
+// wall: the world sits there visible, winnable only with rares carried home
+// from another door's chain.
+export const STOLEN_DEPTH = 2;
+
+// The depth a chain turns rare at. Every chain escalates the same way: its
+// threshold (depth 0) trades common — the gentle bootstrap whose lone trader
+// holds two cards, doubling the first trade — the next few salons trade
+// uncommon, and everything from here down is a rare exchange.
+export const RARE_DEPTH = 4;
+export function salonTierForDepth(depth: number): CardTier {
+  return depth <= 0 ? 'common' : depth < RARE_DEPTH ? 'uncommon' : 'rare';
+}
+
+// Every chain needs names. Branch 0's threshold is always the soft border;
+// each later door's threshold gets its own stable "the X threshold" (the
+// adjectives dealt without repeats until the list runs out, so the hall's
+// doors read distinct), and deeper salons get a stable procedural name seeded
+// by the playthrough seed, the branch and the depth, so revisiting one reads
+// the same name every time.
 const SALON_ADJ = ['velvet', 'hollow', 'gilded', 'quiet', 'crooked', 'amber', 'sunken', 'porcelain', 'marble', 'candlelit', 'glass', 'copper', 'ivory', 'listening', 'patient', 'folded', 'low', 'far', 'dim', 'smoke'];
-export function salonName(seed: number, depth: number): string {
-  if (depth <= 0) return 'gathering at the soft border';
-  const rng = mulberry32((((seed ?? 0) ^ (depth * 2654435761)) >>> 0));
+export function pathName(seed: number, branch: number): string {
+  if (branch <= 0) return 'the soft border';
+  const rng = mulberry32((((seed ?? 0) ^ 0x51ed270b) >>> 0));
+  const adjs = [...SALON_ADJ];
+  for (let i = adjs.length - 1; i > 0; i--) {
+    const j = Math.floor(rng() * (i + 1));
+    [adjs[i], adjs[j]] = [adjs[j], adjs[i]];
+  }
+  const adj = adjs[(branch - 1) % adjs.length];
+  const lap = Math.floor((branch - 1) / adjs.length);
+  return lap === 0 ? `the ${adj} threshold` : `the ${adj} threshold ${lap + 1}`;
+}
+export function salonName(seed: number, depth: number, branch = 0): string {
+  if (depth <= 0) return `gathering at ${pathName(seed, branch)}`;
+  const rng = mulberry32((((seed ?? 0) ^ (depth * 2654435761) ^ (branch * 0x27d4eb2d)) >>> 0));
   return `the ${SALON_ADJ[Math.floor(rng() * SALON_ADJ.length)]} salon`;
 }
 
 // The gatekeeper's single ware: a key card. It carries no world (`data` is
-// empty). `tier` gives the card its look; `keyDepth` is the salon depth the
-// key opens — the door up out of the salon that minted it (a key minted at
-// salon d opens the door to salon d+1). Key cards never satisfy a want
-// (cardQualifies), so they can only be spent on that door, never re-traded.
-export function makeKeyCard(meta: CardMeta, tier: CardTier, keyDepth?: number): WorldCard {
+// empty). `tier` gives the card its look; `keyDepth` + `keyBranch` name the
+// salon the key opens — the door up out of the salon that minted it (a key
+// minted at salon d of a branch opens that branch's door to salon d+1). Key
+// cards never satisfy a want (cardQualifies), so they can only be spent on
+// that door, never re-traded.
+export function makeKeyCard(meta: CardMeta, tier: CardTier, keyDepth?: number, keyBranch?: number): WorldCard {
   return {
     id: meta.nextId++,
     name: 'a key',
@@ -925,6 +1069,7 @@ export function makeKeyCard(meta: CardMeta, tier: CardTier, keyDepth?: number): 
     resources: { money: 0, blood: 0, dragonBone: 0 },
     key: true,
     keyDepth,
+    keyBranch,
   };
 }
 
@@ -940,7 +1085,7 @@ const CREATURE_SPECS: Record<CardTier, number[]> = {
   uncommon: [1, 2],
   rare: [1, 2, 2],
 };
-export function rollCreatures(meta: CardMeta, tier: CardTier, depth: number, rng: () => number, taskIds: string[], manualPool: ManualWorld[] = []): Creature[] {
+export function rollCreatures(meta: CardMeta, tier: CardTier, branch: number, depth: number, rng: () => number, taskIds: string[], manualPool: ManualWorld[] = []): Creature[] {
   const names = [...CREATURE_NAMES];
   for (let i = names.length - 1; i > 0; i--) {
     const j = Math.floor(rng() * (i + 1));
@@ -955,14 +1100,22 @@ export function rollCreatures(meta: CardMeta, tier: CardTier, depth: number, rng
       deck.push(card);
     }
     // A picky trader sometimes tucks a charm in with its worlds — a keepsake
-    // that blesses every world its holder enters (applyCharms) and can never
-    // be traded away.
+    // that blesses every world its holder enters (applyCharms) and leaves
+    // the hand only for a charm-seeker's want.
     if (i > 0 && rng() < 0.25) {
       const charm = makeCharmCard(meta, tier, CHARM_KINDS[Math.floor(rng() * CHARM_KINDS.length)]);
       charm.frame = frame;
       deck.push(charm);
     }
     const want = rollWant(tier, rng, i === 0);
+    // A charm-seeker pays for the keepsake: its deck carries one card of the
+    // tier ABOVE its salon (rares keep to rare) — treasure worth parting
+    // with a charm for, and a way for a higher tier to trickle down early.
+    if (want.kind === 'charm') {
+      const prize = mintDeckCard(meta, TIER_ABOVE[tier] ?? tier, rng, taskIds, manualPool);
+      prize.frame = frame;
+      deck.push(prize);
+    }
     return {
       id: creatureSeq++,
       name: names.pop() ?? 'the other one',
@@ -972,25 +1125,27 @@ export function rollCreatures(meta: CardMeta, tier: CardTier, depth: number, rng
     };
   });
   // Every salon seats a gatekeeper too: it offers a single key card for any one
-  // world — the key that opens the locked door up to the NEXT salon (depth+1).
-  // The chain is endless, so every salon has a door onward.
+  // world — the key that opens the locked door up to the NEXT salon (depth+1,
+  // on this salon's own branch). Every chain is endless, so every salon has a
+  // door onward.
   creatures.push({
     id: creatureSeq++,
     name: 'the gatekeeper',
     want: { kind: 'any', count: 1 },
-    deck: [makeKeyCard(meta, tier, depth + 1)],
+    deck: [makeKeyCard(meta, tier, depth + 1, branch)],
   });
   return creatures;
 }
 
-// ─── The opening chain (levels 1–3) ──────────────────────────────────
-// Until the player's first reset the chain is hand-authored. Levels 1 and 2
-// are a curated on-ramp (level 2's opener carries the charm that introduces
-// charms). Level 3 is a wall on purpose: every want there — the trillion, the
-// rare asks — is impossible before the first reset, because no rare ever
-// circulates in the opening chain (the only rare in existence, the stolen
-// origin world, sits in this very salon's opener deck: visible, unwinnable)
-// and nobody grinds to Ƶ1e12. The dead end is what introduces the reset.
+// ─── The opening chain (branch 0, levels 1–3) ────────────────────────
+// Until the player's first reset branch 0's chain is hand-authored. Levels 1
+// and 2 are a curated on-ramp (level 2's opener carries the charm that
+// introduces charms). Level 3 is a wall on purpose: nothing the opening chain
+// itself deals — no rare, nobody's Ƶ1e12 — meets any want there (the stolen
+// origin world sits in this very salon's opener deck: visible, out of reach).
+// The wall is what teaches the hall: unseal another starter door, climb its
+// chain to the rare exchanges, and carry rares home — or stand in the dead
+// end long enough for it to introduce the reset instead.
 export const HARDCODED_LEVELS = 3;
 
 export function makeHardcodedSalon(meta: CardMeta, depth: number, rng: () => number, taskIds: string[], manualPool: ManualWorld[] = []): TradeEvent {
@@ -1008,7 +1163,7 @@ export function makeHardcodedSalon(meta: CardMeta, depth: number, rng: () => num
     id: creatureSeq++,
     name: 'the gatekeeper',
     want,
-    deck: [makeKeyCard(meta, tier, depth + 1)],
+    deck: [makeKeyCard(meta, tier, depth + 1, 0)],
   });
   let creatures: Creature[];
   if (depth === 0) {
@@ -1038,62 +1193,73 @@ export function makeHardcodedSalon(meta: CardMeta, depth: number, rng: () => num
   } else {
     // Level 3: the wall. The magistrate holds the stolen origin world
     // (generateEvents seats it in this opener's deck) behind a fortune nobody
-    // has; the others want rare worlds that don't circulate yet. Even the
-    // gatekeeper — so the door onward never opens, and the only way forward
-    // is the reset this room introduces.
+    // has; the others want rare worlds this chain never deals. Even the
+    // gatekeeper — so nothing here budges until the player has climbed some
+    // OTHER door's chain to its rare exchanges and carried rares home (or
+    // stood in the dead end long enough to be shown the reset).
     creatures = [
       { id: creatureSeq++, name: 'the magistrate', want: { kind: 'resource', res: 'money', amount: 1_000_000_000_000, count: 1 }, deck: mint('uncommon', FRAME_BASE.uncommon, 1), frame: FRAME_BASE.uncommon },
       { id: creatureSeq++, name: 'the white knuckle', want: { kind: 'tier', tier: 'rare', count: 3 }, deck: mint('uncommon', FRAME_BASE.uncommon + 1, 2), frame: FRAME_BASE.uncommon + 1 },
       gatekeeper({ kind: 'tier', tier: 'rare', count: 1 }),
     ];
   }
-  return { id: depth + 1, depth, name: salonName(meta.seed ?? 0, depth), tier, creatures };
+  return { id: depth + 1, depth, branch: 0, name: salonName(meta.seed ?? 0, depth), tier, creatures };
 }
 
-// Roll a single salon at a given depth (its name, tier, traders + gatekeeper).
-// Before the first reset the opening levels come from the hand-authored chain;
-// after it (or past level 3) everything is procedural.
-export function makeSalon(meta: CardMeta, depth: number, rng: () => number, taskIds: string[], manualPool: ManualWorld[] = []): TradeEvent {
-  if ((meta.resets ?? 0) === 0 && depth < HARDCODED_LEVELS) {
+// Roll a single salon at a branch + depth (its name, tier, traders +
+// gatekeeper). Before the first reset branch 0's opening levels come from the
+// hand-authored chain; every other salon — deeper, or behind a later door —
+// is procedural.
+export function makeSalon(meta: CardMeta, branch: number, depth: number, rng: () => number, taskIds: string[], manualPool: ManualWorld[] = []): TradeEvent {
+  if (branch === 0 && (meta.resets ?? 0) === 0 && depth < HARDCODED_LEVELS) {
     return makeHardcodedSalon(meta, depth, rng, taskIds, manualPool);
   }
   const tier = salonTierForDepth(depth);
   return {
-    id: depth + 1,
+    // Unique across the hall (regenerateEvent mixes it into its rng); branch
+    // 0 keeps the legacy depth+1 ids.
+    id: branch * 1000 + depth + 1,
     depth,
-    name: salonName(meta.seed ?? 0, depth),
+    branch,
+    name: salonName(meta.seed ?? 0, depth, branch),
     tier,
-    creatures: rollCreatures(meta, tier, depth, rng, taskIds, manualPool),
+    creatures: rollCreatures(meta, tier, branch, depth, rng, taskIds, manualPool),
   };
 }
 
-// The realm's initial salons: the chain from the soft border down to the salon
-// that holds the stolen origin world. Deeper salons are rolled lazily as the
-// player reaches them (see cards.ts salonAtDepth).
+// Branch 0's initial salons: the chain from the soft border down to the salon
+// that holds the stolen origin world. Deeper salons — and every later door's
+// chain — are rolled lazily as the player reaches them (see cards.ts salonAt).
 export function generateEvents(meta: CardMeta, stolen: WorldCard | null, taskIds: string[], manualPool: ManualWorld[] = []): TradeEvent[] {
   const rng = mulberry32((((meta.seed ?? 0) ^ (meta.nextId * 2654435761)) >>> 0));
   const events: TradeEvent[] = [];
   for (let depth = 0; depth <= STOLEN_DEPTH; depth++) {
-    events.push(makeSalon(meta, depth, rng, taskIds, manualPool));
+    events.push(makeSalon(meta, 0, depth, rng, taskIds, manualPool));
   }
   // The stolen origin card waits at the fixed stolen-world salon, in its
-  // opener's deck. Pre-reset that opener is the level-3 magistrate and its
-  // want is impossible — the world is a taunt; after the first reset the
-  // procedural opener keeps the easy want, so it's winnable at last.
+  // opener's deck. Pre-reset that opener is the level-3 magistrate, meetable
+  // only with another chain's rares; after the first reset the procedural
+  // opener keeps the easy want, so it's winnable with a plain common.
   if (stolen) events[STOLEN_DEPTH].creatures[0].deck.unshift(stolen);
   return events;
 }
 
-// The reset: back to level 1, every salon refreshed, every door locked again.
-// The player's hand is untouched — only the chain resets. Introduced by the
-// level-3 dead end; the first reset is also the moment the chain goes
-// properly procedural (resets leaves 0), so the wall never comes back. The
-// stolen origin world, if still untraded, rides into the fresh chain.
+// The reset: back to a single door, every salon refreshed, every door locked
+// again. The player's hand is untouched — only the hall resets, its later
+// doors sealed back up. Introduced by the level-3 dead end; the first reset
+// is also the moment the salons go properly procedural (resets leaves 0), so
+// the wall never comes back. The stolen origin world, if still untraded
+// anywhere in the hall, rides into the fresh chain.
 export function resetChain(meta: CardMeta, taskIds: string[], manualPool: ManualWorld[] = []): void {
-  const origin = meta.events?.flatMap((e) => e.creatures).flatMap((c) => c.deck).find((c) => c.origin) ?? null;
+  const branches = ensureBranches(meta);
+  const origin = branches.flatMap((b) => b.events).flatMap((e) => e.creatures).flatMap((c) => c.deck).find((c) => c.origin) ?? null;
   meta.resets = (meta.resets ?? 0) + 1;
   meta.unlockedDepth = 0;
-  meta.events = generateEvents(meta, origin, taskIds, manualPool);
+  meta.branches = [{ events: generateEvents(meta, origin, taskIds, manualPool), unlockedDepth: 0 }];
+  // The hall seals all the way back up — even door 1 — and the seal is dry:
+  // beginning again never leaves the player staring at a countdown.
+  meta.doorsUnsealed = 0;
+  delete meta.lastUnsealAt;
 }
 
 // The reshuffle: this salon ends and a fresh one at the same depth arrives —
@@ -1103,6 +1269,6 @@ export function resetChain(meta: CardMeta, taskIds: string[], manualPool: Manual
 export function regenerateEvent(meta: CardMeta, ev: TradeEvent, taskIds: string[], manualPool: ManualWorld[] = []): void {
   const origin = ev.creatures.flatMap((c) => c.deck).find((c) => c.origin) ?? null;
   const rng = mulberry32((((meta.seed ?? 0) ^ (meta.nextId * 48271 + ev.id)) >>> 0));
-  ev.creatures = rollCreatures(meta, ev.tier, ev.depth, rng, taskIds, manualPool);
+  ev.creatures = rollCreatures(meta, ev.tier, ev.branch ?? 0, ev.depth, rng, taskIds, manualPool);
   if (origin) ev.creatures[0].deck.unshift(origin);
 }

@@ -6,13 +6,15 @@
 
 import { describe, expect, it } from 'vitest';
 import {
-  CardMeta, CardTier, HARDCODED_LEVELS, ManualWorld, MAIN_TRACK, TIER_ABOVE,
-  TIER_RANK, Want, WorldCard, applyCharms, cardFromManual, cardPower,
-  cardQualifies, countQualifying, decodeWorld, encodeWorld, generateEvents,
-  generateJunkWorld, generateWeirdWorld, makeCard, makeCharmCard, mintDeckCard,
-  mulberry32, regenerateEvent, resetChain, rollWant, sceneStructureCounts,
-  spicyAmount, tradeKeepsAWorld, wantLine, wantSatisfiableBy, wantSatisfiedBy,
-  worldName, makeKeyCard, makeSalon, salonName, salonTierForDepth, STOLEN_DEPTH,
+  CardMeta, CardTier, CHARM_DEFS, CHARM_KINDS, HARDCODED_LEVELS, ManualWorld,
+  MAIN_TRACK, RARE_DEPTH,
+  TIER_ABOVE, TIER_RANK, Want, WorldCard, applyCharms, cardFromManual, cardPower,
+  cardQualifies, countQualifying, decodeWorld, encodeWorld, ensureBranches,
+  generateEvents, generateJunkWorld, generateWeirdWorld, makeCard, makeCharmCard,
+  mintDeckCard, mulberry32, pathName, regenerateEvent, resetChain, rollWant,
+  sceneStructureCounts, spicyAmount, tradeKeepsAWorld, wantLine, wantSatisfiableBy,
+  wantSatisfiedBy, worldName, makeKeyCard, makeSalon, salonName, salonTierForDepth,
+  STOLEN_DEPTH,
 } from '../src/cards-core';
 import { BUILDING_DEFS, SOUL_SIGIL } from '../src/config';
 import { GameState, cellKey, isInPlayCell } from '../src/state';
@@ -137,12 +139,31 @@ describe('generateWeirdWorld', () => {
     expect(rare.dragonBoneUnlocked).toBe(true);
   });
 
-  it('only unlocks hell when a portal actually exists', () => {
+  it('only unlocks hell when a FINISHED portal exists — a half-built one waits', () => {
     for (let seed = 1; seed <= 30; seed++) {
       const st = generateWeirdWorld(seed, 'rare', TASK_IDS);
-      const hasPortal = [...st.buildings.values()].some((b) => b.kind === 'hell_portal');
-      expect(st.hellUnlocked).toBe(hasPortal);
+      const hasBuiltPortal = [...st.buildings.values()]
+        .some((b) => b.kind === 'hell_portal' && b.state !== 'constructing');
+      expect(st.hellUnlocked).toBe(hasBuiltPortal);
     }
+  });
+
+  it('deals the occasional half-built construction site (never a wall)', () => {
+    let sites = 0, total = 0;
+    for (let seed = 1; seed <= 30; seed++) {
+      const st = generateWeirdWorld(seed * 11, 'uncommon', TASK_IDS);
+      for (const b of st.buildings.values()) {
+        total++;
+        if (b.state !== 'constructing') continue;
+        sites++;
+        expect(b.kind).not.toBe('wall');
+        // Partial, staffable progress — a real site, not a phantom.
+        expect(b.buildProgress).toBeGreaterThan(0);
+        expect(b.buildProgress).toBeLessThan(1);
+      }
+    }
+    expect(sites).toBeGreaterThan(0);
+    expect(sites).toBeLessThan(total / 2); // texture, not a ruin
   });
 });
 
@@ -393,15 +414,16 @@ describe('rollWant', () => {
     }
   });
 
-  it('the picky slots ask for the table\'s own tier or a resource threshold in band', () => {
+  it('the picky slots ask for the table\'s own tier, a resource threshold in band, or a charm', () => {
     for (let seed = 0; seed < 200; seed++) {
       const w = rollWant('common', mulberry32(seed), false);
-      expect(w.kind === 'tier' || w.kind === 'resource').toBe(true);
+      expect(w.kind === 'tier' || w.kind === 'resource' || w.kind === 'charm').toBe(true);
+      if (w.kind === 'charm') expect(w.count).toBe(1);
       if (w.kind === 'tier') {
         expect(w.tier).toBe('common');
         expect(w.count).toBeGreaterThanOrEqual(1);
         expect(w.count).toBeLessThanOrEqual(3);
-      } else {
+      } else if (w.kind === 'resource') {
         // Common's resource bands: cash 1k–15k, blood 50–800.
         expect(['money', 'blood']).toContain(w.res);
         if (w.res === 'money') { expect(w.amount).toBeGreaterThanOrEqual(1_000); expect(w.amount).toBeLessThanOrEqual(15_000); }
@@ -517,10 +539,12 @@ describe('generateEvents', () => {
     for (const ev of events) {
       for (const cr of ev.creatures) {
         // Every creature advertises a want, and its non-key deck is the salon's
-        // own tier (keys carry no tier rung).
+        // own tier (keys carry no tier rung; a charm-seeker's sweetener is the
+        // one card allowed a tier above).
         expect(cr.want).toBeTruthy();
         expect(wantLine(cr.want)).toBeTruthy();
-        expect(cr.deck.every((c) => c.key || c.tier === ev.tier)).toBe(true);
+        expect(cr.deck.every((c) => c.key || c.tier === ev.tier
+          || (cr.want.kind === 'charm' && c.tier === TIER_ABOVE[ev.tier]))).toBe(true);
       }
     }
     // The opener everywhere keeps the easy rung (any world at the border, a
@@ -571,30 +595,103 @@ describe('generateEvents', () => {
       const all = ev.creatures.flatMap((c) => c.deck);
       expect(all.filter((c) => c.origin).length).toBe(1);
       expect(all.some((c) => c.id === strayId)).toBe(false);
-      expect(all.every((c) => c.origin || c.key || c.tier === ev.tier)).toBe(true);
+      for (const cr of ev.creatures) {
+        expect(cr.deck.every((c) => c.origin || c.key || c.tier === ev.tier
+          || (cr.want.kind === 'charm' && c.tier === TIER_ABOVE[ev.tier]))).toBe(true);
+      }
     }
   });
 });
 
-// ─── The endless chain ───────────────────────────────────────────────
+// ─── The endless chains behind the hall of doors ─────────────────────
 
-describe('endless salon chain', () => {
-  it('maps every depth to a non-escalating tier and a stable name', () => {
+describe('endless salon chains', () => {
+  it('escalates every chain the same way: common threshold, uncommon salons, rare from RARE_DEPTH down', () => {
     expect(salonTierForDepth(0)).toBe('common');
-    for (let d = 1; d < 20; d++) expect(salonTierForDepth(d)).toBe('uncommon');
+    for (let d = 1; d < RARE_DEPTH; d++) expect(salonTierForDepth(d)).toBe('uncommon');
+    for (let d = RARE_DEPTH; d < 20; d++) expect(salonTierForDepth(d)).toBe('rare');
+  });
+
+  it('names branch 0 the soft border, later doors their own thresholds, deeper salons stably', () => {
     expect(salonName(123, 0)).toBe('gathering at the soft border');
     for (let d = 1; d < 20; d++) expect(salonName(123, d)).toMatch(/^the [a-z]+ salon$/);
-    // Names are stable per (seed, depth) so a revisited salon reads the same.
+    // Names are stable per (seed, branch, depth) so a revisited salon reads
+    // the same — and each branch's chain names itself.
     expect(salonName(123, 7)).toBe(salonName(123, 7));
+    expect(salonName(123, 7, 2)).toBe(salonName(123, 7, 2));
+    // Each branch's chain names itself: a single depth can coincide across
+    // branches (the adjective pool is small), but the runs don't.
+    const run = (branch: number) =>
+      Array.from({ length: 12 }, (_, d) => salonName(123, d + 1, branch)).join('|');
+    expect(run(2)).not.toBe(run(3));
+    // Every later door's threshold gets its own name; the first score of
+    // doors never repeat one.
+    expect(pathName(123, 0)).toBe('the soft border');
+    const names = Array.from({ length: 20 }, (_, b) => pathName(123, b + 1));
+    for (const n of names) expect(n).toMatch(/^the [a-z]+ threshold$/);
+    expect(new Set(names).size).toBe(20);
+    expect(salonName(123, 0, 3)).toBe(`gathering at ${pathName(123, 3)}`);
   });
 
   it('rolls a fresh salon at any depth, its gatekeeper keyed to the door onward', () => {
     const meta = freshMeta();
-    const deep = makeSalon(meta, 9, mulberry32(999), TASK_IDS);
+    const deep = makeSalon(meta, 0, 9, mulberry32(999), TASK_IDS);
     expect(deep.depth).toBe(9);
-    expect(deep.tier).toBe('uncommon');
+    expect(deep.tier).toBe('rare');
     const gate = deep.creatures.find((c) => c.deck.some((d) => d.key))!;
     expect(gate.deck[0].keyDepth).toBe(10);
+    expect(gate.deck[0].keyBranch).toBe(0);
+  });
+
+  it('a later door\'s threshold is the same gentle bootstrap: an open want over two commons, keys stamped to its own branch', () => {
+    const meta = freshMeta();
+    const threshold = makeSalon(meta, 3, 0, mulberry32(555), TASK_IDS);
+    expect(threshold.branch).toBe(3);
+    expect(threshold.tier).toBe('common');
+    // Even pre-reset, only branch 0 deals the hand-authored chain — a fresh
+    // door's threshold rolls procedurally, under its own threshold name.
+    const preReset = { ...freshMeta(), resets: 0 };
+    expect(makeSalon(preReset, 3, 0, mulberry32(555), TASK_IDS).name)
+      .not.toBe('gathering at the soft border');
+    expect(threshold.creatures[0].want).toEqual({ kind: 'any', count: 1 });
+    expect(threshold.creatures[0].deck.filter((c) => !c.key && !c.charm).length).toBe(2);
+    const gate = threshold.creatures.find((c) => c.deck.some((d) => d.key))!;
+    expect(gate.deck[0].keyDepth).toBe(1);
+    expect(gate.deck[0].keyBranch).toBe(3);
+  });
+
+  it('a rare exchange deals rare decks behind an uncommon-rung opener', () => {
+    const meta = freshMeta();
+    const rare = makeSalon(meta, 1, RARE_DEPTH, mulberry32(777), TASK_IDS);
+    expect(rare.tier).toBe('rare');
+    expect(rare.creatures[0].want).toEqual({ kind: 'tier', tier: 'uncommon', count: 1 });
+    for (const cr of rare.creatures) {
+      expect(cr.deck.every((c) => c.key || c.charm || c.tier === 'rare')).toBe(true);
+    }
+  });
+});
+
+// ─── The hall of doors ───────────────────────────────────────────────
+
+describe('ensureBranches (the hall migration)', () => {
+  it('adopts a legacy single-chain meta as branch 0, chain and unlock depth intact', () => {
+    const meta = freshMeta();
+    meta.events = generateEvents(meta, null, TASK_IDS);
+    meta.unlockedDepth = 2;
+    const legacyEvents = meta.events;
+    const branches = ensureBranches(meta);
+    expect(branches.length).toBe(1);
+    expect(branches[0].events).toBe(legacyEvents);
+    expect(branches[0].unlockedDepth).toBe(2);
+    expect(branches[0].events.every((e) => e.branch === 0)).toBe(true);
+    expect(meta.events).toBeNull();
+    // Idempotent: a second call changes nothing.
+    expect(ensureBranches(meta)).toBe(branches);
+  });
+
+  it('a meta with no chain at all migrates to an empty hall', () => {
+    const meta = freshMeta();
+    expect(ensureBranches(meta)).toEqual([]);
   });
 });
 
@@ -768,7 +865,10 @@ describe('the opening chain (levels 1–3, pre-reset)', () => {
 // ─── The reset ───────────────────────────────────────────────────────
 
 describe('resetChain (begin again)', () => {
-  it('locks the doors, refreshes every salon, keeps the hand, and goes procedural', () => {
+  const hallDecks = (meta: CardMeta) =>
+    meta.branches!.flatMap((b) => b.events).flatMap((e) => e.creatures).flatMap((c) => c.deck);
+
+  it('seals the hall back to one door, refreshes every salon, keeps the hand, and goes procedural', () => {
     const meta = freshMeta();
     meta.resets = 0;
     meta.unlockedDepth = 2;
@@ -776,35 +876,71 @@ describe('resetChain (begin again)', () => {
     meta.cards = [...held];
     const stolen = card('rare', { id: meta.nextId++, origin: true });
     meta.events = generateEvents(meta, stolen, TASK_IDS);
+    // The player also unsealed a second door and climbed it a little.
+    ensureBranches(meta).push({
+      events: [makeSalon(meta, 1, 0, mulberry32(9), TASK_IDS)],
+      unlockedDepth: 1,
+    });
+    meta.doorsUnsealed = 2;
+    meta.lastUnsealAt = 123456;
     resetChain(meta, TASK_IDS);
     expect(meta.resets).toBe(1);
-    expect(meta.unlockedDepth).toBe(0);
+    expect(meta.branches!.length).toBe(1);     // the hall seals back to one chain
+    expect(meta.branches![0].unlockedDepth).toBe(0);
+    expect(meta.doorsUnsealed).toBe(0);        // ...with even door 1 sealed again
+    expect(meta.lastUnsealAt).toBeUndefined(); // ...and no countdown in the way
     expect(meta.cards).toEqual(held); // the hand is untouched
     // The fresh chain is procedural — its stolen-world opener keeps the easy
     // rung (the impossible magistrate is gone) — and still carries the origin.
-    const holder = meta.events![STOLEN_DEPTH].creatures[0];
+    const holder = meta.branches![0].events[STOLEN_DEPTH].creatures[0];
     expect(holder.want).toEqual({ kind: 'tier', tier: 'common', count: 1 });
-    expect(meta.events!.flatMap((e) => e.creatures).flatMap((c) => c.deck).filter((c) => c.origin).length).toBe(1);
+    expect(hallDecks(meta).filter((c) => c.origin).length).toBe(1);
     // Resetting again keeps counting and keeps carrying the origin.
     resetChain(meta, TASK_IDS);
     expect(meta.resets).toBe(2);
-    expect(meta.events!.flatMap((e) => e.creatures).flatMap((c) => c.deck).filter((c) => c.origin).length).toBe(1);
+    expect(hallDecks(meta).filter((c) => c.origin).length).toBe(1);
   });
 
-  it('an origin already won stays won — it never re-enters the refreshed chain', () => {
+  it('carries the origin home even when it waits behind a later door', () => {
+    const meta = freshMeta();
+    meta.events = generateEvents(meta, null, TASK_IDS);
+    const branches = ensureBranches(meta);
+    const stolen = card('rare', { id: 900, origin: true });
+    const side = makeSalon(meta, 2, 0, mulberry32(4), TASK_IDS);
+    side.creatures[0].deck.unshift(stolen);
+    branches.push({ events: [side], unlockedDepth: 0 });
+    resetChain(meta, TASK_IDS);
+    expect(meta.branches!.length).toBe(1);
+    expect(hallDecks(meta).filter((c) => c.origin).length).toBe(1);
+  });
+
+  it('an origin already won stays won — it never re-enters the refreshed hall', () => {
     const meta = freshMeta();
     meta.events = generateEvents(meta, null, TASK_IDS);
     meta.cards = [card('rare', { id: 700, origin: true })];
     resetChain(meta, TASK_IDS);
     expect(meta.cards.length).toBe(1); // still in hand
-    const all = meta.events!.flatMap((e) => e.creatures).flatMap((c) => c.deck);
-    expect(all.some((c) => c.origin)).toBe(false);
+    expect(hallDecks(meta).some((c) => c.origin)).toBe(false);
   });
 });
 
 // ─── Charms ──────────────────────────────────────────────────────────
 
 describe('charms', () => {
+  it('every charm carries a full reading: name, glyph and a real description', () => {
+    for (const kind of Object.keys(CHARM_DEFS) as (keyof typeof CHARM_DEFS)[]) {
+      const def = CHARM_DEFS[kind];
+      expect(def.name.length).toBeGreaterThan(0);
+      expect(def.glyph.length).toBeGreaterThan(0);
+      expect(def.desc.length).toBeGreaterThan(20);
+    }
+  });
+
+  it('the wet charm is retired from the minting pool but keeps its def for old hands', () => {
+    expect(CHARM_KINDS).not.toContain('rain');
+    expect(CHARM_DEFS.rain.name).toBe('the wet charm');
+  });
+
   it('a charm is a keepsake: no world behind it, and it never satisfies any want', () => {
     const meta = freshMeta();
     const charm = makeCharmCard(meta, 'uncommon', 'gold');
@@ -815,7 +951,7 @@ describe('charms', () => {
     expect(cardQualifies({ kind: 'resource', res: 'money', amount: 0, count: 1 }, charm)).toBe(false);
   });
 
-  it('applyCharms blesses a world with every held charm\'s flag (worlds in hand ride along untouched)', () => {
+  it('applyCharms stamps the hand\'s charm layer beside the world\'s own flags', () => {
     const meta = freshMeta();
     // A balanced common: every charm flag starts false.
     const st = generateWeirdWorld(11, 'common', TASK_IDS, 'balanced');
@@ -827,25 +963,99 @@ describe('charms', () => {
       makeCharmCard(meta, 'common', 'storm'),
       makeCharmCard(meta, 'common', 'tiny'),
     ]);
-    expect(st.goldgoblinsEnabled).toBe(true);
-    expect(st.autoAssignEnabled).toBe(true); // rain implies the busy hands too
-    expect(st.autoWaterEnabled).toBe(true);
-    expect(st.lightningUnlocked).toBe(true);
-    expect(st.tinytaurUnlocked).toBe(true);
+    expect(st.goldgoblinsAlways).toBe(true);  // gilded: EVERY spawn, not the 1-in-5 roll
+    expect(st.charmAutoWork).toBe(true);      // busy/wet: Autobuild + Autowater
+    expect(st.charmLightning).toBe(true);
+    expect(st.minotaursSpawnTiny).toBe(true); // little: all summons arrive tiny
+    // The world's OWN flags are never touched — the blessing is a layer.
+    expect(st.goldgoblinsEnabled).toBe(false);
+    expect(st.autoAssignEnabled).toBe(false);
+    expect(st.autoWaterEnabled).toBe(false);
+    expect(st.lightningUnlocked).toBe(false);
     // And a plain hand blesses nothing.
     const st2 = generateWeirdWorld(11, 'common', TASK_IDS, 'balanced');
     applyCharms(st2, [card('common', { id: 2 })]);
     expect(st2.goldgoblinsEnabled).toBe(false);
+    expect(st2.goldgoblinsAlways).toBeUndefined();
+    expect(st2.minotaursSpawnTiny).toBeUndefined();
+  });
+
+  it('a sold charm takes its blessing with it — while the world\'s earned upgrades survive', () => {
+    const meta = freshMeta();
+    const st = generateWeirdWorld(13, 'common', TASK_IDS, 'balanced');
+    // The world earned Autobuild for itself; the hand blesses the rest.
+    st.autoAssignEnabled = true;
+    applyCharms(st, [
+      card('common', { id: 1 }),
+      makeCharmCard(meta, 'common', 'gold'),
+      makeCharmCard(meta, 'common', 'storm'),
+      makeCharmCard(meta, 'common', 'deft'),
+      makeCharmCard(meta, 'common', 'deft'),
+      makeCharmCard(meta, 'common', 'fleet'),
+      makeCharmCard(meta, 'common', 'unmake'),
+    ]);
+    expect(st.goldgoblinsAlways).toBe(true);
+    expect(st.charmLightning).toBe(true);
+    expect(st.charmBuildSpeed).toBe(16);  // two deft charms stack: 4^2
+    expect(st.charmMoveSpeed).toBe(2);
+    expect(st.charmFreeDemolish).toBe(true);
+    // Every charm traded away to seekers; re-entry strips the whole layer...
+    applyCharms(st, [card('common', { id: 1 })]);
+    expect(st.goldgoblinsAlways).toBeUndefined();
+    expect(st.charmLightning).toBeUndefined();
+    expect(st.charmBuildSpeed).toBeUndefined();
+    expect(st.charmMoveSpeed).toBeUndefined();
+    expect(st.charmFreeDemolish).toBeUndefined();
+    // ...but what the world earned for itself stays earned.
+    expect(st.autoAssignEnabled).toBe(true);
   });
 
   it('procedural picky traders sometimes tuck a charm into their deck', () => {
     const meta = freshMeta(); // resets: 1 — the procedural chain
     let found = false;
     for (let seed = 1; seed <= 40 && !found; seed++) {
-      const salon = makeSalon(meta, 1, mulberry32(seed * 313), TASK_IDS);
+      const salon = makeSalon(meta, 0, 1, mulberry32(seed * 313), TASK_IDS);
       found = salon.creatures.some((c) => c.deck.some((d) => d.charm));
     }
     expect(found).toBe(true);
+  });
+});
+
+// ─── Charm-seekers ───────────────────────────────────────────────────
+
+describe('charm-seekers (traders who want charms)', () => {
+  it('a charm satisfies exactly a charm want — worlds and keys never do', () => {
+    const meta = freshMeta();
+    const charm = makeCharmCard(meta, 'uncommon', 'gold');
+    const charmWant: Want = { kind: 'charm', count: 1 };
+    expect(cardQualifies(charmWant, charm)).toBe(true);
+    expect(cardQualifies(charmWant, card('rare'))).toBe(false);
+    expect(cardQualifies(charmWant, makeKeyCard(meta, 'common', 1, 0))).toBe(false);
+    expect(wantSatisfiedBy(charmWant, [charm])).toBe(true);
+    expect(wantLine(charmWant)).toBe('i want a charm.');
+    expect(wantLine({ kind: 'charm', count: 2 })).toBe('i want two charms.');
+  });
+
+  it('picky slots sometimes roll a charm want; the opener never does', () => {
+    let seekers = 0;
+    for (let seed = 0; seed < 300; seed++) {
+      expect(rollWant('uncommon', mulberry32(seed), true).kind).not.toBe('charm');
+      if (rollWant('uncommon', mulberry32(seed * 7 + 1), false).kind === 'charm') seekers++;
+    }
+    expect(seekers).toBeGreaterThan(10);
+  });
+
+  it('a charm-seeker\'s deck carries a sweetener of the tier above its salon', () => {
+    const meta = freshMeta();
+    for (let seed = 1; seed <= 80; seed++) {
+      const salon = makeSalon(meta, 0, 1, mulberry32(seed * 131), TASK_IDS);
+      const seeker = salon.creatures.find((c) => c.want.kind === 'charm');
+      if (!seeker) continue;
+      // An uncommon salon's seeker holds a rare — treasure worth a keepsake.
+      expect(seeker.deck.some((c) => !c.key && !c.charm && c.tier === 'rare')).toBe(true);
+      return;
+    }
+    throw new Error('no charm-seeker rolled in 80 salons');
   });
 });
 

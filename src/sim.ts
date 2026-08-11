@@ -9,7 +9,7 @@ import {
   getSpawnCapacity, holeBlockedByBuilding, holeCenter, isCellBlocked, isCellInBuilding, isCellInWaterSource,
   isInBounds, maintainerCount, markBuildingsChanged, nearestCellInWaterSource, occupyCell, pushDeathEffect, pushFloater,
   hellMirrorCenter, hellToWorld, pruneSoulChairs, pushLaserBeam, pushLightningBolt, recordGhost, releaseCell, removeDragon, removeGoblin,
-  spaceCentreMaintained, waterCarrierCount,
+  spaceCentreMaintained, waterCarrierCount, autoAssignActive, autoWaterActive,
 } from './state';
 
 // Auto-assign normally only runs on discrete events (a spawn, a manual command,
@@ -42,7 +42,7 @@ export function tick(state: GameState) {
     appendLog(state, 'Hint: demons parlay with talking goblins.');
   }
 
-  if (state.autoAssignEnabled && state.now >= nextAutoAssignAt) {
+  if (autoAssignActive(state) && state.now >= nextAutoAssignAt) {
     autoAssignAllIdle(state);
     nextAutoAssignAt = state.now + AUTO_ASSIGN_INTERVAL;
   }
@@ -953,7 +953,8 @@ function spawnGoblin(state: GameState, forceGold = false) {
     return;
   }
   const id = state.nextId++;
-  const isGold = forceGold || (state.goldgoblinsEnabled && Math.random() < GOLD_GOBLIN_CHANCE);
+  const isGold = forceGold || state.goldgoblinsAlways === true
+    || (state.goldgoblinsEnabled && Math.random() < GOLD_GOBLIN_CHANCE);
   const g: Goblin = {
     id, pos: cellCenter(cell), cell,
     target: null, goal: null,
@@ -981,7 +982,7 @@ function spawnGoblin(state: GameState, forceGold = false) {
   // (±4%) stops a burst of spawns sounding like one machine-gun tone.
   playDecayingGoblinSpawn(0.96 + Math.random() * 0.08);
   appendLog(state, isGold ? `Gold Goblin #${id} hatched!` : `Goblin #${id} hatched.`);
-  if (state.autoAssignEnabled) autoAssignAllIdle(state);
+  if (autoAssignActive(state)) autoAssignAllIdle(state);
 }
 
 // Seat Bob (the cutscene-summoned goblin) at the chosen hole. Bypasses the
@@ -1010,7 +1011,7 @@ export function spawnBob(state: GameState, holeCell: Cell): boolean {
   state.spawnsCompleted++;
   playDecayingGoblinSpawn(0.85);
   appendLog(state, 'Bob has joined the crew.');
-  if (state.autoAssignEnabled) autoAssignAllIdle(state);
+  if (autoAssignActive(state)) autoAssignAllIdle(state);
   return true;
 }
 
@@ -1054,7 +1055,7 @@ export function spawnRobot(state: GameState, terminator = false): boolean {
   appendLog(state, terminator
     ? `Terminator #${id} online. It begins scanning for targets.`
     : `Robot #${id} whirrs to life.`);
-  if (state.autoAssignEnabled) autoAssignAllIdle(state);
+  if (autoAssignActive(state)) autoAssignAllIdle(state);
   return true;
 }
 
@@ -1119,7 +1120,7 @@ function waterCarrierTarget(state: GameState, b: Building): number {
 // > active-short-on-maintainers; within a tier, fewer-currently-assigned wins
 // the next pick (so two equally-needy buildings get filled evenly).
 export function autoAssignAllIdle(state: GameState) {
-  if (!state.autoAssignEnabled) return;
+  if (!autoAssignActive(state)) return;
 
   type Need = { b: Building; tier: number; slots: number; center: { x: number; y: number } };
   const needs: Need[] = [];
@@ -1149,7 +1150,7 @@ export function autoAssignAllIdle(state: GameState) {
   // topped up to its (distance-scaled) carrier target, driest building first so
   // scarce idle goblins shore up whichever is closest to running dry. Gated on
   // the Autowater ritual; manual right-click ignores these caps.
-  if (state.autoWaterEnabled && state.waterSources.size > 0) {
+  if (autoWaterActive(state) && state.waterSources.size > 0) {
     type Drinker = { b: Building; target: number; meter: number };
     const drinkers: Drinker[] = [];
     for (const b of state.buildings.values()) {
@@ -1263,13 +1264,17 @@ function makeMinotaur(state: GameState, cell: Cell, tiny: boolean): Minotaur {
 export function spawnMinotaur(state: GameState, tiny = false): boolean {
   const cell = pickMinotaurSpawnCell(state);
   if (!cell) return false;
-  const t = makeMinotaur(state, cell, tiny);
+  // The little charm: whatever was asked for, every minotaur comes out of
+  // the hole a Tinytaur. The ritual itself still counts as performed, so the
+  // Summon-2-Minotaurs task can't be stranded by the blessing.
+  const arrivesTiny = tiny || state.minotaursSpawnTiny === true;
+  const t = makeMinotaur(state, cell, arrivesTiny);
   state.minotaurs.set(t.id, t);
   // The Summon-2-Minotaurs task counts rituals that actually finished, not
   // purchases — this is the moment the minotaur exists.
   if (!tiny) state.minotaursSummoned++;
-  appendLog(state, tiny ? `Tinytaur #${t.id} skitters out of the hole.` : `Minotaur #${t.id} crawls out of the hole.`);
-  playSound('goblin_spawn', tiny ? 2.2 : 1.4, 0.3);
+  appendLog(state, arrivesTiny ? `Tinytaur #${t.id} skitters out of the hole.` : `Minotaur #${t.id} crawls out of the hole.`);
+  playSound('goblin_spawn', arrivesTiny ? 2.2 : 1.4, 0.3);
   return true;
 }
 
@@ -2223,7 +2228,7 @@ function finaleGrabMoon(state: GameState, F: Finale): void {
 
 function updateMinotaur(state: GameState, t: Minotaur, autoTargets: Map<number, number>) {
   // Tinytaurs move and attack much faster; everything else is shared.
-  const speed = t.tiny ? TINYTAUR.speed : MINOTAUR.speed;
+  const speed = (t.tiny ? TINYTAUR.speed : MINOTAUR.speed) * (state.charmMoveSpeed ?? 1);
   const windup = t.tiny ? TINYTAUR.attackWindup : MINOTAUR.attackWindup;
   // Mid-step pixel lerp (shared with goblin movement model).
   if (t.target) {
@@ -2814,7 +2819,7 @@ function updateDragon(state: GameState, d: Dragon) {
   const k = d.state.kind;
   const isManualOrder = k === 'moving_to' || k === 'going_to_kill'
     || k === 'going_to_building' || k === 'delivering' || k === 'going_to_unit';
-  const speed = isManualOrder ? DRAGON.manualSpeed : DRAGON.speed;
+  const speed = (isManualOrder ? DRAGON.manualSpeed : DRAGON.speed) * (state.charmMoveSpeed ?? 1);
   switch (d.state.kind) {
     case 'carrying': {
       // Climb straight up; once high enough the load enters space.
@@ -3200,7 +3205,7 @@ function advanceOrbitalPlatforms(state: GameState) {
       if (Math.hypot(su.pos.x - sb.pos.x, su.pos.y - sb.pos.y) <= def.size / 2 + ROBOT.buildRange) workers++;
     }
     if (workers < def.buildersRequired) continue;
-    b.buildProgress += TICK_S / (def.buildTime * Math.pow(ROBOT.buildTimeMult, workers));
+    b.buildProgress += TICK_S / (def.buildTime * Math.pow(ROBOT.buildTimeMult, workers) / (state.charmBuildSpeed ?? 1));
     if (b.buildProgress >= 1) {
       b.buildProgress = 1;
       b.activatedAt = state.now;
@@ -3346,7 +3351,7 @@ function updateGoblin(state: GameState, g: Goblin) {
     const dx = tc.x - g.pos.x;
     const dy = tc.y - g.pos.y;
     const d = Math.hypot(dx, dy);
-    const step = (g.robot ? ROBOT.speed : GOBLIN.speed) * TICK_S;
+    const step = (g.robot ? ROBOT.speed : GOBLIN.speed) * (state.charmMoveSpeed ?? 1) * TICK_S;
     if (d <= step + GOBLIN.arriveDist) {
       releaseCell(state, g.cell.cx, g.cell.cy, g.id);
       g.cell = g.target;
@@ -4121,10 +4126,15 @@ function updateConstruction(state: GameState, b: Building) {
   if (workers < def.buildersRequired) return;
   // Each robot on the site compounds a ROBOT.buildTimeMult (0.7×) cut to the
   // build time — announced by the "fast build" floater when it set to work.
-  const buildTime = def.buildTime * Math.pow(ROBOT.buildTimeMult, robotWorkers);
+  // Deft charms divide it again (4× per charm held).
+  const buildTime = def.buildTime * Math.pow(ROBOT.buildTimeMult, robotWorkers) / (state.charmBuildSpeed ?? 1);
   b.buildProgress += TICK_S / buildTime;
   if (b.buildProgress >= 1) {
     b.buildProgress = 1;
+    // The main game opens hell at portal PLACEMENT (input.ts), so this only
+    // matters for a card world's generated half-built portal — the descent
+    // opens the moment the site is finished.
+    if (b.kind === 'hell_portal') state.hellUnlocked = true;
     const keep = def.maintainersRequired;
     const newAssigned: number[] = [];
     let kept = 0;

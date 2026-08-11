@@ -1995,6 +1995,21 @@
         55% { box-shadow: var(--wc-shadow), 0 0 30px 8px var(--tier-c); }
         100% { opacity: 1; box-shadow: var(--wc-shadow); }
       }
+      /* A trade in flight (executeTrade): a placeholder holds the arriving
+         card's spot in the hand, invisible, while the trader's card glides
+         down onto it; on landing it reveals in place with the tier flash —
+         no drop-in from elsewhere, the flight IS the drop. */
+      .world-card.trade-slot { opacity: 0; pointer-events: none; }
+      .world-card.trade-landed {
+        animation:
+          wc-land 520ms cubic-bezier(0.2, 0.9, 0.25, 1) backwards,
+          wc-float 7s ease-in-out infinite;
+      }
+      @keyframes wc-land {
+        0% { opacity: 0.55; transform: scale(0.965); box-shadow: var(--wc-shadow), 0 0 30px 8px var(--tier-c); }
+        60% { box-shadow: var(--wc-shadow), 0 0 22px 4px var(--tier-c); }
+        100% { opacity: 1; box-shadow: var(--wc-shadow); }
+      }
       .world-card.taken {
         transform: translateY(-130vh) rotate(9deg) scale(0.7);
         opacity: 0;
@@ -2200,6 +2215,16 @@
         display: flex; flex-direction: column; align-items: center; gap: 4px;
       }
       .ct-stall.spent { opacity: 0.42; filter: saturate(0.6); pointer-events: none; }
+      /* Mid-trade (executeTrade): the stall eases toward the spent dimming
+         while its lifted-out deck flies, its confirm button and "offers"
+         divider fading under it. Same end values as .spent, so the class
+         handoff at commit is invisible. */
+      .ct-stall.spending {
+        opacity: 0.42; filter: saturate(0.6); pointer-events: none;
+        transition: opacity 760ms ease 160ms, filter 760ms ease 160ms;
+      }
+      .ct-stall.spending .ct-confirm,
+      .ct-stall.spending .ct-offers-label { opacity: 0; transition: opacity 300ms ease; }
       /* The entity's name, spaced display caps under its avatar — the
          screenshot's LUMEN / AERIS / VYRA masthead, in the realm's own voice. */
       .ct-creature-name {
@@ -2594,6 +2619,11 @@
         18% { opacity: 1; }
         100% { opacity: 0; transform: translate(-50%, -150%); }
       }
+      /* The explainer variant: what the door needs (a key, or time), spoken
+         quietly rather than shouted. */
+      .ct-door-float.hint {
+        font-size: 12px; letter-spacing: 0.16em; color: #5f5a74;
+      }
       .ct-door.shake { animation: ct-door-shake 400ms cubic-bezier(0.36, 0.07, 0.19, 0.97); }
       @keyframes ct-door-shake {
         10%, 90% { transform: translateX(-2px); }
@@ -2601,11 +2631,86 @@
         30%, 50%, 70% { transform: translateX(-7px); }
         40%, 60% { transform: translateX(7px); }
       }
+
+      /* ───────── The hall of doors (cards.ts showHub) ──
+         The realm's base level: every unsealed starter door in a wrapping
+         row, each wearing its chain's progress — pips, one per level climbed,
+         coloured by that salon's tier, the deepest level written beneath.
+         The next door waits sealed at the row's end (click to unseal); a
+         ghost of another sits behind it. The row lives in the scrollable
+         stage, so a hall of 10+ doors simply wraps and scrolls. */
+      #card-stage.hub-view { justify-content: flex-start; }
+      .ct-hub-doors {
+        display: flex; flex-wrap: wrap; justify-content: center; align-items: flex-start;
+        gap: 26px 30px; padding: 3vh 18px 2vh; max-width: 1100px; margin: 0 auto;
+      }
+      .ct-door.ct-hub-door {
+        position: static; z-index: auto;
+        width: 132px; padding: 4px 6px 6px;
+      }
+      .ct-hub-door .ct-door-glyph { width: 92px; height: 150px; }
+      .ct-hub-door .ct-door-glyph::after { width: 64px; height: 64px; }
+      /* An unsealed door wears no padlock (the same treatment as a re-entered
+         open salon door; the .unlocking animation still owns the tumble). */
+      .ct-hub-door.open .ct-door-glyph::after {
+        opacity: 0; transform: translate(-50%, -118%) scale(0.65) rotate(-14deg);
+      }
+      .ct-hub-door .ct-door-label { text-align: center; max-width: 128px; }
+      /* The label is the door's name, not a "go" cue — keep it quiet. */
+      .ct-hub-door.open .ct-door-label { color: #7b7698; }
+      .ct-hub-lvl {
+        font-family: var(--font-display); font-size: 9px; letter-spacing: 0.16em;
+        text-transform: uppercase; color: #9a95ad;
+      }
+      .ct-hub-door.t-uncommon .ct-hub-lvl { color: #5f7591; }
+      .ct-hub-door.t-rare .ct-hub-lvl { color: #8c7f5e; }
+      /* The progress pips: one per level climbed, coloured by that level's
+         tier (grey commons, slate uncommons, gold rares). Deep runs cap at a
+         dozen pips and an ellipsis — the level line keeps the exact figure. */
+      .ct-hub-pips {
+        display: flex; flex-wrap: wrap; justify-content: center; align-items: center;
+        gap: 3px; max-width: 116px; min-height: 7px;
+      }
+      .ct-pip {
+        width: 6px; height: 6px; border-radius: 50%;
+        background: #b5b0c6;
+        box-shadow: inset 0 1px 1px rgba(255, 255, 255, 0.7), 0 1px 2px rgba(80, 70, 140, 0.25);
+      }
+      .ct-pip.pip-uncommon { background: #6d87a6; }
+      .ct-pip.pip-rare {
+        background: #c2a24e;
+        box-shadow: 0 0 5px rgba(194, 162, 78, 0.55), inset 0 1px 1px rgba(255, 255, 255, 0.7);
+      }
+      .ct-pip-more { font-size: 9px; line-height: 7px; color: #9a95ad; }
+      /* The sealed next door: dimmed until clicked — the .unlocking beat then
+         owns it — with the padlock worn as-is. */
+      .ct-hub-sealed .ct-door-glyph {
+        filter: brightness(0.55) saturate(0.7) drop-shadow(0 6px 14px rgba(40, 34, 70, 0.35));
+      }
+      .ct-hub-sealed:hover .ct-door-glyph {
+        filter: brightness(0.7) saturate(0.8) drop-shadow(0 9px 18px rgba(60, 50, 110, 0.42));
+      }
+      .ct-hub-sealed .ct-door-label { color: #7d7590; }
+      /* Mid-cooldown the seal is still setting: the label is the seconds
+         counting down, and the door only rattles when tugged. */
+      .ct-hub-sealed.cooling .ct-door-label {
+        color: #9c8a5a; font-variant-numeric: tabular-nums; letter-spacing: 0.24em;
+      }
+      /* The faint door beyond the sealed one: the hall goes on. */
+      .ct-hub-ghost { pointer-events: none; opacity: 0.22; }
+      .ct-hub-ghost .ct-door-glyph { filter: brightness(0.3) grayscale(0.6); }
+
       /* A key card: the antique key stands in for the world preview panes. */
       .wc-key-art {
         flex: 1; min-height: 132px; margin: 8px 6px 4px;
         background: url('assets/realm/key-antique.png') center / contain no-repeat;
         filter: drop-shadow(0 3px 8px rgba(90, 70, 30, 0.35));
+      }
+      /* Which lock the key fits — its door in the hall and the level it
+         opens — written small beneath the key. */
+      .wc-key-line {
+        text-align: center; font-size: 9px; font-style: italic; color: #8f89a6;
+        margin: 0 6px 6px;
       }
       /* A charm card: an amulet in place of the world panes — a keepsake that
          blesses every world its holder enters. No actions, ever. */
@@ -2631,13 +2736,50 @@
       .charm-rain { --charm-c: #3d6d9c; }
       .charm-storm { --charm-c: #8a6ec2; }
       .charm-tiny { --charm-c: #a04e4e; }
+      .charm-deft { --charm-c: #8a6b3e; }
+      .charm-fleet { --charm-c: #3e7f8a; }
+      .charm-unmake { --charm-c: #7a4660; }
       .wc-charm-name {
         text-align: center; font-family: var(--font-display); font-size: 10px;
         letter-spacing: 0.14em; text-transform: uppercase; color: #6d6786;
+        margin-bottom: 6px;
       }
-      .wc-charm-line {
-        text-align: center; font-size: 9px; font-style: italic; color: #8f89a6;
-        margin: 2px 6px 5px;
+      /* The charm reading (cards.ts showCharmRead): a veil over the realm
+         holding one plaque — the charm's glyph, name, one-liner and its full
+         text. A click anywhere puts it down. */
+      #charm-read {
+        position: fixed; inset: 0; z-index: 100001;
+        display: flex; align-items: center; justify-content: center;
+        background: rgba(244, 242, 252, 0.55);
+        backdrop-filter: blur(6px); -webkit-backdrop-filter: blur(6px);
+        opacity: 0; transition: opacity 240ms ease;
+        cursor: pointer;
+      }
+      #charm-read.visible { opacity: 1; }
+      .charm-read-plaque {
+        max-width: min(420px, 84vw);
+        padding: 26px 30px 20px; text-align: center;
+        background: linear-gradient(125deg,
+          rgba(255, 255, 255, 0.92) 0%, rgba(255, 255, 255, 0.72) 55%, rgba(255, 255, 255, 0.86) 100%);
+        border: 1px solid rgba(150, 142, 190, 0.55); border-radius: 22px;
+        box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.95), 0 18px 50px -18px rgba(70, 60, 120, 0.45);
+        transform: translateY(8px) scale(0.97);
+        transition: transform 260ms cubic-bezier(0.2, 0.9, 0.25, 1);
+      }
+      #charm-read.visible .charm-read-plaque { transform: none; }
+      .charm-read-plaque .wc-charm-glyph { font-size: 52px; display: block; margin-bottom: 10px; }
+      .charm-read-name {
+        font-family: var(--font-display); font-size: 15px; letter-spacing: 0.2em;
+        text-transform: uppercase; color: #5b5474;
+      }
+      .charm-read-desc {
+        font-family: var(--font-mono); font-size: 13px; line-height: 1.6; color: #4a4a58;
+        margin: 14px 0 4px;
+      }
+      .charm-read-note { font-size: 12px; font-style: italic; color: #8f89a6; margin-top: 6px; }
+      .charm-read-hint {
+        font-family: var(--font-display); font-size: 9px; letter-spacing: 0.22em;
+        text-transform: uppercase; color: #a49ec0; margin-top: 10px;
       }
       /* The reset sigil: hangs below the forward door once the level-3 dead
          end has introduced it. First click arms it ("sure?"), a second sends
@@ -2714,10 +2856,12 @@
          functional one-shots (deals, trades, dives) keep moving. */
       @media (prefers-reduced-motion: reduce) {
         .cd-blob, .cd-halo, .cd-motes { animation: none; }
-        .world-card, .world-card.dealt, .world-card.trade-arrived {
+        .world-card, .world-card.dealt, .world-card.trade-arrived, .world-card.trade-landed {
           animation-name: none;
         }
         .world-card.dealt { animation: ct-dealt 480ms cubic-bezier(0.2, 0.9, 0.25, 1) backwards; }
+        /* The landing flash stays (a one-shot), only the levitation goes. */
+        .world-card.trade-landed { animation: wc-land 520ms cubic-bezier(0.2, 0.9, 0.25, 1) backwards; }
       }
 
       /* ── Entering / leaving a card world: the finale's pull-back language.

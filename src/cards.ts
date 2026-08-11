@@ -27,11 +27,12 @@ import { clearSave, getRawSave, saveGame, setRawSave } from './save';
 import { GameState, computePlayBounds, isInPlayCell } from './state';
 import { ALL_TASK_IDS } from './ui';
 import {
-  CardMeta, CardResources, CardTier, CHARM_DEFS, Creature, FRAME_BASE,
+  BranchState, CardMeta, CardResources, CardTier, CHARM_DEFS, CHARM_NOTE, CharmKind, Creature, FRAME_BASE,
   HARDCODED_LEVELS, ManualWorld, TradeEvent, Want, WorldCard, applyCharms,
-  cardPower, decodeWorld, encodeWorld, generateEvents, makeCard, makeKeyCard,
-  makeSalon, mulberry32, regenerateEvent, resetChain, salonName,
-  sceneStructureCounts, tradeKeepsAWorld, WantSeg, wantSatisfiedBy, wantSegments,
+  cardPower, decodeWorld, encodeWorld, ensureBranches, generateEvents, makeCard,
+  makeKeyCard, makeSalon, mulberry32, pathName, regenerateEvent, resetChain,
+  salonName, salonTierForDepth, sceneStructureCounts, tradeKeepsAWorld, WantSeg,
+  wantSatisfiedBy, wantSegments,
 } from './cards-core';
 
 const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
@@ -263,28 +264,32 @@ function refreshRealmView(): void {
   swapView(() => routeRealmView(meta));
 }
 
-// Which salon (by depth) is currently on screen — set by showGathering, read
-// by the dev cog's "refresh current traders" so it re-rolls the right one.
-let currentGatheringDepth: number | null = null;
+// Which salon (branch + depth) is currently on screen — set by showGathering
+// (null while the hall of doors is up), read by the dev cog's "refresh current
+// traders" so it re-rolls the right one.
+let currentGathering: { branch: number; depth: number } | null = null;
 
-// Dev tool (realm dev cog): reshuffle every gathering's traders + decks.
+// Dev tool (realm dev cog): reshuffle every gathering's traders + decks,
+// behind every door in the hall.
 export function devReshuffleGatherings(): void {
   const meta = loadMeta();
   if (!meta) return;
-  if (!meta.events) meta.events = generateEvents(meta, null, ALL_TASK_IDS, loadManualWorlds());
-  else for (const ev of meta.events) regenerateEvent(meta, ev, ALL_TASK_IDS, loadManualWorlds());
+  const branches = ensureHall(meta);
+  for (const ev of branches.flatMap((b) => b.events)) {
+    regenerateEvent(meta, ev, ALL_TASK_IDS, loadManualWorlds());
+  }
   saveMeta(meta);
   refreshRealmView();
 }
 
 // Dev tool (realm dev cog): re-roll only the salon currently on screen — the
 // old in-gathering "wait for the next gathering" reshuffle, now a dev control.
-// Re-shows that same salon rather than routing home to the soft border.
+// Re-shows that same salon rather than routing home to the hall.
 export function devRefreshCurrentTraders(): void {
   const meta = loadMeta();
   if (!meta) return;
-  if (currentGatheringDepth == null) { devReshuffleGatherings(); return; }
-  const ev = salonAtDepth(meta, currentGatheringDepth);
+  if (currentGathering == null) { devReshuffleGatherings(); return; }
+  const ev = salonAt(meta, currentGathering.branch, currentGathering.depth);
   if (!ev) return;
   regenerateEvent(meta, ev, ALL_TASK_IDS, loadManualWorlds());
   saveMeta(meta);
@@ -382,8 +387,9 @@ function hopWhite(): HTMLElement {
 async function enterWorld(meta: CardMeta, card: WorldCard, cardEl?: HTMLElement): Promise<void> {
   const st = decodeWorld(card.data);
   if (!st) { realmSound('error'); return; }
-  // Every charm in the hand blesses the world on the way in (sticky flags, so
-  // repeat entries never stack). Spectated worlds are deliberately untouched.
+  // The hand's charm layer stamps onto the world on the way in — absolutely,
+  // so a charm sold since the last visit takes its blessing with it.
+  // Spectated worlds are deliberately untouched.
   applyCharms(st, meta.cards);
   // Stash the outer post-finale save verbatim, then write the card's world
   // into the slot. Only once the slot has verifiably changed does the meta
@@ -970,6 +976,31 @@ function resourcesEl(r: CardResources): HTMLElement {
   return wrap;
 }
 
+// The charm reading: a plaque held up over the realm with the charm's glyph,
+// name, what the blessing does, and the shared holding note. One per screen;
+// a click anywhere puts it down.
+function showCharmRead(kind: CharmKind): void {
+  document.getElementById('charm-read')?.remove();
+  const def = CHARM_DEFS[kind];
+  const veil = div('');
+  veil.id = 'charm-read';
+  const plaque = div(`charm-read-plaque charm-${kind}`);
+  plaque.appendChild(div('wc-charm-glyph', def.glyph));
+  plaque.appendChild(div('charm-read-name', def.name));
+  plaque.appendChild(div('charm-read-desc', def.desc));
+  plaque.appendChild(div('charm-read-note', CHARM_NOTE));
+  plaque.appendChild(div('charm-read-hint', 'click to put it down'));
+  veil.appendChild(plaque);
+  document.body.appendChild(veil);
+  realmSound('select', 0.5, 1.15);
+  requestAnimationFrame(() => veil.classList.add('visible'));
+  veil.addEventListener('click', () => {
+    veil.classList.remove('visible');
+    realmSound('click', 0.4, 0.85);
+    window.setTimeout(() => veil.remove(), 260);
+  }, { once: true });
+}
+
 type CardElOpts = {
   enterLabel?: string;       // ENTER / INSPECT — the card's primary action button
   onEnter?: (cardEl: HTMLElement) => void;
@@ -990,19 +1021,26 @@ function buildCardEl(card: WorldCard, opts: CardElOpts = {}): HTMLElement {
     head.innerHTML = '<span class="wc-tier">key</span>';
     keyEl.appendChild(head);
     keyEl.appendChild(div('wc-key-art'));
+    // With a whole hall of chains, a loose key must say which lock it fits:
+    // the door (branch) it belongs to and the level it opens.
+    if (card.keyDepth !== undefined) {
+      keyEl.appendChild(div('wc-key-line', `door ${(card.keyBranch ?? 0) + 1} · level ${card.keyDepth + 1}`));
+    }
     // A key carries no world, so it's never entered or inspected — only its
     // SELECT button (when it's in the player's hand) ever applies.
     const keyActs = cardActions({ onSelect: opts.onSelect, selectLabel: opts.selectLabel }, keyEl);
     if (keyActs) keyEl.appendChild(keyActs);
     return keyEl;
   }
-  // A charm card: an amulet in place of the world panes. It can't be entered,
-  // selected, or traded — it just sits in the hand, blessing every world the
-  // player dives into — so it carries no action buttons at all.
+  // A charm card: an amulet in place of the world panes. It can't be entered
+  // — no world behind it — so its primary action is READ: the full text of
+  // what the blessing does, held up on a plaque. In the hand it can also be
+  // SELECTed, though only a charm-seeker's want will ever take it.
   if (card.charm) {
-    const def = CHARM_DEFS[card.charm];
+    const kind = card.charm;
+    const def = CHARM_DEFS[kind];
     const charmEl = document.createElement('div');
-    charmEl.className = `world-card wc-charmcard charm-${card.charm}`;
+    charmEl.className = `world-card wc-charmcard charm-${kind}`;
     charmEl.dataset.cardId = String(card.id);
     const chead = document.createElement('div');
     chead.className = 'wc-head';
@@ -1012,7 +1050,13 @@ function buildCardEl(card: WorldCard, opts: CardElOpts = {}): HTMLElement {
     art.appendChild(div('wc-charm-glyph', def.glyph));
     charmEl.appendChild(art);
     charmEl.appendChild(div('wc-charm-name', def.name));
-    charmEl.appendChild(div('wc-charm-line', def.line));
+    const charmActs = cardActions({
+      enterLabel: 'READ',
+      onEnter: () => showCharmRead(kind),
+      onSelect: opts.onSelect,
+      selectLabel: opts.selectLabel,
+    }, charmEl);
+    if (charmActs) charmEl.appendChild(charmActs);
     return charmEl;
   }
   const root = document.createElement('div');
@@ -1147,7 +1191,7 @@ function handCardEl(card: WorldCard, w: HandWiring): HTMLElement {
   } else {
     // A reused node: shed any transient animation/selection state and the
     // inline styles a trade fly-out may have left on it.
-    el.classList.remove('selected', 'dealt', 'trade-arrived', 'trade-given', 'trade-received', 'dived', 'grayed');
+    el.classList.remove('selected', 'dealt', 'trade-arrived', 'trade-slot', 'trade-landed', 'trade-given', 'trade-received', 'dived', 'grayed');
     el.style.transition = '';
     el.style.transform = '';
     el.style.opacity = '';
@@ -1323,43 +1367,45 @@ async function runRealm(): Promise<void> {
 }
 
 // Where the realm lands after the (possible) intro: the lone traded card
-// awaiting its first dive, or the home gathering (the soft border).
+// awaiting its first dive, or the hall of doors (the base level).
 function routeRealmView(meta: CardMeta): void {
   if (meta.phase === 'firstworld') { showFirstCard(meta); return; }
-  showHomeGathering(meta);
+  showHub(meta);
 }
 
-// The salon chain, generated on demand. The intro seeds the opening salons,
-// but a dev hop straight into the 'free' phase might land here without them.
-function ensureEvents(meta: CardMeta): TradeEvent[] {
-  if (!meta.events) {
-    meta.events = generateEvents(meta, null, ALL_TASK_IDS, loadManualWorlds());
+// The hall of doors, generated on demand: migrates a legacy single-chain meta
+// into branches[0] and seeds branch 0 when it's missing entirely (the intro
+// normally seeds it, but a dev hop straight into the 'free' phase might land
+// here without it).
+function ensureHall(meta: CardMeta): BranchState[] {
+  const branches = ensureBranches(meta);
+  if (branches.length === 0) {
+    branches.push({ events: generateEvents(meta, null, ALL_TASK_IDS, loadManualWorlds()), unlockedDepth: 0 });
     saveMeta(meta);
   }
-  return meta.events;
+  return branches;
 }
 
-// The salon at a given depth, rolled (and appended) the first time the player
-// reaches it. Deeper salons each get a stable per-depth seed, so walking back
-// down the chain and forward again lands on the same table until a reshuffle.
-function salonAtDepth(meta: CardMeta, depth: number): TradeEvent {
-  const events = ensureEvents(meta);
-  if (depth < events.length) return events[depth];
-  for (let d = events.length; d <= depth; d++) {
-    // The reset count rides the seed so each pass down the chain deals fresh
-    // tables instead of replaying the previous cycle's salons.
-    const rng = mulberry32((((meta.seed ?? 0) ^ (d * 2246822519) ^ ((meta.resets ?? 0) * 0x85ebca6b)) >>> 0));
-    events.push(makeSalon(meta, d, rng, ALL_TASK_IDS, loadManualWorlds()));
+// The salon at a given branch + depth, rolled (and appended) the first time
+// the player reaches it. Each salon gets a stable per-(branch, depth) seed,
+// so walking back down a chain and forward again lands on the same table
+// until a reshuffle.
+function salonAt(meta: CardMeta, branch: number, depth: number): TradeEvent {
+  const branches = ensureHall(meta);
+  // Branches are unsealed one at a time from the hub; the loop is a guard for
+  // a truncated saved meta, not a normal path.
+  while (branches.length <= branch) branches.push({ events: [], unlockedDepth: 0 });
+  const b = branches[branch];
+  if (depth < b.events.length) return b.events[depth];
+  for (let d = b.events.length; d <= depth; d++) {
+    // The reset count rides the seed so each pass through the hall deals
+    // fresh tables instead of replaying the previous cycle's salons; the
+    // branch rides it so every door's chain is its own.
+    const rng = mulberry32((((meta.seed ?? 0) ^ (d * 2246822519) ^ (branch * 0x9e3779b1) ^ ((meta.resets ?? 0) * 0x85ebca6b)) >>> 0));
+    b.events.push(makeSalon(meta, branch, d, rng, ALL_TASK_IDS, loadManualWorlds()));
   }
   saveMeta(meta);
-  return events[depth];
-}
-
-// The realm's home view: the soft-border salon (depth 0). Its locked door leads
-// onward to the next salon, and so on without end — each door opened once that
-// salon's gatekeeper key has been traded for and spent.
-function showHomeGathering(meta: CardMeta): void {
-  showGathering(meta, salonAtDepth(meta, 0));
+  return b.events[depth];
 }
 
 // The held-on big-card view: after the swindle (and on any reload while the
@@ -1371,7 +1417,7 @@ function showFirstCard(meta: CardMeta): void {
   stage.innerHTML = '';
   stage.className = 'intro-view firstcard-view';
   const card = meta.cards[0];
-  if (!card) { showHomeGathering(meta); return; }
+  if (!card) { showHub(meta); return; }
   const cardEl = buildCardEl(card, {
     enterLabel: 'ENTER',
     onEnter: (el) => { void enterWorld(meta, card, el); },
@@ -1463,9 +1509,13 @@ async function runTradeIntro(meta: CardMeta): Promise<void> {
   // The books: origin gone (seeded into gathering III), junk card in hand.
   // Phase holds at 'firstworld' — the realm now keeps the player on the big
   // single-card view (showFirstCard) with nothing to do but ENTER it; the
-  // street of gatherings only opens once they've been inside and come back.
+  // hall of doors only opens once they've been inside and come back.
   meta.cards = [junk];
-  meta.events = generateEvents(meta, origin, ALL_TASK_IDS, loadManualWorlds());
+  meta.events = null;
+  meta.branches = [{ events: generateEvents(meta, origin, ALL_TASK_IDS, loadManualWorlds()), unlockedDepth: 0 }];
+  // The chain exists (the origin needs its home) but its door does not stand
+  // open: the hall starts fully sealed, the first unsealing the player's own.
+  meta.doorsUnsealed = 0;
   meta.phase = 'firstworld';
   saveMeta(meta);
   await sleep(400);
@@ -1543,29 +1593,209 @@ function renderSegs(segs: WantSeg[], count: number): string {
 
 const LINE_TYPE_MS = 22;
 
+// How long a fresh seal takes to set after each unsealing — the hub's next
+// door spends this long counting down before it can be opened.
+const UNSEAL_COOLDOWN_MS = 90_000;
+
+// ─── The hall of doors ───────────────────────────────────────────────
+// The realm's base level: every starter door the player has unsealed, side
+// by side, each opening onto its own endless chain of salons (common
+// threshold → uncommon salons → rare exchanges). The hall STARTS with every
+// door shut — even the first unsealing is the player's own act. One more
+// door always waits sealed at the end of the row; click it and it swings
+// open IN PLACE (no key, no walking through — entering is a deliberate
+// second click), while the seal re-forms one door along and starts its
+// countdown. Each open door wears its chain's progress — a run of pips, one
+// per level climbed, coloured by that salon's tier, with the deepest level
+// beneath — so how far each path has been explored reads at a glance. The
+// row wraps and the stage scrolls, so the hall keeps working however many
+// doors the player collects.
+function showHub(meta: CardMeta): void {
+  const stage = realmEl('card-stage');
+  clearSpeech();
+  stage.innerHTML = '';
+  stage.className = 'gathering-view hub-view';
+  currentGathering = null;
+
+  const branches = ensureHall(meta);
+  const unsealed = meta.doorsUnsealed ?? branches.length;
+  // Guard for a truncated saved meta: every unsealed door owns a branch.
+  while (branches.length < unsealed) branches.push({ events: [], unlockedDepth: 0 });
+
+  const doorCountLine = (n: number): string => `${n} ${n === 1 ? 'door' : 'doors'} unsealed`;
+  const head = div('ct-gathering-head');
+  const counter = div('ct-level', doorCountLine(unsealed));
+  head.appendChild(counter);
+  head.appendChild(div('ct-event-title', 'the hall of doors'));
+  stage.appendChild(head);
+
+  const row = div('ct-hub-doors');
+  stage.appendChild(row);
+
+  let hubBusy = false;   // latched through the unseal beat so clicks can't double-fire
+  const enterBranch = (b: number): void => {
+    swapView(() => showGathering(meta, salonAt(meta, b, 0)));
+  };
+
+  const buildOpenDoor = (b: number): HTMLElement => {
+    const deepest = branches[b]?.unlockedDepth ?? 0;
+    const door = div(`ct-door ct-hub-door open t-${salonTierForDepth(deepest)}`);
+    door.appendChild(div('ct-door-glyph'));
+    // The chain's progress, worn on the door: one pip per level climbed,
+    // coloured by that salon's tier, capped with an ellipsis for the truly
+    // deep runs (the level line below always carries the exact figure).
+    const pips = div('ct-hub-pips');
+    const shown = Math.min(deepest + 1, 12);
+    for (let d = 0; d < shown; d++) pips.appendChild(div(`ct-pip pip-${salonTierForDepth(d)}`));
+    if (deepest + 1 > shown) pips.appendChild(div('ct-pip-more', '…'));
+    door.appendChild(pips);
+    door.appendChild(div('ct-door-label', pathName(meta.seed ?? 0, b)));
+    door.appendChild(div('ct-hub-lvl', `level ${deepest + 1}`));
+    door.addEventListener('click', () => {
+      if (hubBusy) return;
+      realmSound('online', 0.7, 0.9);
+      enterBranch(b);
+    });
+    return door;
+  };
+  for (let b = 0; b < unsealed; b++) row.appendChild(buildOpenDoor(b));
+
+  // The faint shape at the row's end: the hall goes on for as long as the
+  // player keeps unsealing.
+  const ghost = div('ct-door ct-hub-door ct-hub-ghost locked');
+  ghost.appendChild(div('ct-door-glyph'));
+
+  // The next door, still sealed. A fresh seal takes a while to set: for a
+  // spell after each unsealing it only counts the seconds down under itself
+  // and rattles if tugged. Unsealing swings it open where it stands — the
+  // fresh chain waits for a deliberate click — and the seal re-forms on the
+  // next door along, countdown running.
+  const buildSealedDoor = (): HTMLElement => {
+    const sealed = div('ct-door ct-hub-door ct-hub-sealed locked');
+    sealed.appendChild(div('ct-door-glyph'));
+    const label = div('ct-door-label', 'unseal');
+    sealed.appendChild(label);
+    const readyAt = (meta.lastUnsealAt ?? 0) + UNSEAL_COOLDOWN_MS;
+    // Clamped both ways so a clock jumped into the future can't hold the
+    // door longer than one full cooldown.
+    const remaining = (): number => Math.max(0, Math.min(UNSEAL_COOLDOWN_MS, readyAt - Date.now()));
+    let timer = 0;
+    const syncCooldown = (): void => {
+      // The view swapped away — the stage owns fresh DOM now; let go.
+      if (!sealed.isConnected && timer) { window.clearInterval(timer); return; }
+      const ms = remaining();
+      if (ms > 0) {
+        sealed.classList.add('cooling');
+        label.textContent = String(Math.ceil(ms / 1000));
+        return;
+      }
+      if (timer) { window.clearInterval(timer); timer = 0; }
+      if (sealed.classList.contains('cooling')) {
+        sealed.classList.remove('cooling');
+        label.textContent = 'unseal';
+        realmSound('online', 0.35, 0.8);   // the seal settles — ready
+      }
+    };
+    if (remaining() > 0) {
+      syncCooldown();
+      timer = window.setInterval(syncCooldown, 500);
+    }
+    let openedAs = -1;   // ≥ 0 once this node has swung open as that branch's door
+    sealed.addEventListener('click', () => {
+      if (hubBusy) return;
+      if (openedAs >= 0) { realmSound('online', 0.7, 0.9); enterBranch(openedAs); return; }
+      if (remaining() > 0) {
+        realmSound('door_locked', 0.95, 1);
+        sealed.classList.remove('shake');
+        void sealed.offsetWidth;             // restart the shake animation
+        sealed.classList.add('shake');
+        // The floaty explainer: this one just needs time.
+        const float = div('ct-door-float hint', `wait ${Math.ceil(remaining() / 1000)}s`);
+        sealed.appendChild(float);
+        float.addEventListener('animationend', () => float.remove());
+        return;
+      }
+      hubBusy = true;
+      const b = meta.doorsUnsealed ?? branches.length;
+      while (branches.length <= b) branches.push({ events: [], unlockedDepth: 0 });
+      meta.doorsUnsealed = b + 1;
+      meta.lastUnsealAt = Date.now();
+      saveMeta(meta);
+      // The same beat of payoff as a salon door: the seal gives with a
+      // ka-chunk, the padlock tumbles, the doorway blooms (CSS .unlocking) —
+      // but nobody walks through. The door settles open where it stands.
+      sealed.classList.remove('locked');
+      sealed.classList.add('open', 'unlocking');
+      label.textContent = pathName(meta.seed ?? 0, b);
+      realmSound('click', 0.8, 0.7);                                          // the seal turns
+      window.setTimeout(() => realmSound('place', 1.1, 0.7), 110);            // the bolt drops — clunk
+      window.setTimeout(() => realmSound('task_complete', 0.85, 0.95), 300);  // it gives; light spills
+      window.setTimeout(() => {
+        // Settled open: this node becomes the branch's door (pips, level,
+        // enter-on-click), and the seal re-forms one door along with its
+        // countdown already running off the stamp above.
+        openedAs = b;
+        sealed.classList.remove('unlocking', 'ct-hub-sealed');
+        sealed.classList.add('t-common');
+        const pips = div('ct-hub-pips');
+        pips.appendChild(div('ct-pip pip-common'));
+        sealed.insertBefore(pips, label);
+        sealed.appendChild(div('ct-hub-lvl', 'level 1'));
+        counter.textContent = doorCountLine(b + 1);
+        row.insertBefore(buildSealedDoor(), ghost);
+        hubBusy = false;
+      }, 1000);
+    });
+    return sealed;
+  };
+  row.appendChild(buildSealedDoor());
+  row.appendChild(ghost);
+
+  // The player's hand, inline at the foot of the hall like in a gathering —
+  // nothing to select here, but every world can still be entered.
+  const handWrap = div('ct-hand-inline');
+  stage.appendChild(handWrap);
+  if (meta.cards.length > 0) {
+    handWrap.appendChild(div('ct-caption', meta.cards.length === 1 ? 'your world' : 'your worlds'));
+    const cardsRow = div('ct-cards');
+    for (const c of meta.cards) {
+      cardsRow.appendChild(handCardEl(c, {
+        onEnter: (cardEl) => { void enterWorld(meta, c, cardEl); },
+      }));
+    }
+    handWrap.appendChild(cardsRow);
+  }
+}
+
 function showGathering(meta: CardMeta, ev: TradeEvent): void {
   const stage = realmEl('card-stage');
   clearSpeech();
   stage.innerHTML = '';
   stage.className = 'gathering-view';
 
-  // Swap to another salon (via a door — the forward door up, or the back door
-  // down). The target salon is rolled the first time it's reached.
+  const branch = ev.branch ?? 0;
+  const branches = ensureHall(meta);
+  const branchState = branches[branch] ?? branches[0];
+
+  // Swap to another salon on this branch (via a door — the forward door up,
+  // or the back door down). The target salon is rolled the first time it's
+  // reached.
   const goToSalon = (depth: number): void => {
-    const target = salonAtDepth(meta, depth);
+    const target = salonAt(meta, branch, depth);
     swapView(() => showGathering(meta, target));
   };
 
   // Remember which salon is on screen, so the dev cog's "refresh current
   // traders" knows which one to re-roll.
-  currentGatheringDepth = ev.depth;
+  currentGathering = { branch, depth: ev.depth };
 
   const head = div('ct-gathering-head');
-  // The salon's name, flanked by ornaments (CSS), with the player's level
-  // above it (one level per door climbed — depth + 1) and a soft subtitle
-  // beneath — the realm's own "TRADE / select cards" masthead. (Navigation
-  // between salons is the pair of doors, added below, not a header button.)
-  head.appendChild(div('ct-level', `level ${ev.depth + 1}`));
+  // The salon's name, flanked by ornaments (CSS), with where-you-are above it
+  // (which door in the hall, and the level — one per door climbed, depth + 1)
+  // and a soft subtitle beneath — the realm's own "TRADE / select cards"
+  // masthead. (Navigation between salons is the pair of doors, added below,
+  // not a header button.)
+  head.appendChild(div('ct-level', `door ${branch + 1} · level ${ev.depth + 1}`));
   head.appendChild(div(`ct-event-title t-${ev.tier}`, ev.name));
   head.appendChild(div('ct-gathering-sub', 'offer your worlds to the entities'));
   stage.appendChild(head);
@@ -1684,83 +1914,182 @@ function showGathering(meta: CardMeta, ev: TradeEvent): void {
     }
   };
 
-  // The exchange, in motion: the picked cards lift toward the stall while its
-  // whole deck drops into the hand. Once both halves land the swap re-renders.
+  // The exchange, in motion — one continuous gesture with no layout snaps:
+  //  - the given cards LIFT out of the hand into fixed-position flight
+  //    (reparented to <body>, so their painted canvases ride along) and rise
+  //    to the trader, while the hand row closes the gaps under them with a
+  //    FLIP slide instead of snapping shut;
+  //  - the trader's whole deck lifts into flight the same way and glides down
+  //    onto the EXACT spots where those cards will live in the hand
+  //    (invisible placeholders, appended up front, hold the spots), each one
+  //    revealing with a tier flash the moment its flight lands on it;
+  //  - the stall, emptied mid-air, eases into its spent dimming while its
+  //    card box folds shut and the confirm button fades.
+  // Only after the last landing does the trade commit to the meta — by then
+  // the DOM is already correct, so nothing re-renders or flashes.
   const executeTrade = (cr: Creature): void => {
     if (tradeAnimating) return;
     const picked = minePicked();
     if (!wantSatisfiedBy(cr.want, picked)) return;
     if (!keepsAWorld(cr, picked)) return;   // never empty the hand of worlds
-    tradeAnimating = true;
-    refreshButtons();
     const received = cr.deck;
-    // Fly a card toward a target rect's centre — the given cards rise into the
-    // trader's stall, the received cards fall toward the hand, each tracking
-    // the actual on-screen direction of where it's headed.
-    const flyTo = (el: HTMLElement | null | undefined, target: DOMRect | undefined, scale: number): void => {
-      if (!el || !target) return;
-      const r = el.getBoundingClientRect();
-      const dx = (target.left + target.width / 2) - (r.left + r.width / 2);
-      const dy = (target.top + target.height / 2) - (r.top + r.height / 2);
-      el.style.transition = 'transform 640ms cubic-bezier(0.5, 0, 0.75, 0.4), opacity 560ms ease';
-      el.style.transform = `translate(${dx}px, ${dy}px) scale(${scale})`;
-      el.style.opacity = '0';
-      el.style.pointerEvents = 'none';
-    };
     const stallEl = row.querySelector(`[data-creature-id="${cr.id}"]`) as HTMLElement | null;
-    const stallRect = stallEl?.querySelector('.ct-stall-cards')?.getBoundingClientRect()
-      ?? stallEl?.getBoundingClientRect();
-    const handRect = handWrap.getBoundingClientRect();
-    for (const m of picked) {
-      flyTo(gatherHandRow()?.querySelector(`[data-card-id="${m.id}"]`) as HTMLElement | null, stallRect, 0.6);
-    }
-    for (const t of received) {
-      flyTo(stallEl?.querySelector(`[data-card-id="${t.id}"]`) as HTMLElement | null, handRect, 0.85);
-    }
-    realmSound('select', 0.9, 0.8);
+    const handRow = gatherHandRow();
     const wonOrigin = received.some((t) => t.origin);
-    window.setTimeout(() => {
+
+    // The books — shared by the animated path and the degraded fallback.
+    const commit = (): void => {
       tradeAnimating = false;
       meta.cards = meta.cards.filter((c) => !pickedMine.has(c.id));
       meta.cards.push(...received);
       cr.deck = [];
       pickedMine.clear();
       saveMeta(meta);
-      // Update only the traded stall in place — mark it spent and empty its
-      // card box — so the other traders never flash or re-deal. Then rebuild
-      // just the hand and pop the arrivals in.
       const ref = stalls.get(cr.id);
       if (stallEl) {
         stallEl.classList.add('spent');
-        const box = stallEl.querySelector('.ct-stall-cards');
-        if (box) box.innerHTML = '';
+        stallEl.classList.remove('spending');
+        // The fold + fades finished under .spending; make their end states
+        // structural so dropping the class can't blink anything back.
+        const box = stallEl.querySelector('.ct-stall-cards') as HTMLElement | null;
+        if (box) { box.innerHTML = ''; box.style.height = ''; box.style.transition = ''; box.style.overflow = ''; }
+        stallEl.querySelector('.ct-offers-label')?.remove();
         ref?.giveBtn?.remove();
         if (ref) ref.giveBtn = null;
       }
-      // Surgically update the hand: drop the cards that flew to the trader,
-      // pop the arrivals in — the cards the player kept are never re-rendered,
-      // so they don't flash. (Falls back to a full build if the row is gone.)
-      const handRow = gatherHandRow();
-      if (handRow) {
-        for (const m of picked) handRow.querySelector(`[data-card-id="${m.id}"]`)?.remove();
-        for (const t of received) {
-          const el = buildHandCard(t);
-          el.classList.add('trade-arrived');
-          handRow.appendChild(el);
-        }
-        refreshHandCaption();
-      } else {
-        renderGatherHand();
-        for (const t of received) {
-          gatherHandRow()?.querySelector(`[data-card-id="${t.id}"]`)?.classList.add('trade-arrived');
-        }
-      }
+      refreshHandCaption();
       // Selection is cleared — every stall re-states (the traded one now reads
       // "traded out", the rest revert to their want, dropping any "yes!"/"no.").
       restateAll();
       refreshButtons();
       realmSound(wonOrigin ? 'task_complete' : 'ritual', wonOrigin ? 0.9 : 1, wonOrigin ? 1 : 0.9);
-    }, 680);
+    };
+
+    tradeAnimating = true;
+    refreshButtons();
+
+    // Degraded path (the row rebuilt mid-interaction): no motion, just the swap.
+    if (!stallEl || !handRow) {
+      window.setTimeout(() => { commit(); renderGatherHand(); }, 200);
+      return;
+    }
+
+    realmSound('select', 0.9, 0.8);
+
+    // Geometry read before anything moves.
+    const stallBox = stallEl.querySelector('.ct-stall-cards') as HTMLElement | null;
+    const stallRect = (stallBox ?? stallEl).getBoundingClientRect();
+    const boxHeight = stallBox?.getBoundingClientRect().height ?? 0;
+    const before = new Map<HTMLElement, DOMRect>();
+    for (const el of [...handRow.children] as HTMLElement[]) before.set(el, el.getBoundingClientRect());
+
+    // Lift a card out of the layout into fixed-position flight at its exact
+    // current spot. Returns where it stood.
+    const lift = (el: HTMLElement): DOMRect => {
+      const r = el.getBoundingClientRect();
+      el.classList.remove('selected');
+      el.style.transition = 'none';
+      el.style.transform = '';
+      el.style.position = 'fixed';
+      el.style.left = `${r.left}px`;
+      el.style.top = `${r.top}px`;
+      el.style.width = `${r.width}px`;
+      el.style.height = `${r.height}px`;
+      el.style.margin = '0';
+      // Above the realm (100001, appended later in the body), below the hop
+      // white (100002) — the flight must never cover a dive already leaving.
+      el.style.zIndex = '100001';
+      el.style.pointerEvents = 'none';
+      document.body.appendChild(el);
+      return r;
+    };
+    // Send a lifted card so its centre lands on the target's centre, scaled
+    // to the destination's width.
+    const flight = (el: HTMLElement, from: DOMRect, to: DOMRect,
+      o: { delay: number; dur: number; ease: string; scale?: number; rot?: number; fadeOut?: boolean }): void => {
+      const dx = (to.left + to.width / 2) - (from.left + from.width / 2);
+      const dy = (to.top + to.height / 2) - (from.top + from.height / 2);
+      const scale = o.scale ?? (from.width > 0 ? to.width / from.width : 1);
+      el.style.transition = `transform ${o.dur}ms ${o.ease} ${o.delay}ms`
+        + (o.fadeOut ? `, opacity ${Math.round(o.dur * 0.7)}ms ease ${o.delay + Math.round(o.dur * 0.3)}ms` : '');
+      void el.offsetWidth;   // commit the lifted start before the flight transition arms
+      el.style.transform = `translate(${dx}px, ${dy}px) rotate(${o.rot ?? 0}deg) scale(${scale})`;
+      if (o.fadeOut) el.style.opacity = '0';
+    };
+
+    // The given cards rise to the trader and shrink away into its stall.
+    for (const m of picked) {
+      const el = handRow.querySelector(`[data-card-id="${m.id}"]`) as HTMLElement | null;
+      if (!el) continue;
+      const from = lift(el);
+      // The node leaves the game with the trader — never let the hand cache
+      // hand its flown, fixed-position styles to a future rebuild.
+      handCardCache.delete(m.id);
+      flight(el, from, stallRect, { delay: 0, dur: 560, ease: 'cubic-bezier(0.55, 0, 0.8, 0.45)', scale: 0.55, rot: 5, fadeOut: true });
+      window.setTimeout(() => el.remove(), 700);
+    }
+
+    // The received cards lift out of the stall, each aimed at the invisible
+    // placeholder now holding its future spot in the hand.
+    const arrivals: { el: HTMLElement | null; from: DOMRect | null; slot: HTMLElement }[] = [];
+    for (const t of received) {
+      const src = stallEl.querySelector(`[data-card-id="${t.id}"]`) as HTMLElement | null;
+      const slot = buildHandCard(t);
+      slot.classList.add('trade-slot');
+      handRow.appendChild(slot);
+      arrivals.push(src ? { el: src, from: lift(src), slot } : { el: null, from: null, slot });
+    }
+
+    // The stall dims toward spent and its emptied card box folds shut.
+    stallEl.classList.add('spending');
+    if (stallBox) {
+      stallBox.style.height = `${boxHeight}px`;
+      stallBox.style.overflow = 'hidden';
+      void stallBox.offsetWidth;
+      stallBox.style.transition = 'height 460ms cubic-bezier(0.3, 0.6, 0.3, 1) 200ms';
+      stallBox.style.height = '0px';
+    }
+
+    // FLIP the hand row: everything that survived slides into its new place.
+    for (const el of [...handRow.children] as HTMLElement[]) {
+      const a = before.get(el);
+      if (!a) continue;   // a fresh placeholder — it reveals on landing instead
+      const b = el.getBoundingClientRect();
+      const dx = a.left - b.left, dy = a.top - b.top;
+      if (!dx && !dy) continue;
+      el.style.transition = 'none';
+      el.style.transform = `translate(${dx}px, ${dy}px)`;
+    }
+    requestAnimationFrame(() => {
+      requestAnimationFrame(() => {
+        for (const el of [...handRow.children] as HTMLElement[]) {
+          if (!before.has(el) || !el.style.transform) continue;
+          el.style.transition = 'transform 380ms cubic-bezier(0.25, 0.7, 0.3, 1)';
+          el.style.transform = '';
+          window.setTimeout(() => { el.style.transition = ''; }, 430);
+        }
+      });
+    });
+
+    // Launch the arrivals with a soft stagger; each lands with a tier flash
+    // and a little thunk exactly where its flight ends.
+    let lastLanding = 0;
+    arrivals.forEach((a, i) => {
+      const delay = 90 + i * 90;
+      const landAt = delay + 620;
+      lastLanding = Math.max(lastLanding, landAt);
+      const reveal = (): void => {
+        a.slot.classList.remove('trade-slot');
+        a.slot.classList.add('trade-landed');
+        realmSound('place', 0.4, 0.85 + i * 0.06);
+      };
+      if (!a.el || !a.from) { window.setTimeout(reveal, landAt); return; }
+      flight(a.el, a.from, a.slot.getBoundingClientRect(), { delay, dur: 620, ease: 'cubic-bezier(0.22, 0.75, 0.25, 1)' });
+      const el = a.el;
+      window.setTimeout(() => { reveal(); el.remove(); }, landAt);
+    });
+
+    window.setTimeout(commit, Math.max(720, lastLanding + 60));
   };
 
   // Clicks on the player's hand toggle the shared selection — every trader
@@ -1868,13 +2197,14 @@ function showGathering(meta: CardMeta, ev: TradeEvent): void {
     refreshButtons();
   };
 
-  // The forward door: the locked door UP to the NEXT salon, pinned top-right.
-  // Trade the gatekeeper for this salon's key, then click the door to spend it
-  // and pass onward; without the key it just rattles. Once spent the door stays
-  // open (meta.unlockedDepth). The chain is endless — there's always a next.
+  // The forward door: the locked door UP to the NEXT salon on this branch,
+  // pinned top-right. Trade the gatekeeper for this salon's key, then click
+  // the door to spend it and pass onward; without the key it just rattles.
+  // Once spent the door stays open (the branch's unlockedDepth). Every chain
+  // is endless — there's always a next.
   const above = ev.depth + 1;
   {
-    const isOpen = (): boolean => (meta.unlockedDepth ?? 0) >= above;
+    const isOpen = (): boolean => branchState.unlockedDepth >= above;
     const door = div('ct-door ct-door-fwd');
     door.appendChild(div('ct-door-glyph'));
     const label = div('ct-door-label');
@@ -1884,26 +2214,27 @@ function showGathering(meta: CardMeta, ev: TradeEvent): void {
       door.classList.toggle('locked', !isOpen());
       // An open door names where it leads; a locked one stays bare (it doesn't
       // give the next salon's name away until you've opened it).
-      label.textContent = isOpen() ? `${salonName(meta.seed ?? 0, above)} →` : '';
+      label.textContent = isOpen() ? `${salonName(meta.seed ?? 0, above, branch)} →` : '';
     };
     sync();
     let doorBusy = false;   // latched through the unlock beat so clicks can't double-fire
     door.addEventListener('click', () => {
       if (tradeAnimating || doorBusy) return;
       if (isOpen()) { realmSound('online', 0.7, 0.9); goToSalon(above); return; }
-      // Spend this salon's key (its keyDepth opens this one door, no other).
-      const keyIdx = meta.cards.findIndex((c) => c.key && c.keyDepth === above);
+      // Spend this salon's key (its keyDepth + keyBranch open this one door,
+      // no other — legacy keys with no branch stamp belong to branch 0).
+      const keyIdx = meta.cards.findIndex((c) => c.key && c.keyDepth === above && (c.keyBranch ?? 0) === branch);
       if (keyIdx >= 0) {
         doorBusy = true;
         meta.cards.splice(keyIdx, 1);
-        meta.unlockedDepth = Math.max(meta.unlockedDepth ?? 0, above);
+        branchState.unlockedDepth = Math.max(branchState.unlockedDepth, above);
         saveMeta(meta);
         // A beat of payoff before we pass through: the key turns with a
         // ka-chunk, the padlock springs and tumbles off, the doorway blooms
         // with light (CSS .unlocking), then the door swings us onward.
         door.classList.remove('locked');
         door.classList.add('open', 'unlocking');
-        label.textContent = `${salonName(meta.seed ?? 0, above)} →`;
+        label.textContent = `${salonName(meta.seed ?? 0, above, branch)} →`;
         realmSound('click', 0.8, 0.7);                                          // the key turns
         window.setTimeout(() => realmSound('place', 1.1, 0.7), 110);            // the bolt drops — clunk
         window.setTimeout(() => realmSound('task_complete', 0.85, 0.95), 300);  // it gives; light spills
@@ -1913,9 +2244,11 @@ function showGathering(meta: CardMeta, ev: TradeEvent): void {
         door.classList.remove('shake');
         void door.offsetWidth;             // restart the shake animation
         door.classList.add('shake');
-        // A transient "locked" that floats up and fades, rather than a label
-        // that's always sitting there.
-        const float = div('ct-door-float', 'locked');
+        // A transient explainer that floats up and fades — what the door
+        // actually needs, rather than a bare "locked". (The gatekeeper always
+        // holds this salon's key until it's traded for; a traded key opens
+        // the door on the spot, so a locked door means the key is still his.)
+        const float = div('ct-door-float hint', 'the gatekeeper holds the key');
         door.appendChild(float);
         float.addEventListener('animationend', () => float.remove());
       }
@@ -1923,29 +2256,33 @@ function showGathering(meta: CardMeta, ev: TradeEvent): void {
     stage.appendChild(door);
   }
 
-  // The back door: a black door pinned top-LEFT, the way DOWN to the salon you
-  // came from. Stepping back is free — no key, always open — so it's a plain
-  // click that walks one salon down the chain. Hidden at the soft border (0).
-  if (ev.depth > 0) {
+  // The back door: a black door pinned top-LEFT, the way DOWN — to the
+  // previous salon on this branch, or, from a threshold (depth 0), back out
+  // into the hall of doors. Stepping back is free — no key, always open.
+  {
     const back = div('ct-door ct-door-back');
     back.appendChild(div('ct-door-glyph'));
     const label = div('ct-door-label');
-    label.textContent = `← ${salonName(meta.seed ?? 0, ev.depth - 1)}`;
+    label.textContent = ev.depth > 0
+      ? `← ${salonName(meta.seed ?? 0, ev.depth - 1, branch)}`
+      : '← the hall of doors';
     back.appendChild(label);
     back.addEventListener('click', () => {
       if (tradeAnimating) return;
       realmSound('online', 0.7, 0.8);
-      goToSalon(ev.depth - 1);
+      if (ev.depth > 0) goToSalon(ev.depth - 1);
+      else swapView(() => showHub(meta));
     });
     stage.appendChild(back);
   }
 
-  // The reset sigil. Standing in the level-3 dead end introduces it; from
-  // then on it hangs in every salon, unexplained. Two clicks — one arms it
-  // ("sure?"), the next sends the player back to level 1 with every salon
-  // refreshed and every door locked again. The hand is kept; the first reset
-  // is also what flips the chain from the authored opening to procedural.
-  if (ev.depth >= HARDCODED_LEVELS - 1 && (meta.resets ?? 0) === 0 && !meta.resetSeen) {
+  // The reset sigil. Standing in branch 0's level-3 dead end introduces it;
+  // from then on it hangs in every salon, unexplained. Two clicks — one arms
+  // it ("sure?"), the next seals the hall back to a single door with every
+  // salon refreshed and every door locked again. The hand is kept; the first
+  // reset is also what flips the salons from the authored opening to
+  // procedural.
+  if (branch === 0 && ev.depth >= HARDCODED_LEVELS - 1 && (meta.resets ?? 0) === 0 && !meta.resetSeen) {
     meta.resetSeen = true;
     saveMeta(meta);
   }
@@ -1974,7 +2311,7 @@ function showGathering(meta: CardMeta, ev: TradeEvent): void {
       realmSound('ritual', 1, 0.8);
       resetChain(meta, ALL_TASK_IDS, loadManualWorlds());
       saveMeta(meta);
-      swapView(() => showGathering(meta, salonAtDepth(meta, 0)));
+      swapView(() => showHub(meta));
     });
     stage.appendChild(sigil);
   }
