@@ -34,8 +34,7 @@ import {
   salonName, salonTierForDepth, sceneStructureCounts, tradeKeepsAWorld, WantSeg,
   wantSatisfiedBy, wantSegments,
 } from './cards-core';
-
-const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
+import { sleep } from './util';
 
 // Every sound in the realm rides the ghostly reverb bus (audio.ts: lowpass +
 // cavern convolver, the hell cries' treatment) at a slightly slowed rate —

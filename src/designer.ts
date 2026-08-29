@@ -25,8 +25,7 @@ import {
   CardTier, ManualWorld, cardPower, decodeWorld, encodeWorld, makeSandboxWorld,
 } from './cards-core';
 import { loadManualWorlds, markCardHop, saveManualWorlds, saveWorldsToFile } from './cards';
-
-const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
+import { sleep } from './util';
 
 // ─── Designer localStorage keys ──────────────────────────────────────
 // Distinct from cards.ts's keys so the two boot modes never collide.

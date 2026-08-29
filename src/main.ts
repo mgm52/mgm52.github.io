@@ -22,8 +22,7 @@ import {
   releaseCardWorldArrival, resetCardRealm, setupCardWorldChrome, spectateActive,
 } from './cards';
 import { designerActive, openDesignerList, setupDesignerChrome } from './designer';
-
-const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
+import { sleep } from './util';
 
 // Returns the player's choice — 'resume' if they clicked the resume button,
 // 'new' if they clicked the spawn button. The fade-out animation runs in

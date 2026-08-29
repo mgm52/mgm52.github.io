@@ -60,9 +60,9 @@ export const GOBLIN = {
   spawnCost: 0,
   spawnTime: 2,
   arriveDist: 2,
-  // Hard ceiling for the spawn-progress track. Per-hole capacity lives on
-  // `state.hole.spawnCapacity` and currently doesn't ramp; the headroom is
-  // here in case future upgrades raise it.
+  // Hard ceiling for the spawn-progress track (the DOM pre-creates this many
+  // segments); the live cap is getSpawnCapacity() in state.ts, which grows with
+  // each completed Goblin Hole.
   concurrentBuildLimit: 40,
   breakdanceAfter: 30, // seconds of continuous idle before goblins start breakdancing
 };
@@ -182,7 +182,6 @@ export const DRAGON = {
   // Ritual delay between summoning a dragon and it appearing, mirroring the
   // Minotaur's summon-in time. Only one dragon can be in the ritual at once.
   spawnTime: 3,          // seconds
-  spawnCapacity: 1,
   // Hard ceiling for the summon-progress track. The live cap matches the
   // current active-beacon count, but the DOM pre-creates this many segments
   // so the track can grow/shrink as beacons come and go without rebuilding.

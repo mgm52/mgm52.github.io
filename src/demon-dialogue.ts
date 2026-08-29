@@ -14,6 +14,7 @@ import {
   Demon, DemonVariant, GameState, Ghost, Goblin, Vec2,
   appendLog, hellToWorld, pushDeathEffect, pushFloater,
 } from './state';
+import { sleep } from './util';
 
 type Speaker = 'demon' | 'goblin' | 'bob';
 type Seg = { t: string; em: boolean; white: boolean };
@@ -172,8 +173,6 @@ const POST_LINE_BUFFER_MS = 180;
 // lands with a dramatic trailing-off pause rather than scrolling straight on.
 const ELLIPSIS_PAUSE_MS = 260;
 
-const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
-
 function escapeHtml(s: string): string {
   return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
 }
@@ -331,7 +330,7 @@ function waitForOption(buttons: HTMLButtonElement[]): Promise<number> {
 // to the centre of hell — the demon's "untruth" punishment. (He used to be
 // cast all the way back to the overworld; now it's basically a teleport.)
 // The ghost vanishes here and stays gone for HELL.bobRespawnDelaySec; the
-// respawn pass at the top of tickGhosts (sim.ts) re-materialises him at the
+// ghost respawn pass in sim.ts tick() re-materialises him at the
 // centre with his own landing flash once the timer runs out.
 function strikeGhostToCentre(state: GameState, ghost: Ghost): void {
   const w = (ghost.hx !== undefined && ghost.hy !== undefined)
