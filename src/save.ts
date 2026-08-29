@@ -334,6 +334,14 @@ export function loadGame(): { state: GameState; savedAt: number } | null {
     env.state.viewTransitioning = false;
     env.state.lightningStrikeCooldown ??= 0;
     env.state.selectedAmbientDragonId = null;
+    // Numeric fields added after launch. Booleans can stay undefined (falsy
+    // reads the same as false) but a missing number poisons arithmetic —
+    // NaN money on a gold kill, holeCells[NaN] in the spawn rotation.
+    env.state.goldgoblinMultiplier ??= 1;
+    env.state.autoSpawnTimer ??= 0;
+    env.state.spawnHoleRotation ??= 0;
+    env.state.spawnsCompleted ??= 0;
+    env.state.firstDugAt ??= null;
     // Building.displayNum + state.buildingCounts were added so each kind shows
     // its own ordinal (#1, #2…) rather than a global id. Old saves carry only
     // `id`s, so re-number every building (ground + space) in id-order per
@@ -363,7 +371,11 @@ export function loadGame(): { state: GameState; savedAt: number } | null {
   } catch { return null; }
 }
 
+// Any synchronous write to the slot (erase, world-hop stash/restore) must
+// outrank a worker save still compressing, or its reply would resurrect the
+// state we just replaced. Same stale-write guard as saveGame.
 export function clearSave(): void {
+  lastSyncSaveAt = performance.now();
   try { localStorage.removeItem(STORAGE_KEY); } catch { /* no-op */ }
 }
 
@@ -376,11 +388,8 @@ export function getRawSave(): string | null {
 }
 
 export function setRawSave(raw: string): void {
+  lastSyncSaveAt = performance.now();
   try { localStorage.setItem(STORAGE_KEY, raw); } catch { /* storage full — skip */ }
-}
-
-export function hasSave(): boolean {
-  try { return localStorage.getItem(STORAGE_KEY) !== null; } catch { return false; }
 }
 
 // Coarse human-readable "X ago" — used on the title screen's resume button.

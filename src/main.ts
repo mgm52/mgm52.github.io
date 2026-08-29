@@ -1,15 +1,16 @@
 import { fadeOutMusicForever, getAudioDebugInfo, playSound, preloadSounds, setCrackleEnabled, setGhostSendGain, setInHellView, setMasterVolume, setMusicDepth, setMusicVolume, startBackgroundCrackle, startBackgroundMusic } from './audio';
 import {
-  AUTODRAGON_TIERS, AUTOSPAWN_TIERS, CAMERA_SPEED, CELL, DRAGON, GOBLIN, GOLD_KILL_REWARD, HELL, KILL_REWARD, PAIN_GABBONSAW, ROBOT, SOUL_SIGIL,
-  START_CELL, SUMMON_UPGRADES, TERMINATOR, TICK_MS, MINOTAUR, WORLD, digBloodCost, minotaurBloodCost,
+  AUTODRAGON_TIERS, AUTOSPAWN_TIERS, CAMERA_SPEED, CELL, DRAGON, GOBLIN, HELL, PAIN_GABBONSAW, ROBOT, SOUL_SIGIL,
+  SUMMON_UPGRADES, TERMINATOR, TICK_MS, MINOTAUR, WORLD, digBloodCost, minotaurBloodCost,
 } from './config';
+import { cutsceneHoldActive, designerTimeFrozen, spectatingNow } from './holds';
 import { setupInput } from './input';
 import { finaleBark, runDemonDialogue, runFinaleConfrontation, runGhostChat } from './demon-dialogue';
 import { playIntroSequence, runGabbonsawCutscene, setIntroPaused, skipIntro } from './intro';
 import { getOptions, onOptionsChange } from './options';
 import { getRestartInHell, relockOptionsCog, setupOptionsUI, setupRealmOptionsUI } from './options-ui';
 import { applyDomOptions, centerCameraOn, centerHellCameraOnWorld, centerSpaceCamera, clampCamera, clampHellCamera, clampSpaceCamera, createRender, currentHellScale, preloadRenderAssets, render, spaceCameraMaxY } from './render';
-import { appendLog, buildingCenter, cellCenter, countHypercentres, countSpaceCentres, createInitialState, destroyBuilding, digDirection, dragonsAtCap, earnBlood, earnDragonBone, earnMoney, getSpawnCapacity, pushDeathEffect, pushFloater, recordGhost, removeGoblin, type GameState, type Ghost } from './state';
+import { activeDragonBeaconCount, appendLog, buildingCenter, clearPendingModes, countHypercentres, countSpaceCentres, createInitialState, destroyBuilding, digDirection, dragonsAtCap, earnDragonBone, getSpawnCapacity, recordGhost, removeGoblin, type GameState, type Ghost } from './state';
 import { autoAssignAllIdle, devSkipFinaleToConfront, devTriggerFinale, maybeDepartBobAndLolly, spawnDragon, spawnLollyRampage, spawnMinotaur, spawnRobot, spawnTinytaur, tick } from './sim';
 import { ensureHellPortal, executeSkipToPreFinale, executeTaskSkip, refreshUI, setupUI } from './ui';
 import { clearSave, formatRelativeTime, getLastSaveStats, loadGame, saveGame, saveGameInBackground } from './save';
@@ -21,8 +22,7 @@ import {
   releaseCardWorldArrival, resetCardRealm, setupCardWorldChrome, spectateActive,
 } from './cards';
 import { designerActive, openDesignerList, setupDesignerChrome } from './designer';
-
-const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
+import { sleep } from './util';
 
 // Returns the player's choice — 'resume' if they clicked the resume button,
 // 'new' if they clicked the spawn button. The fade-out animation runs in
@@ -666,10 +666,7 @@ async function main() {
       // dragons can be mid-ritual at once. The overworld also holds at most
       // DRAGON.maxInPlayPerBeacon dragons per active Beacon (live + mid-ritual);
       // a dragon flying off to space frees a slot.
-      let activeBeacons = 0;
-      for (const b of state.buildings.values()) {
-        if (b.kind === 'dragon_beacon' && b.state === 'active') activeBeacons++;
-      }
+      const activeBeacons = activeDragonBeaconCount(state);
       if (activeBeacons === 0) { playSound('error'); return; }
       if (state.blood < DRAGON.bloodCost) { playSound('error'); return; }
       if (state.dragonSpawnQueue.length >= activeBeacons) { playSound('error'); return; }
@@ -731,11 +728,7 @@ async function main() {
       const next = AUTODRAGON_TIERS.find((t) => t.multiplier > state.autoDragonMultiplier);
       if (!next) return;
       if (state.blood < next.bloodCost) { playSound('error'); return; }
-      let activeBeacons = 0;
-      for (const b of state.buildings.values()) {
-        if (b.kind === 'dragon_beacon' && b.state === 'active') activeBeacons++;
-      }
-      if (next.multiplier > activeBeacons) { playSound('error'); return; }
+      if (next.multiplier > activeDragonBeaconCount(state)) { playSound('error'); return; }
       state.blood -= next.bloodCost;
       state.autoDragonMultiplier = next.multiplier;
       if (!state.autoDragonEnabled) {
@@ -753,26 +746,18 @@ async function main() {
       if (blockedInCardWorld()) return;
       // Toggle Orbital Platform placement (space view only — the button is
       // hidden elsewhere); arming it cancels any other pending mode.
-      state.pendingOrbital = !state.pendingOrbital;
-      if (state.pendingOrbital) {
-        state.pendingBuild = null;
-        state.pendingStrike = false;
-        state.pendingCandle = false;
-        state.pendingSpaceCentre = false;
-      }
+      const arm = !state.pendingOrbital;
+      clearPendingModes(state);
+      state.pendingOrbital = arm;
     },
     onPlaceSpaceCentre: () => {
       if (blockedInCardWorld()) return;
       // Toggle Space Centre placement (space view only — the button is hidden
       // elsewhere); arming it cancels any other pending mode. The next tap
       // must land on a completed Orbital Platform.
-      state.pendingSpaceCentre = !state.pendingSpaceCentre;
-      if (state.pendingSpaceCentre) {
-        state.pendingBuild = null;
-        state.pendingStrike = false;
-        state.pendingCandle = false;
-        state.pendingOrbital = false;
-      }
+      const arm = !state.pendingSpaceCentre;
+      clearPendingModes(state);
+      state.pendingSpaceCentre = arm;
     },
     onBuyAutoAssign: () => {
       if (blockedInCardWorld()) return;
@@ -879,29 +864,6 @@ async function main() {
       playSound('ritual');
       appendLog(state, `Dug ${dir.toUpperCase()} — water found.`);
     },
-    onKillGoblin: (id: number) => {
-      const g = state.goblins.get(id);
-      if (!g) return;
-      // Robots can't die — the kill button just bounces off the chassis.
-      if (g.robot) { playSound('error'); return; }
-      const x = g.pos.x, y = g.pos.y;
-      const reward = g.gold
-        ? { money: GOLD_KILL_REWARD.money * state.goldgoblinMultiplier, blood: GOLD_KILL_REWARD.blood }
-        : KILL_REWARD;
-      recordGhost(state, 'goblin', x, y, g.facing, { gold: g.gold, bob: g.bob });
-      removeGoblin(state, id);
-      earnMoney(state, reward.money);
-      earnBlood(state, reward.blood);
-      state.bloodUnlocked = true;
-      // Two stacked floaters so each value gets its own color.
-      pushFloater(state, x, y, `+Ƶ${reward.money.toLocaleString('en-US')}`, 0xffd96b, 1.6);
-      pushFloater(state, x, y - 14, `+${reward.blood} blood`, 0xff8a8a, 1.6);
-      pushDeathEffect(state, x, y);
-      playSound('goblin_death', 0.56);
-      // Bonus cha-ching when the slain goblin was gold-tinted.
-      if (g.gold) playSound('cash', 0.7);
-      appendLog(state, `Goblin #${id} killed — +Ƶ${reward.money.toLocaleString('en-US')}, +${reward.blood} blood.`);
-    },
     onLightningStrike: () => {
       // Cooldown blocks re-entering aim mode; an already-armed strike can still
       // be cancelled (toggle off) so the player isn't stuck in aim if they
@@ -910,21 +872,24 @@ async function main() {
         playSound('error');
         return;
       }
-      // Toggle aim mode; entering it cancels any pending building placement.
-      state.pendingStrike = !state.pendingStrike;
-      if (state.pendingStrike) state.pendingBuild = null;
+      // Toggle aim mode; entering it cancels any other pending mode.
+      const arm = !state.pendingStrike;
+      clearPendingModes(state);
+      state.pendingStrike = arm;
     },
     onBuildBuilding: (kind) => {
       if (blockedInCardWorld()) return;
-      state.pendingBuild = state.pendingBuild?.kind === kind ? null : { kind };
-      if (state.pendingBuild) { state.pendingStrike = false; state.pendingCandle = false; }
+      const next = state.pendingBuild?.kind === kind ? null : { kind };
+      clearPendingModes(state);
+      state.pendingBuild = next;
     },
     onPlaceCandle: () => {
       if (blockedInCardWorld()) return;
-      // Toggle hell candle-placement mode; entering it cancels any pending
-      // build/strike (none of which can fire in hell anyway, but stay tidy).
-      state.pendingCandle = !state.pendingCandle;
-      if (state.pendingCandle) { state.pendingBuild = null; state.pendingStrike = false; }
+      // Toggle hell candle-placement mode; entering it cancels any other
+      // pending mode (none of which can fire in hell anyway, but stay tidy).
+      const arm = !state.pendingCandle;
+      clearPendingModes(state);
+      state.pendingCandle = arm;
     },
     onDestroyBuilding: (id) => {
       destroyBuilding(state, id);
@@ -1044,15 +1009,14 @@ async function main() {
     transitioning = true; transFrom = 0; transTo = 1; transStart = now; ascendHold = 0;
     state.view = 'space';
     state.viewTransitioning = true;
-    state.pendingBuild = null; state.pendingStrike = false; state.pendingCandle = false;
+    clearPendingModes(state);
     playSound('ritual', 0.7, 0.5);
     playSound('online', 0.5, 0.3);
   }
   function triggerDescendToSurface(now: number) {
     transitioning = true; transFrom = 1; transTo = 0; transStart = now; descendHold = 0;
     state.viewTransitioning = true;
-    state.pendingOrbital = false;
-    state.pendingSpaceCentre = false;
+    clearPendingModes(state);
     playSound('ritual', 0.6, 0.6);
   }
   function triggerDescendToHell(now: number) {
@@ -1067,7 +1031,7 @@ async function main() {
     descendHellHold = 0;
     state.view = 'hell';
     state.viewTransitioning = true;
-    state.pendingBuild = null; state.pendingStrike = false; state.pendingCandle = false;
+    clearPendingModes(state);
     playSound('ritual', 0.6, 0.6);
   }
   function triggerAscendFromHell(now: number) {
@@ -1083,7 +1047,7 @@ async function main() {
     hellTransitioning = true; hellTransFrom = 1; hellTransTo = 0; hellTransStart = now;
     ascendHellHold = 0;
     state.viewTransitioning = true;
-    state.pendingCandle = false;
+    clearPendingModes(state);
     playSound('ritual', 0.7, 0.5);
   }
 
@@ -1098,13 +1062,7 @@ async function main() {
     if (quickTravelBusy || state.view === view) return;
     // Respect every world-freeze: cutscenes, parlays, celebrations, Bob's
     // hole-picker. Mid-flight transitions are fine — they get snapped.
-    if (document.body.classList.contains('intro-cutscene-hold')
-        || document.body.classList.contains('bob-cutscene-hold')
-        || document.body.classList.contains('demon-parlay-hold')
-        || document.body.classList.contains('bob-spawn-hold')
-        || document.body.classList.contains('unlock-reveal-hold')
-        || document.body.classList.contains('finale-hold')
-        || state.bobPickingHole) return;
+    if (cutsceneHoldActive() || state.bobPickingHole) return;
     if (view === 'hell' && !state.hellUnlocked) { playSound('error'); return; }
     if (view === 'space' && !state.spaceUnlocked) { playSound('error'); return; }
     if (view === 'ground' && state.groundLocked) { playSound('error'); return; }
@@ -1137,8 +1095,7 @@ async function main() {
       }
       state.view = view;
       // Placement/aim modes don't survive a change of world.
-      state.pendingBuild = null; state.pendingStrike = false; state.pendingCandle = false;
-      state.pendingOrbital = false; state.pendingSpaceCentre = false;
+      clearPendingModes(state);
       if (quickTravelFadeEl) quickTravelFadeEl.style.opacity = '0';
       quickTravelBusy = false;
     }, 160);
@@ -1468,21 +1425,13 @@ async function main() {
     // unlock-reveal-hold freezes time for the whole task-complete ceremony:
     // the WORK COMPLETE overlay plus the staged one-by-one unlock reveal that
     // follows it (set/cleared in ui.ts).
-    const introActive = document.body.classList.contains('intro-cutscene-hold')
-      || document.body.classList.contains('bob-cutscene-hold')
-      || document.body.classList.contains('demon-parlay-hold')
-      || document.body.classList.contains('bob-spawn-hold')
-      || document.body.classList.contains('unlock-reveal-hold')
-      // The finale's closing confrontation + shatter freezes the world like a
-      // cutscene; the autonomous beats before it (Lolly's flight) run live.
-      || document.body.classList.contains('finale-hold')
-      // Spectating a trader's card world: time stands still for the whole
-      // visit (set by setupCardWorldChrome, cleared by the leave reload).
-      || document.body.classList.contains('spectate-hold')
-      // World Designer's PAUSE toggle: freezes the sim (sprites + state.now)
-      // while leaving the world fully interactive for authoring — no overlay,
-      // unlike the player-facing pause. Toggled by setupDesignerChrome.
-      || document.body.classList.contains('designer-time-frozen')
+    // The finale's closing confrontation + shatter freezes the world like a
+    // cutscene; the autonomous beats before it (Lolly's flight) run live.
+    // Spectating a trader's card world and the designer's PAUSE toggle hold
+    // time too, but leave the world interactive (see holds.ts).
+    const introActive = cutsceneHoldActive()
+      || spectatingNow()
+      || designerTimeFrozen()
       || state.bobPickingHole;
     if (!paused && !introActive) {
       acc += dt;

@@ -18,15 +18,14 @@
 // manual-world DB accessors and the shared markCardHop hop guard.
 
 import { clearSave, getRawSave, saveGame, setRawSave } from './save';
-import { DesignerUnitKind, GameState, markBuildingsChanged, removeAllUnits } from './state';
+import { DesignerUnitKind, GameState, clearPendingModes, markBuildingsChanged, removeAllUnits } from './state';
 import { spawnGoldGoblinNow } from './sim';
 import { ALL_TASK_IDS } from './ui';
 import {
   CardTier, ManualWorld, cardPower, decodeWorld, encodeWorld, makeSandboxWorld,
 } from './cards-core';
 import { loadManualWorlds, markCardHop, saveManualWorlds, saveWorldsToFile } from './cards';
-
-const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
+import { sleep } from './util';
 
 // ─── Designer localStorage keys ──────────────────────────────────────
 // Distinct from cards.ts's keys so the two boot modes never collide.
@@ -310,12 +309,12 @@ export function setupDesignerChrome(state: GameState): void {
     b.textContent = label;
     b.title = hellSide ? 'click in the hell view to place' : 'click on the ground to place';
     b.addEventListener('click', () => {
-      // Arming a unit cancels any other placement mode, and clicking the armed
-      // one again disarms — same toggle feel as a build button.
-      state.pendingDesignerUnit = state.pendingDesignerUnit === kind ? null : kind;
-      state.pendingBuild = null;
-      state.pendingOriginalHole = false;
-      state.pendingCandle = false;
+      // Arming a unit cancels every other placement mode, and clicking the
+      // armed one again disarms — same toggle feel as a build button. Read the
+      // next kind BEFORE clearing, since clearPendingModes disarms this too.
+      const next = state.pendingDesignerUnit === kind ? null : kind;
+      clearPendingModes(state);
+      state.pendingDesignerUnit = next;
       syncPalette();
     });
     unitBtns.push({ kind, el: b });

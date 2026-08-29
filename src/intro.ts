@@ -13,6 +13,7 @@
 // chain the panel/task fade-in onto the same promise.
 
 import { playSound } from './audio';
+import { waitForAdvance } from './util';
 
 type IntroChoice = { label: string; nextLine: string };
 type IntroStep =
@@ -164,13 +165,14 @@ function teardownIntro(
 function waitForClick(target: HTMLElement): Promise<void> {
   return new Promise((resolve) => {
     if (introAborted) { resolve(); return; }
+    const wait = waitForAdvance(target);
     const finish = () => {
-      target.removeEventListener('click', finish);
+      wait.cancel();
       abortListeners.delete(finish);
       resolve();
     };
     abortListeners.add(finish);
-    target.addEventListener('click', finish, { once: true });
+    void wait.done.then(finish);
   });
 }
 

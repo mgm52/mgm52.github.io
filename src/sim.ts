@@ -3,7 +3,7 @@ import { BUILDING_DEFS, BuildingKind, CELL, COLS, DEMON, DRAGON, DRAGON_KILL_REW
 import { DEMON_FACING_ANGLE, getOptions } from './options';
 import {
   ALL_DIRS, Building, Cell, DX, DY, Demon, DesignerUnitKind, Dir, Dragon, Finale, FinalePhase, GameState, Ghost, Goblin, HOLE_SIZE, LollyBoostKind, LollyTarget, Minotaur, SoulChair, SpaceBuilding, SpaceUnit, Vec2, WaterSource, isGhostUnitKind, lollyBoostState,
-  anySpawnHole, appendLog, buildingAtCell, buildingCenter, buildingFootprint, buildingPerimeter,
+  activeDragonBeaconCount, anySpawnHole, appendLog, buildingAtCell, buildingCenter, buildingFootprint, buildingPerimeter,
   cellCenter, cellKey, chairSoulSnapshot, constructedDragonBeacon, createMoon, currentPowerBoost, defOf, demonScaleOf, destroyBuilding, dragonsAtCap, dragonTargetBuilding,
   earnBlood, earnDragonBone, earnMoney, findHoleEmergenceCell, maxOverworldDragons,
   getSpawnCapacity, holeBlockedByBuilding, holeCenter, isCellBlocked, isCellInBuilding, isCellInWaterSource,
@@ -21,6 +21,28 @@ import {
 // first tick after load runs a sweep — harmless).
 let nextAutoAssignAt = 0;
 const AUTO_ASSIGN_INTERVAL = 2;
+
+// One tick of a summon track: count every entry down, and when one completes
+// ask `hatch` to produce the unit. A false return means the world couldn't
+// take it right now (blocked hole exit, dragon cap) — the entry stays queued
+// and retries shortly instead of burning the slot the player paid for.
+// Drop a goblin back to idle with no destination: the common tail of every
+// "the thing I was walking to is gone" branch in the goblin state machine.
+function idleGoblin(g: Goblin): void {
+  g.state = { kind: 'idle' };
+  g.goal = null;
+  g.path = [];
+}
+
+const QUEUE_RETRY_S = 0.5;
+function advanceQueue(queue: { remaining: number }[], hatch: () => boolean): void {
+  for (let i = queue.length - 1; i >= 0; i--) {
+    queue[i].remaining -= TICK_S;
+    if (queue[i].remaining > 0) continue;
+    if (hatch()) queue.splice(i, 1);
+    else queue[i].remaining = QUEUE_RETRY_S;
+  }
+}
 
 // Vertical lift (world px) applied to building-center power floaters so the
 // blue "±W" text clears the gold "+Ƶ" income floater spawned at the same point.
@@ -96,26 +118,12 @@ export function tick(state: GameState) {
   // Sticky onboarding flag: the player has had 2+ goblins queued at once, so
   // the "queue several at a time" hint never needs to surface (or hides now).
   if (state.spawnQueue.length >= 2) state.multiSpawnSeen = true;
-  for (let i = state.spawnQueue.length - 1; i >= 0; i--) {
-    state.spawnQueue[i].remaining -= TICK_S;
-    if (state.spawnQueue[i].remaining <= 0) {
-      spawnGoblin(state);
-      state.spawnQueue.splice(i, 1);
-    }
-  }
+  advanceQueue(state.spawnQueue, () => { spawnGoblin(state); return true; });
 
   // ── 1b. Minotaur spawn queue ─────────────────────────────────────
-  for (let i = state.minotaurSpawnQueue.length - 1; i >= 0; i--) {
-    state.minotaurSpawnQueue[i].remaining -= TICK_S;
-    if (state.minotaurSpawnQueue[i].remaining <= 0) {
-      if (spawnMinotaur(state)) {
-        state.minotaurSpawnQueue.splice(i, 1);
-      } else {
-        // Hole perimeter blocked — retry shortly so we don't burn the slot.
-        state.minotaurSpawnQueue[i].remaining = 0.5;
-      }
-    }
-  }
+  // Hole perimeter blocked → spawnMinotaur returns false and the entry
+  // retries shortly rather than burning the slot.
+  advanceQueue(state.minotaurSpawnQueue, () => spawnMinotaur(state));
 
   // ── 1c. Dragon spawn queue ───────────────────────────────────────
   // Autodragon (Lilly's destroy-a-robot reward): every intervalSeconds —
@@ -127,10 +135,7 @@ export function tick(state: GameState) {
     if (state.autoDragonTimer <= 0) {
       state.autoDragonTimer += SUMMON_UPGRADES.autoDragon.intervalSeconds
         / Math.max(1, state.autoDragonMultiplier);
-      let activeBeacons = 0;
-      for (const b of state.buildings.values()) {
-        if (b.kind === 'dragon_beacon' && b.state === 'active') activeBeacons++;
-      }
+      const activeBeacons = activeDragonBeaconCount(state);
       if (activeBeacons > 0
           && state.blood >= DRAGON.bloodCost
           && state.dragonSpawnQueue.length < activeBeacons
@@ -141,47 +146,31 @@ export function tick(state: GameState) {
       }
     }
   }
-  for (let i = state.dragonSpawnQueue.length - 1; i >= 0; i--) {
-    state.dragonSpawnQueue[i].remaining -= TICK_S;
-    if (state.dragonSpawnQueue[i].remaining <= 0) {
-      // Hold a completed ritual if the overworld is already at its dragon
-      // ceiling (e.g. a Beacon went dormant mid-ritual, dropping the cap) —
-      // retry shortly rather than overshooting, the way the Minotaur track
-      // waits on a blocked hole.
-      if (state.dragons.size >= maxOverworldDragons(state)) {
-        state.dragonSpawnQueue[i].remaining = 0.5;
-        continue;
-      }
-      spawnDragon(state);
-      state.dragonSpawnQueue.splice(i, 1);
-    }
+  // A ritual can only wait on a Beacon that still exists: if every Beacon has
+  // been torn down mid-ritual there is nothing for the cap to recover to, so
+  // refund the blood rather than spinning on the retry below forever.
+  if (state.dragonSpawnQueue.length > 0
+      && ![...state.buildings.values()].some((b) => b.kind === 'dragon_beacon')) {
+    state.blood += DRAGON.bloodCost * state.dragonSpawnQueue.length;
+    state.dragonSpawnQueue.length = 0;
+    appendLog(state, 'No Dragon Beacon remains; the ritual fizzles and its blood is refunded.');
   }
+  // Hold a completed ritual if the overworld is already at its dragon
+  // ceiling (e.g. a Beacon went dormant mid-ritual, dropping the cap) —
+  // retry shortly rather than overshooting, the way the Minotaur track
+  // waits on a blocked hole.
+  advanceQueue(state.dragonSpawnQueue, () => {
+    if (state.dragons.size >= maxOverworldDragons(state)) return false;
+    spawnDragon(state);
+    return true;
+  });
 
   // ── 1d. Robot assembly queue ─────────────────────────────────────
   // Mirrors the Minotaur track: money was charged at queue time; if every
   // hole exit is blocked when assembly completes, retry shortly rather than
-  // burning the slot.
-  for (let i = state.robotSpawnQueue.length - 1; i >= 0; i--) {
-    state.robotSpawnQueue[i].remaining -= TICK_S;
-    if (state.robotSpawnQueue[i].remaining <= 0) {
-      if (spawnRobot(state)) {
-        state.robotSpawnQueue.splice(i, 1);
-      } else {
-        state.robotSpawnQueue[i].remaining = 0.5;
-      }
-    }
-  }
-  // Terminators assemble on their own single-slot track, same retry rule.
-  for (let i = state.terminatorSpawnQueue.length - 1; i >= 0; i--) {
-    state.terminatorSpawnQueue[i].remaining -= TICK_S;
-    if (state.terminatorSpawnQueue[i].remaining <= 0) {
-      if (spawnRobot(state, true)) {
-        state.terminatorSpawnQueue.splice(i, 1);
-      } else {
-        state.terminatorSpawnQueue[i].remaining = 0.5;
-      }
-    }
-  }
+  // burning the slot. Terminators assemble on their own single-slot track.
+  advanceQueue(state.robotSpawnQueue, () => spawnRobot(state));
+  advanceQueue(state.terminatorSpawnQueue, () => spawnRobot(state, true));
   // Pain Gabbonsaw channels on its own one-shot bar. When it completes the
   // ritual is owned and main.ts (which owns the cutscene + camera) picks up
   // the pending flag to bring Bob back and loose Lolly.
@@ -928,7 +917,8 @@ function spawnGoblin(state: GameState, forceGold = false) {
   }
   // Try each hole starting at the rotation index; pick the first that yields a
   // reachable free emergence cell (one a goblin could actually walk out to — a
-  // hole walled over yields none). Bump rotation regardless so spawns spread out.
+  // hole walled over yields none). The rotation advances past whichever hole
+  // spawned so consecutive spawns spread across the holes.
   const start = state.spawnHoleRotation % holeCells.length;
   let cell: Cell | null = null;
   let spawnHole: Cell | null = null;
@@ -2585,9 +2575,7 @@ function dragonLift(state: GameState, d: Dragon, b: Building) {
   for (const gid of b.assignedGoblins) {
     const g = state.goblins.get(gid);
     if (!g) continue;
-    g.state = { kind: 'idle' };
-    g.goal = null;
-    g.path = [];
+    idleGoblin(g);
   }
   b.assignedGoblins = [];
   b.selected = false;
@@ -3371,7 +3359,7 @@ function nearestFreeNeighbor(state: GameState, cell: Cell, hunter: Goblin): Cell
   return best;
 }
 
-// Cells on the ring just outside the 2×2 hole footprint, sorted with a
+// Cells on the ring just outside the original hole's footprint, sorted with a
 // strong rightward bias and a mild "stay near the centerline" tiebreak.
 // Minotaurs spawn straight onto the hole ring (no reachability flood — they're
 // summoned, not hatched) but the spawn-blocked check ignores goblin occupancy
@@ -3464,7 +3452,7 @@ function updateGoblin(state: GameState, g: Goblin) {
 
     case 'going_to_build': {
       const b = state.buildings.get(s.buildingId);
-      if (!b) { g.goal = null; g.path = []; g.state = { kind: 'idle' }; return; }
+      if (!b) { idleGoblin(g); return; }
       const buildDef = defOf(b);
 
       // At-commit capacity check: count other goblins already in 'building' state.
@@ -3479,9 +3467,7 @@ function updateGoblin(state: GameState, g: Goblin) {
         if (workers >= buildDef.buildersRequired) {
           const i = b.assignedGoblins.indexOf(g.id);
           if (i >= 0) b.assignedGoblins.splice(i, 1);
-          g.state = { kind: 'idle' };
-          g.goal = null;
-          g.path = [];
+          idleGoblin(g);
           return false;
         }
         g.goal = null;
@@ -3532,7 +3518,7 @@ function updateGoblin(state: GameState, g: Goblin) {
 
     case 'going_to_maintain': {
       const b = state.buildings.get(s.buildingId);
-      if (!b) { g.goal = null; g.path = []; g.state = { kind: 'idle' }; return; }
+      if (!b) { idleGoblin(g); return; }
       const def = defOf(b);
       const slot = maintainerSlot(state, b, g);
       if (!slot) return;
@@ -3547,9 +3533,7 @@ function updateGoblin(state: GameState, g: Goblin) {
         if (m >= def.maintainersRequired) {
           const i = b.assignedGoblins.indexOf(g.id);
           if (i >= 0) b.assignedGoblins.splice(i, 1);
-          g.state = { kind: 'idle' };
-          g.goal = null;
-          g.path = [];
+          idleGoblin(g);
           return;
         }
         g.goal = null;
@@ -3567,7 +3551,7 @@ function updateGoblin(state: GameState, g: Goblin) {
 
     case 'building': {
       const bb = state.buildings.get(s.buildingId);
-      if (!bb) { g.state = { kind: 'idle' }; g.goal = null; g.path = []; return; }
+      if (!bb) { idleGoblin(g); return; }
       // Random idle-fidget every ~5s while standing inside the footprint
       // (typically waiting for the rest of the build crew to show up). Picks
       // a free 8-neighbor cell that's still inside the footprint and steps
@@ -3606,9 +3590,7 @@ function updateGoblin(state: GameState, g: Goblin) {
           const i = b.assignedGoblins.indexOf(g.id);
           if (i >= 0) b.assignedGoblins.splice(i, 1);
         }
-        g.state = { kind: 'idle' };
-        g.goal = null;
-        g.path = [];
+        idleGoblin(g);
         return;
       }
       // Stuck check: if the goblin hasn't progressed a cell in 3s while on
@@ -3617,9 +3599,7 @@ function updateGoblin(state: GameState, g: Goblin) {
         const i = b.assignedGoblins.indexOf(g.id);
         if (i >= 0) b.assignedGoblins.splice(i, 1);
         appendLog(state, `Goblin #${g.id} stuck — water duty cancelled.`);
-        g.state = { kind: 'idle' };
-        g.goal = null;
-        g.path = [];
+        idleGoblin(g);
         return;
       }
       // 'to_source' counts as arrived once we step into ANY cell of the water
@@ -3695,9 +3675,7 @@ function updateGoblin(state: GameState, g: Goblin) {
       // No target or self-target — stand down. A robot target stays valid:
       // the attacker chases and swings, the chassis just shrugs it off.
       if (!target || target.id === g.id) {
-        g.state = { kind: 'idle' };
-        g.goal = null;
-        g.path = [];
+        idleGoblin(g);
         return;
       }
       const dx = Math.abs(target.cell.cx - g.cell.cx);
@@ -3722,9 +3700,7 @@ function updateGoblin(state: GameState, g: Goblin) {
         if (target.robot) {
           robotImmuneFlash(state, target);
           appendLog(state, `Goblin #${g.id}'s blow glances off ${target.terminator ? 'Terminator' : 'Robot'} #${target.id}.`);
-          g.state = { kind: 'idle' };
-          g.goal = null;
-          g.path = [];
+          idleGoblin(g);
           return;
         }
         const tx = target.pos.x, ty = target.pos.y;
@@ -3741,9 +3717,7 @@ function updateGoblin(state: GameState, g: Goblin) {
         playSound('goblin_death', 0.56);
         if (wasGold) playSound('cash', 0.7);
         appendLog(state, `Goblin #${target.id} killed by #${g.id}.`);
-        g.state = { kind: 'idle' };
-        g.goal = null;
-        g.path = [];
+        idleGoblin(g);
         return;
       }
       // Target's own cell is blocked by the target itself, so we'd never
@@ -3764,9 +3738,7 @@ function updateGoblin(state: GameState, g: Goblin) {
       // never matters — a 'no effect' floater over her head, then idle.
       const L = state.finale ? null : state.lolly;
       if (!L) {
-        g.state = { kind: 'idle' };
-        g.goal = null;
-        g.path = [];
+        idleGoblin(g);
         return;
       }
       const dist = Math.hypot(L.pos.x - g.pos.x, L.pos.y - g.pos.y);
@@ -3785,9 +3757,7 @@ function updateGoblin(state: GameState, g: Goblin) {
           return;
         }
         lollyNoEffectFlash(state);
-        g.state = { kind: 'idle' };
-        g.goal = null;
-        g.path = [];
+        idleGoblin(g);
         return;
       }
       // Keep chasing her live position (she's grid-free; her cell is walkable).
@@ -3815,9 +3785,7 @@ function updateGoblin(state: GameState, g: Goblin) {
       // down. A robot target stays valid: the beam fires and the chassis
       // soaks it with an "immune" floater below. Same for Lolly ('no effect').
       if (!g.robot || !target || (s.targetKind === 'goblin' && s.targetId === g.id)) {
-        g.state = { kind: 'idle' };
-        g.goal = null;
-        g.path = [];
+        idleGoblin(g);
         return;
       }
       g.goal = null;
@@ -3855,7 +3823,7 @@ function updateGoblin(state: GameState, g: Goblin) {
 
     case 'maintaining': {
       const b = state.buildings.get(s.buildingId);
-      if (!b) { g.state = { kind: 'idle' }; g.goal = null; g.path = []; return; }
+      if (!b) { idleGoblin(g); return; }
       // Visual-flair wander: every wander interval, try a single random step
       // to an adjacent free footprint cell. No goal, no pathfinding.
       g.goal = null;
@@ -3978,15 +3946,6 @@ function maintainerSlot(state: GameState, b: Building, g: Goblin): Cell | null {
 }
 
 // ─── Pathfinding (BFS over the cell grid) ───────────────────────────
-function preferredDir(from: Cell, to: Cell): Dir {
-  const sx = Math.sign(to.cx - from.cx);
-  const sy = Math.sign(to.cy - from.cy);
-  for (const d of ALL_DIRS) {
-    if (DX[d] === sx && DY[d] === sy) return d;
-  }
-  return 0;
-}
-
 function exemptBuildingFor(state: GameState, g: Goblin): number | undefined {
   const s = g.state;
   if (s.kind === 'going_to_maintain' || s.kind === 'going_to_build' ||

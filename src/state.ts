@@ -15,7 +15,6 @@ export const DX: Record<Dir, number> = { 0: 0, 1: 1, 2: 1, 3: 1, 4: 0, 5: -1, 6:
 export const DY: Record<Dir, number> = { 0: -1, 1: -1, 2: 0, 3: 1, 4: 1, 5: 1, 6: 0, 7: -1 };
 export const ALL_DIRS: Dir[] = [0, 1, 2, 3, 4, 5, 6, 7];
 export const CARDINAL_DIRS: Dir[] = [0, 2, 4, 6];
-export function isDiagonal(d: Dir): boolean { return (d & 1) === 1; }
 
 export type GoblinState =
   | { kind: 'idle' }
@@ -597,7 +596,7 @@ export type Ghost = {
   // Selection + walk-command state for the hell view. `hx/hy` are absolute hell
   // coordinates (only set once the ghost has been interacted with or commanded);
   // when set, they're the source of truth instead of the spawnAt+drift formula.
-  // `goal` is a hell-coord destination — the ghost walks to it at HELL_GHOST_WALK_SPEED.
+  // `goal` is a hell-coord destination — the ghost walks to it at HELL.ghostWalkSpeed.
   selected?: boolean;
   hx?: number;
   hy?: number;
@@ -630,7 +629,7 @@ export type Ghost = {
   // Set by the demon's untruth strike: the ghost is hidden and inert (not
   // rendered, not hit-testable, sim-skipped) until state.now reaches this,
   // then re-materialises at his already-set hx/hy with a landing flash
-  // (see the respawn pass at the top of tickGhosts in sim.ts).
+  // (see the ghost respawn pass in sim.ts tick()).
   respawnAt?: number;
 };
 
@@ -724,9 +723,6 @@ export type Hole = {
   selected: boolean;
 };
 
-// Total in-flight spawn slots: base + GOBLIN_HOLE_CAPACITY_PER_BUILDING per
-// completed Goblin Hole building. Computed fresh each tick so the spawn queue
-// always reflects the latest infrastructure.
 // Whether any hole remains for units to crawl out of: the original Goblin
 // Hole (until Lolly tears it out) or any completed Goblin Hole building.
 // Once Lolly has destroyed every last one, nothing can spawn — goblins,
@@ -1880,15 +1876,9 @@ export function countIdle(state: GameState): number {
   return n;
 }
 
-export function totalIncome(state: GameState): number {
-  let inc = 0;
-  for (const b of state.buildings.values()) if (b.state === 'active') inc += defOf(b).income;
-  return inc;
-}
-
 // Stamp a permanent ghost at the world-x/y where a unit died. Called from
-// every kill site (lightning, dragon, minotaur, goblin, tinytaur sacrifice,
-// player kill button). The ghosts list is rendered in Hell. A matching
+// every kill site (lightning, dragon, minotaur, goblin, tinytaur sacrifice).
+// The ghosts list is rendered in Hell. A matching
 // hell-flagged death effect is also spawned so the ghost manifests with a
 // blood splatter — "dying in reverse" as the unit enters the underworld.
 export function recordGhost(
@@ -1997,13 +1987,27 @@ export function currentPowerBoost(state: GameState): number {
   return total;
 }
 
+// Drop every armed placement / aim mode at once. Only one can be live at a
+// time (arming one cancels the rest), and none survives ESC, a right-click, a
+// touch long-press, or a change of world.
+export function clearPendingModes(state: GameState): void {
+  state.pendingBuild = null;
+  state.pendingStrike = false;
+  state.pendingCandle = false;
+  state.pendingOrbital = false;
+  state.pendingSpaceCentre = false;
+  state.pendingOriginalHole = false;
+  state.pendingDesignerUnit = null;
+}
+
 export function removeGoblin(state: GameState, goblinId: number) {
   const g = state.goblins.get(goblinId);
   if (!g) return;
-  // Detach from any building it was assigned to.
+  // Detach from any building it was assigned to (water carriers count — they
+  // hold a slot on their datacentre just like maintainers do).
   const s = g.state;
   if (s.kind === 'going_to_build' || s.kind === 'going_to_maintain' ||
-      s.kind === 'building' || s.kind === 'maintaining') {
+      s.kind === 'building' || s.kind === 'maintaining' || s.kind === 'fetching_water') {
     const b = state.buildings.get(s.buildingId);
     if (b) {
       const i = b.assignedGoblins.indexOf(goblinId);
@@ -2287,7 +2291,6 @@ export function holeCenter(state: GameState): Vec2 {
   });
 }
 
-// True iff a building's footprint covers any of the Goblin Hole's 2×2 cells.
 // Money cost to build `kind` right now. Fixed at BUILDING_DEFS.cost for most
 // kinds, but the Goblin Hole doubles for every Goblin Hole already in play — so
 // it starts at its base price and gets twice as steep with each one placed.
@@ -2325,19 +2328,6 @@ export function waterCarrierCount(state: GameState, b: Building): number {
   for (const id of b.assignedGoblins) {
     const g = state.goblins.get(id);
     if (g && g.state.kind === 'fetching_water' && g.state.buildingId === b.id) n++;
-  }
-  return n;
-}
-
-// Only carriers who have actually delivered water (completed at least one
-// source → DC round trip). Used to decide whether the DC counts as watered.
-export function effectiveWaterCarrierCount(state: GameState, b: Building): number {
-  let n = 0;
-  for (const id of b.assignedGoblins) {
-    const g = state.goblins.get(id);
-    if (g && g.state.kind === 'fetching_water'
-        && g.state.buildingId === b.id
-        && g.state.firstLoopDone) n++;
   }
   return n;
 }

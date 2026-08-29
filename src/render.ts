@@ -90,8 +90,14 @@ async function loadSheet(base: string): Promise<Sheet> {
 // to the building's pixel size. The colored body / border / short label
 // underneath are independently toggleable via options.
 const buildingTextures: Partial<Record<BuildingKind, Texture>> = {};
+// Kinds with no PNG under assets/buildings — drawn procedurally (the portal
+// beam, the space structures). Skipping them spares a 404 per kind per boot.
+const PROCEDURAL_BUILDINGS: ReadonlySet<BuildingKind> = new Set<BuildingKind>([
+  'hell_portal', 'orbital_platform', 'space_centre',
+]);
+
 async function loadBuildingTextures(): Promise<void> {
-  const kinds = Object.keys(BUILDING_DEFS) as BuildingKind[];
+  const kinds = (Object.keys(BUILDING_DEFS) as BuildingKind[]).filter((k) => !PROCEDURAL_BUILDINGS.has(k));
   await Promise.all(kinds.map(async (k) => {
     try {
       buildingTextures[k] = await Assets.load<Texture>(`assets/buildings/${k}.png`);

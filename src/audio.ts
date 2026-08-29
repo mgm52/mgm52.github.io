@@ -372,7 +372,6 @@ export function setMusicVolume(v: number) {
   if (musicEl && !musicStopped) musicEl.volume = effectiveMusicVolume();
   if (crackleEl) crackleEl.volume = effectiveCrackleVolume();
 }
-export function setMuted(m: boolean) { muted = m; }
 export function setInHellView(b: boolean) { inHellView = b; }
 
 // ─── Looping background music ───────────────────────────────────────

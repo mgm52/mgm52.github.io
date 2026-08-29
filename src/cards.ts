@@ -34,8 +34,7 @@ import {
   salonName, salonTierForDepth, sceneStructureCounts, tradeKeepsAWorld, WantSeg,
   wantSatisfiedBy, wantSegments,
 } from './cards-core';
-
-const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
+import { sleep, waitForAdvance } from './util';
 
 // Every sound in the realm rides the ghostly reverb bus (audio.ts: lowpass +
 // cavern convolver, the hell cries' treatment) at a slightly slowed rate —
@@ -1229,7 +1228,7 @@ async function typeLine(text: string): Promise<void> {
 }
 
 function waitForClick(target: HTMLElement): Promise<void> {
-  return new Promise((resolve) => target.addEventListener('click', () => resolve(), { once: true }));
+  return waitForAdvance(target).done;
 }
 
 async function say(text: string): Promise<void> {
@@ -1289,15 +1288,18 @@ async function goblinOut(): Promise<void> {
 // Soft cross-fade between realm views (table ↔ gathering ↔ trade). The
 // builder resets #card-stage's className, which drops .waiting and lets the
 // opacity transition carry the new view in.
-let stageBusy = false;
+// A second swap requested mid-fade replaces the queued builder rather than
+// racing it, so the view that lands is always the most recent one asked for.
+let pendingViewBuild: (() => void) | null = null;
 function swapView(build: () => void): void {
   const stage = realmEl('card-stage');
-  if (stageBusy) { build(); return; }
-  stageBusy = true;
+  if (pendingViewBuild) { pendingViewBuild = build; return; }
+  pendingViewBuild = build;
   stage.classList.add('waiting');
   window.setTimeout(() => {
-    build();
-    stageBusy = false;
+    const b = pendingViewBuild;
+    pendingViewBuild = null;
+    b?.();
   }, 260);
 }
 

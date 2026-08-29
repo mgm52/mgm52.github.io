@@ -1,17 +1,18 @@
 import { playSound, playSoundReversed, playMinotaurCommand } from './audio';
 import {
-  AUTODRAGON_TIERS, AUTOSPAWN_TIERS, BUILDABLE_KINDS, BUILDING_DEFS, BuildingKind, DRAG_SELECT_HINT_DELAY_SEC, MULTI_SPAWN_HINT_DELAY_SEC,
+  AUTODRAGON_TIERS, AUTOSPAWN_TIERS, BUILDING_DEFS, BuildingKind, DRAG_SELECT_HINT_DELAY_SEC, MULTI_SPAWN_HINT_DELAY_SEC,
   DRAGON, GOBLIN, LIGHTNING, PAIN_GABBONSAW, PAN_HINT_DELAY_SEC, ROBOT, SPAWN_HINT_NO_SPAWN_SEC,
   SPAWN_HINT_NO_TASK_SEC, SPACE, SPACE_UNIT, SUMMON_UPGRADES, TERMINATOR, WATER_HINT_DELAY_SEC, digBloodCost, MINOTAUR, minotaurBloodCost, TINYTAUR, formatPower, SOUL_SIGIL, sigilPortalOutput,
 } from './config';
 import {
   Building, Cell, Demon, DragonState, GameState, Ghost, Goblin, GoblinState, SoulChair, SpaceBuilding, SpaceUnit, Vec2, WaterSource,
-  anySpawnHole, appendLog, buildingAtCell, buildingCenter, buildingLabel, buildingMoneyCost, cellCenter, cellKey, chairSoulSnapshot, countHypercentres, countIdle, countSpaceCentres, defOf, digDirection, dragonsAtCap,
+  activeDragonBeaconCount, anySpawnHole, appendLog, buildingAtCell, buildingCenter, buildingLabel, buildingMoneyCost, cellCenter, cellKey, chairSoulSnapshot, countHypercentres, countSpaceCentres, defOf, digDirection, dragonsAtCap,
   earnDragonBone, findHoleEmergenceCell, getSpawnCapacity, goblinSpawningBlocked, hellMirrorCenter, holeBlockedByBuilding, holeCells, isCellBlocked, isCellInBuilding, isInBounds,
   maintainerCount, markBuildingsChanged, maxOverworldDragons, nextBuildingDisplayNum, occupyCell, spaceCentreMaintainerCount, spaceStructureOverlapAt, waterCarrierCount, lightningActive,
 } from './state';
 import { spawnDragon, spawnMinotaur, spawnRobot, unseatSoulFromChair } from './sim';
 import { isModalDialogueActive } from './demon-dialogue';
+import { designerNow, spectatingNow } from './holds';
 import { unlockOptionsCog } from './options-ui';
 
 // Build buttons appear in this fixed order, mostly cheapest-first. goblin_hole
@@ -713,7 +714,6 @@ export type UICallbacks = {
   onBuildBuilding: (kind: BuildingKind) => void;
   onPlaceCandle: () => void;
   onDestroyBuilding: (id: number) => void;
-  onKillGoblin: (id: number) => void;
 };
 
 export function setupUI(state: GameState, callbacks: UICallbacks) {
@@ -1305,7 +1305,7 @@ export function setupUI(state: GameState, callbacks: UICallbacks) {
   destroyBtn.addEventListener('click', () => {
     // Designer-only: deleting the selected original Goblin Hole just flags it
     // destroyed (it's state.hole, not a Building) and drops the selection.
-    if (state.hole.selected && document.body.classList.contains('world-designer-active')) {
+    if (state.hole.selected && designerNow()) {
       state.holeDestroyed = true;
       state.hole.selected = false;
       playSound('destroy', 0.5);
@@ -1315,7 +1315,7 @@ export function setupUI(state: GameState, callbacks: UICallbacks) {
     if (!target) return;
     // Designer mode: tear down every selected building instantly (no minotaur
     // needed) — an authoring sandbox, mirroring the free instant-place flow.
-    if (document.body.classList.contains('world-designer-active')) {
+    if (designerNow()) {
       for (const b of [...state.buildings.values()].filter((b) => b.selected)) {
         callbacks.onDestroyBuilding(b.id);
       }
@@ -1383,16 +1383,13 @@ export function setupUI(state: GameState, callbacks: UICallbacks) {
     const tgt = e.target as HTMLElement | null;
     if (tgt && (tgt.tagName === 'INPUT' || tgt.tagName === 'SELECT' || tgt.tagName === 'TEXTAREA')) return;
     if (destroyBtn.style.display === 'none') return;
+    // Spectating walls the button off with pointer-events; the shortcut has
+    // to honour the same lock.
+    if (spectatingNow()) return;
     const hasBuilding = [...state.buildings.values()].some((b) => b.selected);
     if (!hasBuilding && !state.hole.selected) return;
     e.preventDefault();
     destroyBtn.click();
-  });
-
-  // Kill button — kills every currently-selected goblin.
-  document.getElementById('info-kill')!.addEventListener('click', () => {
-    const ids = [...state.goblins.values()].filter(g => g.selected).map(g => g.id);
-    for (const id of ids) callbacks.onKillGoblin(id);
   });
 
   // Free-soul button — unseats the bound soul from the selected chair. The
@@ -1405,6 +1402,9 @@ export function setupUI(state: GameState, callbacks: UICallbacks) {
     if (ghost) {
       chair.selected = false;
       ghost.selected = true;
+      playSound('click', 0.8, 0.9);
+    } else {
+      playSound('error');
     }
   });
 
@@ -1585,10 +1585,7 @@ function refreshAutodragonButton(state: GameState, unlocked: boolean): void {
   const canAfford = state.blood >= next.bloodCost;
   cost.classList.toggle('met', canAfford);
   cost.classList.remove('owned');
-  let activeBeacons = 0;
-  for (const b of state.buildings.values()) {
-    if (b.kind === 'dragon_beacon' && b.state === 'active') activeBeacons++;
-  }
+  const activeBeacons = activeDragonBeaconCount(state);
   const needsBeacons = next.multiplier > activeBeacons;
   warn.style.display = needsBeacons ? '' : 'none';
   btn.disabled = !canAfford || needsBeacons;
@@ -1645,11 +1642,10 @@ export function refreshUI(state: GameState) {
       if (u.minotaurEverSummoned) minotaurEverSummoned = true;
     }
   }
-  const idle = countIdle(state);
-
   setText('money', Math.floor(state.money).toLocaleString('en-US'));
 
-  // Blood resource — hidden until the player kills their first goblin.
+  // Blood — shown from the start (the row doubles as a hint that goblins are
+  // worth more dead); bloodUnlocked only gates hints and the candle tutorial.
   setText('blood', state.blood.toString());
 
   // Dragon Bones — row stays hidden until the first one is collected, then
@@ -1775,10 +1771,7 @@ export function refreshUI(state: GameState) {
   // spawn-queue cap equals the active-beacon count (live dragons are uncapped,
   // mirroring how Goblin Holes cap the spawn queue but not live goblins).
   const dragonBtn = document.getElementById('btn-summon-dragon') as HTMLButtonElement;
-  let activeBeaconCount = 0;
-  for (const b of state.buildings.values()) {
-    if (b.kind === 'dragon_beacon' && b.state === 'active') activeBeaconCount++;
-  }
+  const activeBeaconCount = activeDragonBeaconCount(state);
   if (activeBeaconCount > 0) {
     dragonBtn.style.display = '';
     applyFadeInOnFirstShow('btn-summon-dragon');
@@ -2013,7 +2006,9 @@ export function refreshUI(state: GameState) {
     // Unlike the other rituals (which act on the overworld from anywhere),
     // the strike has to be AIMED at the ground — disable it off-ground.
     const offGround = state.view !== 'ground';
-    lightningBtn.disabled = !canAffordLightning || onCooldown || offGround;
+    // An armed strike keeps the button live so it can always be toggled off
+    // (main.ts's handler lets a cancel through the cooldown for the same reason).
+    lightningBtn.disabled = !state.pendingStrike && (!canAffordLightning || onCooldown || offGround);
     lightningBtn.classList.toggle('active', state.pendingStrike);
     document.getElementById('cost-lightning-strike')!.classList.toggle('met', canAffordLightning && !onCooldown && !offGround);
     // Mid-aim bankruptcy (mirrors the candle): if the player can no longer
@@ -2252,7 +2247,7 @@ export function refreshUI(state: GameState) {
   // In the World Designer every building is free (input.ts places straight to
   // active without charging), so the buttons must never gate on price or power
   // either — otherwise a world authored at Ƶ0 can't be laid out at all.
-  const designerFree = document.body.classList.contains('world-designer-active');
+  const designerFree = designerNow();
   for (const kind of SORTED_KINDS) {
     const def = BUILDING_DEFS[kind];
     const btn = document.getElementById(btnId(kind)) as HTMLButtonElement;
@@ -2438,20 +2433,20 @@ export function refreshUI(state: GameState) {
     hint.textContent = 'choose a spawning hole';
   } else if (state.pendingStrike) {
     hint.style.display = 'block';
-    hint.textContent = 'Tap to call down lightning · tap the button again or press ESC to cancel';
+    hint.textContent = `Tap to call down lightning · ${CANCEL_HINT}`;
   } else if (state.pendingBuild) {
     const name = BUILDING_DEFS[state.pendingBuild.kind].name;
     hint.style.display = 'block';
-    hint.textContent = `Tap to place ${name} · tap the button again or press ESC to cancel`;
+    hint.textContent = `Tap to place ${name} · ${CANCEL_HINT}`;
   } else if (state.pendingCandle) {
     hint.style.display = 'block';
-    hint.textContent = 'Tap to place Candle · tap the button again or press ESC to cancel';
+    hint.textContent = `Tap to place Candle · ${CANCEL_HINT}`;
   } else if (state.pendingOrbital) {
     hint.style.display = 'block';
-    hint.textContent = 'Tap the void to deploy an Orbital Platform · tap the button again or press ESC to cancel';
+    hint.textContent = `Tap the void to deploy an Orbital Platform · ${CANCEL_HINT}`;
   } else if (state.pendingSpaceCentre) {
     hint.style.display = 'block';
-    hint.textContent = 'Tap an Orbital Platform to build a Space Centre · tap the button again or press ESC to cancel';
+    hint.textContent = `Tap an Orbital Platform to build a Space Centre · ${CANCEL_HINT}`;
   } else {
     hint.style.display = 'none';
   }
@@ -2570,10 +2565,8 @@ function refreshInfoPanel(state: GameState) {
     : null;
 
   const destroyBtn = document.getElementById('info-destroy')!;
-  const killBtn = document.getElementById('info-kill')!;
   const unseatBtn = document.getElementById('info-unseat')!;
   destroyBtn.style.display = 'none';
-  killBtn.style.display = 'none';
   unseatBtn.style.display = 'none';
   const selectedDemon = [...state.demons.values()].find((d) => d.selected) ?? null;
   const selectedChair = state.soulChairs.find((c) => c.selected) ?? null;
@@ -2661,7 +2654,7 @@ function refreshInfoPanel(state: GameState) {
     showHole(state, panel, portrait, name, stateEl, extra);
     // Designer-only: the original hole can be deleted (holeDestroyed) straight
     // from its panel, mirroring the free instant building destroy.
-    if (document.body.classList.contains('world-designer-active') && !state.holeDestroyed) {
+    if (designerNow() && !state.holeDestroyed) {
       destroyBtn.style.display = '';
     }
   } else if (selectedWater) {
@@ -2928,6 +2921,12 @@ function showGoblin(state: GameState, g: Goblin, panel: HTMLElement, portrait: H
 // long-press handler in input.ts) and there's no spacebar, so reword the
 // command hints from "Right click … (or space)" to "Long tap …".
 const TOUCH_PRIMARY = window.matchMedia('(pointer: coarse)').matches;
+
+// Tail of every placement/aim hint: how to back out of the pending mode.
+// Touch has no ESC or right-click; a long press cancels instead (input.ts).
+const CANCEL_HINT = TOUCH_PRIMARY
+  ? 'tap the button again or long-press to cancel'
+  : 'tap the button again, right-click or press ESC to cancel';
 
 function commandHintText(scope: 'anywhere' | 'target'): string {
   const where = scope === 'anywhere' ? 'anywhere' : 'a building, unit, or spot';
