@@ -2,13 +2,14 @@ import { Application, Container, FederatedPointerEvent, Graphics } from 'pixi.js
 import { playSound, playGhostCommand, playMinotaurCommand } from './audio';
 import { flashCursor } from './cursor-fx';
 import { bobOverworldBark, demonRebuke, finaleBark } from './demon-dialogue';
-import { BUILDABLE_KINDS, BUILDING_DEFS, BuildingKind, CELL, DRAGON, GOBLIN, HELL, LIGHTNING, LOLLY, MAX_SELECTED_UNITS, MINOTAUR, SOUL_SIGIL, SPACE, SPACE_UNIT, WORLD, formatPower } from './config';
+import { BUILDABLE_KINDS, BUILDING_DEFS, BuildingKind, CELL, DRAGON, GOBLIN, HELL, LIGHTNING, LOLLY, MAX_SELECTED_UNITS, MINOTAUR, SOUL_SIGIL, SPACE, SPACE_UNIT, formatPower } from './config';
+import { designerNow, spectatingNow } from './holds';
 import { runBobCutscene } from './intro';
 import { RenderContext, ambientDragonAt, clampCamera, clampHellCamera, clampSpaceCamera, currentHellScale, ghostAtHell, ghostHellPos } from './render';
 import { autoAssignAllIdle, lightningStrike, spawnBob, unseatSoulFromChair } from './sim';
 import {
   Building, Cell, Dragon, GameState, Ghost, Goblin, Minotaur, SpaceUnit, WaterSource,
-  appendLog, buildingAtCell, buildingMoneyCost, candleSpotAt, cellKey, defOf, demonAtHell, findFreeCellNear,
+  appendLog, buildingAtCell, buildingMoneyCost, candleSpotAt, cellKey, clearPendingModes, defOf, demonAtHell, findFreeCellNear,
   hellPortalAt, holeAtCell, isInBounds, markBuildingsChanged, moonAt, nextBuildingDisplayNum, pixelToCell, placeCandle, pushFloater,
   soulChairAt, spaceBuildingAt, spaceStructureOverlapAt, spaceUnitAt, waterCarrierCount, waterSourceAtCell,
   freePlatformAt,
@@ -24,20 +25,6 @@ const FINALE_REFUSAL_LINES = [
 ];
 function finaleRefusalLine(): string {
   return FINALE_REFUSAL_LINES[Math.floor(Math.random() * FINALE_REFUSAL_LINES.length)];
-}
-
-// Spectating a trader's card world (cards.ts sets the class for the whole
-// visit): looking and selecting are fine, but the world takes no orders.
-function spectatingNow(): boolean {
-  return document.body.classList.contains('spectate-hold');
-}
-
-// In the dev World Designer (setupDesignerChrome tags the body): every building
-// is free, placed straight to active, and drag-paintable like a wall — so the
-// dev can lay out a world fast. Outside the designer this is always false and
-// the normal cost/construction path runs.
-function designerNow(): boolean {
-  return document.body.classList.contains('world-designer-active');
 }
 
 type ActivePointer = {
@@ -236,8 +223,13 @@ export function setupInput(
 
     if (e.button === 2) {
       flashCursor(e.clientX, e.clientY);
-      // Right-click cancels a pending strike rather than issuing a unit order.
-      if (state.pendingStrike) { state.pendingStrike = false; input.placementGhost.clear(); return; }
+      // Right-click cancels a pending strike / build placement rather than
+      // issuing a unit order (the RTS convention; touch long-press does the same).
+      if (state.pendingStrike || state.pendingBuild) {
+        clearPendingModes(state);
+        input.placementGhost.clear();
+        return;
+      }
       handleRightClick(state, local.x, local.y);
       return;
     }
@@ -691,12 +683,7 @@ export function setupInput(
 
   window.addEventListener('keydown', (e) => {
     if (e.key === 'Escape') {
-      state.pendingBuild = null;
-      state.pendingStrike = false;
-      state.pendingCandle = false;
-      state.pendingOrbital = false;
-      state.pendingSpaceCentre = false;
-      state.pendingOriginalHole = false;
+      clearPendingModes(state);
       input.placementGhost.clear();
       return;
     }
@@ -842,10 +829,7 @@ function scheduleLongPress(
     input.spaceTapStart = null;
     if (state.pendingBuild || state.pendingCandle || state.pendingOrbital || state.pendingSpaceCentre) {
       // No keyboard ESC on touch — long-press cancels pending placement.
-      state.pendingBuild = null;
-      state.pendingCandle = false;
-      state.pendingOrbital = false;
-      state.pendingSpaceCentre = false;
+      clearPendingModes(state);
       input.placementGhost.clear();
       return;
     }
@@ -1966,8 +1950,7 @@ function maybeTriggerBobCutscene(state: GameState, b: Building, kindName: string
   // of any pending build/strike — both surface a cursor ghost that would
   // otherwise still follow the mouse during the dialogue.
   const onHold = () => {
-    state.pendingBuild = null;
-    state.pendingStrike = false;
+    clearPendingModes(state);
   };
   void runBobCutscene(ord, kindName, onHold).then((res) => {
     bobCutsceneRunning = false;

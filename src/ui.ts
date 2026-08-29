@@ -12,6 +12,7 @@ import {
 } from './state';
 import { spawnDragon, spawnMinotaur, spawnRobot, unseatSoulFromChair } from './sim';
 import { isModalDialogueActive } from './demon-dialogue';
+import { designerNow, spectatingNow } from './holds';
 import { unlockOptionsCog } from './options-ui';
 
 // Build buttons appear in this fixed order, mostly cheapest-first. goblin_hole
@@ -713,7 +714,6 @@ export type UICallbacks = {
   onBuildBuilding: (kind: BuildingKind) => void;
   onPlaceCandle: () => void;
   onDestroyBuilding: (id: number) => void;
-  onKillGoblin: (id: number) => void;
 };
 
 export function setupUI(state: GameState, callbacks: UICallbacks) {
@@ -1305,7 +1305,7 @@ export function setupUI(state: GameState, callbacks: UICallbacks) {
   destroyBtn.addEventListener('click', () => {
     // Designer-only: deleting the selected original Goblin Hole just flags it
     // destroyed (it's state.hole, not a Building) and drops the selection.
-    if (state.hole.selected && document.body.classList.contains('world-designer-active')) {
+    if (state.hole.selected && designerNow()) {
       state.holeDestroyed = true;
       state.hole.selected = false;
       playSound('destroy', 0.5);
@@ -1315,7 +1315,7 @@ export function setupUI(state: GameState, callbacks: UICallbacks) {
     if (!target) return;
     // Designer mode: tear down every selected building instantly (no minotaur
     // needed) — an authoring sandbox, mirroring the free instant-place flow.
-    if (document.body.classList.contains('world-designer-active')) {
+    if (designerNow()) {
       for (const b of [...state.buildings.values()].filter((b) => b.selected)) {
         callbacks.onDestroyBuilding(b.id);
       }
@@ -1383,16 +1383,13 @@ export function setupUI(state: GameState, callbacks: UICallbacks) {
     const tgt = e.target as HTMLElement | null;
     if (tgt && (tgt.tagName === 'INPUT' || tgt.tagName === 'SELECT' || tgt.tagName === 'TEXTAREA')) return;
     if (destroyBtn.style.display === 'none') return;
+    // Spectating walls the button off with pointer-events; the shortcut has
+    // to honour the same lock.
+    if (spectatingNow()) return;
     const hasBuilding = [...state.buildings.values()].some((b) => b.selected);
     if (!hasBuilding && !state.hole.selected) return;
     e.preventDefault();
     destroyBtn.click();
-  });
-
-  // Kill button — kills every currently-selected goblin.
-  document.getElementById('info-kill')!.addEventListener('click', () => {
-    const ids = [...state.goblins.values()].filter(g => g.selected).map(g => g.id);
-    for (const id of ids) callbacks.onKillGoblin(id);
   });
 
   // Free-soul button — unseats the bound soul from the selected chair. The
@@ -1405,6 +1402,9 @@ export function setupUI(state: GameState, callbacks: UICallbacks) {
     if (ghost) {
       chair.selected = false;
       ghost.selected = true;
+      playSound('click', 0.8, 0.9);
+    } else {
+      playSound('error');
     }
   });
 
@@ -2006,7 +2006,9 @@ export function refreshUI(state: GameState) {
     // Unlike the other rituals (which act on the overworld from anywhere),
     // the strike has to be AIMED at the ground — disable it off-ground.
     const offGround = state.view !== 'ground';
-    lightningBtn.disabled = !canAffordLightning || onCooldown || offGround;
+    // An armed strike keeps the button live so it can always be toggled off
+    // (main.ts's handler lets a cancel through the cooldown for the same reason).
+    lightningBtn.disabled = !state.pendingStrike && (!canAffordLightning || onCooldown || offGround);
     lightningBtn.classList.toggle('active', state.pendingStrike);
     document.getElementById('cost-lightning-strike')!.classList.toggle('met', canAffordLightning && !onCooldown && !offGround);
     // Mid-aim bankruptcy (mirrors the candle): if the player can no longer
@@ -2555,10 +2557,8 @@ function refreshInfoPanel(state: GameState) {
     : null;
 
   const destroyBtn = document.getElementById('info-destroy')!;
-  const killBtn = document.getElementById('info-kill')!;
   const unseatBtn = document.getElementById('info-unseat')!;
   destroyBtn.style.display = 'none';
-  killBtn.style.display = 'none';
   unseatBtn.style.display = 'none';
   const selectedDemon = [...state.demons.values()].find((d) => d.selected) ?? null;
   const selectedChair = state.soulChairs.find((c) => c.selected) ?? null;
@@ -2646,7 +2646,7 @@ function refreshInfoPanel(state: GameState) {
     showHole(state, panel, portrait, name, stateEl, extra);
     // Designer-only: the original hole can be deleted (holeDestroyed) straight
     // from its panel, mirroring the free instant building destroy.
-    if (document.body.classList.contains('world-designer-active') && !state.holeDestroyed) {
+    if (designerNow() && !state.holeDestroyed) {
       destroyBtn.style.display = '';
     }
   } else if (selectedWater) {

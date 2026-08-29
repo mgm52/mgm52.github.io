@@ -1289,15 +1289,18 @@ async function goblinOut(): Promise<void> {
 // Soft cross-fade between realm views (table ↔ gathering ↔ trade). The
 // builder resets #card-stage's className, which drops .waiting and lets the
 // opacity transition carry the new view in.
-let stageBusy = false;
+// A second swap requested mid-fade replaces the queued builder rather than
+// racing it, so the view that lands is always the most recent one asked for.
+let pendingViewBuild: (() => void) | null = null;
 function swapView(build: () => void): void {
   const stage = realmEl('card-stage');
-  if (stageBusy) { build(); return; }
-  stageBusy = true;
+  if (pendingViewBuild) { pendingViewBuild = build; return; }
+  pendingViewBuild = build;
   stage.classList.add('waiting');
   window.setTimeout(() => {
-    build();
-    stageBusy = false;
+    const b = pendingViewBuild;
+    pendingViewBuild = null;
+    b?.();
   }, 260);
 }
 

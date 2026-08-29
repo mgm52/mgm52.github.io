@@ -1978,6 +1978,18 @@ export function currentPowerBoost(state: GameState): number {
   return total;
 }
 
+// Drop every armed placement / aim mode at once. Only one can be live at a
+// time (arming one cancels the rest), and none survives ESC, a right-click, a
+// touch long-press, or a change of world.
+export function clearPendingModes(state: GameState): void {
+  state.pendingBuild = null;
+  state.pendingStrike = false;
+  state.pendingCandle = false;
+  state.pendingOrbital = false;
+  state.pendingSpaceCentre = false;
+  state.pendingOriginalHole = false;
+}
+
 export function removeGoblin(state: GameState, goblinId: number) {
   const g = state.goblins.get(goblinId);
   if (!g) return;
