@@ -1,12 +1,12 @@
 import { playSound, playSoundReversed, playMinotaurCommand } from './audio';
 import {
-  AUTODRAGON_TIERS, AUTOSPAWN_TIERS, BUILDABLE_KINDS, BUILDING_DEFS, BuildingKind, DRAG_SELECT_HINT_DELAY_SEC, MULTI_SPAWN_HINT_DELAY_SEC,
+  AUTODRAGON_TIERS, AUTOSPAWN_TIERS, BUILDING_DEFS, BuildingKind, DRAG_SELECT_HINT_DELAY_SEC, MULTI_SPAWN_HINT_DELAY_SEC,
   DRAGON, GOBLIN, LIGHTNING, PAIN_GABBONSAW, PAN_HINT_DELAY_SEC, ROBOT, SPAWN_HINT_NO_SPAWN_SEC,
   SPAWN_HINT_NO_TASK_SEC, SPACE, SPACE_UNIT, SUMMON_UPGRADES, TERMINATOR, WATER_HINT_DELAY_SEC, digBloodCost, MINOTAUR, minotaurBloodCost, TINYTAUR, formatPower, SOUL_SIGIL, sigilPortalOutput,
 } from './config';
 import {
   Building, Cell, Demon, DragonState, GameState, Ghost, Goblin, GoblinState, SoulChair, SpaceBuilding, SpaceUnit, Vec2, WaterSource,
-  anySpawnHole, appendLog, buildingAtCell, buildingCenter, buildingLabel, buildingMoneyCost, cellCenter, cellKey, chairSoulSnapshot, countHypercentres, countIdle, countSpaceCentres, defOf, digDirection, dragonsAtCap,
+  activeDragonBeaconCount, anySpawnHole, appendLog, buildingAtCell, buildingCenter, buildingLabel, buildingMoneyCost, cellCenter, cellKey, chairSoulSnapshot, countHypercentres, countSpaceCentres, defOf, digDirection, dragonsAtCap,
   earnDragonBone, findHoleEmergenceCell, getSpawnCapacity, goblinSpawningBlocked, hellMirrorCenter, holeBlockedByBuilding, holeCells, isCellBlocked, isCellInBuilding, isInBounds,
   maintainerCount, markBuildingsChanged, maxOverworldDragons, nextBuildingDisplayNum, occupyCell, spaceCentreMaintainerCount, spaceStructureOverlapAt, waterCarrierCount, lightningActive,
 } from './state';
@@ -1585,10 +1585,7 @@ function refreshAutodragonButton(state: GameState, unlocked: boolean): void {
   const canAfford = state.blood >= next.bloodCost;
   cost.classList.toggle('met', canAfford);
   cost.classList.remove('owned');
-  let activeBeacons = 0;
-  for (const b of state.buildings.values()) {
-    if (b.kind === 'dragon_beacon' && b.state === 'active') activeBeacons++;
-  }
+  const activeBeacons = activeDragonBeaconCount(state);
   const needsBeacons = next.multiplier > activeBeacons;
   warn.style.display = needsBeacons ? '' : 'none';
   btn.disabled = !canAfford || needsBeacons;
@@ -1645,11 +1642,10 @@ export function refreshUI(state: GameState) {
       if (u.minotaurEverSummoned) minotaurEverSummoned = true;
     }
   }
-  const idle = countIdle(state);
-
   setText('money', Math.floor(state.money).toLocaleString('en-US'));
 
-  // Blood resource — hidden until the player kills their first goblin.
+  // Blood — shown from the start (the row doubles as a hint that goblins are
+  // worth more dead); bloodUnlocked only gates hints and the candle tutorial.
   setText('blood', state.blood.toString());
 
   // Dragon Bones — row stays hidden until the first one is collected, then
@@ -1775,10 +1771,7 @@ export function refreshUI(state: GameState) {
   // spawn-queue cap equals the active-beacon count (live dragons are uncapped,
   // mirroring how Goblin Holes cap the spawn queue but not live goblins).
   const dragonBtn = document.getElementById('btn-summon-dragon') as HTMLButtonElement;
-  let activeBeaconCount = 0;
-  for (const b of state.buildings.values()) {
-    if (b.kind === 'dragon_beacon' && b.state === 'active') activeBeaconCount++;
-  }
+  const activeBeaconCount = activeDragonBeaconCount(state);
   if (activeBeaconCount > 0) {
     dragonBtn.style.display = '';
     applyFadeInOnFirstShow('btn-summon-dragon');

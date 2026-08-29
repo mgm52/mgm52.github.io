@@ -3,7 +3,7 @@ import { BUILDING_DEFS, BuildingKind, CELL, COLS, DEMON, DRAGON, DRAGON_KILL_REW
 import { DEMON_FACING_ANGLE, getOptions } from './options';
 import {
   ALL_DIRS, Building, Cell, DX, DY, Demon, Dir, Dragon, Finale, FinalePhase, GameState, Ghost, Goblin, HOLE_SIZE, LollyBoostKind, LollyTarget, Minotaur, SoulChair, SpaceBuilding, SpaceUnit, Vec2, WaterSource, lollyBoostState,
-  anySpawnHole, appendLog, buildingAtCell, buildingCenter, buildingFootprint, buildingPerimeter,
+  activeDragonBeaconCount, anySpawnHole, appendLog, buildingAtCell, buildingCenter, buildingFootprint, buildingPerimeter,
   cellCenter, cellKey, chairSoulSnapshot, constructedDragonBeacon, createMoon, currentPowerBoost, defOf, demonScaleOf, destroyBuilding, dragonsAtCap, dragonTargetBuilding,
   earnBlood, earnDragonBone, earnMoney, findHoleEmergenceCell, maxOverworldDragons,
   getSpawnCapacity, holeBlockedByBuilding, holeCenter, isCellBlocked, isCellInBuilding, isCellInWaterSource,
@@ -127,10 +127,7 @@ export function tick(state: GameState) {
     if (state.autoDragonTimer <= 0) {
       state.autoDragonTimer += SUMMON_UPGRADES.autoDragon.intervalSeconds
         / Math.max(1, state.autoDragonMultiplier);
-      let activeBeacons = 0;
-      for (const b of state.buildings.values()) {
-        if (b.kind === 'dragon_beacon' && b.state === 'active') activeBeacons++;
-      }
+      const activeBeacons = activeDragonBeaconCount(state);
       if (activeBeacons > 0
           && state.blood >= DRAGON.bloodCost
           && state.dragonSpawnQueue.length < activeBeacons
@@ -140,6 +137,15 @@ export function tick(state: GameState) {
         appendLog(state, 'Autodragon: a summon ritual begins...');
       }
     }
+  }
+  // A ritual can only wait on a Beacon that still exists: if every Beacon has
+  // been torn down mid-ritual there is nothing for the cap to recover to, so
+  // refund the blood rather than spinning on the retry below forever.
+  if (state.dragonSpawnQueue.length > 0
+      && ![...state.buildings.values()].some((b) => b.kind === 'dragon_beacon')) {
+    state.blood += DRAGON.bloodCost * state.dragonSpawnQueue.length;
+    state.dragonSpawnQueue.length = 0;
+    appendLog(state, 'No Dragon Beacon remains; the ritual fizzles and its blood is refunded.');
   }
   for (let i = state.dragonSpawnQueue.length - 1; i >= 0; i--) {
     state.dragonSpawnQueue[i].remaining -= TICK_S;
@@ -928,7 +934,8 @@ function spawnGoblin(state: GameState, forceGold = false) {
   }
   // Try each hole starting at the rotation index; pick the first that yields a
   // reachable free emergence cell (one a goblin could actually walk out to — a
-  // hole walled over yields none). Bump rotation regardless so spawns spread out.
+  // hole walled over yields none). The rotation advances past whichever hole
+  // spawned so consecutive spawns spread across the holes.
   const start = state.spawnHoleRotation % holeCells.length;
   let cell: Cell | null = null;
   let spawnHole: Cell | null = null;

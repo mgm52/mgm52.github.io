@@ -1981,10 +1981,11 @@ export function currentPowerBoost(state: GameState): number {
 export function removeGoblin(state: GameState, goblinId: number) {
   const g = state.goblins.get(goblinId);
   if (!g) return;
-  // Detach from any building it was assigned to.
+  // Detach from any building it was assigned to (water carriers count — they
+  // hold a slot on their datacentre just like maintainers do).
   const s = g.state;
   if (s.kind === 'going_to_build' || s.kind === 'going_to_maintain' ||
-      s.kind === 'building' || s.kind === 'maintaining') {
+      s.kind === 'building' || s.kind === 'maintaining' || s.kind === 'fetching_water') {
     const b = state.buildings.get(s.buildingId);
     if (b) {
       const i = b.assignedGoblins.indexOf(goblinId);
