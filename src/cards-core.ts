@@ -848,6 +848,10 @@ export function sanitizeCardWorld(st: GameState): void {
   st.bobCheatPending = false;
   st.bobLollyDeparted = true;
   st.view = 'ground';
+  // Designer arming is authoring state, not world content — a card must never
+  // arrive with the dev's palette still in hand.
+  st.pendingDesignerUnit = null;
+  st.pendingOriginalHole = false;
 }
 
 // The power number written on a card: only what the world's POWERED buildings

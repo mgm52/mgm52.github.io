@@ -5,10 +5,10 @@ import { bobOverworldBark, demonRebuke, finaleBark } from './demon-dialogue';
 import { BUILDABLE_KINDS, BUILDING_DEFS, BuildingKind, CELL, DRAGON, GOBLIN, HELL, LIGHTNING, LOLLY, MAX_SELECTED_UNITS, MINOTAUR, SOUL_SIGIL, SPACE, SPACE_UNIT, WORLD, formatPower } from './config';
 import { runBobCutscene } from './intro';
 import { RenderContext, ambientDragonAt, clampCamera, clampHellCamera, clampSpaceCamera, currentHellScale, ghostAtHell, ghostHellPos } from './render';
-import { autoAssignAllIdle, lightningStrike, spawnBob, unseatSoulFromChair } from './sim';
+import { autoAssignAllIdle, lightningStrike, placeDesignerUnit, spawnBob, unseatSoulFromChair } from './sim';
 import {
   Building, Cell, Dragon, GameState, Ghost, Goblin, Minotaur, SpaceUnit, WaterSource,
-  appendLog, buildingAtCell, buildingMoneyCost, candleSpotAt, cellKey, defOf, demonAtHell, findFreeCellNear,
+  appendLog, buildingAtCell, buildingMoneyCost, candleSpotAt, cellKey, defOf, demonAtHell, findFreeCellNear, isGhostUnitKind,
   hellPortalAt, holeAtCell, isInBounds, markBuildingsChanged, moonAt, nextBuildingDisplayNum, pixelToCell, placeCandle, pushFloater,
   soulChairAt, spaceBuildingAt, spaceStructureOverlapAt, spaceUnitAt, waterCarrierCount, waterSourceAtCell,
   freePlatformAt,
@@ -171,6 +171,7 @@ export function setupInput(
         if (e.button === 2 && state.view === 'hell' && input.pointers.size < 2) {
           flashCursor(e.clientX, e.clientY);
           if (state.pendingCandle) { state.pendingCandle = false; return; }
+          if (state.pendingDesignerUnit) { state.pendingDesignerUnit = null; return; }
           const hp = e.getLocalPosition(ctx.hellLayer);
           handleHellRightClick(state, hp.x, hp.y);
         }
@@ -238,6 +239,9 @@ export function setupInput(
       flashCursor(e.clientX, e.clientY);
       // Right-click cancels a pending strike rather than issuing a unit order.
       if (state.pendingStrike) { state.pendingStrike = false; input.placementGhost.clear(); return; }
+      // Same for an armed designer unit — it stays armed across drops, so
+      // right-click is how you put the palette down.
+      if (state.pendingDesignerUnit) { state.pendingDesignerUnit = null; return; }
       handleRightClick(state, local.x, local.y);
       return;
     }
@@ -269,6 +273,14 @@ export function setupInput(
       }
       state.pendingOriginalHole = false;
       input.placementGhost.clear();
+      return;
+    }
+    // Designer-only: drop the armed unit here. Stays armed so a crowd can be
+    // laid down click by click; the ghost kinds are handled on the hell side.
+    if (state.pendingDesignerUnit && !isGhostUnitKind(state.pendingDesignerUnit)) {
+      if (!placeDesignerUnit(state, state.pendingDesignerUnit, local.x, local.y)) {
+        refusePlacement(state, local.x, local.y, 'blocked', 'Cannot place there — blocked.');
+      }
       return;
     }
     if (state.pendingBuild) {
@@ -427,6 +439,12 @@ export function setupInput(
             // the button toggle it off.
             if (state.pendingCandle) {
               tryPlaceCandle(state, ctx, hp.x, hp.y);
+              return;
+            }
+            // Designer-only: conjure the armed soul here. Same stay-armed
+            // behaviour as the candle, so a sigil's worth can be laid down.
+            if (state.pendingDesignerUnit && isGhostUnitKind(state.pendingDesignerUnit)) {
+              placeDesignerUnit(state, state.pendingDesignerUnit, hp.x, hp.y);
               return;
             }
             // A small precise ghost wins over the giant demon hit box behind it,
@@ -697,6 +715,7 @@ export function setupInput(
       state.pendingOrbital = false;
       state.pendingSpaceCentre = false;
       state.pendingOriginalHole = false;
+      state.pendingDesignerUnit = null;
       input.placementGhost.clear();
       return;
     }
@@ -840,12 +859,13 @@ function scheduleLongPress(
     input.isDragging = false;
     input.selectionGfx.clear();
     input.spaceTapStart = null;
-    if (state.pendingBuild || state.pendingCandle || state.pendingOrbital || state.pendingSpaceCentre) {
+    if (state.pendingBuild || state.pendingCandle || state.pendingOrbital || state.pendingSpaceCentre || state.pendingDesignerUnit) {
       // No keyboard ESC on touch — long-press cancels pending placement.
       state.pendingBuild = null;
       state.pendingCandle = false;
       state.pendingOrbital = false;
       state.pendingSpaceCentre = false;
+      state.pendingDesignerUnit = null;
       input.placementGhost.clear();
       return;
     }
@@ -1033,12 +1053,14 @@ function tryPlaceCandle(state: GameState, ctx: RenderContext, hx: number, hy: nu
         : 'Too close to another candle.', 'hell', sizeMult);
     return;
   }
-  if (state.blood < SOUL_SIGIL.candleBloodCost) {
+  // Free in the designer, like every other placement there.
+  const freeCandle = designerNow();
+  if (!freeCandle && state.blood < SOUL_SIGIL.candleBloodCost) {
     refusePlacement(state, hx, hy, `need ${SOUL_SIGIL.candleBloodCost} blood`,
       `Need ${SOUL_SIGIL.candleBloodCost} blood to place a candle.`, 'hell', sizeMult);
     return;
   }
-  state.blood -= SOUL_SIGIL.candleBloodCost;
+  if (!freeCandle) state.blood -= SOUL_SIGIL.candleBloodCost;
   placeCandle(state, spot);
   playSound('place', 1.3);
   const placed = state.soulChairs.filter((c) => c.portalId === spot.portal.id).length;
@@ -1878,7 +1900,10 @@ function placeBuilding(state: GameState, x: number, y: number) {
 // beep on every drag tick.
 function tryPlaceWallAt(state: GameState, cx: number, cy: number, silent: boolean): boolean {
   if (!isInBounds(cx, cy)) return false;
-  if (state.money < 1) {
+  // Free in the designer, like every other building there — a world authored
+  // at Ƶ0 must still be wallable.
+  const free = designerNow();
+  if (!free && state.money < 1) {
     if (!silent) refusePlacement(state, (cx + 0.5) * CELL, (cy + 0.5) * CELL, 'need Ƶ1', 'Not enough Ƶ.');
     return false;
   }
@@ -1888,7 +1913,7 @@ function tryPlaceWallAt(state: GameState, cx: number, cy: number, silent: boolea
     if (!silent) refusePlacement(state, (cx + 0.5) * CELL, (cy + 0.5) * CELL, 'blocked', 'Cannot place there — blocked.');
     return false;
   }
-  state.money -= 1;
+  if (!free) state.money -= 1;
   const b: Building = {
     id: state.nextId++,
     displayNum: nextBuildingDisplayNum(state, 'wall'),

@@ -18,7 +18,7 @@
 // manual-world DB accessors and the shared markCardHop hop guard.
 
 import { clearSave, getRawSave, saveGame, setRawSave } from './save';
-import { GameState, markBuildingsChanged, removeAllUnits } from './state';
+import { DesignerUnitKind, GameState, markBuildingsChanged, removeAllUnits } from './state';
 import { spawnGoldGoblinNow } from './sim';
 import { ALL_TASK_IDS } from './ui';
 import {
@@ -291,6 +291,52 @@ export function setupDesignerChrome(state: GameState): void {
   goldBtn.textContent = '+ GOLDBLIN';
   goldBtn.addEventListener('click', () => spawnGoldGoblinNow(state));
   bar.appendChild(goldBtn);
+
+  // UNIT PALETTE — one toggle per placeable unit. Arming one drops that unit
+  // wherever you click (ground for the living, hell for the souls) and stays
+  // armed so a crowd goes down in one pass; right-click / ESC puts it away.
+  // The summon buttons in the sidebar can't do this: every one of them emerges
+  // at a hole, which is no use for staging a world's starting tableau.
+  const palette = document.createElement('div');
+  palette.className = 'wd-units';
+  const unitBtns: { kind: DesignerUnitKind; el: HTMLButtonElement }[] = [];
+  const syncPalette = () => {
+    for (const u of unitBtns) u.el.classList.toggle('armed', state.pendingDesignerUnit === u.kind);
+  };
+  const unitBtn = (kind: DesignerUnitKind, label: string, hellSide: boolean) => {
+    const b = document.createElement('button');
+    b.type = 'button';
+    b.className = hellSide ? 'wd-unit wd-unit-soul' : 'wd-unit';
+    b.textContent = label;
+    b.title = hellSide ? 'click in the hell view to place' : 'click on the ground to place';
+    b.addEventListener('click', () => {
+      // Arming a unit cancels any other placement mode, and clicking the armed
+      // one again disarms — same toggle feel as a build button.
+      state.pendingDesignerUnit = state.pendingDesignerUnit === kind ? null : kind;
+      state.pendingBuild = null;
+      state.pendingOriginalHole = false;
+      state.pendingCandle = false;
+      syncPalette();
+    });
+    unitBtns.push({ kind, el: b });
+    palette.appendChild(b);
+  };
+  unitBtn('goblin', 'goblin', false);
+  unitBtn('goldblin', 'goldblin', false);
+  unitBtn('minotaur', 'minotaur', false);
+  unitBtn('tinytaur', 'tinytaur', false);
+  unitBtn('dragon', 'dragon', false);
+  unitBtn('robot', 'robot', false);
+  unitBtn('terminator', 'terminator', false);
+  unitBtn('ghost_goblin', 'soul', true);
+  unitBtn('ghost_goldblin', 'gold soul', true);
+  unitBtn('ghost_minotaur', 'mino soul', true);
+  unitBtn('ghost_tinytaur', 'tiny soul', true);
+  unitBtn('ghost_dragon', 'dragon soul', true);
+  // The canvas clears the arming on right-click / ESC, so re-sync the lit
+  // button on a cadence rather than trying to hear about it.
+  window.setInterval(syncPalette, 200);
+  bar.appendChild(palette);
 
   // SAVE / EXIT.
   const actions = document.createElement('div');

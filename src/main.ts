@@ -229,7 +229,10 @@ async function main() {
   // Pixi all init first), so raise the held white-out NOW — before the first
   // await below can let the bare overworld paint — and let the realm settle
   // over it. Mirrors applyFinaleEnded; driveFinale re-applies it idempotently.
-  if (isRealmReturnBoot()) {
+  // Not for a designer launch: it marks the same hop flag to skip the title, and
+  // with the metagame begun (meta exists, no active card) that reads as a realm
+  // return — which would bury the authoring session under an opaque white-out.
+  if (isRealmReturnBoot() && !designerActive()) {
     const w = document.getElementById('finale-white') ?? document.body.appendChild(
       Object.assign(document.createElement('div'), { id: 'finale-white' }));
     w.style.transition = 'none';
@@ -616,10 +619,11 @@ async function main() {
   // In a card world the player can only RUN the world — spawn units — never
   // build in it or buy upgrades; worlds are authored only in the designer.
   // Gates the placement/purchase callbacks below (the UI hides their buttons
-  // too). Main game and designer are untouched: cardWorld is set only on
-  // generated trading-card worlds.
+  // too). The main game is untouched. The DESIGNER is exempt explicitly: its
+  // sandbox carries cardWorld (every world it authors is a card), and authoring
+  // is exactly when building has to work.
   const blockedInCardWorld = (): boolean => {
-    if (!state.cardWorld) return false;
+    if (!state.cardWorld || inDesigner) return false;
     playSound('error');
     return true;
   };
@@ -1431,7 +1435,7 @@ async function main() {
     if (e.key === 'Escape') {
       // input.ts clears any pending placement/aim mode on ESC; only an ESC
       // with nothing armed toggles pause.
-      if (state.pendingBuild || state.pendingStrike || state.pendingCandle || state.pendingOrbital || state.pendingSpaceCentre || state.pendingOriginalHole) return;
+      if (state.pendingBuild || state.pendingStrike || state.pendingCandle || state.pendingOrbital || state.pendingSpaceCentre || state.pendingOriginalHole || state.pendingDesignerUnit) return;
       togglePause();
     } else if (k === 'p') {
       // Ignore P while typing in an input/select (options panel sliders, etc.)

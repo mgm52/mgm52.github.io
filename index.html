@@ -3145,6 +3145,30 @@
         border: 1px solid rgba(230, 200, 90, 0.65);
       }
       .wd-gold:hover { background: rgba(230, 200, 90, 0.4); }
+      /* Unit palette — one toggle per placeable unit; the armed one stays lit.
+         Souls (hell-side placements) wear the portal's red instead. */
+      .wd-units { display: flex; flex-wrap: wrap; gap: 4px; align-items: center; }
+      .wd-unit {
+        font-family: var(--font-display); letter-spacing: 0.08em;
+        font-size: 10px; padding: 4px 9px; cursor: pointer;
+        border-radius: 5px;
+        background: rgba(150, 190, 255, 0.14); color: #cfe2ff;
+        border: 1px solid rgba(150, 190, 255, 0.4);
+      }
+      .wd-unit:hover { background: rgba(150, 190, 255, 0.3); }
+      .wd-unit.armed {
+        background: rgba(150, 190, 255, 0.62); color: #08111f;
+        border-color: #dbe9ff;
+      }
+      .wd-unit-soul {
+        background: rgba(255, 90, 100, 0.14); color: #ffc9cd;
+        border-color: rgba(255, 90, 100, 0.4);
+      }
+      .wd-unit-soul:hover { background: rgba(255, 90, 100, 0.3); }
+      .wd-unit-soul.armed {
+        background: rgba(255, 90, 100, 0.62); color: #1a0507;
+        border-color: #ffd6d9;
+      }
       .wd-toast {
         color: #9af0b4; font-size: 11px; opacity: 0;
         white-space: nowrap;

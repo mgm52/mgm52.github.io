@@ -176,6 +176,10 @@ export function loadGame(): { state: GameState; savedAt: number } | null {
     env.state.dragonBoneUnlocked ??= false;
     env.state.pendingStrike = false;
     env.state.pendingCandle = false;
+    // Designer arming never survives a load — a world saved mid-placement
+    // would otherwise drop a unit on the player's first click.
+    env.state.pendingDesignerUnit = null;
+    env.state.pendingOriginalHole = false;
     // Spatial-index version — absent from saves predating buildingAtCell's
     // cell→building index. Seed it so the first markBuildingsChanged++ doesn't
     // turn undefined into NaN (which would defeat the index's cache tag).

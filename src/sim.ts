@@ -2,12 +2,12 @@ import { playDecayingGoblinDeath, playDecayingGoblinSpawn, playDecayingGoldKillC
 import { BUILDING_DEFS, BuildingKind, CELL, COLS, DEMON, DRAGON, DRAGON_KILL_REWARD, FINALE, GOBLIN, GOLD_GOBLIN_CHANCE, GOLD_KILL_REWARD, HELL, KILL_REWARD, LIGHTNING, LOLLY, LOLLY_BOOST, MINOTAUR_KILL_REWARD, REACTOR_MELTDOWN, ROBOT, SOUL_SIGIL, SPACE, SPACE_UNIT, SUMMON_UPGRADES, TICK_S, MINOTAUR, TINYTAUR, WATER_DEPLETION_PP_PER_SEC, WATER_METER_MAX, WORLD, SOUL_STRENGTH_LABEL, formatPower, sigilPortalOutput, soulStrengthOf } from './config';
 import { DEMON_FACING_ANGLE, getOptions } from './options';
 import {
-  ALL_DIRS, Building, Cell, DX, DY, Demon, Dir, Dragon, Finale, FinalePhase, GameState, Ghost, Goblin, HOLE_SIZE, LollyBoostKind, LollyTarget, Minotaur, SoulChair, SpaceBuilding, SpaceUnit, Vec2, WaterSource, lollyBoostState,
+  ALL_DIRS, Building, Cell, DX, DY, Demon, DesignerUnitKind, Dir, Dragon, Finale, FinalePhase, GameState, Ghost, Goblin, HOLE_SIZE, LollyBoostKind, LollyTarget, Minotaur, SoulChair, SpaceBuilding, SpaceUnit, Vec2, WaterSource, isGhostUnitKind, lollyBoostState,
   anySpawnHole, appendLog, buildingAtCell, buildingCenter, buildingFootprint, buildingPerimeter,
   cellCenter, cellKey, chairSoulSnapshot, constructedDragonBeacon, createMoon, currentPowerBoost, defOf, demonScaleOf, destroyBuilding, dragonsAtCap, dragonTargetBuilding,
   earnBlood, earnDragonBone, earnMoney, findHoleEmergenceCell, maxOverworldDragons,
   getSpawnCapacity, holeBlockedByBuilding, holeCenter, isCellBlocked, isCellInBuilding, isCellInWaterSource,
-  isInBounds, maintainerCount, markBuildingsChanged, nearestCellInWaterSource, occupyCell, pushDeathEffect, pushFloater,
+  isInBounds, maintainerCount, markBuildingsChanged, nearestCellInWaterSource, occupyCell, pixelToCell, pushDeathEffect, pushFloater,
   hellMirrorCenter, hellToWorld, pruneSoulChairs, pushLaserBeam, pushLightningBolt, recordGhost, releaseCell, removeDragon, removeGoblin,
   spaceCentreMaintained, waterCarrierCount, autoAssignActive, autoWaterActive,
 } from './state';
@@ -1055,6 +1055,76 @@ export function spawnRobot(state: GameState, terminator = false): boolean {
   appendLog(state, terminator
     ? `Terminator #${id} online. It begins scanning for targets.`
     : `Robot #${id} whirrs to life.`);
+  if (autoAssignActive(state)) autoAssignAllIdle(state);
+  return true;
+}
+
+// ─── Designer unit placement ─────────────────────────────────────────
+// Drop one unit exactly where the dev clicked, free and queue-free — the
+// staging counterpart to the summon buttons, which all emerge at a hole and
+// walk off from there. Living kinds take the clicked ground cell (refused if
+// it's blocked); a dragon needs no cell at all (they fly over everything);
+// ghost kinds are conjured straight into hell at hell coordinates.
+// Returns false when the drop can't be made, so the caller can beep.
+export function placeDesignerUnit(
+  state: GameState, kind: DesignerUnitKind, x: number, y: number,
+): boolean {
+  if (isGhostUnitKind(kind)) {
+    const ghostKind = kind === 'ghost_dragon' ? 'dragon'
+      : (kind === 'ghost_minotaur' || kind === 'ghost_tinytaur') ? 'minotaur'
+      : 'goblin';
+    // `quiet` skips the death splatter — these souls were never killed here.
+    recordGhost(state, ghostKind, x, y, 0, {
+      gold: kind === 'ghost_goldblin' || undefined,
+      tiny: kind === 'ghost_tinytaur' || undefined,
+      quiet: true,
+    });
+    playSound('place', 1.3);
+    return true;
+  }
+  if (kind === 'dragon') {
+    const id = state.nextId++;
+    const d: Dragon = {
+      id,
+      pos: { x, y },
+      facing: 1,
+      state: { kind: 'seeking' },
+      carrying: null,
+      carryingUnit: null,
+      selected: false,
+      spawnAt: state.now,
+    };
+    state.dragons.set(id, d);
+    appendLog(state, `Dragon #${id} placed.`);
+    playSound('place', 1.6);
+    return true;
+  }
+  const cell = pixelToCell(x, y);
+  if (!isInBounds(cell.cx, cell.cy) || isCellBlocked(state, cell.cx, cell.cy)) return false;
+  if (kind === 'minotaur' || kind === 'tinytaur') {
+    const t = makeMinotaur(state, cell, kind === 'tinytaur');
+    state.minotaurs.set(t.id, t);
+    // Placed minotaurs count as summoned for the same reason spawnMinotaur
+    // counts them: the task tracks minotaurs that exist, not purchases.
+    if (kind === 'minotaur') state.minotaursSummoned++;
+    appendLog(state, `${kind === 'tinytaur' ? 'Tinytaur' : 'Minotaur'} #${t.id} placed.`);
+    playSound('place', 1.6);
+    return true;
+  }
+  const id = state.nextId++;
+  const g: Goblin = {
+    id, pos: cellCenter(cell), cell, target: null, goal: null,
+    path: [], facing: Math.PI / 2,
+    state: { kind: 'idle' }, selected: false, idleSince: null, lastCellChangedAt: state.now,
+    gold: kind === 'goldblin' || undefined,
+    robot: (kind === 'robot' || kind === 'terminator') || undefined,
+    terminator: kind === 'terminator' || undefined,
+  };
+  state.goblins.set(id, g);
+  occupyCell(state, cell.cx, cell.cy, id);
+  if (kind === 'terminator') state.terminatorEverSpawned = true;
+  appendLog(state, `${kind === 'terminator' ? 'Terminator' : kind === 'robot' ? 'Robot' : kind === 'goldblin' ? 'Goldblin' : 'Goblin'} #${id} placed.`);
+  playSound('place', 1.6);
   if (autoAssignActive(state)) autoAssignAllIdle(state);
   return true;
 }

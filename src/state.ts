@@ -564,6 +564,19 @@ export type DeathEffect = {
 // `spawnAt` is state.now at recording; the renderer uses (state.now - spawnAt)
 // to derive the current y drift, and the sim prunes ghosts that have fallen
 // past the bottom of HELL.
+// The World Designer's placeable units. The living kinds drop on the ground
+// view; the ghost_* kinds drop in hell (souls the world starts with, so a
+// sigil can be stocked without staging the kills that would fill it).
+export type DesignerUnitKind =
+  | 'goblin' | 'goldblin' | 'robot' | 'terminator'
+  | 'minotaur' | 'tinytaur' | 'dragon'
+  | 'ghost_goblin' | 'ghost_goldblin' | 'ghost_minotaur' | 'ghost_tinytaur' | 'ghost_dragon';
+
+// True for the kinds that drop in hell rather than on the ground.
+export function isGhostUnitKind(kind: DesignerUnitKind): boolean {
+  return kind.startsWith('ghost_');
+}
+
 export type Ghost = {
   id: number;
   kind: 'goblin' | 'minotaur' | 'dragon';
@@ -938,6 +951,12 @@ export type GameState = {
   // next ground click (re)places the original Goblin Hole at that cell and
   // clears holeDestroyed. Ephemeral, reset on load.
   pendingOriginalHole?: boolean;
+  // Designer-only: the unit kind armed by the World Designer's unit palette.
+  // Each click drops one at the pointer — on the ground for the living kinds,
+  // in hell for the ghost kinds — and placement STAYS armed so a crowd can be
+  // laid down in one pass (Escape / long-press disarms, like a pending build).
+  // Ephemeral, reset on load.
+  pendingDesignerUnit?: DesignerUnitKind | null;
   // True while the player is placing hell candles (the Candle option in the
   // hell-view Build panel; each tap on a mirror's outer ring places one for
   // SOUL_SIGIL.candleBloodCost blood). Ephemeral — reset on load.

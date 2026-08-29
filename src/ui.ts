@@ -2249,6 +2249,10 @@ export function refreshUI(state: GameState) {
   // neither the old nor the new set is offered.
   const viewArrived = !state.viewTransitioning;
   const availablePower = state.lastPowerProduced - state.lastPowerConsumed;
+  // In the World Designer every building is free (input.ts places straight to
+  // active without charging), so the buttons must never gate on price or power
+  // either — otherwise a world authored at Ƶ0 can't be laid out at all.
+  const designerFree = document.body.classList.contains('world-designer-active');
   for (const kind of SORTED_KINDS) {
     const def = BUILDING_DEFS[kind];
     const btn = document.getElementById(btnId(kind)) as HTMLButtonElement;
@@ -2258,11 +2262,11 @@ export function refreshUI(state: GameState) {
     // Goblin Hole's price doubles per hole in play, so its cost is dynamic —
     // refresh both the displayed figure and the affordability check each frame.
     const moneyCost = buildingMoneyCost(state, kind);
-    const canAffordMoney = state.money >= moneyCost;
-    const canAffordBlood = !def.bloodCost || state.blood >= def.bloodCost;
-    const canAffordBone = !def.dragonBoneCost || state.dragonBone >= def.dragonBoneCost;
+    const canAffordMoney = designerFree || state.money >= moneyCost;
+    const canAffordBlood = designerFree || !def.bloodCost || state.blood >= def.bloodCost;
+    const canAffordBone = designerFree || !def.dragonBoneCost || state.dragonBone >= def.dragonBoneCost;
     const draw = def.powerOutput < 0 ? -def.powerOutput : 0;
-    const enoughPower = draw === 0 || draw <= availablePower;
+    const enoughPower = designerFree || draw === 0 || draw <= availablePower;
     // Set the disabled state BEFORE kicking off the fade-in so the right
     // keyframes (full vs disabled-target opacity) get picked.
     btn.disabled = !canAffordMoney || !canAffordBlood || !canAffordBone || !enoughPower;
@@ -2287,7 +2291,7 @@ export function refreshUI(state: GameState) {
   // mode rather than letting every map click error-beep. Power headroom is
   // deliberately NOT checked here: it fluctuates every tick (surges, water
   // meters) and placement re-validates it anyway.
-  if (state.pendingBuild) {
+  if (state.pendingBuild && !designerFree) {
     const def = BUILDING_DEFS[state.pendingBuild.kind];
     const canPay = state.money >= buildingMoneyCost(state, state.pendingBuild.kind)
       && (!def.bloodCost || state.blood >= def.bloodCost)
@@ -2384,8 +2388,12 @@ export function refreshUI(state: GameState) {
   // every building button, the candle / orbital / space-centre placers, and
   // all ritual upgrades plus dig — stays hidden. So the whole Build subsection
   // collapses and only Lightning survives in the Ritual subsection (and only
-  // while this world actually unlocked it). Main game / designer: unaffected.
-  if (state.cardWorld) {
+  // while this world actually unlocked it). Main game: unaffected.
+  //
+  // The designer is exempt even though its sandbox carries cardWorld (every
+  // world it authors IS a card): authoring is precisely the moment you need
+  // the whole Build list.
+  if (state.cardWorld && !designerFree) {
     buildSection.style.display = 'none';
     const ritualListEl = document.getElementById('ritual-list')!;
     for (const el of Array.from(ritualListEl.children)) {
