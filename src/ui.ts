@@ -2425,20 +2425,20 @@ export function refreshUI(state: GameState) {
     hint.textContent = 'choose a spawning hole';
   } else if (state.pendingStrike) {
     hint.style.display = 'block';
-    hint.textContent = 'Tap to call down lightning · tap the button again or press ESC to cancel';
+    hint.textContent = `Tap to call down lightning · ${CANCEL_HINT}`;
   } else if (state.pendingBuild) {
     const name = BUILDING_DEFS[state.pendingBuild.kind].name;
     hint.style.display = 'block';
-    hint.textContent = `Tap to place ${name} · tap the button again or press ESC to cancel`;
+    hint.textContent = `Tap to place ${name} · ${CANCEL_HINT}`;
   } else if (state.pendingCandle) {
     hint.style.display = 'block';
-    hint.textContent = 'Tap to place Candle · tap the button again or press ESC to cancel';
+    hint.textContent = `Tap to place Candle · ${CANCEL_HINT}`;
   } else if (state.pendingOrbital) {
     hint.style.display = 'block';
-    hint.textContent = 'Tap the void to deploy an Orbital Platform · tap the button again or press ESC to cancel';
+    hint.textContent = `Tap the void to deploy an Orbital Platform · ${CANCEL_HINT}`;
   } else if (state.pendingSpaceCentre) {
     hint.style.display = 'block';
-    hint.textContent = 'Tap an Orbital Platform to build a Space Centre · tap the button again or press ESC to cancel';
+    hint.textContent = `Tap an Orbital Platform to build a Space Centre · ${CANCEL_HINT}`;
   } else {
     hint.style.display = 'none';
   }
@@ -2913,6 +2913,12 @@ function showGoblin(state: GameState, g: Goblin, panel: HTMLElement, portrait: H
 // long-press handler in input.ts) and there's no spacebar, so reword the
 // command hints from "Right click … (or space)" to "Long tap …".
 const TOUCH_PRIMARY = window.matchMedia('(pointer: coarse)').matches;
+
+// Tail of every placement/aim hint: how to back out of the pending mode.
+// Touch has no ESC or right-click; a long press cancels instead (input.ts).
+const CANCEL_HINT = TOUCH_PRIMARY
+  ? 'tap the button again or long-press to cancel'
+  : 'tap the button again, right-click or press ESC to cancel';
 
 function commandHintText(scope: 'anywhere' | 'target'): string {
   const where = scope === 'anywhere' ? 'anywhere' : 'a building, unit, or spot';

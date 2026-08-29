@@ -34,7 +34,7 @@ import {
   salonName, salonTierForDepth, sceneStructureCounts, tradeKeepsAWorld, WantSeg,
   wantSatisfiedBy, wantSegments,
 } from './cards-core';
-import { sleep } from './util';
+import { sleep, waitForAdvance } from './util';
 
 // Every sound in the realm rides the ghostly reverb bus (audio.ts: lowpass +
 // cavern convolver, the hell cries' treatment) at a slightly slowed rate —
@@ -1228,7 +1228,7 @@ async function typeLine(text: string): Promise<void> {
 }
 
 function waitForClick(target: HTMLElement): Promise<void> {
-  return new Promise((resolve) => target.addEventListener('click', () => resolve(), { once: true }));
+  return waitForAdvance(target).done;
 }
 
 async function say(text: string): Promise<void> {

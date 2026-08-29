@@ -3,7 +3,7 @@ import { playSound, playGhostCommand, playMinotaurCommand } from './audio';
 import { flashCursor } from './cursor-fx';
 import { bobOverworldBark, demonRebuke, finaleBark } from './demon-dialogue';
 import { BUILDABLE_KINDS, BUILDING_DEFS, BuildingKind, CELL, DRAGON, GOBLIN, HELL, LIGHTNING, LOLLY, MAX_SELECTED_UNITS, MINOTAUR, SOUL_SIGIL, SPACE, SPACE_UNIT, formatPower } from './config';
-import { designerNow, spectatingNow } from './holds';
+import { cutsceneHoldActive, designerNow, spectatingNow } from './holds';
 import { runBobCutscene } from './intro';
 import { RenderContext, ambientDragonAt, clampCamera, clampHellCamera, clampSpaceCamera, currentHellScale, ghostAtHell, ghostHellPos } from './render';
 import { autoAssignAllIdle, lightningStrike, spawnBob, unseatSoulFromChair } from './sim';
@@ -157,7 +157,7 @@ export function setupInput(
         // pending strike is cancelled on the ground).
         if (e.button === 2 && state.view === 'hell' && input.pointers.size < 2) {
           flashCursor(e.clientX, e.clientY);
-          if (state.pendingCandle) { state.pendingCandle = false; return; }
+          if (state.pendingCandle) { clearPendingModes(state); return; }
           const hp = e.getLocalPosition(ctx.hellLayer);
           handleHellRightClick(state, hp.x, hp.y);
         }
@@ -168,8 +168,8 @@ export function setupInput(
         if (e.button === 2 && state.view === 'space' && input.pointers.size < 2) {
           flashCursor(e.clientX, e.clientY);
           if (state.pendingOrbital || state.pendingSpaceCentre) {
-            state.pendingOrbital = false;
-            state.pendingSpaceCentre = false;
+            clearPendingModes(state);
+            input.placementGhost.clear();
             return;
           }
           const sp = e.getLocalPosition(ctx.spaceLayer);
@@ -691,6 +691,9 @@ export function setupInput(
     // Works in the ground view (unit orders), the hell view (steering souls),
     // and the space view (steering robots).
     if (e.code === 'Space') {
+      // During a scripted beat Space pages the click-wall (util.ts
+      // waitForAdvance); it must not also fire an order under the overlay.
+      if (cutsceneHoldActive()) return;
       const ae = document.activeElement as HTMLElement | null;
       if (ae && (ae.tagName === 'INPUT' || ae.tagName === 'TEXTAREA' || ae.isContentEditable)) return;
       e.preventDefault();
@@ -827,8 +830,8 @@ function scheduleLongPress(
     input.isDragging = false;
     input.selectionGfx.clear();
     input.spaceTapStart = null;
-    if (state.pendingBuild || state.pendingCandle || state.pendingOrbital || state.pendingSpaceCentre) {
-      // No keyboard ESC on touch — long-press cancels pending placement.
+    if (state.pendingBuild || state.pendingStrike || state.pendingCandle || state.pendingOrbital || state.pendingSpaceCentre) {
+      // No keyboard ESC on touch — long-press cancels pending placement/aim.
       clearPendingModes(state);
       input.placementGhost.clear();
       return;

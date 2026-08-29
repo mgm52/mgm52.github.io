@@ -14,7 +14,7 @@ import {
   Demon, DemonVariant, GameState, Ghost, Goblin, Vec2,
   appendLog, hellToWorld, pushDeathEffect, pushFloater,
 } from './state';
-import { sleep } from './util';
+import { sleep, waitForAdvance } from './util';
 
 type Speaker = 'demon' | 'goblin' | 'bob';
 type Seg = { t: string; em: boolean; white: boolean };
@@ -305,10 +305,7 @@ function getEls(): Els | null {
 }
 
 function waitForClick(target: HTMLElement): Promise<void> {
-  return new Promise((resolve) => {
-    const finish = () => { target.removeEventListener('click', finish); resolve(); };
-    target.addEventListener('click', finish, { once: true });
-  });
+  return waitForAdvance(target).done;
 }
 
 // Resolves with the index of whichever button gets clicked first.
