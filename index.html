@@ -671,6 +671,17 @@
       #descend-hell-hint { bottom: 14px; }
       #ascend-hell-hint { top: 14px; }
       #descend-hell-hint.visible, #ascend-hell-hint.visible { opacity: 1; }
+      /* The refused climb out of hell (main.ts hellBounce): hangs over the
+         descent transition's fully-black midpoint while the player is sent
+         back down. Same red palette as the hell prompts, no box. */
+      #hell-block-text {
+        position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%);
+        font-family: var(--font-body); font-size: calc(21px * var(--font-body-scale));
+        color: #ffd0c8; letter-spacing: 2px; text-align: center; white-space: nowrap;
+        text-shadow: 0 0 10px rgba(255, 80, 80, 0.7);
+        pointer-events: none; opacity: 0; transition: opacity 700ms ease; z-index: 6;
+      }
+      #hell-block-text.visible { opacity: 1; }
       /* On touch there are no arrow keys, so the navigation hints double as
          tap targets (handlers in main.ts). Only the visible (edge-gated) hint
          accepts taps; enlarge the hit area a touch for fingers. */
@@ -3343,6 +3354,9 @@
              ground (once a Hell Portal exists) and at the top edge of hell. -->
         <div id="descend-hell-hint">Hold ↓ to descend into hell</div>
         <div id="ascend-hell-hint">Hold ↑ to return to the surface</div>
+        <!-- The refused climb: shown by main.ts over the black while a player
+             with unfinished hell business is sent back down. -->
+        <div id="hell-block-text">you have unfinished business below</div>
         <!-- Quick-travel strip — Lilly's fully-feed reward (refreshUI toggles
              .visible; clicks wired in ui.ts; the view snap + black blink live
              in main.ts). Pinned top-right of the play area, just left of the

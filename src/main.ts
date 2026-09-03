@@ -10,7 +10,7 @@ import { playIntroSequence, runGabbonsawCutscene, setIntroPaused, skipIntro } fr
 import { getOptions, onOptionsChange } from './options';
 import { getRestartInHell, relockOptionsCog, setupOptionsUI, setupRealmOptionsUI } from './options-ui';
 import { applyDomOptions, centerCameraOn, centerHellCameraOnWorld, centerSpaceCamera, clampCamera, clampHellCamera, clampSpaceCamera, createRender, currentHellScale, preloadRenderAssets, render, spaceCameraMaxY } from './render';
-import { activeDragonBeaconCount, appendLog, buildingCenter, clearPendingModes, countHypercentres, countSpaceCentres, createInitialState, destroyBuilding, digDirection, dragonsAtCap, earnDragonBone, getSpawnCapacity, recordGhost, removeGoblin, type GameState, type Ghost } from './state';
+import { activeDragonBeaconCount, appendLog, buildingCenter, clearPendingModes, countHypercentres, countSpaceCentres, createInitialState, destroyBuilding, digDirection, dragonsAtCap, earnDragonBone, gabbonsawLockedByHell, getSpawnCapacity, hellBusinessUnfinished, recordGhost, removeGoblin, type GameState, type Ghost } from './state';
 import { autoAssignAllIdle, devSkipFinaleToConfront, devTriggerFinale, maybeDepartBobAndLolly, spawnDragon, spawnLollyRampage, spawnMinotaur, spawnRobot, spawnTinytaur, tick } from './sim';
 import { ensureHellPortal, executeSkipToPreFinale, executeTaskSkip, refreshUI, setupUI } from './ui';
 import { clearSave, formatRelativeTime, getLastSaveStats, loadGame, saveGame, saveGameInBackground } from './save';
@@ -818,6 +818,13 @@ async function main() {
       // greyed-out "owned" trophy (refreshUI). The cutscene handoff lives in
       // the game loop (gabbonsawCutscenePending).
       if (state.gabbonsawBought || state.gabbonsawRitualRemaining !== null) return;
+      // Locked until Bob has met Lolly below and Lilly has handed down her
+      // Work (refreshUI greys the button with the same reason).
+      if (gabbonsawLockedByHell(state)) {
+        playSound('door_locked');
+        appendLog(state, 'The ritual will not take. You have unfinished business below.');
+        return;
+      }
       if (state.dragonBone < PAIN_GABBONSAW.dragonBoneCost) { playSound('error'); return; }
       // Snapshot the world as it stands — before even the bones are spent.
       // The trading-card realm (cards.ts) deals this state back to the player
@@ -997,6 +1004,25 @@ async function main() {
   let descendHellHold = 0, ascendHellHold = 0;
   const descendHellHint = document.getElementById('descend-hell-hint');
   const ascendHellHint = document.getElementById('ascend-hell-hint');
+  // Duration of the current depth ease. The bounce below runs a shorter,
+  // proportional leg so its climb matches the real ascent's pace.
+  let hellTransDuration = HELL_TRANS_MS;
+
+  // ─── The refused climb ──────────────────────────────────────────────
+  // While Bob still has business in hell (hellBusinessUnfinished: the
+  // colossus has his bones but Lolly's corner piece or Lilly's Work handout
+  // is still owed), holding ↑ at the top of hell starts what looks like the
+  // normal ascent — the scene lifts and fades — but the climb only reaches
+  // HELL_BOUNCE_DEPTH, where the descent's black overlay is already fully
+  // opaque and neither hell nor the surface is drawn. A line hangs over the
+  // black, then the depth eases back to 1 and the player is deposited where
+  // they started. The surface is never shown.
+  const HELL_BOUNCE_DEPTH = 0.62;
+  const HELL_BOUNCE_MS = 1500;       // each leg: the lift into black, the drop back
+  const HELL_BOUNCE_HOLD_MS = 2400;
+  let hellBounce: 'up' | 'hold' | 'down' | null = null;
+  let hellBounceHoldUntil = 0;
+  const hellBlockText = document.getElementById('hell-block-text');
 
   // ─── Transition triggers ────────────────────────────────────────────
   // Each kicks off one of the four ground↔space / ground↔hell transitions.
@@ -1028,15 +1054,32 @@ async function main() {
     hellZoomFocusY = WORLD.height / 2;
     centerHellCameraOnWorld(ctx, hellZoomFocusX, hellZoomFocusY);
     hellTransitioning = true; hellTransFrom = 0; hellTransTo = 1; hellTransStart = now;
+    hellTransDuration = HELL_TRANS_MS;
     descendHellHold = 0;
     state.view = 'hell';
     state.viewTransitioning = true;
     clearPendingModes(state);
     playSound('ritual', 0.6, 0.6);
   }
+  function triggerBouncedAscent(now: number) {
+    hellBounce = 'up';
+    hellTransitioning = true; hellTransFrom = 1; hellTransTo = HELL_BOUNCE_DEPTH; hellTransStart = now;
+    hellTransDuration = HELL_BOUNCE_MS;
+    ascendHellHold = 0;
+    state.viewTransitioning = true;
+    clearPendingModes(state);
+    // Same cue as the real climb — the refusal shouldn't announce itself.
+    playSound('ritual', 0.7, 0.5);
+  }
+  // The hold-↑ / tap-hint path out of hell: the real climb, or the refusal.
+  function tryAscendFromHell(now: number) {
+    if (hellBusinessUnfinished(state)) triggerBouncedAscent(now);
+    else triggerAscendFromHell(now);
+  }
   function triggerAscendFromHell(now: number) {
     // On return: pivot the zoom-in around whatever world spot is currently at
     // the centre of the hell viewport. Then reverse the descent transition.
+    hellTransDuration = HELL_TRANS_MS;
     const scale = currentHellScale(ctx);
     const hellCenterX = ctx.hellCamera.x + ctx.viewport.width / (2 * scale);
     const hellCenterY = ctx.hellCamera.y + ctx.viewport.height / (2 * scale);
@@ -1058,12 +1101,20 @@ async function main() {
   // transition variable to the destination's settled values, fade back.
   const quickTravelFadeEl = document.getElementById('quick-travel-fade');
   let quickTravelBusy = false;
-  function quickTravel(view: 'ground' | 'hell' | 'space'): void {
+  // `force` skips the unfinished-business refusal — for the Pain Gabbonsaw
+  // hand-off, which must land on the overworld whatever hell still owes.
+  function quickTravel(view: 'ground' | 'hell' | 'space', force = false): void {
     if (quickTravelBusy || state.view === view) return;
     // Respect every world-freeze: cutscenes, parlays, celebrations, Bob's
     // hole-picker. Mid-flight transitions are fine — they get snapped.
     if (cutsceneHoldActive() || state.bobPickingHole) return;
     if (view === 'hell' && !state.hellUnlocked) { playSound('error'); return; }
+    // Leaving hell with business unfinished: the same refusal as the climb.
+    if (!force && view !== 'hell' && state.view === 'hell' && hellBusinessUnfinished(state)) {
+      playSound('door_locked');
+      appendLog(state, 'You have unfinished business below.');
+      return;
+    }
     if (view === 'space' && !state.spaceUnlocked) { playSound('error'); return; }
     if (view === 'ground' && state.groundLocked) { playSound('error'); return; }
     // First hop ever — retires the strip's fresh-unlock attention pulse.
@@ -1076,6 +1127,8 @@ async function main() {
       transitioning = false;
       hellTransitioning = false;
       hellZooming = false;
+      hellBounce = null;
+      hellBlockText?.classList.remove('visible');
       ascendHold = descendHold = descendHellHold = ascendHellHold = 0;
       state.viewTransitioning = false;
       if (view === 'space') {
@@ -1114,7 +1167,7 @@ async function main() {
   tapHint(ascendHint, triggerAscendToSpace);
   tapHint(descendHint, triggerDescendToSurface);
   tapHint(descendHellHint, triggerDescendToHell);
-  tapHint(ascendHellHint, triggerAscendFromHell);
+  tapHint(ascendHellHint, tryAscendFromHell);
 
   // ─── Finale driver ──────────────────────────────────────────────────
   // The cinematic's world-simulation lives in sim.ts (updateFinale); this
@@ -1463,7 +1516,7 @@ async function main() {
       // player back to the overworld, run Bob's cutscene, then loose Lolly.
       if (state.gabbonsawCutscenePending) {
         state.gabbonsawCutscenePending = false;
-        if (state.view !== 'ground') quickTravel('ground');
+        if (state.view !== 'ground') quickTravel('ground', true);
         void runGabbonsawCutscene().then(() => {
           const at = spawnLollyRampage(state);
           centerCameraOn(ctx, at.x, at.y);
@@ -1561,15 +1614,32 @@ async function main() {
       showHints();
     } else if (hellTransitioning) {
       // Mid-descent: drive depth with the same ease-in-out and ignore pan.
-      const t = Math.min(1, (now - hellTransStart) / HELL_TRANS_MS);
+      const t = Math.min(1, (now - hellTransStart) / hellTransDuration);
       const e = t * t * (3 - 2 * t);
       ctx.depth = hellTransFrom + (hellTransTo - hellTransFrom) * e;
-      if (t >= 1) {
+      if (t >= 1 && hellBounce === 'up') {
+        // The refused climb has reached the black: hang the line over it and
+        // hold. The view stays 'hell' and viewTransitioning stays true, so
+        // input and the sidebar keep treating this as mid-transition.
         ctx.depth = hellTransTo;
         hellTransitioning = false;
+        hellBounce = 'hold';
+        hellBounceHoldUntil = now + HELL_BOUNCE_HOLD_MS;
+        hellBlockText?.classList.add('visible');
+        playSound('door_locked', 0.8, 0.85);
+        appendLog(state, 'You have unfinished business below.');
+      } else if (t >= 1) {
+        ctx.depth = hellTransTo;
+        hellTransitioning = false;
+        const bounced = hellBounce === 'down';
+        hellBounce = null;
         // Arrived — the destination view's buttons may now show (see refreshUI).
         state.viewTransitioning = false;
-        if (hellTransTo >= 0.5) {
+        if (bounced) {
+          // Back where the climb began: hell is still zoomed out and the
+          // camera untouched, so there's nothing to re-run.
+          state.view = 'hell';
+        } else if (hellTransTo >= 0.5) {
           state.view = 'hell';
           // Arrival: kick off the camera zoom-out reveal — slowed by 50% so
           // the underworld opens up gradually rather than snapping out.
@@ -1578,6 +1648,15 @@ async function main() {
         } else {
           state.view = 'ground';
         }
+      }
+      showHints();
+    } else if (hellBounce === 'hold') {
+      // Black screen, line up. Once the hold runs out, ease back down.
+      if (now >= hellBounceHoldUntil) {
+        hellBlockText?.classList.remove('visible');
+        hellBounce = 'down';
+        hellTransitioning = true; hellTransFrom = ctx.depth; hellTransTo = 1; hellTransStart = now;
+        hellTransDuration = HELL_BOUNCE_MS;
       }
       showHints();
     } else if (ctx.altitude >= 0.9999) {
@@ -1611,7 +1690,7 @@ async function main() {
       const atTop = ctx.hellCamera.y <= 1;
       if (!state.groundLocked && upHeld && atTop) {
         ascendHellHold += dt;
-        if (ascendHellHold >= SPACE_HOLD_MS) triggerAscendFromHell(now);
+        if (ascendHellHold >= SPACE_HOLD_MS) tryAscendFromHell(now);
       } else { ascendHellHold = 0; }
       showHints({ ascendHell: !state.groundLocked && atTop && !hellTransitioning });
     } else {
