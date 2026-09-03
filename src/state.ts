@@ -1594,7 +1594,7 @@ export function unlockEverything(state: GameState, taskIds: string[]): void {
   state.goldgoblinsEnabled = true;
   state.tinytaurUnlocked = true;
   state.lightningUnlocked = true;
-  state.lillyTasksGiven = true;
+  markHellBeatsDone(state);
   state.optionsUnlocked = true;
   const all = new Set(taskIds);
   state.unlocks = {
@@ -1604,6 +1604,54 @@ export function unlockEverything(state: GameState, taskIds: string[]): void {
     everBuilt: new Set(),
     minotaurEverSummoned: true,
   };
+}
+
+// ─── Hell's narrative beats ─────────────────────────────────────────
+// The endgame (the Pain Gabbonsaw ritual → Lolly's rampage → the finale)
+// only makes sense once Bob has met Lolly in the corner of the abyss and
+// Lilly has handed down her Work. Two gates share these predicates so they
+// can never disagree: the top of hell bounces the player back down while
+// business is unfinished (main.ts), and the ritual button stays locked until
+// the beats are done (ui.ts refreshUI + main.ts onBuyPainGabbonsaw).
+
+// Both story beats Bob owes the abyss: Lolly's corner conversation heard
+// through to "talked of golf", and Lilly's "you need more Work" handout.
+// Once Bob and Lolly have slipped out of hell together the corner demon is
+// gone from the roster, so the departure itself counts as done.
+export function hellBeatsDone(state: GameState): boolean {
+  if (state.bobLollyDeparted) return true;
+  const lollyHeard = [...state.demons.values()].some((d) => d.variant === 'friend' && d.toldOfGolf);
+  return lollyHeard && state.lillyTasksGiven;
+}
+
+// Should the Pain Gabbonsaw ritual refuse to sell? Card worlds and the
+// designer sandbox have no story to protect.
+export function gabbonsawLockedByHell(state: GameState): boolean {
+  if (state.cardWorld || state.tasksDisabled) return false;
+  return !hellBeatsDone(state);
+}
+
+// Should the climb out of hell bounce the player back down? Only once the
+// colossus has taken Bob's bones — before that the player may need the
+// overworld to earn them, so blocking the exit could strand them. After the
+// trade both remaining beats need only Bob (who cannot be seated in a chair,
+// never drifts off the bottom, and is only ever hidden briefly by the
+// untruth strike), so the block always has an exit.
+export function hellBusinessUnfinished(state: GameState): boolean {
+  if (state.cardWorld || state.tasksDisabled) return false;
+  const traded = [...state.demons.values()].some((d) => (d.variant ?? 'pit') === 'pit' && d.boneGiftGiven);
+  return traded && !hellBeatsDone(state);
+}
+
+// Dev cheats that jump past hell (the designer sandbox, skip-to-pre-finale)
+// stamp the beats as heard so the ritual isn't locked behind a story the
+// tester deliberately skipped.
+export function markHellBeatsDone(state: GameState): void {
+  state.lillyTasksGiven = true;
+  for (const d of state.demons.values()) {
+    if (d.variant === 'friend') d.toldOfGolf = true;
+    if (d.variant === 'l') d.heardOfGolf = true;
+  }
 }
 
 export function appendLog(state: GameState, msg: string) {

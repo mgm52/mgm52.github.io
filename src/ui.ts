@@ -7,7 +7,7 @@ import {
 import {
   Building, Cell, Demon, DragonState, GameState, Ghost, Goblin, GoblinState, SoulChair, SpaceBuilding, SpaceUnit, Vec2, WaterSource,
   activeDragonBeaconCount, anySpawnHole, appendLog, buildingAtCell, buildingCenter, buildingLabel, buildingMoneyCost, cellCenter, cellKey, chairSoulSnapshot, countHypercentres, countSpaceCentres, defOf, digDirection, dragonsAtCap,
-  earnDragonBone, findHoleEmergenceCell, getSpawnCapacity, goblinSpawningBlocked, hellMirrorCenter, holeBlockedByBuilding, holeCells, isCellBlocked, isCellInBuilding, isInBounds,
+  earnDragonBone, findHoleEmergenceCell, gabbonsawLockedByHell, getSpawnCapacity, goblinSpawningBlocked, hellMirrorCenter, markHellBeatsDone, holeBlockedByBuilding, holeCells, isCellBlocked, isCellInBuilding, isInBounds,
   maintainerCount, markBuildingsChanged, maxOverworldDragons, nextBuildingDisplayNum, occupyCell, spaceCentreMaintainerCount, spaceStructureOverlapAt, waterCarrierCount, lightningActive,
 } from './state';
 import { spawnDragon, spawnMinotaur, spawnRobot, unseatSoulFromChair } from './sim';
@@ -2128,12 +2128,17 @@ export function refreshUI(state: GameState) {
   {
     const gabVisible = revealedTaskIds.has('collect_blood');
     const channeling = state.gabbonsawRitualRemaining !== null;
+    // Locked until Bob has settled his business in hell (Lolly's corner
+    // piece + Lilly's Work handout): the ritual is what looses Lolly on the
+    // overworld, and she has to have been met below first. The cost slot
+    // carries the reason instead of the price.
+    const gabLocked = !state.gabbonsawBought && gabbonsawLockedByHell(state);
     refreshRitualButton(
       'btn-buy-gabbonsaw', 'cost-buy-gabbonsaw',
       gabVisible,
       state.gabbonsawBought,
-      !channeling && state.dragonBone >= PAIN_GABBONSAW.dragonBoneCost,
-      `${PAIN_GABBONSAW.dragonBoneCost} bones`,
+      !channeling && !gabLocked && state.dragonBone >= PAIN_GABBONSAW.dragonBoneCost,
+      gabLocked ? 'unfinished business below' : `${PAIN_GABBONSAW.dragonBoneCost} bones`,
     );
     if (gabVisible) {
       const gabBtn = document.getElementById('btn-buy-gabbonsaw') as HTMLButtonElement;
@@ -3291,8 +3296,9 @@ export function executeTaskSkip(state: GameState): void {
 // The result reads as a lived-in run poised for the Pain Gabbonsaw ritual.
 export function executeSkipToPreFinale(state: GameState): void {
   // Lilly only hands out her optional Work after the golf-alibi beat; grant it
-  // up front so those three tasks are available to skip.
-  state.lillyTasksGiven = true;
+  // up front so those three tasks are available to skip — and stamp Lolly's
+  // corner piece heard too, so the Pain Gabbonsaw isn't locked behind hell.
+  markHellBeatsDone(state);
 
   // prevent_spawning's normal skip walls every hole shut. We want a wall-free,
   // still-spawnable world, so mark it complete up front (sticky completion is
